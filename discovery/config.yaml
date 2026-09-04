@@ -27,7 +27,7 @@ youtube_music:
 # Sign in with Google on the site. Create a "Web application" OAuth client (see SETUP.md) and put its ID here —
 # a client ID is public by design. Only the listed Google accounts get curator mode.
 google:
-  client_id: ""
+  client_id: "903191577478-dev4etltn01rvubgi4fkqaulshltit7d.apps.googleusercontent.com"
   curators:
     - chrisrohn@gmail.com
 
