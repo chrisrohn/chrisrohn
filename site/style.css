@@ -84,9 +84,6 @@ main { padding: 14px 18px 140px; max-width: 1200px; margin: 0 auto; }
 .year { background: var(--card2); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; font-size: 13px; }
 .thumbs { display: flex; gap: 6px; }
 .thumbs .btn { font-size: 18px; padding: 6px 12px; }
-.undo { display: none; font-size: 12px; }
-.card.rated-up .undo, .card.rated-down .undo { display: inline-block; }
-.card.rated-up .thumbs, .card.rated-down .thumbs { display: none; }
 .status { font-size: 11px; color: var(--muted); }
 
 .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
@@ -133,3 +130,7 @@ body.curator .mode { display: inline-block; }
 .sources-filter label.on { color: var(--fg); background: var(--card2); }
 .sources-filter input { margin: 0; accent-color: var(--accent); }
 .sources-filter .all { font-size: 11px; color: var(--accent2); background: none; border: none; cursor: pointer; padding: 0 4px; }
+.who { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.who img { width: 22px; height: 22px; border-radius: 50%; }
+.toast .btn { margin-left: 12px; padding: 3px 10px; font-size: 13px; color: var(--accent2); border-color: var(--accent2); }
+.filters.picks > *:not(#q) { display: none; }

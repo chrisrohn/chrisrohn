@@ -1,7 +1,9 @@
-/* Indie Discotheque discovery feed — client.
- * Reads data/feed.json (built daily by GitHub Actions) and data/decisions.json (your archive).
- * Thumbs are kept locally until you press "Sync approvals", which sends them to GitHub via
- * repository_dispatch; the workflow files 👍 tracks into "<year> Indie Discotheque" and archives both.
+/* Chris Rohn's New Music — client.
+ * Reads data/feed.json (built daily by GitHub Actions). Anyone can listen.
+ * Sign in with Google (one of the configured curator accounts) to get curator mode:
+ *   👍 → added straight to "<year> Indie Discotheque" in YOUR YouTube library (YouTube Data API v3, from this browser)
+ *   👎 → added to the unlisted "Skipped" playlist so it never comes back
+ * Nothing is written anywhere until you press a thumb. Undo is available for a few seconds after each one.
  */
 (() => {
   "use strict";
@@ -12,136 +14,262 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
     del(k) { try { localStorage.removeItem(k); } catch {} },
   };
-  const DEFAULT_REPO = (location.hostname.endsWith("github.io") ? location.hostname.split(".")[0] + "/" + (location.pathname.split("/")[1] || "") : "chrisrohn/chrisrohn").replace(/\/$/, "");
+  const YT_API = "https://www.googleapis.com/youtube/v3";
+  const SCOPES = "openid email https://www.googleapis.com/auth/youtube";
 
   const state = {
     feed: null,
-    archive: {},                   // from data/decisions.json (server-side archive)
-    local: LS.get("id:decisions", {}),   // pending decisions {id: {decision, year, videoId, artist, title, decided_at}}
-    synced: LS.get("id:synced", {}),     // decisions already sent but maybe not yet rebuilt into feed.json
-    settings: Object.assign({ repo: DEFAULT_REPO, token: "", year: null, syncDowns: false }, LS.get("id:settings", {})),
+    rated: LS.get("id:rated", {}),          // {id: {decision, year, videoId, artist, title, playlistItemId, at}} — local mirror of what this browser filed
+    auth: LS.get("id:auth", null),          // {access_token, expires_at, email, name, picture}
+    playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL..."} learned from your library
     filters: Object.assign({ q: "", sourcesOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
     view: "feed",
-    order: [],                     // ids currently rendered
+    order: [],
     currentId: null,
     player: null, playerReady: false, pendingVideo: null,
+    tokenClient: null,
+    busy: new Set(),
   };
-
-  // A sign-in link (#curator=<token>) from another browser: store the token, then scrub it from the URL/history.
-  (() => {
-    const m = /[#&]curator=([^&]+)/.exec(location.hash || "");
-    if (m) {
-      try { state.settings.token = decodeURIComponent(m[1]); LS.set("id:settings", state.settings); } catch {}
-      history.replaceState(null, "", location.pathname + location.search);
-    }
-  })();
 
   // ---------- data ----------
   async function load() {
     const bust = "?t=" + Math.floor(Date.now() / 60000);
-    const [feed, dec] = await Promise.all([
-      fetch("data/feed.json" + bust).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status))),
-      fetch("data/decisions.json" + bust).then(r => r.ok ? r.json() : { items: {} }).catch(() => ({ items: {} })),
-    ]);
+    const feed = await fetch("data/feed.json" + bust).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
     state.feed = feed;
-    state.archive = dec.items || {};
-    // anything the server has archived no longer needs local bookkeeping
-    for (const id of Object.keys(state.synced)) if (state.archive[id]) delete state.synced[id];
-    for (const id of Object.keys(state.local)) if (state.archive[id]) delete state.local[id];
+    // anything the daily build already saw in your playlists no longer needs local bookkeeping
+    const ids = new Set(feed.items.map(i => i.id));
+    for (const id of Object.keys(state.rated)) if (!ids.has(id) && Date.now() - (state.rated[id].at || 0) > 3 * 86400e3) delete state.rated[id];
+    for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
+    if (feed.youtube && feed.youtube.skipped_playlist_id) state.playlists.__skipped = state.playlists.__skipped || feed.youtube.skipped_playlist_id;
     persist();
-    if (!state.settings.year) state.settings.year = (feed.years && feed.years[0]) || new Date().getFullYear();
     fillYears();
     fillSources();
     renderMeta();
     applyMode();
     render();
+    if (isCurator()) refreshRecent().catch(() => {});
   }
-
-  // Curator mode = a GitHub token is saved in THIS browser. Everyone else gets a read-only listening feed.
-  const isCurator = () => !!(state.settings.token && state.settings.token.trim());
-  function applyMode() {
-    document.body.classList.toggle("curator", isCurator());
-    if (!isCurator() && state.view === "queue") { state.view = "feed"; $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === "feed")); }
-  }
-
   function persist() {
-    LS.set("id:decisions", state.local);
-    LS.set("id:synced", state.synced);
-    LS.set("id:settings", state.settings);
+    LS.set("id:rated", state.rated);
+    LS.set("id:auth", state.auth);
+    LS.set("id:playlists", state.playlists);
     LS.set("id:filters", state.filters);
   }
-
   const items = () => (state.feed && state.feed.items) || [];
   const byId = id => items().find(i => i.id === id);
-  const decisionFor = id => state.local[id] || state.synced[id] || state.archive[id] || null;
+  const decisionFor = id => state.rated[id] || null;
   const yearOf = it => {
     const d = it.release_date || (it.youtube && it.youtube.year);
     const y = d ? parseInt(String(d).slice(0, 4), 10) : NaN;
-    return Number.isFinite(y) ? y : (state.settings.year || new Date().getFullYear());
+    return Number.isFinite(y) ? y : new Date().getFullYear();
   };
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // ---------- auth (Google Identity Services, token flow) ----------
+  const tokenValid = () => !!(state.auth && state.auth.access_token && state.auth.expires_at > Date.now() + 30e3);
+  const curators = () => ((state.feed && state.feed.google && state.feed.google.curators) || []).map(e => e.toLowerCase());
+  const isCurator = () => tokenValid() && !!state.auth.email && curators().includes(state.auth.email.toLowerCase());
+  function applyMode() {
+    const on = isCurator();
+    document.body.classList.toggle("curator", on);
+    const who = $("#who");
+    if (state.auth && state.auth.email) {
+      who.hidden = false;
+      who.innerHTML = `${state.auth.picture ? `<img src="${esc(state.auth.picture)}" alt="">` : ""}<span>${esc(state.auth.name || state.auth.email)}</span>` +
+        (on ? "" : (tokenValid() ? ` <span class="muted">(listener)</span>` : ` <span class="muted">(session expired)</span>`));
+      $("#signin").textContent = tokenValid() ? "Sign out" : "Sign in again";
+    } else {
+      who.hidden = true;
+      $("#signin").textContent = "Sign in with Google";
+    }
+    const cid = state.feed && state.feed.google && state.feed.google.client_id;
+    $("#signin").disabled = !cid;
+    $("#signin").title = cid ? "" : "Google client ID not configured yet (see SETUP.md)";
+  }
+  function ensureGis() {
+    return new Promise((resolve, reject) => {
+      if (window.google && google.accounts && google.accounts.oauth2) return resolve();
+      const s = document.createElement("script"); s.src = "https://accounts.google.com/gsi/client"; s.async = true; s.defer = true;
+      s.onload = resolve; s.onerror = () => reject(new Error("could not load Google sign-in")); document.head.appendChild(s);
+    });
+  }
+  async function signIn() {
+    const cid = state.feed.google && state.feed.google.client_id;
+    if (!cid) { toast("Google client ID not configured yet — see SETUP.md", true); return false; }
+    await ensureGis();
+    return new Promise(resolve => {
+      state.tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: cid, scope: SCOPES,
+        callback: async resp => {
+          if (resp.error) { toast("Sign-in failed: " + resp.error, true); return resolve(false); }
+          state.auth = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in || 3600) * 1000 };
+          try {
+            const me = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + resp.access_token } }).then(r => r.json());
+            Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture });
+          } catch {}
+          persist(); applyMode(); render();
+          if (isCurator()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); }
+          else toast(`Signed in as ${state.auth.email || "?"}. This account isn't a curator, so it's listen-only.`);
+          resolve(true);
+        },
+      });
+      state.tokenClient.requestAccessToken({ prompt: "", hint: state.auth && state.auth.email ? state.auth.email : undefined });
+    });
+  }
+  function signOut() {
+    try { if (state.auth && state.auth.access_token && window.google) google.accounts.oauth2.revoke(state.auth.access_token, () => {}); } catch {}
+    state.auth = null; persist(); applyMode(); render(); toast("Signed out");
+  }
+  async function withAuth(fn) {
+    if (!tokenValid()) { const ok = await signIn(); if (!ok || !tokenValid()) throw new Error("not signed in"); }
+    return fn(state.auth.access_token);
+  }
+
+  // ---------- YouTube Data API ----------
+  async function yt(method, path, { params = {}, body } = {}) {
+    return withAuth(async token => {
+      const url = new URL(YT_API + path); for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
+      const r = await fetch(url, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      if (r.status === 204) return {};
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = (j.error && j.error.message) || r.statusText;
+        if (r.status === 401) { state.auth.expires_at = 0; persist(); applyMode(); }
+        throw new Error(msg + (r.status === 403 && /quota/i.test(msg) ? " — daily YouTube API quota reached; try again after midnight Pacific" : ""));
+      }
+      return j;
+    });
+  }
+  const pattern = () => (state.feed.youtube && state.feed.youtube.playlist_title_pattern) || "{year} Indie Discotheque";
+  const titleFor = year => pattern().replace("{year}", year);
+  const skippedTitle = () => (state.feed.youtube && state.feed.youtube.skipped_playlist_title) || "Skipped";
+  const titleRegex = () => new RegExp("^" + pattern().split("{year}").map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(\\d{4})") + "$", "i");
+
+  async function loadLibraryPlaylists() {
+    const rx = titleRegex();
+    let pageToken; let n = 0;
+    do {
+      const j = await yt("GET", "/playlists", { params: { part: "snippet", mine: "true", maxResults: 50, pageToken } });
+      for (const p of j.items || []) {
+        const t = (p.snippet.title || "").trim();
+        const m = rx.exec(t);
+        if (m) state.playlists[m[1]] = p.id;
+        else if (t.toLowerCase() === skippedTitle().toLowerCase()) state.playlists.__skipped = p.id;
+        n++;
+      }
+      pageToken = j.nextPageToken;
+    } while (pageToken && n < 500);
+    state.playlists.__loaded_at = Date.now();
+    persist();
+  }
+  async function playlistFor(year) {
+    if (!state.playlists[year] || !state.playlists.__loaded_at) await loadLibraryPlaylists();
+    if (!state.playlists[year]) {
+      const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: titleFor(year), description: "Filed from chrisrohn.com" }, status: { privacyStatus: "public" } } });
+      state.playlists[year] = j.id; persist(); toast(`Created playlist “${titleFor(year)}”`);
+    }
+    return state.playlists[year];
+  }
+  async function skippedPlaylist() {
+    if (!state.playlists.__skipped && !state.playlists.__loaded_at) await loadLibraryPlaylists();
+    if (!state.playlists.__skipped) {
+      const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: skippedTitle(), description: "Thumbs-down from chrisrohn.com. Keep unlisted; paste the ID into discovery/config.yaml → skipped_playlist_id." }, status: { privacyStatus: "unlisted" } } });
+      state.playlists.__skipped = j.id; persist();
+      toast(`Created unlisted “${skippedTitle()}” playlist. Paste its ID into config.yaml → skipped_playlist_id: ${j.id}`);
+    }
+    return state.playlists.__skipped;
+  }
+  async function addToPlaylist(playlistId, videoId) {
+    const j = await yt("POST", "/playlistItems", { params: { part: "snippet" }, body: { snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } } });
+    return j.id;
+  }
+  async function removePlaylistItem(playlistItemId) { await yt("DELETE", "/playlistItems", { params: { id: playlistItemId } }); }
+
+  // Hide things rated from another device since the last daily build: read the newest entries of the current-year + skipped playlists.
+  async function refreshRecent() {
+    const ids = [state.playlists[String(new Date().getFullYear())], state.playlists.__skipped].filter(Boolean);
+    const seen = new Set();
+    for (const pid of ids) {
+      const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50 } }).catch(() => ({}));
+      for (const it of j.items || []) seen.add(it.snippet.resourceId && it.snippet.resourceId.videoId);
+    }
+    let changed = false;
+    for (const it of items()) if (it.youtube && seen.has(it.youtube.videoId) && !state.rated[it.id]) { state.rated[it.id] = { decision: "seen", at: Date.now() }; changed = true; }
+    if (changed) { persist(); render(); }
+  }
+
+  // ---------- rating ----------
+  async function rate(id, decision, year) {
+    if (!isCurator()) return;
+    if (state.busy.has(id)) return;
+    const it = byId(id); if (!it) return;
+    const vid = it.youtube && it.youtube.videoId;
+    if (!vid) { toast("No YouTube match for this one — open it via the search link instead", true); return; }
+    year = year || yearOf(it);
+    state.busy.add(id);
+    // optimistic: hide it now, move focus to the next card
+    state.rated[id] = { decision, year, videoId: vid, artist: it.artist, title: it.title, at: Date.now(), pending: true };
+    persist();
+    const wasCurrent = state.currentId === id; const idx = state.order.indexOf(id);
+    render();
+    if (state.view === "feed") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasCurrent && $("#autoplay").checked && byId(next)?.youtube?.videoId) play(next); } else if (wasCurrent) stopPlayer(); }
+    try {
+      const pid = decision === "up" ? await playlistFor(String(year)) : await skippedPlaylist();
+      const itemId = await addToPlaylist(pid, vid);
+      state.rated[id] = { ...state.rated[id], playlistItemId: itemId, playlistId: pid, pending: false };
+      persist();
+      toast(decision === "up" ? `👍 ${it.artist} – ${it.title} → ${titleFor(year)}` : `👎 ${it.artist} – ${it.title} → ${skippedTitle()}`, false, { label: "Undo", fn: () => undo(id) });
+    } catch (e) {
+      delete state.rated[id]; persist(); render();
+      toast(`Could not file ${it.artist} – ${it.title}: ${e.message}`, true);
+    } finally { state.busy.delete(id); render(); }
+  }
+  async function undo(id) {
+    const r = state.rated[id]; if (!r) return;
+    try {
+      if (r.playlistItemId) await removePlaylistItem(r.playlistItemId);
+      delete state.rated[id]; persist(); render(); toast("Undone");
+    } catch (e) { toast("Undo failed: " + e.message, true); }
+  }
 
   // ---------- rendering ----------
   function renderMeta() {
     const f = state.feed;
     const when = f.generated_at ? new Date(f.generated_at) : null;
-    const rel = when ? relTime(when) : "?";
-    $("#meta").textContent = `${f.count} candidates · ${f.new_today} new today · built ${rel} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar`;
+    $("#meta").textContent = `${f.count} candidates · ${f.new_today} new today · built ${when ? relTime(when) : "?"} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar`;
     $("#lfm").href = "https://www.last.fm/user/" + (f.lastfm_user || "tt_discotheque");
-    document.title = `Chris Rohn's New Music · ${f.new_today} new`;
+    document.title = `${f.site_name || "Chris Rohn's New Music"} · ${f.new_today} new`;
   }
-  function relTime(d) {
-    const m = Math.round((Date.now() - d.getTime()) / 60000);
-    if (m < 60) return m + " min ago";
-    const h = Math.round(m / 60);
-    if (h < 36) return h + " h ago";
-    return Math.round(h / 24) + " d ago";
-  }
-  function fillYears() {
-    const years = (state.feed.years && state.feed.years.length) ? state.feed.years : range(new Date().getFullYear(), 1979);
-    const sel = $("#s-year");
-    sel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("");
-    sel.value = state.settings.year;
-    state._years = years;
-  }
+  function relTime(d) { const m = Math.round((Date.now() - d.getTime()) / 60000); if (m < 60) return m + " min ago"; const h = Math.round(m / 60); if (h < 36) return h + " h ago"; return Math.round(h / 24) + " d ago"; }
+  function fillYears() { state._years = (state.feed.years && state.feed.years.length) ? state.feed.years : range(new Date().getFullYear(), 1979); }
+  const range = (a, b) => { const r = []; for (let y = a; y >= b; y--) r.push(y); return r; };
   const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", rss: "Blogs & radio", spotify: "Spotify" };
   function fillSources() {
-    const box = $("#sources");
-    const names = state.feed.sources || [];
-    const off = new Set(state.filters.sourcesOff || []);
+    const box = $("#sources"); const names = state.feed.sources || []; const off = new Set(state.filters.sourcesOff || []);
     box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s)}</label>`).join("") +
       (names.length > 1 ? `<button class="all" type="button" data-all="1">all</button><button class="all" type="button" data-all="0">none</button>` : "");
-    $$("input", box).forEach(cb => cb.addEventListener("change", () => {
-      const set = new Set(state.filters.sourcesOff || []);
-      cb.checked ? set.delete(cb.value) : set.add(cb.value);
-      state.filters.sourcesOff = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render();
-    }));
+    $$("input", box).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters.sourcesOff || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters.sourcesOff = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render(); }));
     $$("button.all", box).forEach(b => b.addEventListener("click", () => { state.filters.sourcesOff = b.dataset.all === "1" ? [] : [...names]; persist(); fillSources(); render(); }));
   }
-  const range = (a, b) => { const r = []; for (let y = a; y >= b; y--) r.push(y); return r; };
+  const hay = i => [i.artist, i.title, i.release, ...(i.tags || []), ...(i.reasons || [])].join(" ").toLowerCase();
+  function pickAsItem(p, i) { return { id: "pick" + i, artist: p.artist, title: p.title, release: p.album, sources: [], tags: [], reasons: [], score: 0, youtube: p.videoId ? { videoId: p.videoId, thumbnail: p.thumbnail } : null, artwork: p.thumbnail, release_date: p.year ? String(p.year) : null, _pick: true, _year: p.year }; }
 
   function visibleItems() {
-    const f = state.filters;
-    const q = f.q.trim().toLowerCase();
-    let list;
-    if (state.view === "feed") {
-      list = items().filter(i => !decisionFor(i.id));
-    } else if (state.view === "queue") {
-      list = Object.keys(state.local).map(id => byId(id) || fromDecision(id, state.local[id]));
-    } else {
-      const ids = new Set([...Object.keys(state.synced), ...Object.keys(state.archive)]);
-      list = [...ids].map(id => byId(id) || fromDecision(id, state.synced[id] || state.archive[id]));
-      if (!isCurator()) list = list.filter(i => (decisionFor(i.id) || {}).decision === "up");
-      list.sort((a, b) => String(decisionFor(b.id)?.decided_at || "").localeCompare(String(decisionFor(a.id)?.decided_at || "")));
-      return list.filter(i => !q || hay(i).includes(q));
+    const f = state.filters; const q = f.q.trim().toLowerCase();
+    if (state.view === "picks") {
+      const picks = (state.feed.picks || []).map(pickAsItem);
+      const mine = Object.entries(state.rated).filter(([, r]) => r.decision === "up").sort((a, b) => b[1].at - a[1].at).map(([id, r]) => byId(id) || { id, artist: r.artist, title: r.title, sources: [], tags: [], reasons: [], score: 0, youtube: { videoId: r.videoId }, release_date: String(r.year), _pick: true, _year: r.year });
+      const seen = new Set(); const all = [];
+      for (const it of [...mine, ...picks]) { const k = ((it.youtube && it.youtube.videoId) || it.id); if (seen.has(k)) continue; seen.add(k); all.push({ ...it, _pick: true, _year: it._year || (state.rated[it.id] && state.rated[it.id].year) }); }
+      return all.filter(i => !q || hay(i).includes(q));
     }
+    let list = items().filter(i => !decisionFor(i.id));
     list = list.filter(i => {
       if (q && !hay(i).includes(q)) return false;
       if (f.sourcesOff && f.sourcesOff.length && !(i.sources || []).some(s => !f.sourcesOff.includes(s.split(":")[0]))) return false;
-      if (state.view === "feed") {
-        if (f.onlyNew && i.first_seen !== state.feed.generated_at?.slice(0, 10)) return false;
-        if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
-        if (f.onlyKnown && !i.match_kind) return false;
-      }
+      if (f.onlyNew && i.first_seen !== state.feed.generated_at?.slice(0, 10)) return false;
+      if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
+      if (f.onlyKnown && !i.match_kind) return false;
       return true;
     });
     const cmp = {
@@ -152,43 +280,27 @@
     }[f.sort] || ((a, b) => b.score - a.score);
     return list.sort(cmp);
   }
-  const hay = i => [i.artist, i.title, i.release, ...(i.tags || []), ...(i.reasons || [])].join(" ").toLowerCase();
-  const fromDecision = (id, d) => ({ id, artist: d.artist || "?", title: d.title || "?", sources: [], tags: [], reasons: [], score: 0, youtube: d.videoId ? { videoId: d.videoId } : null, release_date: d.year ? String(d.year) : null, _ghost: true });
 
   function render() {
-    const list = $("#list");
-    const vis = visibleItems();
-    state.order = vis.map(i => i.id);
-    list.innerHTML = "";
-    const tpl = $("#card-tpl");
-    const frag = document.createDocumentFragment();
+    const list = $("#list"); const vis = visibleItems(); state.order = vis.map(i => i.id);
+    list.innerHTML = ""; const tpl = $("#card-tpl"); const frag = document.createDocumentFragment();
     for (const it of vis) frag.appendChild(card(it, tpl));
     list.appendChild(frag);
-    const empty = $("#empty");
-    empty.hidden = vis.length > 0;
-    empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : state.view === "queue" ? "No unsynced thumbs. Rate something in the feed." : "No picks yet.";
+    const empty = $("#empty"); empty.hidden = vis.length > 0;
+    empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : "No picks yet.";
     $("#count-feed").textContent = items().filter(i => !decisionFor(i.id)).length;
-    $("#count-queue").textContent = Object.keys(state.local).length;
-    $("#count-archive").textContent = Object.keys(state.archive).length + Object.keys(state.synced).length;
-    applyMode();
-    const ups = Object.values(state.local).filter(d => d.decision === "up").length;
-    const downs = Object.values(state.local).filter(d => d.decision === "down").length;
-    const sync = $("#sync");
-    sync.disabled = !(ups || downs);
-    sync.textContent = ups || downs ? `Sync ${ups} 👍${downs ? ` · ${downs} 👎` : ""}` : "Sync approvals";
-    $("#filters").style.display = state.view === "feed" ? "" : "";
+    $("#count-picks").textContent = (state.feed.picks || []).length;
+    $("#filters").classList.toggle("picks", state.view === "picks");
   }
 
   function card(it, tpl) {
     const el = tpl.content.firstElementChild.cloneNode(true);
     el.dataset.id = it.id;
-    const d = decisionFor(it.id);
     const yt = it.youtube || {};
-    const art = $(".art", el);
-    const img = $("img", art);
+    const art = $(".art", el); const img = $("img", art);
     if (it.artwork || yt.thumbnail) img.src = it.artwork || yt.thumbnail; else img.remove();
     if (!yt.videoId) art.classList.add("unplayable");
-    if (it.first_seen && it.first_seen === state.feed.generated_at?.slice(0, 10) && !it._ghost) el.classList.add("new");
+    if (it.first_seen && it.first_seen === state.feed.generated_at?.slice(0, 10) && !it._pick) el.classList.add("new");
     $(".artist", el).textContent = it.artist;
     const m = $(".match", el);
     if (it.match_kind) { m.textContent = it.match_kind === "direct" ? "you play " + (it.matched_artist === it.artist ? "them" : it.matched_artist) : "similar to " + (it.reasons.find(r => r.startsWith("similar to ")) || "").slice(11); m.classList.add(it.match_kind); } else m.remove();
@@ -207,46 +319,17 @@
     $(".links", el).innerHTML = links.join(" · ");
     $(".score", el).textContent = it.score ? it.score.toFixed(1) : "";
     const ysel = $(".year", el);
-    ysel.innerHTML = state._years.map(y => `<option value="${y}">${y}</option>`).join("");
-    ysel.value = d?.year || yearOf(it);
-    ysel.addEventListener("change", () => { if (state.local[it.id]) { state.local[it.id].year = +ysel.value; persist(); } });
-    if (d) {
-      el.classList.add(d.decision === "up" ? "rated-up" : "rated-down");
-      if (d.filed_at || d.synced) el.classList.add("filed");
-      const st = document.createElement("div");
-      st.className = "status";
-      st.textContent = d.decision === "up" ? (d.filed_at ? `filed → ${d.year}` : d.synced ? "syncing…" : `👍 → ${d.year} (unsynced)`) : (state.archive[it.id] ? "archived 👎" : "👎 (unsynced)");
-      $(".side", el).appendChild(st);
-      if (!state.local[it.id]) { $(".undo", el).remove(); ysel.disabled = true; }
+    if (it._pick) { ysel.remove(); $(".thumbs", el).remove(); const st = document.createElement("div"); st.className = "status"; st.textContent = it._year ? `in ${titleFor(it._year)}` : ""; $(".side", el).appendChild(st); }
+    else {
+      ysel.innerHTML = state._years.map(y => `<option value="${y}">${y}</option>`).join(""); ysel.value = yearOf(it);
+      $(".btn.up", el).addEventListener("click", e => { e.stopPropagation(); rate(it.id, "up", +ysel.value); });
+      $(".btn.down", el).addEventListener("click", e => { e.stopPropagation(); rate(it.id, "down", +ysel.value); });
     }
-    $(".btn.up", el).addEventListener("click", e => { e.stopPropagation(); rate(it.id, "up", +ysel.value); });
-    $(".btn.down", el).addEventListener("click", e => { e.stopPropagation(); rate(it.id, "down", +ysel.value); });
-    const undo = $(".undo", el); if (undo) undo.addEventListener("click", e => { e.stopPropagation(); unrate(it.id); });
     art.addEventListener("click", () => { if (yt.videoId) play(it.id); });
     el.addEventListener("dblclick", () => { if (yt.videoId) play(it.id); });
     el.addEventListener("focus", () => { state.currentId = it.id; $$(".card.current").forEach(c => c.classList.remove("current")); el.classList.add("current"); });
     return el;
   }
-  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-  // ---------- decisions ----------
-  function rate(id, decision, year) {
-    if (!isCurator()) return;
-    const it = byId(id) || fromDecision(id, decisionFor(id) || {});
-    state.local[id] = { decision, year: year || yearOf(it), videoId: it.youtube?.videoId || null, artist: it.artist, title: it.title, decided_at: new Date().toISOString() };
-    delete state.synced[id];
-    persist();
-    toast(decision === "up" ? `👍 ${it.artist} – ${it.title} → ${state.local[id].year}` : `👎 ${it.artist} – ${it.title}`);
-    const wasCurrent = state.currentId === id;
-    const idx = state.order.indexOf(id);
-    render();
-    if (state.view === "feed") {
-      const next = state.order[idx] || state.order[idx - 1];
-      if (next) { focusCard(next); if (wasCurrent && $("#autoplay").checked && byId(next)?.youtube?.videoId) play(next); }
-      else if (wasCurrent) stopPlayer();
-    }
-  }
-  function unrate(id) { delete state.local[id]; persist(); render(); }
   function focusCard(id) { const el = $(`.card[data-id="${CSS.escape(id)}"]`); if (el) { el.focus({ preventScroll: false }); el.scrollIntoView({ block: "center", behavior: "smooth" }); } }
 
   // ---------- player ----------
@@ -257,15 +340,14 @@
       events: {
         onReady: () => { state.playerReady = true; if (state.pendingVideo) { state.player.loadVideoById(state.pendingVideo); state.pendingVideo = null; } },
         onStateChange: e => { if (e.data === YT.PlayerState.ENDED && $("#autoplay").checked) nextTrack(); },
-        onError: () => { toast("Can't embed this one – opening YouTube Music", true); const it = byId(state.currentId); if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank"); },
+        onError: () => { toast("Can't embed this one – opening YouTube Music", true); const it = current(); if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank"); },
       },
     });
   };
+  const current = () => byId(state.currentId) || visibleItems().find(i => i.id === state.currentId);
   function ensureApi() { if (window.YT && window.YT.Player) return; if ($("#yt-api")) return; const s = document.createElement("script"); s.id = "yt-api"; s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s); }
   function play(id) {
-    const it = byId(id) || fromDecision(id, decisionFor(id) || {});
-    const vid = it.youtube?.videoId; if (!vid) return;
-    state.currentId = id;
+    state.currentId = id; const it = current(); const vid = it?.youtube?.videoId; if (!vid) return;
     $$(".card.current").forEach(c => c.classList.remove("current"));
     const el = $(`.card[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
     $("#player").hidden = false;
@@ -275,74 +357,27 @@
   }
   function stopPlayer() { if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; }
   function step(delta) {
-    const i = state.order.indexOf(state.currentId);
-    let j = i < 0 ? 0 : i + delta;
-    while (j >= 0 && j < state.order.length) {
-      const it = byId(state.order[j]);
-      if (it?.youtube?.videoId) { play(state.order[j]); focusCard(state.order[j]); return; }
-      j += delta;
-    }
+    const i = state.order.indexOf(state.currentId); let j = i < 0 ? 0 : i + delta;
+    while (j >= 0 && j < state.order.length) { const id = state.order[j]; const it = byId(id) || visibleItems().find(x => x.id === id); if (it?.youtube?.videoId) { play(id); focusCard(id); return; } j += delta; }
   }
-  const nextTrack = () => step(1);
-  const prevTrack = () => step(-1);
+  const nextTrack = () => step(1); const prevTrack = () => step(-1);
   function toggle() { if (!state.playerReady) return; const s = state.player.getPlayerState(); if (s === YT.PlayerState.PLAYING) state.player.pauseVideo(); else state.player.playVideo(); }
 
-  // ---------- sync ----------
-  async function syncDecisions() {
-    const pending = Object.entries(state.local).map(([id, d]) => ({ id, ...d }));
-    if (!pending.length) return;
-    const ups = pending.filter(d => d.decision === "up");
-    const downs = pending.filter(d => d.decision === "down");
-    const body = $("#confirm-body");
-    const byYear = {};
-    for (const u of ups) (byYear[u.year] ||= []).push(u);
-    body.innerHTML = `<p class="muted">${ups.length} track(s) will be added to your YouTube Music year playlists and ${downs.length} thumbs-down archived. Nothing else is touched.</p>` +
-      `<div class="confirm-list">` + Object.keys(byYear).sort((a, b) => b - a).map(y => `<h4>${y} Indie Discotheque</h4>` + byYear[y].map(u => `<div><span>👍</span><span>${esc(u.artist)} – ${esc(u.title)}</span>${u.videoId ? "" : '<span class="muted">(no YouTube match – will be skipped)</span>'}</div>`).join("")).join("") +
-      (downs.length ? `<h4>Archive 👎</h4>` + downs.map(u => `<div><span>👎</span><span>${esc(u.artist)} – ${esc(u.title)}</span></div>`).join("") : "") + `</div>` +
-      (state.settings.token ? "" : `<p class="muted">No GitHub token set – open ⚙ Settings, or export the queue as CSV instead.</p>`);
-    const dlg = $("#confirm");
-    $("#confirm-ok").disabled = !state.settings.token;
-    dlg.returnValue = "";
-    dlg.showModal();
-    await new Promise(r => dlg.addEventListener("close", r, { once: true }));
-    if (dlg.returnValue !== "ok") return;
-    const repo = state.settings.repo || DEFAULT_REPO;
-    const chunks = [];
-    for (let i = 0; i < pending.length; i += 150) chunks.push(pending.slice(i, i + 150));
-    try {
-      for (const chunk of chunks) {
-        const r = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-          method: "POST",
-          headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + state.settings.token, "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
-          body: JSON.stringify({ event_type: "decisions", client_payload: { decisions: chunk, sent_at: new Date().toISOString() } }),
-        });
-        if (r.status !== 204) throw new Error(`GitHub said ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      }
-      for (const d of pending) { state.synced[d.id] = { ...d, synced: true }; delete state.local[d.id]; }
-      persist(); render();
-      toast(`Sent ${pending.length} decision(s). GitHub is filing them now; the feed refreshes within a few minutes.`);
-    } catch (e) {
-      toast("Sync failed: " + e.message, true);
-    }
-  }
-
-  function exportCsv() {
-    const rows = [["Title", "Artist", "Album", "Year", "YouTube"], ...Object.values(state.local).filter(d => d.decision === "up").map(d => [d.title, d.artist, "", d.year, d.videoId ? "https://music.youtube.com/watch?v=" + d.videoId : ""])];
-    const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `indie-discotheque-approvals-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-  }
-
+  // ---------- misc ----------
   let toastTimer;
-  function toast(msg, err = false) {
+  function toast(msg, err = false, action) {
     let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
     t.textContent = msg; t.classList.toggle("err", err); t.style.display = "";
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; }, err ? 6000 : 2600);
+    if (action) { const b = document.createElement("button"); b.className = "btn ghost"; b.textContent = action.label; b.addEventListener("click", () => { t.style.display = "none"; action.fn(); }); t.appendChild(b); }
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; }, err ? 7000 : (action ? 8000 : 2600));
   }
+  function exportCsv() {
+    const rows = [["Title", "Artist", "Album", "Year", "YouTube"], ...Object.values(state.rated).filter(d => d.decision === "up").map(d => [d.title, d.artist, "", d.year, d.videoId ? "https://music.youtube.com/watch?v=" + d.videoId : ""])];
+    const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `new-music-approvals-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+  }
+  function currentYear(id = state.currentId) { const el = id && $(`.card[data-id="${CSS.escape(id)}"] .year`); return el ? +el.value : undefined; }
 
-  // ---------- wiring ----------
   function wire() {
     $$(".tab").forEach(b => b.addEventListener("click", () => { state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b)); render(); }));
     const f = state.filters;
@@ -352,23 +387,14 @@
     $("#only-new").addEventListener("change", e => { f.onlyNew = e.target.checked; persist(); render(); });
     $("#only-playable").addEventListener("change", e => { f.onlyPlayable = e.target.checked; persist(); render(); });
     $("#only-known").addEventListener("change", e => { f.onlyKnown = e.target.checked; persist(); render(); });
-    $("#sync").addEventListener("click", syncDecisions);
+    $("#signin").addEventListener("click", () => { if (state.auth && tokenValid()) signOut(); else signIn().catch(e => toast(e.message, true)); });
     $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", toggle);
     $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
-    const s = state.settings;
-    $("#s-repo").value = s.repo; $("#s-token").value = s.token; $("#s-hide-downs").checked = s.syncDowns;
-    $("#settings-btn").addEventListener("click", () => $("#settings").showModal());
-    $("#settings").addEventListener("close", () => { s.repo = $("#s-repo").value.trim() || DEFAULT_REPO; s.token = $("#s-token").value.trim(); s.year = +$("#s-year").value; s.syncDowns = $("#s-hide-downs").checked; persist(); applyMode(); render(); });
+    $("#settings-btn").addEventListener("click", () => { $("#s-playlists").textContent = Object.entries(state.playlists).filter(([k]) => !k.startsWith("__")).length + " year playlists known" + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : " · no skipped playlist yet"); $("#settings").showModal(); });
     $("#s-export").addEventListener("click", exportCsv);
-    $("#s-link").addEventListener("click", async () => {
-      const tok = ($("#s-token").value || state.settings.token || "").trim();
-      if (!tok) { toast("Save a token first", true); return; }
-      const url = location.origin + location.pathname + "#curator=" + encodeURIComponent(tok);
-      try { await navigator.clipboard.writeText(url); toast("Sign-in link copied. Open it once in the other browser; it stores the token and removes it from the address bar."); }
-      catch { prompt("Copy this link and open it in the other browser:", url); }
-    });
-    $("#s-clear").addEventListener("click", () => { if (confirm("Clear unsynced thumbs and local settings?")) { ["id:decisions", "id:synced", "id:settings", "id:filters"].forEach(LS.del); location.reload(); } });
+    $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast("Playlists reloaded")).catch(e => toast(e.message, true)));
+    $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
       const id = state.currentId || state.order[0];
@@ -384,7 +410,6 @@
       }
     });
   }
-  function currentYear(id = state.currentId) { const el = id && $(`.card[data-id="${CSS.escape(id)}"] .year`); return el ? +el.value : undefined; }
 
   wire();
   load().catch(e => { $("#meta").textContent = "Feed not built yet — run the Discover workflow once. (" + e.message + ")"; $("#empty").hidden = false; $("#empty").textContent = "No feed yet."; });

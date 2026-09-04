@@ -8,15 +8,28 @@ station:
   lastfm_user: tt_discotheque
   timezone: America/New_York
 
-# Your YouTube Music year playlists ("2026 Indie Discotheque", "2025 Indie Discotheque", ...).
-# The sync step prefers matching by title ("<year> Indie Discotheque") in your library; these IDs are the fallback
-# and are also read (publicly) as taste seeds + "already saved" de-duplication.
+# Your YouTube Music year playlists ("2026 Indie Discotheque", "2025 Indie Discotheque", ... back to 1979).
+# The site signs you in with Google and writes to these playlists from your browser. The daily build reads them
+# (they're public) to seed your taste profile and to hide anything already saved or skipped.
 youtube_music:
   playlist_title_pattern: "{year} Indie Discotheque"
+  first_year: 1979
+  # Any one of your year playlists; the build uses it to find your channel and then every other year playlist.
   playlists:
     "2026": PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN
     "2025": PLTW5JZnPjE_onNAnNNGWFyek1iTfsdSrS
     "2024": PLTW5JZnPjE_pezZ1Xi92GmMvNM_mMLlvJ
+  # 👎 go here (the site creates it, unlisted, on first use and tells you the ID to paste here).
+  skipped_playlist_title: "Indie Discotheque – Skipped"
+  skipped_playlist_id: ""
+  picks_count: 40                 # newest saves shown on the public "Picks" tab
+
+# Sign in with Google on the site. Create a "Web application" OAuth client (see SETUP.md) and put its ID here —
+# a client ID is public by design. Only the listed Google accounts get curator mode.
+google:
+  client_id: ""
+  curators:
+    - chrisrohn@gmail.com
 
 # ---------- Taste profile ----------
 profile:

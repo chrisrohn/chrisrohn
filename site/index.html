@@ -21,12 +21,12 @@
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-view="feed" role="tab">Feed <span class="pill" id="count-feed">0</span></button>
-    <button class="tab curator" data-view="queue" role="tab">Queue <span class="pill" id="count-queue">0</span></button>
-    <button class="tab" data-view="archive" role="tab">Picks <span class="pill" id="count-archive">0</span></button>
+    <button class="tab" data-view="picks" role="tab">Picks <span class="pill" id="count-picks">0</span></button>
   </nav>
   <div class="actions">
-    <span id="mode" class="mode" title="Curator mode: thumbs + sync are enabled in this browser">curator</span>
-    <button id="sync" class="btn primary curator" disabled>Sync approvals</button>
+    <span id="who" class="who" hidden></span>
+    <span class="mode curator" title="Curator mode: thumbs file straight into your YouTube playlists">curator</span>
+    <button id="signin" class="btn primary">Sign in with Google</button>
     <button id="settings-btn" class="btn ghost" title="Settings">⚙</button>
   </div>
 </header>
@@ -69,30 +69,14 @@
 <dialog id="settings">
   <form method="dialog" class="settings-form">
     <h2>Settings</h2>
-    <p class="muted">Anyone can listen here. <b>Curator mode</b> (thumbs, queue, sync) switches on in this browser only when a GitHub token is saved below. Sync sends your thumbs to GitHub, which files the 👍 tracks into <code>&lt;year&gt; Indie Discotheque</code> in your YouTube Music library and archives everything you rated. Nothing happens until you press <b>Sync approvals</b>.</p>
-    <label>GitHub repository <input id="s-repo" placeholder="chrisrohn/chrisrohn"></label>
-    <label>Fine-grained token (Contents: read &amp; write) <input id="s-token" type="password" placeholder="github_pat_…" autocomplete="off"></label>
-    <p class="muted">Stored only in this browser. See <a href="https://github.com/chrisrohn/chrisrohn/blob/main/SETUP.md" target="_blank" rel="noopener">SETUP.md</a>.</p>
-    <label>Default year for approvals <select id="s-year"></select></label>
-    <label class="chk"><input type="checkbox" id="s-hide-downs"> also sync 👎 immediately (otherwise they wait for the next sync)</label>
+    <p class="muted">Anyone can listen here. <b>Sign in with Google</b> as a curator account and the thumbs appear: 👍 adds the track to <code>&lt;year&gt; Indie Discotheque</code> in your YouTube library right away (Undo for a few seconds), 👎 adds it to the unlisted <code>Skipped</code> playlist so it never comes back. Nothing else is touched.</p>
+    <p class="muted" id="s-playlists"></p>
     <div class="row">
-      <button class="btn ghost curator" id="s-link" type="button" title="Copies a one-time link that signs another browser into curator mode">Copy sign-in link</button>
-      <button class="btn ghost" id="s-export" type="button">Export queue as CSV (Soundiiz)</button>
+      <button class="btn ghost curator" id="s-reload" type="button">Reload my playlists</button>
+      <button class="btn ghost curator" id="s-export" type="button">Export today's 👍 as CSV</button>
       <button class="btn ghost" id="s-clear" type="button">Clear local state</button>
       <span class="grow"></span>
       <button class="btn primary" value="ok">Done</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="confirm">
-  <form method="dialog" class="settings-form">
-    <h2>Sync to YouTube Music</h2>
-    <div id="confirm-body"></div>
-    <div class="row">
-      <button class="btn ghost" value="cancel">Cancel</button>
-      <span class="grow"></span>
-      <button class="btn primary" value="ok" id="confirm-ok">File approvals &amp; archive</button>
     </div>
   </form>
 </dialog>
@@ -122,7 +106,6 @@
         <button class="btn down" title="thumbs down (d)">👎</button>
         <button class="btn up" title="thumbs up (u)">👍</button>
       </div>
-      <button class="btn ghost undo curator" title="undo">undo</button>
     </div>
   </article>
 </template>

@@ -17,6 +17,7 @@ import math
 import os
 import re
 from collections import defaultdict
+from datetime import date
 from typing import Any
 
 from .util import CACHE_DIR, DATA_DIR, Http, log, norm, norm_track, item_key, read_json, utcnow, write_json
@@ -131,31 +132,89 @@ def listenbrainz_similar(http: Http, mbid: str, limit: int) -> list[dict]:
     return rows[:limit]
 
 
-def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]]:
-    """Read your public year playlists (no auth) → artist counts + saved-track keys."""
+def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str | None]:
+    """Find every '<year> Indie Discotheque' playlist (+ the Skipped playlist) on your channel.
+
+    Uses one configured playlist to learn the channel id, then lists the channel's public playlists.
+    Returns ({year: playlistId}, skipped_playlist_id, channel_id).
+    """
+    ycfg = cfg.get("youtube_music") or {}
+    pattern = ycfg.get("playlist_title_pattern", "{year} Indie Discotheque")
+    rx = re.compile("^" + re.escape(pattern).replace(re.escape("{year}"), r"(\d{4})") + "$", re.I)
+    found: dict[str, str] = {str(y): pid for y, pid in (ycfg.get("playlists") or {}).items()}
+    skipped = ycfg.get("skipped_playlist_id") or None
+    skipped_title = (ycfg.get("skipped_playlist_title") or "").strip().lower()
+    channel = None
+    for pid in list(found.values()):
+        try:
+            pl = yt.get_playlist(pid, limit=0)
+            channel = (pl.get("author") or {}).get("id")
+            if channel:
+                break
+        except Exception as exc:  # noqa: BLE001
+            log.debug("playlist %s lookup failed: %s", pid, exc)
+    if channel:
+        try:
+            for pl in yt.get_user_playlists(channel, yt.get_user(channel)["playlists"]["params"]):
+                title = (pl.get("title") or "").strip()
+                m = rx.match(title)
+                if m and pl.get("playlistId"):
+                    found.setdefault(m.group(1), pl["playlistId"])
+                elif skipped_title and title.lower() == skipped_title and pl.get("playlistId"):
+                    skipped = skipped or pl["playlistId"]
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not list channel playlists (%s); using configured IDs only", exc)
+    return found, skipped, channel
+
+
+def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict], list[dict], dict]:
+    """Read your public year playlists (no auth) → artist counts, saved/skipped keys, recent picks, playlist map."""
     artists: dict[str, float] = defaultdict(float)
     saved: dict[str, dict] = {}
+    picks: list[dict] = []
+    meta: dict = {"years": {}, "skipped": None, "channel": None}
     try:
         from ytmusicapi import YTMusic
     except ImportError:
-        return artists, saved
+        return artists, saved, picks, meta
     yt = YTMusic()
-    for year, pid in (cfg.get("youtube_music", {}).get("playlists") or {}).items():
+    years, skipped, channel = discover_playlists(cfg, yt)
+    meta.update({"years": years, "skipped": skipped, "channel": channel})
+    picks_n = int((cfg.get("youtube_music") or {}).get("picks_count", 40))
+    current = str(date.today().year)
+    for year, pid in sorted(years.items(), reverse=True):
         try:
             pl = yt.get_playlist(pid, limit=None)
         except Exception as exc:  # noqa: BLE001
             log.warning("could not read playlist %s (%s): %s", year, pid, exc)
             continue
+        tracks = pl.get("tracks") or []
         weight = 1.0 + 0.25 * max(0, int(year) - 2023) if str(year).isdigit() else 1.0
-        for t in pl.get("tracks") or []:
+        for t in tracks:
             title = t.get("title") or ""
             names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
             for nme in names:
                 artists[nme] += weight
             if names:
-                saved[item_key(names[0], title)] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId")}
-        log.info("playlist %s: %d tracks", year, len(pl.get("tracks") or []))
-    return artists, saved
+                saved[item_key(names[0], title)] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId"), "decision": "up"}
+        if year == current:
+            for t in tracks[-picks_n:][::-1]:
+                names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
+                thumbs = t.get("thumbnails") or []
+                picks.append({"artist": names[0] if names else "", "title": t.get("title") or "", "videoId": t.get("videoId"),
+                              "year": year, "thumbnail": thumbs[-1]["url"] if thumbs else None, "album": (t.get("album") or {}).get("name")})
+        log.info("playlist %s: %d tracks", year, len(tracks))
+    if skipped:
+        try:
+            pl = yt.get_playlist(skipped, limit=None)
+            for t in pl.get("tracks") or []:
+                names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
+                if names:
+                    saved[item_key(names[0], t.get("title") or "")] = {"artist": names[0], "title": t.get("title"), "videoId": t.get("videoId"), "decision": "down"}
+            log.info("skipped playlist: %d tracks", len(pl.get("tracks") or []))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not read skipped playlist %s: %s", skipped, exc)
+    return artists, saved, picks, meta
 
 
 def build_profile(cfg: dict, http: Http) -> dict:
@@ -188,7 +247,7 @@ def build_profile(cfg: dict, http: Http) -> dict:
         log.warning("LASTFM_API_KEY not set — profile will rely on playlists + seeds only")
 
     # 2. Your YouTube Music year playlists
-    yt_artists, saved = youtube_playlist_seeds(cfg)
+    yt_artists, saved, picks, yt_meta = youtube_playlist_seeds(cfg)
     for name, cnt in yt_artists.items():
         add_direct(name, 0.6 * math.log2(cnt + 1), "ytmusic-playlists")
 
@@ -264,6 +323,8 @@ def build_profile(cfg: dict, http: Http) -> dict:
         "mbid_index": mb_index,
         "tags": tags,
         "saved": saved,
+        "picks": picks,
+        "youtube": yt_meta,
     }
     write_json(PROFILE_PATH, profile, compact=True)
     log.info("profile: %s", profile["counts"])
