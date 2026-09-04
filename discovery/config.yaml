@@ -162,7 +162,7 @@ sources:
   radio:
     enabled: true
     kexp: true
-    somafm: [indiepop, groovesalad, u80s]
+    somafm: [poptron, indiepop]   # channel ids from somafm.com URLs, e.g. somafm.com/poptron
   # Labels you trust: every release they put out in the window, via MusicBrainz.
   musicbrainz_labels:
     enabled: true
