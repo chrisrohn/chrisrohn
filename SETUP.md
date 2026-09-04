@@ -53,7 +53,10 @@ that is a normal "Sign in with Google" button on the site.
 1. https://console.cloud.google.com/projectcreate → name it `indie-discotheque` → Create.
 2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3).
 3. https://console.cloud.google.com/auth/overview → **Get started** → App name `Chris Rohn's New Music`, your
-   email, Audience **External**, contact email → Create.
+   email, Audience **External**, contact email → Create. Then on **Branding** set Application home page
+   `https://chrisrohn.com`, Privacy policy `https://chrisrohn.com/privacy.html`, Terms of service
+   `https://chrisrohn.com/terms.html`, and add `chrisrohn.com` under Authorised domains. (Both pages ship with
+   the site and contain the disclosures YouTube API Services require.)
 4. https://console.cloud.google.com/auth/audience → **Publish app** (confirm). Unverified is fine: Google shows a
    one-time "app isn't verified" screen that you click through (**Advanced → Go to …**). Publishing avoids the
    7-day sign-in expiry of Testing mode. (If you'd rather stay in Testing, add yourself under **Test users**.)

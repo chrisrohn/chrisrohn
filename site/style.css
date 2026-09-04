@@ -134,3 +134,14 @@ body.curator .mode { display: inline-block; }
 .who img { width: 22px; height: 22px; border-radius: 50%; }
 .toast .btn { margin-left: 12px; padding: 3px 10px; font-size: 13px; color: var(--accent2); border-color: var(--accent2); }
 .filters.picks > *:not(#q) { display: none; }
+
+/* legal pages */
+body.doc .top { position: static; }
+body.doc .brand h1 a { color: var(--fg); text-decoration: none; }
+body.doc .tab { text-decoration: none; }
+.prose { max-width: 820px; margin: 0 auto; padding: 24px 18px 60px; line-height: 1.6; }
+.prose h2 { font-size: 18px; margin: 28px 0 8px; color: var(--accent2); }
+.prose h3 { font-size: 15px; margin: 18px 0 6px; }
+.prose ul { padding-left: 22px; }
+.prose li { margin: 6px 0; }
+body.doc footer { padding-bottom: 40px; }
