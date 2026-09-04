@@ -129,6 +129,68 @@ sources:
       - 106   # Electro
       - 132   # Pop
       - 113   # Dance
+  # New singles/albums from your top artists, straight from YouTube Music (video IDs included; replaces Release Radar).
+  ytmusic_artists:
+    enabled: true
+    top_artists: 150          # checked per run, rotating through the pool so everyone gets covered every few days
+    pool: 600
+  # Label / curator / session channels on YouTube. Free RSS per channel; wrong handles show up in ⚙ feed health.
+  youtube_channels:
+    enabled: true
+    channels:
+      - { name: "Toy Tonics", channel: "@toytonics" }
+      - { name: "Razor-N-Tape", channel: "@RazorNTape" }
+      - { name: "Italians Do It Better", channel: "@ItaliansDoItBetter" }
+      - { name: "Kitsuné Musique", channel: "@KitsuneMusique" }
+      - { name: "Ed Banger Records", channel: "@edbangerrecords" }
+      - { name: "Roche Musique", channel: "@RocheMusique" }
+      - { name: "Future Classic", channel: "@futureclassic" }
+      - { name: "Ghostly International", channel: "@ghostly" }
+      - { name: "Ninja Tune", channel: "@ninjatune" }
+      - { name: "Cascine", channel: "@cascine" }
+      - { name: "Majestic Casual", channel: "@majesticcasual" }
+      - { name: "Eton Messy", channel: "@EtonMessy" }
+      - { name: "KEXP live sessions", channel: "@kexp" }
+      - { name: "COLORS", channel: "@COLORSxSTUDIOS" }
+  # ListenBrainz "Weekly Exploration" / "Weekly Jams" — free collaborative filtering. Make a ListenBrainz account,
+  # import your Last.fm history (Settings → Import), then put the username here.
+  listenbrainz_playlists:
+    enabled: true
+    user: ""
+    kinds: [exploration, jams]
+  # What tastemaker radio is actually playing (profile-matched, or recently released for KEXP).
+  radio:
+    enabled: true
+    kexp: true
+    somafm: [indiepop, groovesalad, u80s]
+  # Labels you trust: every release they put out in the window, via MusicBrainz.
+  musicbrainz_labels:
+    enabled: true
+    labels:
+      - Toy Tonics
+      - Razor-N-Tape
+      - Italians Do It Better
+      - Kitsuné
+      - Ed Banger Records
+      - Roche Musique
+      - Future Classic
+      - Ghostly International
+      - Cascine
+      - Heavenly Recordings
+      - Lucky Number
+      - Captured Tracks
+      - Mexican Summer
+      - Bella Union
+      - Permanent Vacation
+      - Music For Dreams
+      - Nang
+      - Midnight Riot
+      - Glitterbox Recordings
+      - Athens of the North
+      - Soundway
+      - Mr Bongo
+      - Big Crown Records
+      - Colemine Records
   rss:
     enabled: true
     # Headlines shaped like `Artist – "Song"` become playable cards; other posts are kept only if they mention a

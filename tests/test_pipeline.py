@@ -280,3 +280,36 @@ def test_rohn_standard_notation():
     assert a.display == b.display == "Jungle - Keep Moving feat. Nao (Purple Disco Machine Remix)"
     assert a.key == b.key and a.key != c.key           # remix is a different track; feat. spelling is not
     assert a.to_dict()["display_title"] == "Keep Moving feat. Nao (Purple Disco Machine Remix)"
+
+
+def test_youtube_channel_feed_and_radio(monkeypatch, sandbox):
+    from discovery.sources import youtube_channels, radio, HEALTH
+    import discovery.sources.youtube_channels as yc
+    monkeypatch.setattr(yc, "CACHE", sandbox / "data" / "cache" / "yt_channels.json")
+
+    today = date.today()
+    atom = f"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xt/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/">
+      <entry><yt:videoId>abc123def45</yt:videoId><title>Jungle - Keep Moving (Official Video)</title><published>{today.isoformat()}T10:00:00+00:00</published><author><name>Toy Tonics</name></author><media:group><media:thumbnail url="https://i/t.jpg"/></media:group></entry>
+      <entry><yt:videoId>zzz</yt:videoId><title>Toy Tonics Podcast #12 (DJ Set)</title><published>{today.isoformat()}T10:00:00+00:00</published></entry>
+    </feed>"""
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            if "youtube.com/@" in url:
+                return '<html>"externalId":"UCabcdefghijklmnopqrstu"</html>'
+            if "videos.xml" in url:
+                return atom
+            if "kexp" in url:
+                return {"results": [{"artist": "Roosevelt", "song": "Lovers", "album": "Polydans", "release_date": today.isoformat()},
+                                    {"artist": "Nobody", "song": "Old", "release_date": "1999-01-01"}]}
+            return "<songs><song><artist>Jungle</artist><title>Back On 74</title><album>Volcano</album></song><song><artist>Stranger</artist><title>x</title></song></songs>"
+
+    cfg = _cfg()
+    cfg["sources"]["youtube_channels"]["channels"] = [{"name": "Toy Tonics", "channel": "@toytonics"}]
+    got = youtube_channels.fetch(cfg, PROFILE, FakeHttp())
+    assert len(got) == 1 and got[0].youtube["videoId"] == "abc123def45" and got[0].artist == "Jungle" and got[0].title == "Keep Moving"
+    assert HEALTH["yt:Toy Tonics"]["kept"] == 1
+    cfg["sources"]["radio"]["somafm"] = ["indiepop"]
+    r = radio.fetch(cfg, PROFILE, FakeHttp())
+    names = {(i.artist, i.title) for i in r}
+    assert ("Roosevelt", "Lovers") in names and ("Jungle", "Back On 74") in names and ("Nobody", "Old") not in names and ("Stranger", "x") not in names

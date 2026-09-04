@@ -15,8 +15,9 @@ import feedparser
 from ..models import Item
 from ..util import Http, log, norm, parse_artist_title, parse_date
 
+from . import report
+
 STRIP_HTML = re.compile(r"<[^>]+>")
-HEALTH: dict[str, dict] = {}   # feed name -> {"ok": bool, "entries": n, "kept": n, "error": str|None}
 
 
 def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
@@ -31,11 +32,11 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
             raw = http.get(url, as_json=False, cache=False, headers={"Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5"})
         except Exception as exc:  # noqa: BLE001
             log.warning("rss %s: %s", name, exc)
-            HEALTH[name] = {"ok": False, "entries": 0, "kept": 0, "error": str(exc)[:120]}
+            report(name, False, error=exc)
             continue
         parsed = feedparser.parse(raw)
         if not parsed.entries:
-            HEALTH[name] = {"ok": False, "entries": 0, "kept": 0, "error": "no entries (not a feed?)"}
+            report(name, False, error="no entries (not a feed?)")
             continue
         n = 0
         for entry in parsed.entries[:80]:
@@ -80,6 +81,6 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 blurb=summary or None,
             ))
             n += 1
-        HEALTH[name] = {"ok": True, "entries": len(parsed.entries), "kept": n, "error": None}
+        report(name, True, entries=len(parsed.entries), kept=n)
         log.info("rss %s: %d/%d entries kept", name, n, len(parsed.entries))
     return out

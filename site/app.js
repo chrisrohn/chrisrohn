@@ -262,7 +262,7 @@
   function relTime(d) { const m = Math.round((Date.now() - d.getTime()) / 60000); if (m < 60) return m + " min ago"; const h = Math.round(m / 60); if (h < 36) return h + " h ago"; return Math.round(h / 24) + " d ago"; }
   function fillYears() { state._years = (state.feed.years && state.feed.years.length) ? state.feed.years : range(new Date().getFullYear(), 1979); }
   const range = (a, b) => { const r = []; for (let y = a; y >= b; y--) r.push(y); return r; };
-  const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", rss: "Blogs & radio", spotify: "Spotify" };
+  const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", "musicbrainz-label": "Labels", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "Artist watch", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify" };
   function fillSources() {
     const box = $("#sources"); const names = state.feed.sources || []; const off = new Set(state.filters.sourcesOff || []);
     const blogs = state.feed.blogs || []; const boff = new Set(state.filters.blogsOff || []);

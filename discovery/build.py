@@ -44,6 +44,8 @@ def build_feed(cfg: dict) -> dict:
     today_s = date.today().isoformat()
     for it in items:
         first_seen.setdefault(it.key, today_s)
+        if not it.release_date:
+            it.release_date = date.fromisoformat(first_seen[it.key])
     cutoff_keys = {i.key for i in items}
     # keep first_seen bounded to the last ~60 days of items
     state["first_seen"] = {k: v for k, v in first_seen.items() if k in cutoff_keys or (date.today() - date.fromisoformat(v)).days < 60}
@@ -83,11 +85,8 @@ def build_feed(cfg: dict) -> dict:
 
 
 def _feed_health() -> dict:
-    try:
-        from .sources.rss import HEALTH
-        return dict(HEALTH)
-    except Exception:  # noqa: BLE001
-        return {}
+    from .sources import HEALTH
+    return dict(HEALTH)
 
 
 def _year_range(cfg: dict) -> list[int]:
