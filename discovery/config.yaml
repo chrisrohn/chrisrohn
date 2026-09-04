@@ -19,7 +19,10 @@ youtube_music:
     "2026": PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN
     "2025": PLTW5JZnPjE_onNAnNNGWFyek1iTfsdSrS
     "2024": PLTW5JZnPjE_pezZ1Xi92GmMvNM_mMLlvJ
-  # 👎 go here (the site creates it, unlisted, on first use and tells you the ID to paste here).
+  # 👎 are free: by default they're remembered in the browser only (no YouTube quota). Set skips_in_youtube: true
+  # (or flip the switch in ⚙ on the site) to also file them into an unlisted "Skipped" playlist so every device and
+  # the daily build see them. Each YouTube write costs 50 of the 10,000 daily quota units.
+  skips_in_youtube: false
   skipped_playlist_title: "Indie Discotheque – Skipped"
   skipped_playlist_id: ""
   picks_count: 40                 # newest saves shown on the public "Picks" tab
@@ -38,7 +41,7 @@ profile:
     overall: 1.0
     12month: 1.6
     3month: 2.2
-  lastfm_top_artists_limit: 400
+  lastfm_top_artists_limit: 1000   # 200 per request; cheap. Rank-decayed weight, so the tail mostly adds "you play them" matches.
   # How many top artists get expanded into similar artists (Last.fm + ListenBrainz).
   expand_top_n: 120
   similar_per_artist: 12

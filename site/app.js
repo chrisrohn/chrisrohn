@@ -22,6 +22,8 @@
     rated: LS.get("id:rated", {}),          // {id: {decision, year, videoId, artist, title, playlistItemId, at}} — local mirror of what this browser filed
     auth: LS.get("id:auth", null),          // {access_token, expires_at, email, name, picture}
     playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL..."} learned from your library
+    settings: LS.get("id:settings", {}),    // {skipsInYouTube}
+    quota: LS.get("id:quota", { day: "", units: 0 }),  // rough count of YouTube API units spent today (resets midnight Pacific)
     filters: Object.assign({ q: "", sourcesOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
     view: "feed",
     order: [],
@@ -38,7 +40,7 @@
     state.feed = feed;
     // anything the daily build already saw in your playlists no longer needs local bookkeeping
     const ids = new Set(feed.items.map(i => i.id));
-    for (const id of Object.keys(state.rated)) if (!ids.has(id) && Date.now() - (state.rated[id].at || 0) > 3 * 86400e3) delete state.rated[id];
+    for (const id of Object.keys(state.rated)) if (!ids.has(id) && Date.now() - (state.rated[id].at || 0) > 45 * 86400e3) delete state.rated[id];
     for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
     if (feed.youtube && feed.youtube.skipped_playlist_id) state.playlists.__skipped = state.playlists.__skipped || feed.youtube.skipped_playlist_id;
     persist();
@@ -54,7 +56,14 @@
     LS.set("id:auth", state.auth);
     LS.set("id:playlists", state.playlists);
     LS.set("id:filters", state.filters);
+    LS.set("id:settings", state.settings);
+    LS.set("id:quota", state.quota);
   }
+  const skipsInYouTube = () => state.settings.skipsInYouTube != null ? !!state.settings.skipsInYouTube : !!(state.feed && state.feed.youtube && state.feed.youtube.skips_in_youtube);
+  // YouTube quota: 10,000 units/day, reset at midnight Pacific. Reads cost 1, writes cost 50.
+  const ptDay = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  function spend(units) { if (state.quota.day !== ptDay()) state.quota = { day: ptDay(), units: 0 }; state.quota.units += units; persist(); }
+  const quotaText = () => { const u = state.quota.day === ptDay() ? state.quota.units : 0; return `~${u.toLocaleString()} of 10,000 YouTube API units used today (${Math.floor((10000 - u) / 50)} more saves) · resets midnight Pacific`; };
   const items = () => (state.feed && state.feed.items) || [];
   const byId = id => items().find(i => i.id === id);
   const decisionFor = id => state.rated[id] || null;
@@ -130,6 +139,7 @@
     return withAuth(async token => {
       const url = new URL(YT_API + path); for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
       const r = await fetch(url, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      spend(method === "GET" ? 1 : 50);
       if (r.status === 204) return {};
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -213,12 +223,19 @@
     const wasCurrent = state.currentId === id; const idx = state.order.indexOf(id);
     render();
     if (state.view === "feed") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasCurrent && $("#autoplay").checked && byId(next)?.youtube?.videoId) play(next); } else if (wasCurrent) stopPlayer(); }
+    if (decision === "down" && !skipsInYouTube()) {
+      // free: remembered in this browser only (no quota). Turn on "skips in YouTube" in ⚙ to sync across devices.
+      state.rated[id] = { ...state.rated[id], pending: false, local: true }; persist(); state.busy.delete(id); render();
+      toast(`👎 ${it.artist} – ${it.title}`, false, { label: "Undo", fn: () => undo(id) });
+      return;
+    }
     try {
       const pid = decision === "up" ? await playlistFor(String(year)) : await skippedPlaylist();
       const itemId = await addToPlaylist(pid, vid);
       state.rated[id] = { ...state.rated[id], playlistItemId: itemId, playlistId: pid, pending: false };
       persist();
-      toast(decision === "up" ? `👍 ${it.artist} – ${it.title} → ${titleFor(year)}` : `👎 ${it.artist} – ${it.title} → ${skippedTitle()}`, false, { label: "Undo", fn: () => undo(id) });
+      const left = Math.floor((10000 - (state.quota.day === ptDay() ? state.quota.units : 0)) / 50);
+      toast((decision === "up" ? `👍 ${it.artist} – ${it.title} → ${titleFor(year)}` : `👎 ${it.artist} – ${it.title} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
     } catch (e) {
       delete state.rated[id]; persist(); render();
       toast(`Could not file ${it.artist} – ${it.title}: ${e.message}`, true);
@@ -391,7 +408,13 @@
     $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", toggle);
     $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
-    $("#settings-btn").addEventListener("click", () => { $("#s-playlists").textContent = Object.entries(state.playlists).filter(([k]) => !k.startsWith("__")).length + " year playlists known" + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : " · no skipped playlist yet"); $("#settings").showModal(); });
+    $("#settings-btn").addEventListener("click", () => {
+      $("#s-playlists").textContent = Object.entries(state.playlists).filter(([k]) => !k.startsWith("__")).length + " year playlists known" + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : " · no skipped playlist yet");
+      $("#s-quota").textContent = quotaText();
+      $("#s-skips").checked = skipsInYouTube();
+      $("#settings").showModal();
+    });
+    $("#s-skips").addEventListener("change", e => { state.settings.skipsInYouTube = e.target.checked; persist(); });
     $("#s-export").addEventListener("click", exportCsv);
     $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast("Playlists reloaded")).catch(e => toast(e.message, true)));
     $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters"].forEach(LS.del); location.reload(); } });
