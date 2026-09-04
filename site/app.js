@@ -20,7 +20,7 @@
     local: LS.get("id:decisions", {}),   // pending decisions {id: {decision, year, videoId, artist, title, decided_at}}
     synced: LS.get("id:synced", {}),     // decisions already sent but maybe not yet rebuilt into feed.json
     settings: Object.assign({ repo: DEFAULT_REPO, token: "", year: null, syncDowns: false }, LS.get("id:settings", {})),
-    filters: Object.assign({ q: "", source: "", sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
+    filters: Object.assign({ q: "", sourcesOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
     view: "feed",
     order: [],                     // ids currently rendered
     currentId: null,
@@ -44,7 +44,15 @@
     fillYears();
     fillSources();
     renderMeta();
+    applyMode();
     render();
+  }
+
+  // Curator mode = a GitHub token is saved in THIS browser. Everyone else gets a read-only listening feed.
+  const isCurator = () => !!(state.settings.token && state.settings.token.trim());
+  function applyMode() {
+    document.body.classList.toggle("curator", isCurator());
+    if (!isCurator() && state.view === "queue") { state.view = "feed"; $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === "feed")); }
   }
 
   function persist() {
@@ -70,7 +78,7 @@
     const rel = when ? relTime(when) : "?";
     $("#meta").textContent = `${f.count} candidates · ${f.new_today} new today · built ${rel} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar`;
     $("#lfm").href = "https://www.last.fm/user/" + (f.lastfm_user || "tt_discotheque");
-    document.title = `Indie Discotheque · ${f.new_today} new`;
+    document.title = `Chris Rohn's New Music · ${f.new_today} new`;
   }
   function relTime(d) {
     const m = Math.round((Date.now() - d.getTime()) / 60000);
@@ -86,11 +94,19 @@
     sel.value = state.settings.year;
     state._years = years;
   }
+  const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", rss: "Blogs & radio", spotify: "Spotify" };
   function fillSources() {
-    const sel = $("#source");
-    const cur = state.filters.source;
-    sel.innerHTML = '<option value="">all sources</option>' + (state.feed.sources || []).map(s => `<option value="${s}">${s}</option>`).join("");
-    sel.value = cur;
+    const box = $("#sources");
+    const names = state.feed.sources || [];
+    const off = new Set(state.filters.sourcesOff || []);
+    box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s)}</label>`).join("") +
+      (names.length > 1 ? `<button class="all" type="button" data-all="1">all</button><button class="all" type="button" data-all="0">none</button>` : "");
+    $$("input", box).forEach(cb => cb.addEventListener("change", () => {
+      const set = new Set(state.filters.sourcesOff || []);
+      cb.checked ? set.delete(cb.value) : set.add(cb.value);
+      state.filters.sourcesOff = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render();
+    }));
+    $$("button.all", box).forEach(b => b.addEventListener("click", () => { state.filters.sourcesOff = b.dataset.all === "1" ? [] : [...names]; persist(); fillSources(); render(); }));
   }
   const range = (a, b) => { const r = []; for (let y = a; y >= b; y--) r.push(y); return r; };
 
@@ -105,12 +121,13 @@
     } else {
       const ids = new Set([...Object.keys(state.synced), ...Object.keys(state.archive)]);
       list = [...ids].map(id => byId(id) || fromDecision(id, state.synced[id] || state.archive[id]));
+      if (!isCurator()) list = list.filter(i => (decisionFor(i.id) || {}).decision === "up");
       list.sort((a, b) => String(decisionFor(b.id)?.decided_at || "").localeCompare(String(decisionFor(a.id)?.decided_at || "")));
       return list.filter(i => !q || hay(i).includes(q));
     }
     list = list.filter(i => {
       if (q && !hay(i).includes(q)) return false;
-      if (f.source && !(i.sources || []).some(s => s.split(":")[0] === f.source)) return false;
+      if (f.sourcesOff && f.sourcesOff.length && !(i.sources || []).some(s => !f.sourcesOff.includes(s.split(":")[0]))) return false;
       if (state.view === "feed") {
         if (f.onlyNew && i.first_seen !== state.feed.generated_at?.slice(0, 10)) return false;
         if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
@@ -140,10 +157,11 @@
     list.appendChild(frag);
     const empty = $("#empty");
     empty.hidden = vis.length > 0;
-    empty.textContent = state.view === "feed" ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : state.view === "queue" ? "No unsynced thumbs. Rate something in the feed." : "Nothing archived yet.";
+    empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : state.view === "queue" ? "No unsynced thumbs. Rate something in the feed." : "No picks yet.";
     $("#count-feed").textContent = items().filter(i => !decisionFor(i.id)).length;
     $("#count-queue").textContent = Object.keys(state.local).length;
     $("#count-archive").textContent = Object.keys(state.archive).length + Object.keys(state.synced).length;
+    applyMode();
     const ups = Object.values(state.local).filter(d => d.decision === "up").length;
     const downs = Object.values(state.local).filter(d => d.decision === "down").length;
     const sync = $("#sync");
@@ -204,6 +222,7 @@
 
   // ---------- decisions ----------
   function rate(id, decision, year) {
+    if (!isCurator()) return;
     const it = byId(id) || fromDecision(id, decisionFor(id) || {});
     state.local[id] = { decision, year: year || yearOf(it), videoId: it.youtube?.videoId || null, artist: it.artist, title: it.title, decided_at: new Date().toISOString() };
     delete state.synced[id];
@@ -320,7 +339,6 @@
     const f = state.filters;
     $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-playable").checked = f.onlyPlayable; $("#only-known").checked = f.onlyKnown;
     $("#q").addEventListener("input", e => { f.q = e.target.value; persist(); render(); });
-    $("#source").addEventListener("change", e => { f.source = e.target.value; persist(); render(); });
     $("#sort").addEventListener("change", e => { f.sort = e.target.value; persist(); render(); });
     $("#only-new").addEventListener("change", e => { f.onlyNew = e.target.checked; persist(); render(); });
     $("#only-playable").addEventListener("change", e => { f.onlyPlayable = e.target.checked; persist(); render(); });
@@ -332,7 +350,7 @@
     const s = state.settings;
     $("#s-repo").value = s.repo; $("#s-token").value = s.token; $("#s-hide-downs").checked = s.syncDowns;
     $("#settings-btn").addEventListener("click", () => $("#settings").showModal());
-    $("#settings").addEventListener("close", () => { s.repo = $("#s-repo").value.trim() || DEFAULT_REPO; s.token = $("#s-token").value.trim(); s.year = +$("#s-year").value; s.syncDowns = $("#s-hide-downs").checked; persist(); render(); });
+    $("#settings").addEventListener("close", () => { s.repo = $("#s-repo").value.trim() || DEFAULT_REPO; s.token = $("#s-token").value.trim(); s.year = +$("#s-year").value; s.syncDowns = $("#s-hide-downs").checked; persist(); applyMode(); render(); });
     $("#s-export").addEventListener("click", exportCsv);
     $("#s-clear").addEventListener("click", () => { if (confirm("Clear unsynced thumbs and local settings?")) { ["id:decisions", "id:synced", "id:settings", "id:filters"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {

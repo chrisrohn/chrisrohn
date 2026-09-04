@@ -94,9 +94,9 @@ def _write_rss(cfg: dict, payload: dict) -> None:
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>',
-        f"<title>{esc(payload['station'])} — new music feed</title>",
+        f"<title>{esc(cfg['station'].get('site_name') or payload['station'])}</title>",
         f"<link>https://{domain}/</link>",
-        f"<description>Daily new-music discovery for {esc(payload['station'])}</description>",
+        f"<description>Daily new-music discovery feed for the {esc(payload['station'])} radio station</description>",
         f'<atom:link href="https://{domain}/feed.xml" rel="self" type="application/rss+xml"/>',
     ]
     for it in payload["items"][:100]:

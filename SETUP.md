@@ -105,6 +105,17 @@ The site runs in your browser and needs a token to trigger the Decisions workflo
 
 Without a token you can still rate everything and use **Export queue as CSV (Soundiiz)** from ⚙.
 
+## Public vs. curator
+
+The site at chrisrohn.com is public: anyone can browse, filter by source, play tracks and see your **Picks**
+(the thumbs-ups you've filed). Nothing on the public side can change anything — the repo's JSON is read-only
+from a browser and no secrets ship with the page.
+
+**Curator mode** is simply "this browser has your GitHub token saved in ⚙". Only then do the thumbs, the year
+selector, the Queue tab and **Sync approvals** appear, and only a valid token can trigger the Decisions workflow.
+A visitor who pastes a random token gets a 404 from GitHub and nothing happens. Clear the token in ⚙ (or use a
+private window) to see the public view.
+
 ## Daily use
 
 - Open chrisrohn.com. `j`/`k` move, `space` plays, `u` thumbs up, `d` thumbs down, `o` opens in YouTube Music, `/` searches.
