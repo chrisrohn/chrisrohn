@@ -254,6 +254,7 @@ class Http:
             "ws.audioscrobbler.com": 0.25,
             "api.deezer.com": 0.25,
             "bandcamp.com": 1.0,
+            "itunes.apple.com": 3.2,   # ~20 requests/minute
         }
         self._dirty = False
 

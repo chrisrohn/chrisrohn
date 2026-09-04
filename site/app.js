@@ -25,7 +25,7 @@
     settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25 }, LS.get("id:settings", {})),    // {skipsInYouTube, audition, auditionSeconds, auditionStart}
     auditionTimer: null, auditionTick: null, auditionArmed: null,
     quota: LS.get("id:quota", { day: "", units: 0 }),  // rough count of YouTube API units spent today (resets midnight Pacific)
-    filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
+    filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: false }, LS.get("id:filters", {})),
     view: "feed",
     order: [],
     currentId: null,
@@ -76,7 +76,7 @@
     const y = d ? parseInt(String(d).slice(0, 4), 10) : NaN;
     return Number.isFinite(y) ? y : new Date().getFullYear();
   };
-  const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found — defaulted to this year" };
+  const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — pick the year yourself" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- auth (Google Identity Services, token flow) ----------
@@ -325,6 +325,7 @@
       if (f.onlyNew && i.first_seen !== state.feed.generated_at?.slice(0, 10)) return false;
       if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
       if (f.onlyKnown && !i.match_kind) return false;
+      if (f.onlyRecent && Number.isFinite(i.year) && i.year_source !== "unknown" && i.year < new Date().getFullYear() - 1) return false;
       return true;
     });
     const cmp = {
@@ -368,7 +369,8 @@
       const conf = it.year_confidence || "low";
       yb.classList.add(conf);
       yb.title = YEAR_SOURCE[it.year_source] || "";
-      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? "year unknown" : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+      if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
     }
     $(".reasons", el).textContent = (it.reasons || []).filter(r => !r.startsWith("similar to") && !r.startsWith("you play")).join(" · ");
     $(".tags", el).innerHTML = (it.tags || []).slice(0, 6).map(t => `<span class="tag">${esc(t)}</span>`).join("");
@@ -496,6 +498,8 @@
     $("#only-new").addEventListener("change", e => { f.onlyNew = e.target.checked; persist(); render(); });
     $("#only-playable").addEventListener("change", e => { f.onlyPlayable = e.target.checked; persist(); render(); });
     $("#only-known").addEventListener("change", e => { f.onlyKnown = e.target.checked; persist(); render(); });
+    $("#only-recent").checked = f.onlyRecent;
+    $("#only-recent").addEventListener("change", e => { f.onlyRecent = e.target.checked; persist(); render(); });
     $("#signin").addEventListener("click", () => { if (state.auth && tokenValid()) signOut(); else signIn().catch(e => toast(e.message, true)); });
     $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", () => { holdAudition(); toggle(); });
     const aud = $("#audition"); aud.checked = auditionOn(); $("#audition-label").textContent = (state.settings.auditionSeconds || 30) + "s";
