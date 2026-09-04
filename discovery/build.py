@@ -6,7 +6,7 @@ from datetime import date
 
 from .models import Item
 from .profile import load_profile
-from .resolve import resolve_all
+from .resolve import resolve_all, verify_years
 from .score import dedupe, score_items
 from .sources import run_sources
 from .util import DATA_DIR, SITE_DATA_DIR, Http, log, read_json, utcnow, write_json
@@ -39,6 +39,7 @@ def build_feed(cfg: dict) -> dict:
     # after resolution, drop things with no playable YouTube result unless they are strong matches
     items = [i for i in items if i.youtube or i.match_kind == "direct" or i.editorial]
     items = score_items(items, profile, cfg)[: int(rcfg.get("max_items", 200))]
+    verify_years(items, cfg, http)
 
     today_s = date.today().isoformat()
     for it in items:

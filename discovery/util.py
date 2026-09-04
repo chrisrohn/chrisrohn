@@ -108,8 +108,10 @@ _PUNCT_RE = re.compile(r"[^\w\s]")
 _SPACE_RE = re.compile(r"\s+")
 _FEAT_RE = re.compile(r"\s*[\(\[]?\s*(feat\.?|ft\.?|featuring|with)\s+[^\)\]]*[\)\]]?\s*$", re.I)
 _SUFFIX_RE = re.compile(
-    r"\s*[\(\[\-–—]\s*(official|radio edit|single version|album version|remaster(ed)?( \d{4})?|explicit|clean|"
-    r"lyric video|official (music )?video|audio|visualizer|hq|hd)\s*[\)\]]?\s*$",
+    r"\s*[\(\[\-–—]\s*(official|radio edit|single version|album version|(\d{4} )?remaster(ed)?( \d{4})?|remastered version|"
+    r"explicit|clean|mono|stereo|lyric video|official (music )?video|audio|visualizer|hq|hd|"
+    r"\d+(st|nd|rd|th)[ -]anniversary( edition| version| remaster)?|anniversary edition|deluxe( edition| version)?|"
+    r"expanded( edition)?|bonus track( version)?|reissue|re-issue|original mix|extended( mix| version)?|edit)\s*[\)\]]?\s*$",
     re.I,
 )
 
@@ -133,8 +135,13 @@ def norm(s: str | None) -> str:
 def norm_track(s: str | None) -> str:
     if not s:
         return ""
-    s = _SUFFIX_RE.sub("", str(s))
-    s = _FEAT_RE.sub("", s)
+    s = str(s)
+    for _ in range(4):  # peel stacked suffixes: "Song (Remastered) [Deluxe Edition]"
+        stripped = _SUFFIX_RE.sub("", s)
+        stripped = _FEAT_RE.sub("", stripped)
+        if stripped == s:
+            break
+        s = stripped
     return norm(s)
 
 

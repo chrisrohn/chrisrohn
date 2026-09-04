@@ -44,6 +44,10 @@ def sandbox(tmp_path, monkeypatch):
 def test_norm_and_parse():
     assert util.norm("The Bird & The Bee") == "bird and the bee"
     assert util.norm_track("Heartbeat (feat. Someone) [Radio Edit]") == "heartbeat"
+    assert util.norm_track("Lovers (10th Anniversary Edition)") == "lovers"
+    assert util.norm_track("Lovers (2016 Remaster) [Deluxe]") == "lovers"
+    assert util.norm_track("Lovers - Remastered 2026") == "lovers"
+    assert util.norm_track("Lovers (Club Remix)") == "lovers club remix"   # a remix is a different recording
     assert util.split_artists("Jungle & Roosevelt feat. Nao") == ["Jungle", "Roosevelt", "Nao"]
     assert util.parse_artist_title('Jungle – "Back On 74"') == ("Jungle", "Back On 74")
     assert util.parse_artist_title("Magdalena Bay Share New Song: Death & Romance") is None
@@ -217,3 +221,35 @@ def test_resolve_pick():
     ]
     assert _pick(res, "Jungle", "Keep Moving")["videoId"] == "a"
     assert _pick(res[1:], "Jungle", "Keep Moving") is None
+
+
+def test_verify_years_uses_musicbrainz_and_flags_reissues(monkeypatch):
+    from discovery import resolve
+
+    today = date.today()
+    mb = {"recordings": [
+        {"title": "Lovers", "artist-credit": [{"name": "Roosevelt"}], "releases": [
+            {"date": "2016-08-19", "release-group": {"first-release-date": "2016-08-19"}},
+            {"date": today.isoformat(), "release-group": {"first-release-date": today.isoformat(), "secondary-types": ["Compilation"]}},
+        ]},
+        {"title": "Lovers (Karaoke)", "artist-credit": [{"name": "Roosevelt"}], "releases": [{"date": "1990-01-01"}]},
+    ]}
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            return mb if "Roosevelt" in kw["params"]["query"] else {"recordings": []}
+
+    items = [
+        Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["listenbrainz"]),
+        Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["bandcamp"]),
+        Item(artist="Someone", title="Blog Only", kind="track", release_date=today, sources=["rss:Pitchfork"], youtube={"videoId": "x", "year": "2019"}),
+        Item(artist="Nobody", title="Nothing", kind="track", sources=["rss:Blog"]),
+    ]
+    resolve.verify_years(items, _cfg(), FakeHttp())
+    r, j, s, n = items
+    assert (r.year, r.year_source, r.year_confidence, r.original_year) == (2016, "musicbrainz-recording", "high", 2016)
+    assert (j.year, j.year_source, j.year_confidence) == (today.year, "release-date", "medium")
+    assert (s.year, s.year_source) == (2019, "youtube")          # blog date is not trusted; YouTube album year wins
+    assert (n.year, n.year_confidence) == (today.year, "low")
+    d = r.to_dict()
+    assert d["year"] == 2016 and d["original_year"] == 2016

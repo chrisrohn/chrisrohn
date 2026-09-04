@@ -180,3 +180,5 @@ ranking:
 resolve:
   youtube_music: true
   max_lookups_per_run: 400
+  # Year verification: ask MusicBrainz for the earliest release of each artist + title (1 request/sec, cached).
+  max_year_lookups_per_run: 300

@@ -68,10 +68,12 @@
   const byId = id => items().find(i => i.id === id);
   const decisionFor = id => state.rated[id] || null;
   const yearOf = it => {
+    if (Number.isFinite(it.year)) return it.year;
     const d = it.release_date || (it.youtube && it.youtube.year);
     const y = d ? parseInt(String(d).slice(0, 4), 10) : NaN;
     return Number.isFinite(y) ? y : new Date().getFullYear();
   };
+  const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found — defaulted to this year" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- auth (Google Identity Services, token flow) ----------
@@ -324,6 +326,14 @@
     $(".title", el).textContent = it.title;
     $(".release", el).textContent = [it.release_type, it.release && it.release !== it.title ? it.release : null].filter(Boolean).join(" · ");
     $(".date", el).textContent = it.release_date || "";
+    const yb = $(".yearbadge", el);
+    if (it._pick) yb.remove();
+    else {
+      const conf = it.year_confidence || "low";
+      yb.classList.add(conf);
+      yb.title = YEAR_SOURCE[it.year_source] || "";
+      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+    }
     $(".reasons", el).textContent = (it.reasons || []).filter(r => !r.startsWith("similar to") && !r.startsWith("you play")).join(" · ");
     $(".tags", el).innerHTML = (it.tags || []).slice(0, 6).map(t => `<span class="tag">${esc(t)}</span>`).join("");
     $(".sources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}" title="${esc(s)}">${esc(n || k)}</span>`; }).join("");
