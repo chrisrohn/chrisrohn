@@ -7,8 +7,8 @@ Payload (sent by the site via GitHub `repository_dispatch`, event_type = "decisi
   * "up" decisions are added to the "<year> Indie Discotheque" playlist in YOUR YouTube Music library
     — only here, only for tracks you explicitly approved. The daily feed build never touches playlists.
 
-Needs the YTMUSIC_BROWSER_JSON secret (see SETUP.md) for the playlist step; without it, decisions are still
-archived and the approved tracks are left in `pending_playlist` so you can re-run once the secret exists.
+Needs the YTMUSIC_HEADERS_RAW (or YTMUSIC_BROWSER_JSON) secret (see SETUP.md) for the playlist step; without it,
+decisions are still archived and approved tracks stay in `pending_playlist`, retried on the next sync.
 """
 from __future__ import annotations
 
@@ -32,15 +32,34 @@ def _load() -> dict:
 
 
 def _ytmusic_authed():
-    raw = os.environ.get("YTMUSIC_BROWSER_JSON")
-    if not raw:
+    """Authenticated client from one of two secrets (no local install needed):
+
+    * YTMUSIC_HEADERS_RAW  – request headers copied straight out of the browser's DevTools on music.youtube.com
+    * YTMUSIC_BROWSER_JSON – the browser.json produced by `ytmusicapi browser`, if you prefer
+    """
+    raw_headers = os.environ.get("YTMUSIC_HEADERS_RAW")
+    raw_json = os.environ.get("YTMUSIC_BROWSER_JSON")
+    if not raw_headers and not raw_json:
         return None
+    import ytmusicapi
     from ytmusicapi import YTMusic
 
     tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-    tmp.write(raw)
     tmp.close()
-    return YTMusic(tmp.name)
+    if raw_headers:
+        try:
+            ytmusicapi.setup(filepath=tmp.name, headers_raw=raw_headers.strip())
+        except Exception as exc:  # noqa: BLE001
+            log.error("YTMUSIC_HEADERS_RAW could not be parsed (%s) — copy the full request headers block, including the Cookie line", exc)
+            return None
+    else:
+        with open(tmp.name, "w", encoding="utf-8") as fh:
+            fh.write(raw_json)
+    try:
+        return YTMusic(tmp.name)
+    except Exception as exc:  # noqa: BLE001
+        log.error("YouTube Music auth failed: %s", exc)
+        return None
 
 
 def _find_year_playlists(yt, cfg: dict, cache: dict[str, str]) -> dict[str, str]:
@@ -105,7 +124,7 @@ def apply_decisions(cfg: dict, payload: dict[str, Any]) -> dict:
     filed = 0
     yt = _ytmusic_authed()
     if approved and not yt:
-        log.warning("YTMUSIC_BROWSER_JSON not set — %d approvals stay pending", len(approved))
+        log.warning("YTMUSIC_HEADERS_RAW not set — %d approvals stay pending", len(approved))
     elif approved:
         playlists = _find_year_playlists(yt, cfg, store["playlists"])
         store["playlists"] = playlists

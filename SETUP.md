@@ -33,7 +33,7 @@ into the year playlist you chose on the card (defaults to the release year, 1979
    | Secret | Required | Where to get it |
    |---|---|---|
    | `LASTFM_API_KEY` | yes | https://www.last.fm/api/account/create — instant, free. Any app name. |
-   | `YTMUSIC_BROWSER_JSON` | for filing 👍 into playlists | step 3 below |
+   | `YTMUSIC_HEADERS_RAW` | for filing 👍 into playlists | step 3 below (copy/paste from your browser, no install) |
    | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | no (source is off) | needs Premium since Feb 2026; skip |
 
 5. **Actions → Discover → Run workflow.** First run takes ~10–15 min (profile build + MusicBrainz rate limit).
@@ -56,15 +56,22 @@ Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick
 
 ## 3. YouTube Music auth (so 👍 lands in your year playlists)
 
-ytmusicapi uses your browser session; nothing is shared with a third party.
+No install needed. You copy the request headers your own browser already sends to music.youtube.com and store
+them as a secret; the Decisions workflow turns them into a ytmusicapi session. Nothing is shared with any
+third party.
 
-```bash
-pip install ytmusicapi
-ytmusicapi browser        # follow the prompt: paste the request headers from music.youtube.com (F12 → Network → any /browse POST → copy request headers)
-```
+1. In **Chrome or Edge** (Firefox works too), open https://music.youtube.com and make sure you're signed in.
+2. Press **F12** → **Network** tab. In the filter box type `browse`.
+3. Click anything in YouTube Music (e.g. Library) so requests appear. Click a request whose name starts with
+   **browse?** and whose Method is **POST** (status 200).
+4. In the right pane, **Headers** → scroll to **Request Headers**. Chrome/Edge: right-click on that section →
+   **Copy value** (or select the whole block from `accept:` down through `x-youtube-client-version:` and copy).
+   Firefox: click **Raw** next to Request Headers, then select all and copy.
+5. GitHub → repo **Settings → Secrets and variables → Actions → New repository secret**:
+   Name `YTMUSIC_HEADERS_RAW`, Value = paste the block. Save.
 
-Open the generated `browser.json`, copy its entire contents into the `YTMUSIC_BROWSER_JSON` secret.
-Sessions last a long time (months); if approvals start staying "pending", regenerate the file and update the secret.
+The block must include the `cookie:` line (it's long) and `x-goog-authuser:`. Sessions last for months; if
+approvals start showing "pending" in the archive, repeat steps 1–5 and update the secret.
 
 Playlists are matched by title: `<year> Indie Discotheque` in your library. The three IDs in
 `discovery/config.yaml` are only a fallback.
