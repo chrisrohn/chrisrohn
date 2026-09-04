@@ -28,9 +28,9 @@
 </ul>
 
 <h3>2.2 Curators who sign in with Google</h3>
-<p>The "Sign in with Google" button is intended for the Site's curator(s). The Site uses <b>YouTube API Services</b> to let a signed-in curator file tracks into their own YouTube playlists. When you sign in, the Site requests permission for:</p>
+<p>Anyone may use "Sign in with Google". The Site uses <b>YouTube API Services</b> to let a signed-in user file tracks into playlists in <b>their own</b> YouTube library: the curator's approvals go to the "&lt;year&gt; Indie Discotheque" playlists, and any other signed-in user's approvals go to "&lt;year&gt; Picks from chrisrohn.com" playlists in that user's library. No user can write to another user's playlists. When you sign in, the Site requests permission for:</p>
 <ul>
-  <li><b>Basic profile (openid, email):</b> your email address, display name, and profile picture. Used only to show who is signed in and to check whether the account is on the curator list.</li>
+  <li><b>Basic profile (openid, email):</b> your email address, display name, and profile picture. Used only to show who is signed in and to decide whether the account is the curator (Indie Discotheque playlists) or a guest (your own "Picks" playlists).</li>
   <li><b>Manage your YouTube account (youtube scope):</b> used only to list your playlists, create a year playlist or the unlisted "Skipped" playlist if one is missing, add a track to a playlist when you press 👍 or 👎, and remove that entry if you press Undo. The Site never reads your watch history, subscriptions, comments, or private videos, and never posts, comments, or uploads on your behalf.</li>
 </ul>
 <p><b>Where this data lives.</b> The Google access token, your email, name, and picture, the IDs of your year playlists, and a short local list of the tracks you rated (artist, title, YouTube video ID) are stored <b>only in your browser's local storage on the device you signed in from</b>. The access token expires after about one hour. Nothing is transmitted to us or to any server we control, because there is none; all YouTube API calls go directly from your browser to Google.</p>

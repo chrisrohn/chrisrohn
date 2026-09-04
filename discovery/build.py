@@ -57,7 +57,8 @@ def build_feed(cfg: dict) -> dict:
         "generated_at": utcnow().isoformat(),
         "station": cfg["station"]["name"],
         "site_name": cfg["station"].get("site_name") or cfg["station"]["name"],
-        "google": {"client_id": gcfg.get("client_id") or "", "curators": [c.lower() for c in (gcfg.get("curators") or [])]},
+        "google": {"client_id": gcfg.get("client_id") or "", "curators": [c.lower() for c in (gcfg.get("curators") or [])],
+                   "guests": bool(gcfg.get("guests", True)), "guest_playlist_title_pattern": gcfg.get("guest_playlist_title_pattern") or "{year} Picks from chrisrohn.com"},
         "youtube": {
             "playlist_title_pattern": ycfg.get("playlist_title_pattern", "{year} Indie Discotheque"),
             "skipped_playlist_title": ycfg.get("skipped_playlist_title", "Skipped"),

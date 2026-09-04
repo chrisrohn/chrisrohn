@@ -33,6 +33,11 @@ google:
   client_id: "903191577478-dev4etltn01rvubgi4fkqaulshltit7d.apps.googleusercontent.com"
   curators:
     - chrisrohn@gmail.com
+  # Other Google accounts may sign in and rate too ("guests"). Their 👍 go into THEIR OWN YouTube library under this
+  # name, never into the Indie Discotheque playlists. Set guests: false to make the site listen-only for everyone else.
+  # Note: every signed-in user shares the project's daily YouTube API quota (10,000 units ≈ 200 saves in total).
+  guests: true
+  guest_playlist_title_pattern: "{year} Picks from chrisrohn.com"
 
 # ---------- Taste profile ----------
 profile:
