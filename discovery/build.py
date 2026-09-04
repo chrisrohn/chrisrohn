@@ -21,7 +21,7 @@ def build_feed(cfg: dict) -> dict:
     state = read_json(STATE_PATH, {"first_seen": {}})
     first_seen: dict[str, str] = state.setdefault("first_seen", {})
 
-    raw = run_sources(cfg, profile, http)
+    raw = [i.normalize_credit() for i in run_sources(cfg, profile, http)]
     items = dedupe(raw)
     log.info("%d raw sightings → %d unique items", len(raw), len(items))
 
@@ -104,7 +104,7 @@ def _write_rss(cfg: dict, payload: dict) -> None:
         desc = f"{it.get('release_type') or ''} {it.get('release') or ''} · score {it['score']} · {', '.join(it.get('reasons', []))}".strip()
         parts.append(
             "<item>"
-            f"<title>{esc(it['artist'])} – {esc(it['title'])}</title>"
+            f"<title>{esc(it.get('display') or (it['artist'] + ' - ' + it['title']))}</title>"
             f"<link>{esc(link)}</link>"
             f"<guid isPermaLink=\"false\">{it['id']}</guid>"
             f"<description>{esc(desc)}</description>"

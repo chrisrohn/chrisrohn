@@ -75,11 +75,11 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
         found: dict | None = None
         try:
             if it.kind == "track":
-                res = yt.search(f"{it.artist} {it.title}", filter="songs", limit=6)
-                hit = _pick(res, it.artist, it.title)
+                res = yt.search(f"{it.artist} {it.display_title}", filter="songs", limit=6)
+                hit = _pick(res, it.artist, it.display_title)
                 if not hit:
-                    res = yt.search(f"{it.artist} {it.title}", filter="videos", limit=4)
-                    hit = _pick(res, it.artist, it.title)
+                    res = yt.search(f"{it.artist} {it.display_title}", filter="videos", limit=4)
+                    hit = _pick(res, it.artist, it.display_title)
                 if hit:
                     found = _shape(hit, "track-search")
             else:
@@ -112,6 +112,7 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
                         # promote release → track so the card shows a playable song
                         it.title = first.get("title") or it.title
                         it.kind = "track"
+                        it.normalize_credit()
                 if not found:
                     res = yt.search(f"{it.artist} {it.release or it.title}", filter="songs", limit=6)
                     hit = _pick(res, it.artist, None)
@@ -119,6 +120,7 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
                         found = _shape(hit, "release-fallback")
                         it.title = hit.get("title") or it.title
                         it.kind = "track"
+                        it.normalize_credit()
         except Exception as exc:  # noqa: BLE001
             log.debug("yt resolve failed for %s – %s: %s", it.artist, it.title, exc)
             found = None
@@ -184,7 +186,7 @@ def verify_years(items: list[Item], cfg: dict, http) -> None:
             mb_year = cache[key].get("mb")
         elif looked < budget and it.kind == "track":
             looked += 1
-            mb_year, matched = _mb_earliest_year(http, it.artist, it.title)
+            mb_year, matched = _mb_earliest_year(http, it.artist, it.display_title)
             cache[key] = {"mb": mb_year, "matched": matched}
         yt_year = None
         try:

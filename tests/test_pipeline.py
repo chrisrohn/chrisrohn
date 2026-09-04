@@ -253,3 +253,30 @@ def test_verify_years_uses_musicbrainz_and_flags_reissues(monkeypatch):
     assert (n.year, n.year_confidence) == (today.year, "low")
     d = r.to_dict()
     assert d["year"] == 2016 and d["original_year"] == 2016
+
+
+def test_rohn_standard_notation():
+    from discovery.util import format_credit, parse_credit
+
+    cases = {
+        ("Jungle", "Keep Moving"): "Jungle - Keep Moving",
+        ("Jungle", "Keep Moving (Roosevelt Remix)"): "Jungle - Keep Moving (Roosevelt Remix)",
+        ("Jungle", "Keep Moving - Roosevelt Remix"): "Jungle - Keep Moving (Roosevelt Remix)",
+        ("Jungle", "Keep Moving (feat. Nao)"): "Jungle - Keep Moving feat. Nao",
+        ("Jungle", "Keep Moving feat. Nao"): "Jungle - Keep Moving feat. Nao",
+        ("Jungle feat. Nao", "Keep Moving"): "Jungle - Keep Moving feat. Nao",
+        ("Jungle ft. Nao & Erick the Architect", "Keep Moving (Purple Disco Machine Remix)"): "Jungle - Keep Moving feat. Nao & Erick the Architect (Purple Disco Machine Remix)",
+        ("Jungle", "Keep Moving (feat. Nao) [Purple Disco Machine Remix]"): "Jungle - Keep Moving feat. Nao (Purple Disco Machine Remix)",
+        ("Jungle", "Keep Moving (Poolside Rework)"): "Jungle - Keep Moving (Poolside Rework)",
+        ("Jungle", "Keep Moving (Extended Mix)"): "Jungle - Keep Moving (Extended Mix)",
+    }
+    for (artist, title), want in cases.items():
+        p = parse_credit(artist, title)
+        assert format_credit(p["artist"], p["title"], p["featuring"], p["remixer"], p["remix_kind"]) == want, (artist, title)
+
+    a = Item(artist="Jungle feat. Nao", title="Keep Moving (Purple Disco Machine Remix)").normalize_credit()
+    b = Item(artist="Jungle", title="Keep Moving feat. Nao (Purple Disco Machine Remix)").normalize_credit()
+    c = Item(artist="Jungle", title="Keep Moving").normalize_credit()
+    assert a.display == b.display == "Jungle - Keep Moving feat. Nao (Purple Disco Machine Remix)"
+    assert a.key == b.key and a.key != c.key           # remix is a different track; feat. spelling is not
+    assert a.to_dict()["display_title"] == "Keep Moving feat. Nao (Purple Disco Machine Remix)"
