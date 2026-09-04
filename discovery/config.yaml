@@ -41,7 +41,7 @@ profile:
     overall: 1.0
     12month: 1.6
     3month: 2.2
-  lastfm_top_artists_limit: 400
+  lastfm_top_artists_limit: 1000   # 200 per request; cheap. Rank-decayed weight, so the tail mostly adds "you play them" matches.
   # How many top artists get expanded into similar artists (Last.fm + ListenBrainz).
   expand_top_n: 120
   similar_per_artist: 12
