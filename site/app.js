@@ -27,6 +27,15 @@
     player: null, playerReady: false, pendingVideo: null,
   };
 
+  // A sign-in link (#curator=<token>) from another browser: store the token, then scrub it from the URL/history.
+  (() => {
+    const m = /[#&]curator=([^&]+)/.exec(location.hash || "");
+    if (m) {
+      try { state.settings.token = decodeURIComponent(m[1]); LS.set("id:settings", state.settings); } catch {}
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  })();
+
   // ---------- data ----------
   async function load() {
     const bust = "?t=" + Math.floor(Date.now() / 60000);
@@ -352,6 +361,13 @@
     $("#settings-btn").addEventListener("click", () => $("#settings").showModal());
     $("#settings").addEventListener("close", () => { s.repo = $("#s-repo").value.trim() || DEFAULT_REPO; s.token = $("#s-token").value.trim(); s.year = +$("#s-year").value; s.syncDowns = $("#s-hide-downs").checked; persist(); applyMode(); render(); });
     $("#s-export").addEventListener("click", exportCsv);
+    $("#s-link").addEventListener("click", async () => {
+      const tok = ($("#s-token").value || state.settings.token || "").trim();
+      if (!tok) { toast("Save a token first", true); return; }
+      const url = location.origin + location.pathname + "#curator=" + encodeURIComponent(tok);
+      try { await navigator.clipboard.writeText(url); toast("Sign-in link copied. Open it once in the other browser; it stores the token and removes it from the address bar."); }
+      catch { prompt("Copy this link and open it in the other browser:", url); }
+    });
     $("#s-clear").addEventListener("click", () => { if (confirm("Clear unsynced thumbs and local settings?")) { ["id:decisions", "id:synced", "id:settings", "id:filters"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
