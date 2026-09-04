@@ -100,6 +100,10 @@ session that the playlist's owner approved in that browser.
 - 👍 files the track into the year playlist immediately (an **Undo** button shows for a few seconds). 👎 hides
   it. Both disappear from the feed at once; saves are hidden on every device after the next daily build, skips
   on this device (or everywhere, with the optional Skipped playlist).
+- **Audition mode** (`a`, or the checkbox in the player bar): each track starts partway in and the site moves on by
+  itself after 30 seconds unless you press a key or click the player. Length and start point are in ⚙.
+- **On a phone**, open chrisrohn.com and choose "Add to Home Screen" / "Install app": it runs full-screen with its
+  own icon. Swipe a card right for 👍, left for 👎 (curator or guest mode only).
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list.
 
 ## Sources

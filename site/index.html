@@ -5,8 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chris Rohn's New Music</title>
 <meta name="description" content="Chris Rohn's daily new-music discovery feed, built for the Indie Discotheque radio station. Listen to what's new in indie pop, nu-disco, indietronica and friends.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪩</text></svg>">
-<link rel="alternate" type="application/rss+xml" title="Indie Discotheque feed" href="/feed.xml">
+<link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0b0b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="New Music">
+<link rel="alternate" type="application/rss+xml" title="Chris Rohn's New Music" href="/feed.xml">
 <link rel="preconnect" href="https://www.youtube.com">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -43,7 +49,7 @@
   <label class="chk"><input type="checkbox" id="only-new"> new today</label>
   <label class="chk"><input type="checkbox" id="only-playable" checked> playable</label>
   <label class="chk"><input type="checkbox" id="only-known"> known artists</label>
-  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · </span><kbd>o</kbd> open</span>
+  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open</span>
 </section>
 
 <main>
@@ -60,6 +66,8 @@
       <button class="btn" id="p-toggle" title="play/pause (space)">⏯</button>
       <button class="btn" id="p-next" title="next (j)">⏭</button>
       <label class="chk"><input type="checkbox" id="autoplay" checked> autoplay next</label>
+      <label class="chk" title="Start each track partway in and move on automatically after a few seconds. Any key or click on the player cancels the timer for that track."><input type="checkbox" id="audition"> audition <span id="audition-label">30s</span></label>
+      <span id="audition-bar" class="audition-bar" hidden><i></i></span>
       <button class="btn down curator" id="p-down" title="thumbs down (d)">👎</button>
       <button class="btn up curator" id="p-up" title="thumbs up (u)">👍</button>
     </div>
@@ -88,6 +96,10 @@
     <p class="muted" id="s-quota"></p>
     <p class="muted owner" id="s-guests"></p>
     <details><summary class="muted">Blog feed health (tracks kept / posts seen in the last build)</summary><div id="s-feeds" class="feeds"></div></details>
+    <div class="row">
+      <label>Audition length (seconds) <input id="s-aud-secs" type="number" min="10" max="120" step="1" style="width:90px"></label>
+      <label>Audition starts at (% into the track) <input id="s-aud-start" type="number" min="0" max="80" step="1" style="width:90px"></label>
+    </div>
     <label class="chk curator"><input type="checkbox" id="s-skips"> Also file 👎 into the unlisted “Skipped” playlist on YouTube (syncs skips across devices and into the daily build; costs 50 quota units each). Off = skips are free and remembered in this browser only.</label>
     <div class="row">
       <button class="btn ghost curator" id="s-reload" type="button">Reload my playlists</button>
