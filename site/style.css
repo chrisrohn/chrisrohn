@@ -149,3 +149,4 @@ body.doc footer { padding-bottom: 40px; }
 .yearbadge.high { color: var(--up); border-color: rgba(61,220,132,.4); }
 .yearbadge.medium { color: var(--fg); }
 .yearbadge.low { color: var(--gold); border-color: rgba(255,209,102,.5); }
+.card.new .side { padding-top: 14px; }
