@@ -24,7 +24,7 @@
     playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL..."} learned from your library
     settings: LS.get("id:settings", {}),    // {skipsInYouTube}
     quota: LS.get("id:quota", { day: "", units: 0 }),  // rough count of YouTube API units spent today (resets midnight Pacific)
-    filters: Object.assign({ q: "", sourcesOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
+    filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
     view: "feed",
     order: [],
     currentId: null,
@@ -265,11 +265,31 @@
   const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", rss: "Blogs & radio", spotify: "Spotify" };
   function fillSources() {
     const box = $("#sources"); const names = state.feed.sources || []; const off = new Set(state.filters.sourcesOff || []);
-    box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s)}</label>`).join("") +
+    const blogs = state.feed.blogs || []; const boff = new Set(state.filters.blogsOff || []);
+    const blogCount = blogs.filter(b => !boff.has(b)).length;
+    box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s)}</label>` +
+        (s === "rss" && blogs.length ? `<button class="all pick" type="button" id="blogs-btn" title="choose which blogs">${blogCount}/${blogs.length} blogs ▾</button>` : "")).join("") +
       (names.length > 1 ? `<button class="all" type="button" data-all="1">all</button><button class="all" type="button" data-all="0">none</button>` : "");
     $$("input", box).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters.sourcesOff || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters.sourcesOff = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render(); }));
-    $$("button.all", box).forEach(b => b.addEventListener("click", () => { state.filters.sourcesOff = b.dataset.all === "1" ? [] : [...names]; persist(); fillSources(); render(); }));
+    $$("button.all[data-all]", box).forEach(b => b.addEventListener("click", () => { state.filters.sourcesOff = b.dataset.all === "1" ? [] : [...names]; persist(); fillSources(); render(); }));
+    const bb = $("#blogs-btn"); if (bb) bb.addEventListener("click", openBlogPicker);
   }
+  function openBlogPicker() {
+    const blogs = state.feed.blogs || []; const boff = new Set(state.filters.blogsOff || []);
+    const counts = {}; for (const it of items()) for (const s of it.sources || []) if (s.startsWith("rss:")) counts[s.slice(4)] = (counts[s.slice(4)] || 0) + 1;
+    const body = $("#blogs-body");
+    body.innerHTML = blogs.map(b => `<label class="chk"><input type="checkbox" value="${esc(b)}" ${boff.has(b) ? "" : "checked"}> ${esc(b)} <span class="muted">(${counts[b] || 0})</span></label>`).join("");
+    $$("input", body).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters.blogsOff || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters.blogsOff = [...set]; persist(); render(); }));
+    $("#blogs-all").onclick = () => { state.filters.blogsOff = []; persist(); openBlogPicker(); render(); };
+    $("#blogs-none").onclick = () => { state.filters.blogsOff = [...blogs]; persist(); openBlogPicker(); render(); };
+    const dlg = $("#blogs"); if (!dlg.open) { dlg.showModal(); dlg.addEventListener("close", () => fillSources(), { once: true }); }
+  }
+  const sourceOn = s => {
+    const fam = s.split(":")[0];
+    if ((state.filters.sourcesOff || []).includes(fam)) return false;
+    if (fam === "rss" && (state.filters.blogsOff || []).includes(s.slice(4))) return false;
+    return true;
+  };
   const hay = i => [i.artist, i.display_title || i.title, i.release, ...(i.tags || []), ...(i.reasons || [])].join(" ").toLowerCase();
   const credit = i => i.display || `${i.artist} - ${i.display_title || i.title}`;
   function pickAsItem(p, i) { return { id: "pick" + i, artist: p.artist, title: p.title, release: p.album, sources: [], tags: [], reasons: [], score: 0, youtube: p.videoId ? { videoId: p.videoId, thumbnail: p.thumbnail } : null, artwork: p.thumbnail, release_date: p.year ? String(p.year) : null, _pick: true, _year: p.year }; }
@@ -286,7 +306,7 @@
     let list = items().filter(i => !decisionFor(i.id));
     list = list.filter(i => {
       if (q && !hay(i).includes(q)) return false;
-      if (f.sourcesOff && f.sourcesOff.length && !(i.sources || []).some(s => !f.sourcesOff.includes(s.split(":")[0]))) return false;
+      if (!(i.sources || []).some(sourceOn)) return false;
       if (f.onlyNew && i.first_seen !== state.feed.generated_at?.slice(0, 10)) return false;
       if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
       if (f.onlyKnown && !i.match_kind) return false;
@@ -422,6 +442,9 @@
     $("#settings-btn").addEventListener("click", () => {
       $("#s-playlists").textContent = Object.entries(state.playlists).filter(([k]) => !k.startsWith("__")).length + " year playlists known" + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : " · no skipped playlist yet");
       $("#s-quota").textContent = quotaText();
+      const fh = state.feed.feed_health || {};
+      const rows = Object.entries(fh).sort((x, y) => (y[1].kept - x[1].kept) || x[0].localeCompare(y[0]));
+      $("#s-feeds").innerHTML = rows.length ? rows.map(([n, h]) => `<span class="${h.ok ? (h.kept ? "ok" : "quiet") : "dead"}" title="${esc(h.error || "")}">${esc(n)} ${h.ok ? h.kept + "/" + h.entries : "✗"}</span>`).join("") : "<span class=\"muted\">no blog feed data yet</span>";
       $("#s-skips").checked = skipsInYouTube();
       $("#settings").showModal();
     });

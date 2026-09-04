@@ -131,31 +131,56 @@ sources:
       - 113   # Dance
   rss:
     enabled: true
+    # Headlines shaped like `Artist – "Song"` become playable cards; other posts are kept only if they mention a
+    # profile artist. Dead or noisy feeds show up in ⚙ → feed health on the site; prune freely.
     feeds:
-      - name: Pitchfork Best New Tracks
-        url: https://pitchfork.com/feed/feed-track-reviews/rss
-      - name: Pitchfork Best New Music
-        url: https://pitchfork.com/feed/feed-best-new/rss
-      - name: Gorilla vs. Bear
-        url: https://www.gorillavsbear.net/feed/
-      - name: Stereogum
-        url: https://www.stereogum.com/feed/
-      - name: The Line of Best Fit
-        url: https://www.thelineofbestfit.com/rss
-      - name: Hype Machine Popular
-        url: https://hypem.com/feed/popular/1/feed.xml
-      - name: Hype Machine Latest
-        url: https://hypem.com/feed/latest/all/1/feed.xml
-      - name: KEXP Song of the Day
-        url: https://www.kexp.org/podcasts/song-of-the-day/feed.xml
-      - name: Bandcamp Daily
-        url: https://daily.bandcamp.com/feed
-      - name: Under the Radar
-        url: https://www.undertheradarmag.com/rss/news
-      - name: DIY Magazine
-        url: https://diymag.com/feed
-      - name: The FADER
-        url: https://www.thefader.com/rss.xml
+      # --- disco / nu-disco / indie dance / balearic (closest to the station) ---
+      - { name: "Le Visiteur", url: "https://levisiteuronline.com/feed/" }
+      - { name: "Ransom Note", url: "https://www.theransomnote.com/feed/" }
+      - { name: "Test Pressing", url: "https://testpressing.org/feed/" }
+      - { name: "Music Is My Sanctuary", url: "https://musicismysanctuary.com/feed/" }
+      - { name: "Acid Stag", url: "https://acidstag.com/feed/" }
+      - { name: "Discobelle", url: "https://discobelle.net/feed/" }
+      - { name: "Bolting Bits", url: "https://boltingbits.com/feed/" }
+      - { name: "Magnetic Magazine", url: "https://www.magneticmag.com/feed/" }
+      - { name: "When We Dip", url: "https://whenwedip.com/feed/" }
+      - { name: "Data Transmission", url: "https://datatransmission.co/feed/" }
+      - { name: "Electronic Groove", url: "https://electronicgroove.com/feed/" }
+      - { name: "XLR8R", url: "https://xlr8r.com/feed/" }
+      - { name: "Mixmag", url: "https://mixmag.net/rss.xml" }
+      - { name: "DJ Mag", url: "https://djmag.com/rss.xml" }
+      # --- indie pop / indietronica / dream pop ---
+      - { name: "Gorilla vs. Bear", url: "https://www.gorillavsbear.net/feed/" }
+      - { name: "Nialler9", url: "https://nialler9.com/feed/" }
+      - { name: "Indie Shuffle", url: "https://www.indieshuffle.com/feed/" }
+      - { name: "Stereofox", url: "https://www.stereofox.com/feed/" }
+      - { name: "EARMILK", url: "https://earmilk.com/feed/" }
+      - { name: "Atwood Magazine", url: "https://atwoodmagazine.com/feed/" }
+      - { name: "Various Small Flames", url: "https://varioussmallflames.co.uk/feed/" }
+      - { name: "Obscure Sound", url: "https://obscuresound.com/feed/" }
+      - { name: "Beats Per Minute", url: "https://beatsperminute.com/feed/" }
+      - { name: "Post-Trash", url: "https://post-trash.com/home?format=rss" }
+      - { name: "Gold Flake Paint", url: "https://goldflakepaint.co.uk/feed/" }
+      - { name: "The Wild Honey Pie", url: "https://www.thewildhoneypie.com/feed/" }
+      - { name: "Aquarium Drunkard", url: "https://aquariumdrunkard.com/feed/" }
+      - { name: "The Line of Best Fit", url: "https://www.thelineofbestfit.com/rss" }
+      - { name: "DIY Magazine", url: "https://diymag.com/feed" }
+      - { name: "Loud and Quiet", url: "https://www.loudandquiet.com/feed/" }
+      - { name: "Clash", url: "https://www.clashmusic.com/feed/" }
+      - { name: "Under the Radar", url: "https://www.undertheradarmag.com/rss/news" }
+      # --- big tents (lots of news; the artist filter keeps them useful) ---
+      - { name: "Pitchfork Best New Tracks", url: "https://pitchfork.com/feed/feed-track-reviews/rss" }
+      - { name: "Pitchfork Best New Music", url: "https://pitchfork.com/feed/feed-best-new/rss" }
+      - { name: "Stereogum", url: "https://www.stereogum.com/feed/" }
+      - { name: "Brooklyn Vegan", url: "https://www.brooklynvegan.com/feed/" }
+      - { name: "Consequence", url: "https://consequence.net/feed/" }
+      - { name: "The FADER", url: "https://www.thefader.com/rss.xml" }
+      # --- radio + curated ---
+      - { name: "KEXP Song of the Day", url: "https://www.kexp.org/podcasts/song-of-the-day/feed.xml" }
+      - { name: "KCRW Today's Top Tune", url: "https://www.kcrw.com/music/shows/todays-top-tune/rss" }
+      - { name: "Bandcamp Daily", url: "https://daily.bandcamp.com/feed" }
+      - { name: "Hype Machine Popular", url: "https://hypem.com/feed/popular/1/feed.xml" }
+      - { name: "Hype Machine Latest", url: "https://hypem.com/feed/latest/all/1/feed.xml" }
   spotify:
     # Optional. Requires a Premium account + a dev-mode app since Feb 2026. Off by default.
     enabled: false
