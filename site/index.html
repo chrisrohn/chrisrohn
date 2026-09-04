@@ -50,13 +50,43 @@
   <label class="chk"><input type="checkbox" id="only-playable" checked> playable</label>
   <label class="chk"><input type="checkbox" id="only-known"> known artists</label>
   <label class="chk" title="Hide tracks whose verified release year is older than last year (radio and recommendation sources surface catalog too)"><input type="checkbox" id="only-recent"> new releases only</label>
+  <button class="btn ghost mobile-only" id="layout-toggle" type="button">list view</button>
   <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open</span>
 </section>
 
 <main>
   <div id="list" class="list" aria-live="polite"></div>
+  <section id="deck" class="deck" hidden aria-live="polite">
+    <div class="deck-top">
+      <button class="btn ghost" id="deck-prev" title="back">‹ back</button>
+      <span class="deck-count" id="deck-count"></span>
+      <button class="btn ghost mobile-only" id="deck-filters" title="filters">filters</button>
+      <button class="btn ghost" id="deck-next" title="later (skip without rating)">later ›</button>
+    </div>
+    <div id="deck-card"></div>
+    <div class="deck-actions">
+      <button class="btn down big curator" id="deck-down" title="thumbs down">👎</button>
+      <button class="btn big play" id="deck-play" title="play / pause">▶</button>
+      <button class="btn up big curator" id="deck-up" title="thumbs up">👍</button>
+    </div>
+  </section>
   <div id="empty" class="empty" hidden></div>
 </main>
+
+<template id="deck-tpl">
+  <article class="dcard" tabindex="0">
+    <div class="dart"><img alt="" loading="eager"><span class="dplay">▶</span><span class="yearbadge"></span></div>
+    <div class="dbody">
+      <div class="dartist"></div>
+      <div class="dtitle"></div>
+      <div class="dmeta"><span class="release"></span><span class="date"></span></div>
+      <div class="dwhy"></div>
+      <div class="dtags"></div>
+      <div class="dsources"></div>
+      <div class="drow"><select class="year curator" title="year playlist"></select><span class="dlinks"></span></div>
+    </div>
+  </article>
+</template>
 
 <aside class="player" id="player" hidden>
   <div class="player-frame"><div id="yt"></div></div>
