@@ -11,6 +11,8 @@ from .models import Item
 from .util import CACHE_DIR, log, norm, norm_track, read_json, write_json
 
 YT_CACHE = CACHE_DIR / "youtube.json"
+YEAR_CACHE = CACHE_DIR / "years.json"
+MB_RECORDING = "https://musicbrainz.org/ws/2/recording/"
 
 
 def _pick(results: list[dict], artist: str, title: str | None) -> dict | None:
@@ -73,11 +75,11 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
         found: dict | None = None
         try:
             if it.kind == "track":
-                res = yt.search(f"{it.artist} {it.title}", filter="songs", limit=6)
-                hit = _pick(res, it.artist, it.title)
+                res = yt.search(f"{it.artist} {it.display_title}", filter="songs", limit=6)
+                hit = _pick(res, it.artist, it.display_title)
                 if not hit:
-                    res = yt.search(f"{it.artist} {it.title}", filter="videos", limit=4)
-                    hit = _pick(res, it.artist, it.title)
+                    res = yt.search(f"{it.artist} {it.display_title}", filter="videos", limit=4)
+                    hit = _pick(res, it.artist, it.display_title)
                 if hit:
                     found = _shape(hit, "track-search")
             else:
@@ -110,6 +112,7 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
                         # promote release → track so the card shows a playable song
                         it.title = first.get("title") or it.title
                         it.kind = "track"
+                        it.normalize_credit()
                 if not found:
                     res = yt.search(f"{it.artist} {it.release or it.title}", filter="songs", limit=6)
                     hit = _pick(res, it.artist, None)
@@ -117,6 +120,7 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
                         found = _shape(hit, "release-fallback")
                         it.title = hit.get("title") or it.title
                         it.kind = "track"
+                        it.normalize_credit()
         except Exception as exc:  # noqa: BLE001
             log.debug("yt resolve failed for %s – %s: %s", it.artist, it.title, exc)
             found = None
@@ -126,3 +130,85 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
             it.artwork = found.get("thumbnail")
     write_json(YT_CACHE, cache, compact=True)
     log.info("youtube: %d lookups this run, %d cached", looked, len(cache))
+
+
+def _mb_earliest_year(http, artist: str, title: str) -> tuple[int | None, bool]:
+    """Earliest release year MusicBrainz knows for this artist + recording title. Returns (year, matched)."""
+    from .util import split_artists
+
+    q = f'recording:"{title}" AND artist:"{artist}"'
+    try:
+        data = http.get(MB_RECORDING, params={"query": q, "fmt": "json", "limit": 15})
+    except Exception as exc:  # noqa: BLE001
+        log.debug("MB recording lookup failed for %s – %s: %s", artist, title, exc)
+        return None, False
+    a_norms = {norm(artist)} | {norm(x) for x in split_artists(artist)}
+    t_norm = norm_track(title)
+    years: list[int] = []
+    for rec in data.get("recordings") or []:
+        if norm_track(rec.get("title")) != t_norm:
+            continue
+        credits = rec.get("artist-credit") or []
+        names = {norm(c.get("name") or (c.get("artist") or {}).get("name")) for c in credits if isinstance(c, dict)}
+        if not (names & a_norms):
+            continue
+        for rel in rec.get("releases") or []:
+            rg = rel.get("release-group") or {}
+            sec = {str(x).lower() for x in (rg.get("secondary-types") or [])}
+            if sec & {"compilation", "live", "dj-mix", "remix"}:
+                continue
+            for d in (rel.get("date"), rg.get("first-release-date")):
+                if d and str(d)[:4].isdigit():
+                    years.append(int(str(d)[:4]))
+    if not years:
+        return None, True
+    return min(years), True
+
+
+def verify_years(items: list[Item], cfg: dict, http) -> None:
+    """Decide `year` for each item with provenance + confidence, using MusicBrainz as the authority when it knows the recording.
+
+    Order: MusicBrainz earliest release of the recording (high) → source release date (medium; low for blog dates)
+    → YouTube album year (medium) → current year (low).
+    """
+    from datetime import date
+
+    rcfg = cfg.get("resolve") or {}
+    budget = int(rcfg.get("max_year_lookups_per_run", 300))
+    cache: dict = read_json(YEAR_CACHE, {})
+    looked = 0
+    for it in items:
+        feed_year = it.release_date.year if it.release_date else None
+        feed_is_blog = it.release_date is not None and all(s.startswith("rss") for s in it.sources)
+        mb_year: int | None = None
+        key = it.key
+        if key in cache:
+            mb_year = cache[key].get("mb")
+        elif looked < budget and it.kind == "track":
+            looked += 1
+            mb_year, matched = _mb_earliest_year(http, it.artist, it.display_title)
+            cache[key] = {"mb": mb_year, "matched": matched}
+        yt_year = None
+        try:
+            yt_year = int(str((it.youtube or {}).get("year") or "")[:4])
+        except ValueError:
+            yt_year = None
+
+        if mb_year:
+            it.year, it.year_source, it.year_confidence = mb_year, "musicbrainz-recording", "high"
+            if feed_year and mb_year < feed_year - 1:
+                it.original_year = mb_year
+        elif feed_year and not feed_is_blog:
+            it.year, it.year_source, it.year_confidence = feed_year, "release-date", "medium"
+        elif yt_year:
+            it.year, it.year_source, it.year_confidence = yt_year, "youtube", "medium"
+        elif feed_year:
+            it.year, it.year_source, it.year_confidence = feed_year, "feed-date", "low"
+        else:
+            it.year, it.year_source, it.year_confidence = date.today().year, "unknown", "low"
+        # a YouTube album year older than everything else is also a reissue hint
+        if yt_year and it.year and yt_year < it.year - 1 and not it.original_year:
+            it.original_year = yt_year
+            it.year_confidence = "low" if it.year_confidence != "high" else it.year_confidence
+    write_json(YEAR_CACHE, cache, compact=True)
+    log.info("years: %d MusicBrainz lookups this run", looked)

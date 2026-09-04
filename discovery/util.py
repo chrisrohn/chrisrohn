@@ -108,8 +108,10 @@ _PUNCT_RE = re.compile(r"[^\w\s]")
 _SPACE_RE = re.compile(r"\s+")
 _FEAT_RE = re.compile(r"\s*[\(\[]?\s*(feat\.?|ft\.?|featuring|with)\s+[^\)\]]*[\)\]]?\s*$", re.I)
 _SUFFIX_RE = re.compile(
-    r"\s*[\(\[\-–—]\s*(official|radio edit|single version|album version|remaster(ed)?( \d{4})?|explicit|clean|"
-    r"lyric video|official (music )?video|audio|visualizer|hq|hd)\s*[\)\]]?\s*$",
+    r"\s*[\(\[\-–—]\s*(official|radio edit|single version|album version|(\d{4} )?remaster(ed)?( \d{4})?|remastered version|"
+    r"explicit|clean|mono|stereo|lyric video|official (music )?video|audio|visualizer|hq|hd|"
+    r"\d+(st|nd|rd|th)[ -]anniversary( edition| version| remaster)?|anniversary edition|deluxe( edition| version)?|"
+    r"expanded( edition)?|bonus track( version)?|reissue|re-issue|original mix|extended( mix| version)?|edit)\s*[\)\]]?\s*$",
     re.I,
 )
 
@@ -133,8 +135,13 @@ def norm(s: str | None) -> str:
 def norm_track(s: str | None) -> str:
     if not s:
         return ""
-    s = _SUFFIX_RE.sub("", str(s))
-    s = _FEAT_RE.sub("", s)
+    s = str(s)
+    for _ in range(4):  # peel stacked suffixes: "Song (Remastered) [Deluxe Edition]"
+        stripped = _SUFFIX_RE.sub("", s)
+        stripped = _FEAT_RE.sub("", stripped)
+        if stripped == s:
+            break
+        s = stripped
     return norm(s)
 
 
@@ -144,6 +151,67 @@ def split_artists(credit: str | None) -> list[str]:
         return []
     parts = re.split(r"\s*(?:,|&|\+|/|\bfeat\.?(?=\s)|\bft\.?(?=\s)|\bfeaturing\b|\bwith\b|\bx\b|\bvs\.?(?=\s)|\band\b)\s*", credit, flags=re.I)
     return [p.strip() for p in parts if p and p.strip()]
+
+
+_FEAT_ANY_RE = re.compile(r"\s*[\(\[]?\s*\b(?:feat\.?|ft\.?|featuring|with)\s+(?P<who>[^\)\]\(\[]+?)\s*[\)\]]?\s*(?=[\(\[]|$)", re.I)
+_REMIX_RE = re.compile(
+    r"\s*[\(\[\-–—]\s*(?P<who>[^\(\)\[\]]+?)\s+(?P<kind>remix|rework|re-work|edit|re-edit|dub|bootleg|flip|refix|rerub|version|mix|remake|vip)\s*[\)\]]?\s*$",
+    re.I,
+)
+_REMIX_KIND = {"re-work": "Rework", "re-edit": "Re-edit", "vip": "VIP"}
+
+
+def parse_credit(artist: str, title: str) -> dict:
+    """Split a raw (artist, title) into Rohn Standard Notation parts.
+
+    Standard:            Artist - Song Title
+    Remix:               Artist - Song Title (Remixartist Remix)
+    Featuring:           Artist - Song Title feat. Subartist
+    Featuring + Remix:   Artist - Song Title feat. Subartist (Remixartist Remix)
+    """
+    artist = re.sub(r"\s+", " ", artist or "").strip()
+    title = re.sub(r"\s+", " ", title or "").strip()
+    featuring: list[str] = []
+    remixer: str | None = None
+    kind: str | None = None
+
+    # featured artists hiding in the artist credit: "A feat. B", "A ft. B & C"
+    m = re.search(r"\s+(?:feat\.?|ft\.?|featuring)\s+(.+)$", artist, re.I)
+    if m:
+        featuring += [x.strip() for x in re.split(r"\s*(?:,|&|\band\b)\s*", m.group(1)) if x.strip()]
+        artist = artist[: m.start()].strip()
+
+    # remix suffix first (it sits at the very end), then featured artists anywhere in the title
+    m = _REMIX_RE.search(title)
+    if m:
+        remixer = m.group("who").strip(" -–—")
+        k = m.group("kind").lower()
+        kind = _REMIX_KIND.get(k, k.capitalize())
+        title = title[: m.start()].strip()
+    for m in list(_FEAT_ANY_RE.finditer(title))[::-1]:
+        featuring[0:0] = [x.strip() for x in re.split(r"\s*(?:,|&|\band\b)\s*", m.group("who")) if x.strip()]
+        title = (title[: m.start()] + title[m.end():]).strip()
+    # tidy leftovers like "Song ()" / trailing dashes
+    title = re.sub(r"\s*[\(\[]\s*[\)\]]", "", title).strip(" -–—")
+    seen: list[str] = []
+    for f in featuring:
+        if f.lower() not in {x.lower() for x in seen} and f.lower() != artist.lower():
+            seen.append(f)
+    return {"artist": artist, "title": title, "featuring": seen, "remixer": remixer, "remix_kind": kind}
+
+
+def format_title(title: str, featuring: list[str] | None, remixer: str | None, remix_kind: str | None) -> str:
+    """Title part of the notation: 'Song Title feat. A & B (X Remix)'."""
+    out = title or ""
+    if featuring:
+        out += " feat. " + " & ".join(featuring)
+    if remixer:
+        out += f" ({remixer} {remix_kind or 'Remix'})"
+    return out
+
+
+def format_credit(artist: str, title: str, featuring: list[str] | None = None, remixer: str | None = None, remix_kind: str | None = None) -> str:
+    return f"{artist} - {format_title(title, featuring, remixer, remix_kind)}"
 
 
 def item_key(artist: str, title: str) -> str:

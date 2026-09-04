@@ -44,6 +44,10 @@ def sandbox(tmp_path, monkeypatch):
 def test_norm_and_parse():
     assert util.norm("The Bird & The Bee") == "bird and the bee"
     assert util.norm_track("Heartbeat (feat. Someone) [Radio Edit]") == "heartbeat"
+    assert util.norm_track("Lovers (10th Anniversary Edition)") == "lovers"
+    assert util.norm_track("Lovers (2016 Remaster) [Deluxe]") == "lovers"
+    assert util.norm_track("Lovers - Remastered 2026") == "lovers"
+    assert util.norm_track("Lovers (Club Remix)") == "lovers club remix"   # a remix is a different recording
     assert util.split_artists("Jungle & Roosevelt feat. Nao") == ["Jungle", "Roosevelt", "Nao"]
     assert util.parse_artist_title('Jungle – "Back On 74"') == ("Jungle", "Back On 74")
     assert util.parse_artist_title("Magdalena Bay Share New Song: Death & Romance") is None
@@ -217,3 +221,62 @@ def test_resolve_pick():
     ]
     assert _pick(res, "Jungle", "Keep Moving")["videoId"] == "a"
     assert _pick(res[1:], "Jungle", "Keep Moving") is None
+
+
+def test_verify_years_uses_musicbrainz_and_flags_reissues(monkeypatch):
+    from discovery import resolve
+
+    today = date.today()
+    mb = {"recordings": [
+        {"title": "Lovers", "artist-credit": [{"name": "Roosevelt"}], "releases": [
+            {"date": "2016-08-19", "release-group": {"first-release-date": "2016-08-19"}},
+            {"date": today.isoformat(), "release-group": {"first-release-date": today.isoformat(), "secondary-types": ["Compilation"]}},
+        ]},
+        {"title": "Lovers (Karaoke)", "artist-credit": [{"name": "Roosevelt"}], "releases": [{"date": "1990-01-01"}]},
+    ]}
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            return mb if "Roosevelt" in kw["params"]["query"] else {"recordings": []}
+
+    items = [
+        Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["listenbrainz"]),
+        Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["bandcamp"]),
+        Item(artist="Someone", title="Blog Only", kind="track", release_date=today, sources=["rss:Pitchfork"], youtube={"videoId": "x", "year": "2019"}),
+        Item(artist="Nobody", title="Nothing", kind="track", sources=["rss:Blog"]),
+    ]
+    resolve.verify_years(items, _cfg(), FakeHttp())
+    r, j, s, n = items
+    assert (r.year, r.year_source, r.year_confidence, r.original_year) == (2016, "musicbrainz-recording", "high", 2016)
+    assert (j.year, j.year_source, j.year_confidence) == (today.year, "release-date", "medium")
+    assert (s.year, s.year_source) == (2019, "youtube")          # blog date is not trusted; YouTube album year wins
+    assert (n.year, n.year_confidence) == (today.year, "low")
+    d = r.to_dict()
+    assert d["year"] == 2016 and d["original_year"] == 2016
+
+
+def test_rohn_standard_notation():
+    from discovery.util import format_credit, parse_credit
+
+    cases = {
+        ("Jungle", "Keep Moving"): "Jungle - Keep Moving",
+        ("Jungle", "Keep Moving (Roosevelt Remix)"): "Jungle - Keep Moving (Roosevelt Remix)",
+        ("Jungle", "Keep Moving - Roosevelt Remix"): "Jungle - Keep Moving (Roosevelt Remix)",
+        ("Jungle", "Keep Moving (feat. Nao)"): "Jungle - Keep Moving feat. Nao",
+        ("Jungle", "Keep Moving feat. Nao"): "Jungle - Keep Moving feat. Nao",
+        ("Jungle feat. Nao", "Keep Moving"): "Jungle - Keep Moving feat. Nao",
+        ("Jungle ft. Nao & Erick the Architect", "Keep Moving (Purple Disco Machine Remix)"): "Jungle - Keep Moving feat. Nao & Erick the Architect (Purple Disco Machine Remix)",
+        ("Jungle", "Keep Moving (feat. Nao) [Purple Disco Machine Remix]"): "Jungle - Keep Moving feat. Nao (Purple Disco Machine Remix)",
+        ("Jungle", "Keep Moving (Poolside Rework)"): "Jungle - Keep Moving (Poolside Rework)",
+        ("Jungle", "Keep Moving (Extended Mix)"): "Jungle - Keep Moving (Extended Mix)",
+    }
+    for (artist, title), want in cases.items():
+        p = parse_credit(artist, title)
+        assert format_credit(p["artist"], p["title"], p["featuring"], p["remixer"], p["remix_kind"]) == want, (artist, title)
+
+    a = Item(artist="Jungle feat. Nao", title="Keep Moving (Purple Disco Machine Remix)").normalize_credit()
+    b = Item(artist="Jungle", title="Keep Moving feat. Nao (Purple Disco Machine Remix)").normalize_credit()
+    c = Item(artist="Jungle", title="Keep Moving").normalize_credit()
+    assert a.display == b.display == "Jungle - Keep Moving feat. Nao (Purple Disco Machine Remix)"
+    assert a.key == b.key and a.key != c.key           # remix is a different track; feat. spelling is not
+    assert a.to_dict()["display_title"] == "Keep Moving feat. Nao (Purple Disco Machine Remix)"

@@ -145,3 +145,8 @@ body.doc .tab { text-decoration: none; }
 .prose ul { padding-left: 22px; }
 .prose li { margin: 6px 0; }
 body.doc footer { padding-bottom: 40px; }
+.yearbadge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); cursor: help; }
+.yearbadge.high { color: var(--up); border-color: rgba(61,220,132,.4); }
+.yearbadge.medium { color: var(--fg); }
+.yearbadge.low { color: var(--gold); border-color: rgba(255,209,102,.5); }
+.card.new .side { padding-top: 14px; }

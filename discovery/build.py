@@ -6,7 +6,7 @@ from datetime import date
 
 from .models import Item
 from .profile import load_profile
-from .resolve import resolve_all
+from .resolve import resolve_all, verify_years
 from .score import dedupe, score_items
 from .sources import run_sources
 from .util import DATA_DIR, SITE_DATA_DIR, Http, log, read_json, utcnow, write_json
@@ -21,7 +21,7 @@ def build_feed(cfg: dict) -> dict:
     state = read_json(STATE_PATH, {"first_seen": {}})
     first_seen: dict[str, str] = state.setdefault("first_seen", {})
 
-    raw = run_sources(cfg, profile, http)
+    raw = [i.normalize_credit() for i in run_sources(cfg, profile, http)]
     items = dedupe(raw)
     log.info("%d raw sightings → %d unique items", len(raw), len(items))
 
@@ -39,6 +39,7 @@ def build_feed(cfg: dict) -> dict:
     # after resolution, drop things with no playable YouTube result unless they are strong matches
     items = [i for i in items if i.youtube or i.match_kind == "direct" or i.editorial]
     items = score_items(items, profile, cfg)[: int(rcfg.get("max_items", 200))]
+    verify_years(items, cfg, http)
 
     today_s = date.today().isoformat()
     for it in items:
@@ -103,7 +104,7 @@ def _write_rss(cfg: dict, payload: dict) -> None:
         desc = f"{it.get('release_type') or ''} {it.get('release') or ''} · score {it['score']} · {', '.join(it.get('reasons', []))}".strip()
         parts.append(
             "<item>"
-            f"<title>{esc(it['artist'])} – {esc(it['title'])}</title>"
+            f"<title>{esc(it.get('display') or (it['artist'] + ' - ' + it['title']))}</title>"
             f"<link>{esc(link)}</link>"
             f"<guid isPermaLink=\"false\">{it['id']}</guid>"
             f"<description>{esc(desc)}</description>"

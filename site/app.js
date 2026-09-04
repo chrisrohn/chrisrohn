@@ -68,10 +68,12 @@
   const byId = id => items().find(i => i.id === id);
   const decisionFor = id => state.rated[id] || null;
   const yearOf = it => {
+    if (Number.isFinite(it.year)) return it.year;
     const d = it.release_date || (it.youtube && it.youtube.year);
     const y = d ? parseInt(String(d).slice(0, 4), 10) : NaN;
     return Number.isFinite(y) ? y : new Date().getFullYear();
   };
+  const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found — defaulted to this year" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- auth (Google Identity Services, token flow) ----------
@@ -218,7 +220,7 @@
     year = year || yearOf(it);
     state.busy.add(id);
     // optimistic: hide it now, move focus to the next card
-    state.rated[id] = { decision, year, videoId: vid, artist: it.artist, title: it.title, at: Date.now(), pending: true };
+    state.rated[id] = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, at: Date.now(), pending: true };
     persist();
     const wasCurrent = state.currentId === id; const idx = state.order.indexOf(id);
     render();
@@ -226,7 +228,7 @@
     if (decision === "down" && !skipsInYouTube()) {
       // free: remembered in this browser only (no quota). Turn on "skips in YouTube" in ⚙ to sync across devices.
       state.rated[id] = { ...state.rated[id], pending: false, local: true }; persist(); state.busy.delete(id); render();
-      toast(`👎 ${it.artist} – ${it.title}`, false, { label: "Undo", fn: () => undo(id) });
+      toast(`👎 ${credit(it)}`, false, { label: "Undo", fn: () => undo(id) });
       return;
     }
     try {
@@ -235,10 +237,10 @@
       state.rated[id] = { ...state.rated[id], playlistItemId: itemId, playlistId: pid, pending: false };
       persist();
       const left = Math.floor((10000 - (state.quota.day === ptDay() ? state.quota.units : 0)) / 50);
-      toast((decision === "up" ? `👍 ${it.artist} – ${it.title} → ${titleFor(year)}` : `👎 ${it.artist} – ${it.title} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
+      toast((decision === "up" ? `👍 ${credit(it)} → ${titleFor(year)}` : `👎 ${credit(it)} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
     } catch (e) {
       delete state.rated[id]; persist(); render();
-      toast(`Could not file ${it.artist} – ${it.title}: ${e.message}`, true);
+      toast(`Could not file ${credit(it)}: ${e.message}`, true);
     } finally { state.busy.delete(id); render(); }
   }
   async function undo(id) {
@@ -268,7 +270,8 @@
     $$("input", box).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters.sourcesOff || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters.sourcesOff = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render(); }));
     $$("button.all", box).forEach(b => b.addEventListener("click", () => { state.filters.sourcesOff = b.dataset.all === "1" ? [] : [...names]; persist(); fillSources(); render(); }));
   }
-  const hay = i => [i.artist, i.title, i.release, ...(i.tags || []), ...(i.reasons || [])].join(" ").toLowerCase();
+  const hay = i => [i.artist, i.display_title || i.title, i.release, ...(i.tags || []), ...(i.reasons || [])].join(" ").toLowerCase();
+  const credit = i => i.display || `${i.artist} - ${i.display_title || i.title}`;
   function pickAsItem(p, i) { return { id: "pick" + i, artist: p.artist, title: p.title, release: p.album, sources: [], tags: [], reasons: [], score: 0, youtube: p.videoId ? { videoId: p.videoId, thumbnail: p.thumbnail } : null, artwork: p.thumbnail, release_date: p.year ? String(p.year) : null, _pick: true, _year: p.year }; }
 
   function visibleItems() {
@@ -321,9 +324,17 @@
     $(".artist", el).textContent = it.artist;
     const m = $(".match", el);
     if (it.match_kind) { m.textContent = it.match_kind === "direct" ? "you play " + (it.matched_artist === it.artist ? "them" : it.matched_artist) : "similar to " + (it.reasons.find(r => r.startsWith("similar to ")) || "").slice(11); m.classList.add(it.match_kind); } else m.remove();
-    $(".title", el).textContent = it.title;
+    $(".title", el).textContent = it.display_title || it.title;
     $(".release", el).textContent = [it.release_type, it.release && it.release !== it.title ? it.release : null].filter(Boolean).join(" · ");
     $(".date", el).textContent = it.release_date || "";
+    const yb = $(".yearbadge", el);
+    if (it._pick) yb.remove();
+    else {
+      const conf = it.year_confidence || "low";
+      yb.classList.add(conf);
+      yb.title = YEAR_SOURCE[it.year_source] || "";
+      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+    }
     $(".reasons", el).textContent = (it.reasons || []).filter(r => !r.startsWith("similar to") && !r.startsWith("you play")).join(" · ");
     $(".tags", el).innerHTML = (it.tags || []).slice(0, 6).map(t => `<span class="tag">${esc(t)}</span>`).join("");
     $(".sources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}" title="${esc(s)}">${esc(n || k)}</span>`; }).join("");
@@ -368,7 +379,7 @@
     $$(".card.current").forEach(c => c.classList.remove("current"));
     const el = $(`.card[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
     $("#player").hidden = false;
-    $("#now").innerHTML = `<b>${esc(it.artist)}</b> – ${esc(it.title)} ${it.release ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
+    $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
     ensureApi();
     if (state.playerReady) state.player.loadVideoById(vid); else state.pendingVideo = vid;
   }
@@ -389,7 +400,7 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; }, err ? 7000 : (action ? 8000 : 2600));
   }
   function exportCsv() {
-    const rows = [["Title", "Artist", "Album", "Year", "YouTube"], ...Object.values(state.rated).filter(d => d.decision === "up").map(d => [d.title, d.artist, "", d.year, d.videoId ? "https://music.youtube.com/watch?v=" + d.videoId : ""])];
+    const rows = [["Title", "Artist", "Notation", "Year", "YouTube"], ...Object.values(state.rated).filter(d => d.decision === "up").map(d => [d.title, d.artist, `${d.artist} - ${d.title}`, d.year, d.videoId ? "https://music.youtube.com/watch?v=" + d.videoId : ""])];
     const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `new-music-approvals-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   }
