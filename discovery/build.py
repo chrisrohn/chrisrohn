@@ -44,6 +44,8 @@ def build_feed(cfg: dict) -> dict:
     today_s = date.today().isoformat()
     for it in items:
         first_seen.setdefault(it.key, today_s)
+        if not it.release_date:
+            it.release_date = date.fromisoformat(first_seen[it.key])
     cutoff_keys = {i.key for i in items}
     # keep first_seen bounded to the last ~60 days of items
     state["first_seen"] = {k: v for k, v in first_seen.items() if k in cutoff_keys or (date.today() - date.fromisoformat(v)).days < 60}
@@ -64,12 +66,14 @@ def build_feed(cfg: dict) -> dict:
             "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
         },
         "picks": profile.get("picks") or [],
+        "feed_health": _feed_health(),
         "lastfm_user": cfg["station"]["lastfm_user"],
         "profile": {"built_at": profile.get("built_at"), "counts": profile.get("counts")},
         "years": _year_range(cfg),
         "count": len(items),
         "new_today": sum(1 for i in items if first_seen.get(i.key) == today_s),
         "sources": sorted({s.split(":")[0] for i in items for s in i.sources}),
+        "blogs": sorted({s.split(":", 1)[1] for i in items for s in i.sources if s.startswith("rss:")}),
         "items": [dict(i.to_dict(), first_seen=first_seen.get(i.key)) for i in items],
     }
     write_json(FEED_PATH, payload, compact=True)
@@ -78,6 +82,11 @@ def build_feed(cfg: dict) -> dict:
     http.save()
     log.info("feed: %d items (%d new today)", payload["count"], payload["new_today"])
     return payload
+
+
+def _feed_health() -> dict:
+    from .sources import HEALTH
+    return dict(HEALTH)
 
 
 def _year_range(cfg: dict) -> list[int]:

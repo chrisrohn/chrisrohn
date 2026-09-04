@@ -78,6 +78,7 @@ main { padding: 14px 18px 140px; max-width: 1200px; margin: 0 auto; }
 .src { font-size: 11px; border-radius: 6px; padding: 1px 6px; border: 1px solid var(--line); color: var(--muted); }
 .src.listenbrainz { border-color: #eb743b66; } .src.bandcamp { border-color: #1da0c366; } .src.musicbrainz { border-color: #ba478f66; }
 .src.deezer, .src.deezer-editorial, .src.deezer-related { border-color: #a238ff66; } .src.rss { border-color: #ffd16666; } .src.spotify { border-color: #1db95466; }
+.src.ytmusic, .src.youtube { border-color: #ff000066; } .src.radio { border-color: #47e0ff66; } .src.musicbrainz-label { border-color: #ff4fa366; }
 .links a { font-size: 12px; }
 .side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .score { font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; }
@@ -150,3 +151,9 @@ body.doc footer { padding-bottom: 40px; }
 .yearbadge.medium { color: var(--fg); }
 .yearbadge.low { color: var(--gold); border-color: rgba(255,209,102,.5); }
 .card.new .side { padding-top: 14px; }
+.feeds { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.feeds span { font-size: 11px; border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; color: var(--muted); }
+.feeds span.ok { color: var(--fg); } .feeds span.dead { color: var(--down); border-color: rgba(255,93,93,.4); }
+details summary { cursor: pointer; font-size: 13px; }
+.blog-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; max-height: 50vh; overflow: auto; }
+.sources-filter .pick { border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--accent2); }

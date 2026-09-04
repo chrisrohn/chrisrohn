@@ -129,31 +129,119 @@ sources:
       - 106   # Electro
       - 132   # Pop
       - 113   # Dance
+  # New singles/albums from your top artists, straight from YouTube Music (video IDs included; replaces Release Radar).
+  ytmusic_artists:
+    enabled: true
+    top_artists: 150          # checked per run, rotating through the pool so everyone gets covered every few days
+    pool: 600
+  # Label / curator / session channels on YouTube. Free RSS per channel; wrong handles show up in ⚙ feed health.
+  youtube_channels:
+    enabled: true
+    channels:
+      - { name: "Toy Tonics", channel: "@toytonics" }
+      - { name: "Razor-N-Tape", channel: "@RazorNTape" }
+      - { name: "Italians Do It Better", channel: "@ItaliansDoItBetter" }
+      - { name: "Kitsuné Musique", channel: "@KitsuneMusique" }
+      - { name: "Ed Banger Records", channel: "@edbangerrecords" }
+      - { name: "Roche Musique", channel: "@RocheMusique" }
+      - { name: "Future Classic", channel: "@futureclassic" }
+      - { name: "Ghostly International", channel: "@ghostly" }
+      - { name: "Ninja Tune", channel: "@ninjatune" }
+      - { name: "Cascine", channel: "@cascine" }
+      - { name: "Majestic Casual", channel: "@majesticcasual" }
+      - { name: "Eton Messy", channel: "@EtonMessy" }
+      - { name: "KEXP live sessions", channel: "@kexp" }
+      - { name: "COLORS", channel: "@COLORSxSTUDIOS" }
+  # ListenBrainz "Weekly Exploration" / "Weekly Jams" — free collaborative filtering. Make a ListenBrainz account,
+  # import your Last.fm history (Settings → Import), then put the username here.
+  listenbrainz_playlists:
+    enabled: true
+    user: ""
+    kinds: [exploration, jams]
+  # What tastemaker radio is actually playing (profile-matched, or recently released for KEXP).
+  radio:
+    enabled: true
+    kexp: true
+    somafm: [poptron, indiepop]   # channel ids from somafm.com URLs, e.g. somafm.com/poptron
+  # Labels you trust: every release they put out in the window, via MusicBrainz.
+  musicbrainz_labels:
+    enabled: true
+    labels:
+      - Toy Tonics
+      - Razor-N-Tape
+      - Italians Do It Better
+      - Kitsuné
+      - Ed Banger Records
+      - Roche Musique
+      - Future Classic
+      - Ghostly International
+      - Cascine
+      - Heavenly Recordings
+      - Lucky Number
+      - Captured Tracks
+      - Mexican Summer
+      - Bella Union
+      - Permanent Vacation
+      - Music For Dreams
+      - Nang
+      - Midnight Riot
+      - Glitterbox Recordings
+      - Athens of the North
+      - Soundway
+      - Mr Bongo
+      - Big Crown Records
+      - Colemine Records
   rss:
     enabled: true
+    # Headlines shaped like `Artist – "Song"` become playable cards; other posts are kept only if they mention a
+    # profile artist. Dead or noisy feeds show up in ⚙ → feed health on the site; prune freely.
     feeds:
-      - name: Pitchfork Best New Tracks
-        url: https://pitchfork.com/feed/feed-track-reviews/rss
-      - name: Pitchfork Best New Music
-        url: https://pitchfork.com/feed/feed-best-new/rss
-      - name: Gorilla vs. Bear
-        url: https://www.gorillavsbear.net/feed/
-      - name: Stereogum
-        url: https://www.stereogum.com/feed/
-      - name: The Line of Best Fit
-        url: https://www.thelineofbestfit.com/rss
-      - name: Hype Machine Popular
-        url: https://hypem.com/feed/popular/1/feed.xml
-      - name: Hype Machine Latest
-        url: https://hypem.com/feed/latest/all/1/feed.xml
-      - name: KEXP Song of the Day
-        url: https://www.kexp.org/podcasts/song-of-the-day/feed.xml
-      - name: Bandcamp Daily
-        url: https://daily.bandcamp.com/feed
-      - name: Under the Radar
-        url: https://www.undertheradarmag.com/rss/news
-      - name: The FADER
-        url: https://www.thefader.com/rss.xml
+      # --- disco / nu-disco / indie dance / balearic (closest to the station) ---
+      - { name: "Le Visiteur", url: "https://levisiteuronline.com/feed/" }
+      - { name: "Ransom Note", url: "https://www.theransomnote.com/feed/" }
+      - { name: "Test Pressing", url: "https://testpressing.org/feed/" }
+      - { name: "Music Is My Sanctuary", url: "https://musicismysanctuary.com/feed/" }
+      - { name: "Acid Stag", url: "https://acidstag.com/feed/" }
+      - { name: "Discobelle", url: "https://discobelle.net/feed/" }
+      - { name: "Bolting Bits", url: "https://boltingbits.com/feed/" }
+      - { name: "Magnetic Magazine", url: "https://www.magneticmag.com/feed/" }
+      - { name: "When We Dip", url: "https://whenwedip.com/feed/" }
+      - { name: "Data Transmission", url: "https://datatransmission.co/feed/" }
+      - { name: "Electronic Groove", url: "https://electronicgroove.com/feed/" }
+      - { name: "XLR8R", url: "https://xlr8r.com/feed/" }
+      - { name: "Mixmag", url: "https://mixmag.net/rss.xml" }
+      - { name: "DJ Mag", url: "https://djmag.com/rss.xml" }
+      # --- indie pop / indietronica / dream pop ---
+      - { name: "Gorilla vs. Bear", url: "https://www.gorillavsbear.net/feed/" }
+      - { name: "Nialler9", url: "https://nialler9.com/feed/" }
+      - { name: "Indie Shuffle", url: "https://www.indieshuffle.com/feed/" }
+      - { name: "Stereofox", url: "https://www.stereofox.com/feed/" }
+      - { name: "EARMILK", url: "https://earmilk.com/feed/" }
+      - { name: "Atwood Magazine", url: "https://atwoodmagazine.com/feed/" }
+      - { name: "Various Small Flames", url: "https://varioussmallflames.co.uk/feed/" }
+      - { name: "Obscure Sound", url: "https://obscuresound.com/feed/" }
+      - { name: "Beats Per Minute", url: "https://beatsperminute.com/feed/" }
+      - { name: "Post-Trash", url: "https://post-trash.com/home?format=rss" }
+      - { name: "Gold Flake Paint", url: "https://goldflakepaint.co.uk/feed/" }
+      - { name: "The Wild Honey Pie", url: "https://www.thewildhoneypie.com/feed/" }
+      - { name: "Aquarium Drunkard", url: "https://aquariumdrunkard.com/feed/" }
+      - { name: "The Line of Best Fit", url: "https://www.thelineofbestfit.com/rss" }
+      - { name: "Loud and Quiet", url: "https://www.loudandquiet.com/feed/" }
+      - { name: "Clash", url: "https://www.clashmusic.com/feed/" }
+      - { name: "Under the Radar", url: "https://www.undertheradarmag.com/rss/news" }
+      # --- big tents (lots of news; the artist filter keeps them useful) ---
+      - { name: "Pitchfork Best New Tracks", url: "https://pitchfork.com/feed/feed-track-reviews/rss" }
+      - { name: "Pitchfork Best New Music", url: "https://pitchfork.com/feed/feed-best-new/rss" }
+      - { name: "Stereogum", url: "https://www.stereogum.com/feed/" }
+      - { name: "Brooklyn Vegan", url: "https://www.brooklynvegan.com/feed/" }
+      - { name: "Consequence", url: "https://consequence.net/feed/" }
+      - { name: "The FADER", url: "https://www.thefader.com/rss.xml" }
+      # --- radio + curated ---
+      - { name: "KEXP Song of the Day", url: "https://www.kexp.org/podcasts/song-of-the-day/feed.xml" }
+      - { name: "KCRW Today's Top Tune", url: "https://www.kcrw.com/music/shows/todays-top-tune/rss" }
+      - { name: "Bandcamp Daily", url: "https://daily.bandcamp.com/feed" }
+      - { name: "Hype Machine Popular", url: "https://hypem.com/feed/popular/1/feed.xml" }
+      - { name: "Hype Machine Latest", url: "https://hypem.com/feed/latest/all/1/feed.xml" }
   spotify:
     # Optional. Requires a Premium account + a dev-mode app since Feb 2026. Off by default.
     enabled: false

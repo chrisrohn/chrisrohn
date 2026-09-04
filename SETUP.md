@@ -99,6 +99,24 @@ that the playlist's owner approved in that browser.
   on this device (or everywhere, with the optional Skipped playlist).
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list.
 
+## Sources
+
+All in `discovery/config.yaml → sources`, each with an `enabled` switch. Per-feed health shows under ⚙ on the site.
+
+| Source | What it finds | Needs |
+|---|---|---|
+| `listenbrainz_fresh` | every release MusicBrainz knows from the last N days, filtered by your artists/tags | nothing |
+| `musicbrainz_tags` | recent releases tagged with your genres, from artists you've never heard of | nothing |
+| `musicbrainz_labels` | everything your trusted labels released this window | nothing |
+| `ytmusic_artists` | new singles/albums of your top artists straight from YouTube Music (the old Release Radar) | nothing |
+| `youtube_channels` | label / curator / session channels via YouTube RSS, video IDs included | channel handles |
+| `bandcamp` | newest releases per Bandcamp tag | nothing |
+| `deezer` | newest albums of your top artists + editorial new releases | nothing |
+| `radio` | recent KEXP plays (API) and SomaFM channel logs, profile-matched | nothing |
+| `listenbrainz_playlists` | ListenBrainz Weekly Exploration / Weekly Jams (collaborative filtering) | a ListenBrainz username with your Last.fm history imported |
+| `rss` | 40+ blogs and radio shows; `Artist – "Song"` headlines become cards | nothing |
+| `spotify` | off; Spotify's API is no longer viable | Premium + dev app |
+
 ## Tuning
 
 Everything lives in `discovery/config.yaml`:
