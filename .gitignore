@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+data/cache/http*.json
+data/cache/sources.json
+data/cache/profile.json
+data/cache/everynoise.json
+*.tmp
+browser.json
+oauth.json
+.env
