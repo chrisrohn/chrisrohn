@@ -41,8 +41,10 @@
     // anything the daily build already saw in your playlists no longer needs local bookkeeping
     const ids = new Set(feed.items.map(i => i.id));
     for (const id of Object.keys(state.rated)) if (!ids.has(id) && Date.now() - (state.rated[id].at || 0) > 45 * 86400e3) delete state.rated[id];
-    for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
-    if (feed.youtube && feed.youtube.skipped_playlist_id) state.playlists.__skipped = state.playlists.__skipped || feed.youtube.skipped_playlist_id;
+    if (isOwner()) {
+      for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
+      if (feed.youtube && feed.youtube.skipped_playlist_id) state.playlists.__skipped = state.playlists.__skipped || feed.youtube.skipped_playlist_id;
+    }
     persist();
     fillYears();
     fillSources();
@@ -79,10 +81,17 @@
   // ---------- auth (Google Identity Services, token flow) ----------
   const tokenValid = () => !!(state.auth && state.auth.access_token && state.auth.expires_at > Date.now() + 30e3);
   const curators = () => ((state.feed && state.feed.google && state.feed.google.curators) || []).map(e => e.toLowerCase());
-  const isCurator = () => tokenValid() && !!state.auth.email && curators().includes(state.auth.email.toLowerCase());
+  const isSignedIn = () => tokenValid() && !!state.auth.email;
+  const isOwner = () => isSignedIn() && curators().includes(state.auth.email.toLowerCase());
+  const guestsAllowed = () => !!(state.feed && state.feed.google && state.feed.google.guests);
+  // "curator" = anyone allowed to rate: the owner, or a guest when guests are enabled. Guests file into their own library.
+  const isCurator = () => isOwner() || (isSignedIn() && guestsAllowed());
+  const role = () => isOwner() ? "curator" : (isCurator() ? "guest" : "listener");
   function applyMode() {
     const on = isCurator();
     document.body.classList.toggle("curator", on);
+    document.body.classList.toggle("guest", on && !isOwner());
+    const badge = $(".mode"); if (badge) { badge.textContent = role(); badge.title = isOwner() ? "Curator: thumbs file into the Indie Discotheque year playlists" : `Guest: thumbs file into your own “${titleFor("<year>")}” playlists`; }
     const who = $("#who");
     if (state.auth && state.auth.email) {
       who.hidden = false;
@@ -113,14 +122,17 @@
         client_id: cid, scope: SCOPES,
         callback: async resp => {
           if (resp.error) { toast("Sign-in failed: " + resp.error, true); return resolve(false); }
+          const prevEmail = state.auth && state.auth.email;
           state.auth = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in || 3600) * 1000 };
           try {
             const me = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + resp.access_token } }).then(r => r.json());
             Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture });
           } catch {}
+          if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
           persist(); applyMode(); render();
-          if (isCurator()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); }
-          else toast(`Signed in as ${state.auth.email || "?"}. This account isn't a curator, so it's listen-only.`);
+          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); }
+          else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); }
+          else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
           resolve(true);
         },
       });
@@ -129,7 +141,7 @@
   }
   function signOut() {
     try { if (state.auth && state.auth.access_token && window.google) google.accounts.oauth2.revoke(state.auth.access_token, () => {}); } catch {}
-    state.auth = null; persist(); applyMode(); render(); toast("Signed out");
+    state.auth = null; state.playlists = {}; persist(); applyMode(); render(); toast("Signed out");
   }
   async function withAuth(fn) {
     if (!tokenValid()) { const ok = await signIn(); if (!ok || !tokenValid()) throw new Error("not signed in"); }
@@ -152,7 +164,9 @@
       return j;
     });
   }
-  const pattern = () => (state.feed.youtube && state.feed.youtube.playlist_title_pattern) || "{year} Indie Discotheque";
+  const pattern = () => isOwner()
+    ? ((state.feed.youtube && state.feed.youtube.playlist_title_pattern) || "{year} Indie Discotheque")
+    : ((state.feed.google && state.feed.google.guest_playlist_title_pattern) || "{year} Picks from chrisrohn.com");
   const titleFor = year => pattern().replace("{year}", year);
   const skippedTitle = () => (state.feed.youtube && state.feed.youtube.skipped_playlist_title) || "Skipped";
   const titleRegex = () => new RegExp("^" + pattern().split("{year}").map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(\\d{4})") + "$", "i");
@@ -442,6 +456,11 @@
     $("#settings-btn").addEventListener("click", () => {
       $("#s-playlists").textContent = Object.entries(state.playlists).filter(([k]) => !k.startsWith("__")).length + " year playlists known" + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : " · no skipped playlist yet");
       $("#s-quota").textContent = quotaText();
+      const g = $("#s-guests");
+      if (isOwner()) {
+        g.hidden = false;
+        g.innerHTML = `Guest rating is <b>${guestsAllowed() ? "on" : "off"}</b> (other Google accounts ${guestsAllowed() ? "can rate into their own “" + esc((state.feed.google || {}).guest_playlist_title_pattern || "") + "” playlists" : "get a listen-only site"}). This is a site-wide switch, so it lives in the repo: <a href="https://github.com/chrisrohn/chrisrohn/edit/main/discovery/config.yaml" target="_blank" rel="noopener">edit config.yaml</a> → <code>google.guests: ${guestsAllowed() ? "false" : "true"}</code>. Takes effect at the next daily build (or run the Discover workflow).`;
+      } else g.hidden = true;
       const fh = state.feed.feed_health || {};
       const rows = Object.entries(fh).sort((x, y) => (y[1].kept - x[1].kept) || x[0].localeCompare(y[0]));
       $("#s-feeds").innerHTML = rows.length ? rows.map(([n, h]) => `<span class="${h.ok ? (h.kept ? "ok" : "quiet") : "dead"}" title="${esc(h.error || "")}">${esc(n)} ${h.ok ? h.kept + "/" + h.entries : "✗"}</span>`).join("") : "<span class=\"muted\">no blog feed data yet</span>";

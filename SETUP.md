@@ -86,9 +86,12 @@ YouTube API quota extension form in the Cloud console (free).
 chrisrohn.com is public: anyone can browse, filter by source, play tracks and see **Picks** (the newest tracks in
 your current-year playlist). Nothing on the public side can write anywhere.
 
-**Curator mode** appears only when the signed-in Google account is in `google.curators`. Other Google accounts
-can sign in but stay listen-only. Nothing about the site can touch a playlist except through a Google session
-that the playlist's owner approved in that browser.
+**Curator mode** appears when the signed-in Google account is in `google.curators`: thumbs file into the
+`<year> Indie Discotheque` playlists. **Guests** are off by default: other Google accounts can sign in but get a listen-only site. Flip
+`google.guests: true` (your ⚙ panel links straight to the line) and they can rate too, with their 👍 going into
+`<year> Picks from chrisrohn.com` playlists in *their own* library, never yours. Everyone who signs in
+shares the project's daily YouTube API quota. Nothing about the site can touch a playlist except through a Google
+session that the playlist's owner approved in that browser.
 
 ## Daily use
 

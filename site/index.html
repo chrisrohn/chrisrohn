@@ -83,9 +83,10 @@
 <dialog id="settings">
   <form method="dialog" class="settings-form">
     <h2>Settings</h2>
-    <p class="muted">Signing in uses YouTube API Services; see the <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms</a>. Anyone can listen here. <b>Sign in with Google</b> as a curator account and the thumbs appear: 👍 adds the track to <code>&lt;year&gt; Indie Discotheque</code> in your YouTube library right away (Undo for a few seconds), 👎 hides it here for good (and, if you switch it on below, files it into an unlisted <code>Skipped</code> playlist). Nothing else is touched.</p>
+    <p class="muted">Signing in uses YouTube API Services; see the <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms</a>. Anyone can listen here. <b>Sign in with Google</b> and the thumbs appear: 👍 adds the track to a year playlist in <em>your own</em> YouTube library right away (curator: <code>&lt;year&gt; Indie Discotheque</code>; guests: <code>&lt;year&gt; Picks from chrisrohn.com</code>), with Undo for a few seconds. 👎 hides it here for good (and, if you switch it on below, files it into an unlisted <code>Skipped</code> playlist). Nothing else is touched.</p>
     <p class="muted" id="s-playlists"></p>
     <p class="muted" id="s-quota"></p>
+    <p class="muted owner" id="s-guests"></p>
     <details><summary class="muted">Blog feed health (tracks kept / posts seen in the last build)</summary><div id="s-feeds" class="feeds"></div></details>
     <label class="chk curator"><input type="checkbox" id="s-skips"> Also file 👎 into the unlisted “Skipped” playlist on YouTube (syncs skips across devices and into the daily build; costs 50 quota units each). Off = skips are free and remembered in this browser only.</label>
     <div class="row">
