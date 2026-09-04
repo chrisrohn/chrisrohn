@@ -7,7 +7,7 @@ Payload (sent by the site via GitHub `repository_dispatch`, event_type = "decisi
   * "up" decisions are added to the "<year> Indie Discotheque" playlist in YOUR YouTube Music library
     — only here, only for tracks you explicitly approved. The daily feed build never touches playlists.
 
-Needs the YTMUSIC_HEADERS_RAW (or YTMUSIC_BROWSER_JSON) secret (see SETUP.md) for the playlist step; without it,
+Needs the YTMUSIC_OAUTH_JSON (or YTMUSIC_HEADERS_RAW / YTMUSIC_BROWSER_JSON) secret (see SETUP.md) for the playlist step; without it,
 decisions are still archived and approved tracks stay in `pending_playlist`, retried on the next sync.
 """
 from __future__ import annotations
@@ -32,30 +32,38 @@ def _load() -> dict:
 
 
 def _ytmusic_authed():
-    """Authenticated client from one of two secrets (no local install needed):
+    """Authenticated client from whichever secret exists (checked in this order):
 
-    * YTMUSIC_HEADERS_RAW  – request headers copied straight out of the browser's DevTools on music.youtube.com
-    * YTMUSIC_BROWSER_JSON – the browser.json produced by `ytmusicapi browser`, if you prefer
+    * YTMUSIC_OAUTH_JSON (+ YTMUSIC_OAUTH_CLIENT_ID/SECRET) – created by the "Connect YouTube Music" workflow
+    * YTMUSIC_HEADERS_RAW  – request headers copied from the browser's DevTools on music.youtube.com
+    * YTMUSIC_BROWSER_JSON – the browser.json produced by `ytmusicapi browser`
     """
+    oauth_json = os.environ.get("YTMUSIC_OAUTH_JSON")
+    cid, csec = os.environ.get("YTMUSIC_OAUTH_CLIENT_ID"), os.environ.get("YTMUSIC_OAUTH_CLIENT_SECRET")
     raw_headers = os.environ.get("YTMUSIC_HEADERS_RAW")
     raw_json = os.environ.get("YTMUSIC_BROWSER_JSON")
-    if not raw_headers and not raw_json:
+    if not (oauth_json or raw_headers or raw_json):
         return None
     import ytmusicapi
     from ytmusicapi import YTMusic
 
     tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
     tmp.close()
-    if raw_headers:
-        try:
-            ytmusicapi.setup(filepath=tmp.name, headers_raw=raw_headers.strip())
-        except Exception as exc:  # noqa: BLE001
-            log.error("YTMUSIC_HEADERS_RAW could not be parsed (%s) — copy the full request headers block, including the Cookie line", exc)
-            return None
-    else:
-        with open(tmp.name, "w", encoding="utf-8") as fh:
-            fh.write(raw_json)
     try:
+        if oauth_json:
+            if not (cid and csec):
+                log.error("YTMUSIC_OAUTH_JSON is set but YTMUSIC_OAUTH_CLIENT_ID/SECRET are missing")
+                return None
+            from ytmusicapi import OAuthCredentials
+
+            with open(tmp.name, "w", encoding="utf-8") as fh:
+                fh.write(oauth_json)
+            return YTMusic(tmp.name, oauth_credentials=OAuthCredentials(client_id=cid, client_secret=csec))
+        if raw_headers:
+            ytmusicapi.setup(filepath=tmp.name, headers_raw=raw_headers.strip())
+        else:
+            with open(tmp.name, "w", encoding="utf-8") as fh:
+                fh.write(raw_json)
         return YTMusic(tmp.name)
     except Exception as exc:  # noqa: BLE001
         log.error("YouTube Music auth failed: %s", exc)
@@ -124,7 +132,7 @@ def apply_decisions(cfg: dict, payload: dict[str, Any]) -> dict:
     filed = 0
     yt = _ytmusic_authed()
     if approved and not yt:
-        log.warning("YTMUSIC_HEADERS_RAW not set — %d approvals stay pending", len(approved))
+        log.warning("YouTube Music not connected — %d approvals stay pending", len(approved))
     elif approved:
         playlists = _find_year_playlists(yt, cfg, store["playlists"])
         store["playlists"] = playlists

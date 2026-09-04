@@ -226,3 +226,25 @@ def test_resolve_pick():
     ]
     assert _pick(res, "Jungle", "Keep Moving")["videoId"] == "a"
     assert _pick(res[1:], "Jungle", "Keep Moving") is None
+
+
+def test_device_flow_polls_until_approved(monkeypatch):
+    from discovery import oauth
+
+    calls = {"n": 0}
+
+    class FakeCreds:
+        def __init__(self, *a, **k): pass
+        def get_code(self):
+            return {"device_code": "dev", "user_code": "ABCD-EFGH", "verification_url": "https://www.google.com/device", "interval": 0, "expires_in": 60}
+        def token_from_code(self, device_code):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return {"error": "authorization_pending"}
+            return {"access_token": "at", "refresh_token": "rt", "scope": "s", "token_type": "Bearer", "expires_in": 3600}
+
+    import ytmusicapi.auth.oauth.credentials as c
+    monkeypatch.setattr(c, "OAuthCredentials", FakeCreds)
+    monkeypatch.setattr(oauth.time, "sleep", lambda s: None)
+    tok = oauth.device_flow("id", "secret")
+    assert calls["n"] == 3 and tok["access_token"] == "at" and tok["refresh_token"] == "rt" and tok["expires_at"] > 0

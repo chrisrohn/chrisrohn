@@ -42,6 +42,9 @@ jobs:
 
       - name: Apply decisions (file approvals into year playlists)
         env:
+          YTMUSIC_OAUTH_JSON: ${{ secrets.YTMUSIC_OAUTH_JSON }}
+          YTMUSIC_OAUTH_CLIENT_ID: ${{ secrets.YTMUSIC_OAUTH_CLIENT_ID }}
+          YTMUSIC_OAUTH_CLIENT_SECRET: ${{ secrets.YTMUSIC_OAUTH_CLIENT_SECRET }}
           YTMUSIC_HEADERS_RAW: ${{ secrets.YTMUSIC_HEADERS_RAW }}
           YTMUSIC_BROWSER_JSON: ${{ secrets.YTMUSIC_BROWSER_JSON }}
           DECISIONS_JSON: ${{ toJSON(github.event.client_payload) }}

@@ -33,7 +33,7 @@ into the year playlist you chose on the card (defaults to the release year, 1979
    | Secret | Required | Where to get it |
    |---|---|---|
    | `LASTFM_API_KEY` | yes | https://www.last.fm/api/account/create — instant, free. Any app name. |
-   | `YTMUSIC_HEADERS_RAW` | for filing 👍 into playlists | step 3 below (copy/paste from your browser, no install) |
+   | `YTMUSIC_OAUTH_CLIENT_ID`, `YTMUSIC_OAUTH_CLIENT_SECRET`, `ADMIN_PAT` | for filing 👍 into playlists | step 3 below (all in the browser, no install) |
    | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | no (source is off) | needs Premium since Feb 2026; skip |
 
 5. **Actions → Discover → Run workflow.** First run takes ~10–15 min (profile build + MusicBrainz rate limit).
@@ -54,24 +54,42 @@ At your registrar, add:
 Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick **Enforce HTTPS** once the check passes
 (`site/CNAME` already contains the domain, so deploys keep it). Docs: https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site
 
-## 3. YouTube Music auth (so 👍 lands in your year playlists)
+## 3. Connect YouTube Music (so 👍 lands in your year playlists)
 
-No install needed. You copy the request headers your own browser already sends to music.youtube.com and store
-them as a secret; the Decisions workflow turns them into a ytmusicapi session. Nothing is shared with any
-third party.
+Everything happens in a browser; nothing is installed and no developer console is needed. Use a **personal**
+Google account (a work/school account may be blocked from Google Cloud).
 
-1. In **Chrome or Edge** (Firefox works too), open https://music.youtube.com and make sure you're signed in.
-2. Press **F12** → **Network** tab. In the filter box type `browse`.
-3. Click anything in YouTube Music (e.g. Library) so requests appear. Click a request whose name starts with
-   **browse?** and whose Method is **POST** (status 200).
-4. In the right pane, **Headers** → scroll to **Request Headers**. Chrome/Edge: right-click on that section →
-   **Copy value** (or select the whole block from `accept:` down through `x-youtube-client-version:` and copy).
-   Firefox: click **Raw** next to Request Headers, then select all and copy.
-5. GitHub → repo **Settings → Secrets and variables → Actions → New repository secret**:
-   Name `YTMUSIC_HEADERS_RAW`, Value = paste the block. Save.
+**a. Create a free Google OAuth client (5 minutes, once)**
 
-The block must include the `cookie:` line (it's long) and `x-goog-authuser:`. Sessions last for months; if
-approvals start showing "pending" in the archive, repeat steps 1–5 and update the secret.
+1. https://console.cloud.google.com/projectcreate → name it `indie-discotheque` → Create.
+2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3).
+3. https://console.cloud.google.com/apis/credentials/consent → External → fill App name + your email → Save.
+   Under **Audience → Test users** add your own Google email. (Leave the app in "Testing"; that's fine for one user.)
+4. https://console.cloud.google.com/apis/credentials → **Create credentials → OAuth client ID** →
+   Application type **TVs and Limited Input devices** → Create. Copy the **Client ID** and **Client secret**.
+
+**b. Store them + an admin token as repo secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `YTMUSIC_OAUTH_CLIENT_ID` | the Client ID |
+| `YTMUSIC_OAUTH_CLIENT_SECRET` | the Client secret |
+| `ADMIN_PAT` | a fine-grained GitHub token for this repo with **Secrets: Read and write** (https://github.com/settings/personal-access-tokens/new). Lets the workflow save the sign-in result as a secret. |
+
+**c. Sign in**
+
+1. **Actions → Connect YouTube Music → Run workflow.**
+2. Open the running job. The **Summary** (and the log) shows: *Open google.com/device and enter code XXXX-XXXX.*
+3. On your phone or any browser go to https://www.google.com/device, enter the code, pick the Google account that
+   owns the playlists, click **Continue/Allow**. (Google warns the app is unverified because it's your own; continue.)
+4. The job finishes with "Saved as repository secret YTMUSIC_OAUTH_JSON. You're connected."
+
+Tokens from a "Testing" OAuth app expire after 7 days; publish the consent screen (**Audience → Publish app**, no
+verification needed for this scope) and the token refreshes itself indefinitely. If approvals ever show
+"pending" in the Archive, just run **Connect YouTube Music** again.
+
+Alternative without Google Cloud: if you *can* open DevTools somewhere, paste the request headers from a
+`browse?` POST on music.youtube.com into a `YTMUSIC_HEADERS_RAW` secret instead (Network tab → Request Headers).
 
 Playlists are matched by title: `<year> Indie Discotheque` in your library. The three IDs in
 `discovery/config.yaml` are only a fallback.
