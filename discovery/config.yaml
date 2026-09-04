@@ -161,7 +161,7 @@ sources:
   # import your Last.fm history (Settings → Import), then put the username here.
   listenbrainz_playlists:
     enabled: true
-    user: ""
+    user: "chrisrohn"
     kinds: [exploration, jams]
   # What tastemaker radio is actually playing (profile-matched, or recently released for KEXP).
   radio:
