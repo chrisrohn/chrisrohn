@@ -224,7 +224,7 @@ def test_resolve_pick():
     assert _pick(res[1:], "Jungle", "Keep Moving") is None
 
 
-def test_verify_years_uses_musicbrainz_and_flags_reissues(monkeypatch):
+def test_verify_years_uses_musicbrainz_then_deezer_then_itunes(monkeypatch):
     from discovery import resolve
 
     today = date.today()
@@ -235,25 +235,44 @@ def test_verify_years_uses_musicbrainz_and_flags_reissues(monkeypatch):
         ]},
         {"title": "Lovers (Karaoke)", "artist-credit": [{"name": "Roosevelt"}], "releases": [{"date": "1990-01-01"}]},
     ]}
+    calls = []
 
     class FakeHttp:
         def get(self, url, **kw):
-            return mb if "Roosevelt" in kw["params"]["query"] else {"recordings": []}
+            calls.append((url, kw.get("params", {})))
+            p = kw.get("params", {})
+            if "musicbrainz" in url:
+                return mb if "Roosevelt" in p["query"] else {"recordings": []}
+            if "itunes" in url:
+                if "Someone" in p["term"]:
+                    return {"results": [{"trackName": "Blog Only", "artistName": "Someone", "releaseDate": "2019-03-01T00:00:00Z"}]}
+                return {"results": []}
+            if "deezer" in url and url.endswith("/search"):
+                if "RAC" in p["q"]:
+                    return {"data": [{"title": "I Should've Guessed (feat. Speak)", "title_short": "I Should've Guessed", "artist": {"name": "RAC"}, "album": {"id": 77}}]}
+                return {"data": []}
+            if "/album/77" in url:
+                return {"release_date": "2014-04-14", "record_type": "album"}
+            return {}
 
     items = [
         Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["listenbrainz"]),
+        Item(artist="RAC", title="I Should've Guessed", featuring=["Speak"], kind="track", sources=["radio:SomaFM poptron"]),
         Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["bandcamp"]),
         Item(artist="Someone", title="Blog Only", kind="track", release_date=today, sources=["rss:Pitchfork"], youtube={"videoId": "x", "year": "2019"}),
         Item(artist="Nobody", title="Nothing", kind="track", sources=["rss:Blog"]),
     ]
     resolve.verify_years(items, _cfg(), FakeHttp())
-    r, j, s, n = items
+    r, rac, j, s, n = items
     assert (r.year, r.year_source, r.year_confidence, r.original_year) == (2016, "musicbrainz-recording", "high", 2016)
+    assert (rac.year, rac.year_source, rac.year_confidence) == (2014, "deezer", "medium")           # radio play, no date → Deezer knew
+    # the MusicBrainz query used the plain title, not "… feat. Speak"
+    mbq = next(p["query"] for u, p in calls if "musicbrainz" in u and "RAC" in p["query"])
+    assert 'recording:"I Should\'ve Guessed" AND artist:"RAC"' == mbq
     assert (j.year, j.year_source, j.year_confidence) == (today.year, "release-date", "medium")
-    assert (s.year, s.year_source) == (2019, "youtube")          # blog date is not trusted; YouTube album year wins
-    assert (n.year, n.year_confidence) == (today.year, "low")
-    d = r.to_dict()
-    assert d["year"] == 2016 and d["original_year"] == 2016
+    assert (s.year, s.year_source) == (2019, "itunes")                                              # iTunes beats the blog date
+    assert (n.year, n.year_source, n.year_confidence) == (today.year, "unknown", "low")
+    assert r.to_dict()["original_year"] == 2016
 
 
 def test_rohn_standard_notation():

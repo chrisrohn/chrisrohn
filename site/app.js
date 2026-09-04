@@ -22,10 +22,11 @@
     rated: LS.get("id:rated", {}),          // {id: {decision, year, videoId, artist, title, playlistItemId, at}} — local mirror of what this browser filed
     auth: LS.get("id:auth", null),          // {access_token, expires_at, email, name, picture}
     playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL..."} learned from your library
-    settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25 }, LS.get("id:settings", {})),    // {skipsInYouTube, audition, auditionSeconds, auditionStart}
+    settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
+    deckIndex: 0,    // {skipsInYouTube, audition, auditionSeconds, auditionStart}
     auditionTimer: null, auditionTick: null, auditionArmed: null,
     quota: LS.get("id:quota", { day: "", units: 0 }),  // rough count of YouTube API units spent today (resets midnight Pacific)
-    filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
+    filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: false }, LS.get("id:filters", {})),
     view: "feed",
     order: [],
     currentId: null,
@@ -76,7 +77,7 @@
     const y = d ? parseInt(String(d).slice(0, 4), 10) : NaN;
     return Number.isFinite(y) ? y : new Date().getFullYear();
   };
-  const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found — defaulted to this year" };
+  const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — pick the year yourself" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- auth (Google Identity Services, token flow) ----------
@@ -239,7 +240,8 @@
     persist();
     const wasCurrent = state.currentId === id; const idx = state.order.indexOf(id);
     render();
-    if (state.view === "feed") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasCurrent && $("#autoplay").checked && byId(next)?.youtube?.videoId) play(next); } else if (wasCurrent) stopPlayer(); }
+    if (deckOn()) { const nxt = deckItem(); if (nxt && wasCurrent && $("#autoplay").checked && nxt.youtube?.videoId) play(nxt.id); else if (wasCurrent && !nxt) stopPlayer(); if (nxt) render(); }
+    else if (state.view === "feed") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasCurrent && $("#autoplay").checked && byId(next)?.youtube?.videoId) play(next); } else if (wasCurrent) stopPlayer(); }
     if (decision === "down" && !skipsInYouTube()) {
       // free: remembered in this browser only (no quota). Turn on "skips in YouTube" in ⚙ to sync across devices.
       state.rated[id] = { ...state.rated[id], pending: false, local: true }; persist(); state.busy.delete(id); render();
@@ -325,6 +327,7 @@
       if (f.onlyNew && i.first_seen !== state.feed.generated_at?.slice(0, 10)) return false;
       if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
       if (f.onlyKnown && !i.match_kind) return false;
+      if (f.onlyRecent && Number.isFinite(i.year) && i.year_source !== "unknown" && i.year < new Date().getFullYear() - 1) return false;
       return true;
     });
     const cmp = {
@@ -336,17 +339,65 @@
     return list.sort(cmp);
   }
 
+  const isPhone = () => window.matchMedia("(max-width: 760px)").matches;
+  const deckOn = () => (state.settings.deck == null ? isPhone() : !!state.settings.deck) && state.view === "feed";
   function render() {
     const list = $("#list"); const vis = visibleItems(); state.order = vis.map(i => i.id);
+    document.body.classList.toggle("deck-mode", deckOn());
+    const lt = $("#layout-toggle"); if (lt) lt.textContent = deckOn() ? "list view" : "card view";
+    if (deckOn()) { list.innerHTML = ""; renderDeck(vis); }
+    else { $("#deck").hidden = true;
     list.innerHTML = ""; const tpl = $("#card-tpl"); const frag = document.createDocumentFragment();
     for (const it of vis) frag.appendChild(card(it, tpl));
-    list.appendChild(frag);
+    list.appendChild(frag); }
     const empty = $("#empty"); empty.hidden = vis.length > 0;
     empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : "No picks yet.";
     $("#count-feed").textContent = items().filter(i => !decisionFor(i.id)).length;
     $("#count-picks").textContent = (state.feed.picks || []).length;
     $("#filters").classList.toggle("picks", state.view === "picks");
   }
+
+  function renderDeck(vis) {
+    const deck = $("#deck"); const host = $("#deck-card");
+    if (!vis.length) { deck.hidden = true; host.innerHTML = ""; return; }
+    deck.hidden = false;
+    state.deckIndex = Math.max(0, Math.min(state.deckIndex, vis.length - 1));
+    const it = vis[state.deckIndex];
+    $("#deck-count").textContent = `${state.deckIndex + 1} / ${vis.length}`;
+    $("#deck-prev").disabled = state.deckIndex === 0;
+    const el = $("#deck-tpl").content.firstElementChild.cloneNode(true);
+    el.dataset.id = it.id;
+    const yt = it.youtube || {};
+    const img = $("img", el); if (it.artwork || yt.thumbnail) img.src = it.artwork || yt.thumbnail; else img.remove();
+    if (!yt.videoId) $(".dplay", el).remove();
+    $(".dartist", el).textContent = it.artist;
+    $(".dtitle", el).textContent = it.display_title || it.title;
+    $(".release", el).textContent = [it.release_type, it.release && it.release !== it.title ? it.release : null].filter(Boolean).join(" · ");
+    $(".date", el).textContent = it.release_date || "";
+    const yb = $(".yearbadge", el); const conf = it.year_confidence || "low"; yb.classList.add(conf); yb.title = YEAR_SOURCE[it.year_source] || "";
+    yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? "year unknown" : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+    if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
+    const why = [];
+    if (it.match_kind === "direct") why.push(it.matched_artist === it.artist ? "you play them" : "you play " + it.matched_artist);
+    else if (it.match_kind === "similar") why.push(it.reasons.find(r => r.startsWith("similar to ")) || "similar artist");
+    for (const r of it.reasons || []) if (!r.startsWith("you play") && !r.startsWith("similar to")) why.push(r);
+    $(".dwhy", el).textContent = why.join(" · ");
+    $(".dtags", el).innerHTML = (it.tags || []).slice(0, 5).map(t => `<span class="tag">${esc(t)}</span>`).join("");
+    $(".dsources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}">${esc(n || k)}</span>`; }).join("");
+    const links = [];
+    if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
+    for (const [k, u] of Object.entries(it.links || {})) links.push(`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(k)}</a>`);
+    $(".dlinks", el).innerHTML = links.join(" · ");
+    const ysel = $(".year", el); ysel.innerHTML = state._years.map(y => `<option value="${y}">${y}</option>`).join(""); ysel.value = yearOf(it);
+    $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
+    attachSwipe(el, it, 110);
+    if (state.currentId === it.id) el.classList.add("current");
+    host.innerHTML = ""; host.appendChild(el);
+    $("#deck-play").textContent = state.currentId === it.id && state.playerReady && state.player.getPlayerState && state.player.getPlayerState() === 1 ? "⏸" : "▶";
+    $("#deck-play").disabled = !yt.videoId;
+  }
+  const deckItem = () => { const id = $("#deck-card .dcard")?.dataset.id; return id ? byId(id) : null; };
+  function deckYear() { const s = $("#deck-card .year"); return s ? +s.value : undefined; }
 
   function card(it, tpl) {
     const el = tpl.content.firstElementChild.cloneNode(true);
@@ -368,7 +419,8 @@
       const conf = it.year_confidence || "low";
       yb.classList.add(conf);
       yb.title = YEAR_SOURCE[it.year_source] || "";
-      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? "year unknown" : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+      if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
     }
     $(".reasons", el).textContent = (it.reasons || []).filter(r => !r.startsWith("similar to") && !r.startsWith("you play")).join(" · ");
     $(".tags", el).innerHTML = (it.tags || []).slice(0, 6).map(t => `<span class="tag">${esc(t)}</span>`).join("");
@@ -394,7 +446,7 @@
     el.addEventListener("focus", () => { state.currentId = it.id; $$(".card.current").forEach(c => c.classList.remove("current")); el.classList.add("current"); });
     return el;
   }
-  function attachSwipe(el, it) {
+  function attachSwipe(el, it, threshold = 90) {
     let x0 = 0, y0 = 0, dx = 0, active = false;
     el.addEventListener("touchstart", e => { if (!isCurator()) return; const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; dx = 0; active = true; el.classList.add("swiping"); }, { passive: true });
     el.addEventListener("touchmove", e => {
@@ -406,7 +458,7 @@
     const end = () => {
       if (!active) return; active = false; el.classList.remove("swiping");
       const ysel = $(".year", el); const year = ysel ? +ysel.value : undefined;
-      if (dx > 90) rate(it.id, "up", year); else if (dx < -90) rate(it.id, "down", year);
+      if (dx > threshold) rate(it.id, "up", year); else if (dx < -threshold) rate(it.id, "down", year);
       el.style.transform = ""; el.classList.remove("swipe-up", "swipe-down");
     };
     el.addEventListener("touchend", end); el.addEventListener("touchcancel", end);
@@ -433,8 +485,9 @@
   function ensureApi() { if (window.YT && window.YT.Player) return; if ($("#yt-api")) return; const s = document.createElement("script"); s.id = "yt-api"; s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s); }
   function play(id) {
     state.currentId = id; const it = current(); const vid = it?.youtube?.videoId; if (!vid) return;
-    $$(".card.current").forEach(c => c.classList.remove("current"));
-    const el = $(`.card[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
+    $$(".card.current, .dcard.current").forEach(c => c.classList.remove("current"));
+    const el = $(`.card[data-id="${CSS.escape(id)}"], .dcard[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
+    const dp = $("#deck-play"); if (dp) dp.textContent = "⏸";
     $("#player").hidden = false;
     $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
     ensureApi();
@@ -466,6 +519,7 @@
   }
   function holdAudition() { if (state.auditionTimer) { clearAudition(); toast("Audition timer cancelled for this track"); } }
   function step(delta) {
+    if (deckOn()) { const vis = visibleItems(); state.deckIndex = Math.max(0, Math.min(vis.length - 1, state.deckIndex + delta)); renderDeck(vis); const it = deckItem(); if (it?.youtube?.videoId && state.currentId) play(it.id); return; }
     const i = state.order.indexOf(state.currentId); let j = i < 0 ? 0 : i + delta;
     while (j >= 0 && j < state.order.length) { const id = state.order[j]; const it = byId(id) || visibleItems().find(x => x.id === id); if (it?.youtube?.videoId) { play(id); focusCard(id); return; } j += delta; }
   }
@@ -485,7 +539,7 @@
     const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `new-music-approvals-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   }
-  function currentYear(id = state.currentId) { const el = id && $(`.card[data-id="${CSS.escape(id)}"] .year`); return el ? +el.value : undefined; }
+  function currentYear(id = state.currentId) { const el = id && $(`.card[data-id="${CSS.escape(id)}"] .year, .dcard[data-id="${CSS.escape(id)}"] .year`); return el ? +el.value : undefined; }
 
   function wire() {
     $$(".tab").forEach(b => b.addEventListener("click", () => { state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b)); render(); }));
@@ -496,6 +550,8 @@
     $("#only-new").addEventListener("change", e => { f.onlyNew = e.target.checked; persist(); render(); });
     $("#only-playable").addEventListener("change", e => { f.onlyPlayable = e.target.checked; persist(); render(); });
     $("#only-known").addEventListener("change", e => { f.onlyKnown = e.target.checked; persist(); render(); });
+    $("#only-recent").checked = f.onlyRecent;
+    $("#only-recent").addEventListener("change", e => { f.onlyRecent = e.target.checked; persist(); render(); });
     $("#signin").addEventListener("click", () => { if (state.auth && tokenValid()) signOut(); else signIn().catch(e => toast(e.message, true)); });
     $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", () => { holdAudition(); toggle(); });
     const aud = $("#audition"); aud.checked = auditionOn(); $("#audition-label").textContent = (state.settings.auditionSeconds || 30) + "s";
@@ -505,6 +561,18 @@
     $("#s-aud-start").addEventListener("change", e => { state.settings.auditionStart = Math.min(80, Math.max(0, +e.target.value || 0)); persist(); });
     $("#yt").addEventListener("click", holdAudition, true);
     if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});
+    $("#deck-up").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "up", deckYear()); });
+    $("#deck-down").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "down", deckYear()); });
+    $("#deck-play").addEventListener("click", () => { const it = deckItem(); if (!it?.youtube?.videoId) return; if (state.currentId === it.id && state.playerReady) { holdAudition(); toggle(); $("#deck-play").textContent = $("#deck-play").textContent === "⏸" ? "▶" : "⏸"; } else play(it.id); });
+    $("#deck-next").addEventListener("click", () => { state.deckIndex++; render(); const it = deckItem(); if (it?.youtube?.videoId && state.currentId) play(it.id); });
+    $("#deck-prev").addEventListener("click", () => { state.deckIndex = Math.max(0, state.deckIndex - 1); render(); });
+    $("#layout-toggle").addEventListener("click", () => { state.settings.deck = !deckOn(); persist(); render(); });
+    $("#deck-filters").addEventListener("click", () => document.body.classList.toggle("filters-open"));
+    // keep the pinned deck buttons above the player bar whatever its height
+    const playerEl = $("#player");
+    const setPlayerH = () => document.documentElement.style.setProperty("--player-h", playerEl.hidden ? "0px" : playerEl.getBoundingClientRect().height + "px");
+    new ResizeObserver(setPlayerH).observe(playerEl); new MutationObserver(setPlayerH).observe(playerEl, { attributes: true, attributeFilter: ["hidden"] }); setPlayerH();
+    window.matchMedia("(max-width: 760px)").addEventListener("change", () => render());
     $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
     $("#settings-btn").addEventListener("click", () => {
@@ -527,7 +595,7 @@
     $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
-      const id = state.currentId || state.order[0];
+      const id = deckOn() ? (deckItem()?.id || state.currentId) : (state.currentId || state.order[0]);
       switch (e.key) {
         case "j": case "ArrowDown": e.preventDefault(); state.currentId ? step(1) : focusCard(state.order[0]); break;
         case "k": case "ArrowUp": e.preventDefault(); step(-1); break;
