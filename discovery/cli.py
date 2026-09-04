@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
 
         prof = read_json(DATA_DIR / "profile.json", None)
         stale = True
-        if prof and prof.get("built_at"):
+        if prof and prof.get("built_at") and "youtube" in prof:  # profiles from older pipeline versions get rebuilt
             built = datetime.fromisoformat(prof["built_at"])
             stale = datetime.now(timezone.utc) - built > timedelta(days=int(cfg["profile"].get("rebuild_days", 3)))
         if stale or "--rebuild-profile" in argv:
