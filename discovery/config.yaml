@@ -30,7 +30,7 @@ youtube_music:
 # Sign in with Google on the site. Create a "Web application" OAuth client (see SETUP.md) and put its ID here —
 # a client ID is public by design. Only the listed Google accounts get curator mode.
 google:
-  client_id: ""
+  client_id: "903191577478-dev4etltn01rvubgi4fkqaulshltit7d.apps.googleusercontent.com"
   curators:
     - chrisrohn@gmail.com
 
@@ -226,7 +226,6 @@ sources:
       - { name: "The Wild Honey Pie", url: "https://www.thewildhoneypie.com/feed/" }
       - { name: "Aquarium Drunkard", url: "https://aquariumdrunkard.com/feed/" }
       - { name: "The Line of Best Fit", url: "https://www.thelineofbestfit.com/rss" }
-      - { name: "DIY Magazine", url: "https://diymag.com/feed" }
       - { name: "Loud and Quiet", url: "https://www.loudandquiet.com/feed/" }
       - { name: "Clash", url: "https://www.clashmusic.com/feed/" }
       - { name: "Under the Radar", url: "https://www.undertheradarmag.com/rss/news" }
@@ -250,7 +249,7 @@ sources:
 
 # ---------- Ranking ----------
 ranking:
-  max_items: 200
+  max_items: 500
   min_score: 0.6
   weights:
     affinity: 4.0          # direct artist match
