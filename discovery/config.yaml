@@ -152,8 +152,6 @@ sources:
         url: https://daily.bandcamp.com/feed
       - name: Under the Radar
         url: https://www.undertheradarmag.com/rss/news
-      - name: DIY Magazine
-        url: https://diymag.com/feed
       - name: The FADER
         url: https://www.thefader.com/rss.xml
   spotify:
@@ -163,7 +161,7 @@ sources:
 
 # ---------- Ranking ----------
 ranking:
-  max_items: 200
+  max_items: 500
   min_score: 0.6
   weights:
     affinity: 4.0          # direct artist match
