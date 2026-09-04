@@ -33,7 +33,7 @@ into the year playlist you chose on the card (defaults to the release year, 1979
    | Secret | Required | Where to get it |
    |---|---|---|
    | `LASTFM_API_KEY` | yes | https://www.last.fm/api/account/create — instant, free. Any app name. |
-   | `YTMUSIC_BROWSER_JSON` | for filing 👍 into playlists | step 3 below |
+   | `YTMUSIC_OAUTH_CLIENT_ID`, `YTMUSIC_OAUTH_CLIENT_SECRET`, `ADMIN_PAT` | for filing 👍 into playlists | step 3 below (all in the browser, no install) |
    | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | no (source is off) | needs Premium since Feb 2026; skip |
 
 5. **Actions → Discover → Run workflow.** First run takes ~10–15 min (profile build + MusicBrainz rate limit).
@@ -54,17 +54,42 @@ At your registrar, add:
 Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick **Enforce HTTPS** once the check passes
 (`site/CNAME` already contains the domain, so deploys keep it). Docs: https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site
 
-## 3. YouTube Music auth (so 👍 lands in your year playlists)
+## 3. Connect YouTube Music (so 👍 lands in your year playlists)
 
-ytmusicapi uses your browser session; nothing is shared with a third party.
+Everything happens in a browser; nothing is installed and no developer console is needed. Use a **personal**
+Google account (a work/school account may be blocked from Google Cloud).
 
-```bash
-pip install ytmusicapi
-ytmusicapi browser        # follow the prompt: paste the request headers from music.youtube.com (F12 → Network → any /browse POST → copy request headers)
-```
+**a. Create a free Google OAuth client (5 minutes, once)**
 
-Open the generated `browser.json`, copy its entire contents into the `YTMUSIC_BROWSER_JSON` secret.
-Sessions last a long time (months); if approvals start staying "pending", regenerate the file and update the secret.
+1. https://console.cloud.google.com/projectcreate → name it `indie-discotheque` → Create.
+2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3).
+3. https://console.cloud.google.com/apis/credentials/consent → External → fill App name + your email → Save.
+   Under **Audience → Test users** add your own Google email. (Leave the app in "Testing"; that's fine for one user.)
+4. https://console.cloud.google.com/apis/credentials → **Create credentials → OAuth client ID** →
+   Application type **TVs and Limited Input devices** → Create. Copy the **Client ID** and **Client secret**.
+
+**b. Store them + an admin token as repo secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `YTMUSIC_OAUTH_CLIENT_ID` | the Client ID |
+| `YTMUSIC_OAUTH_CLIENT_SECRET` | the Client secret |
+| `ADMIN_PAT` | a fine-grained GitHub token for this repo with **Secrets: Read and write** (https://github.com/settings/personal-access-tokens/new). Lets the workflow save the sign-in result as a secret. |
+
+**c. Sign in**
+
+1. **Actions → Connect YouTube Music → Run workflow.**
+2. Open the running job. The **Summary** (and the log) shows: *Open google.com/device and enter code XXXX-XXXX.*
+3. On your phone or any browser go to https://www.google.com/device, enter the code, pick the Google account that
+   owns the playlists, click **Continue/Allow**. (Google warns the app is unverified because it's your own; continue.)
+4. The job finishes with "Saved as repository secret YTMUSIC_OAUTH_JSON. You're connected."
+
+Tokens from a "Testing" OAuth app expire after 7 days; publish the consent screen (**Audience → Publish app**, no
+verification needed for this scope) and the token refreshes itself indefinitely. If approvals ever show
+"pending" in the Archive, just run **Connect YouTube Music** again.
+
+Alternative without Google Cloud: if you *can* open DevTools somewhere, paste the request headers from a
+`browse?` POST on music.youtube.com into a `YTMUSIC_HEADERS_RAW` secret instead (Network tab → Request Headers).
 
 Playlists are matched by title: `<year> Indie Discotheque` in your library. The three IDs in
 `discovery/config.yaml` are only a fallback.
