@@ -22,7 +22,8 @@
     rated: LS.get("id:rated", {}),          // {id: {decision, year, videoId, artist, title, playlistItemId, at}} — local mirror of what this browser filed
     auth: LS.get("id:auth", null),          // {access_token, expires_at, email, name, picture}
     playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL..."} learned from your library
-    settings: LS.get("id:settings", {}),    // {skipsInYouTube}
+    settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25 }, LS.get("id:settings", {})),    // {skipsInYouTube, audition, auditionSeconds, auditionStart}
+    auditionTimer: null, auditionTick: null, auditionArmed: null,
     quota: LS.get("id:quota", { day: "", units: 0 }),  // rough count of YouTube API units spent today (resets midnight Pacific)
     filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false }, LS.get("id:filters", {})),
     view: "feed",
@@ -389,8 +390,26 @@
     }
     art.addEventListener("click", () => { if (yt.videoId) play(it.id); });
     el.addEventListener("dblclick", () => { if (yt.videoId) play(it.id); });
+    if (!it._pick) attachSwipe(el, it);
     el.addEventListener("focus", () => { state.currentId = it.id; $$(".card.current").forEach(c => c.classList.remove("current")); el.classList.add("current"); });
     return el;
+  }
+  function attachSwipe(el, it) {
+    let x0 = 0, y0 = 0, dx = 0, active = false;
+    el.addEventListener("touchstart", e => { if (!isCurator()) return; const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; dx = 0; active = true; el.classList.add("swiping"); }, { passive: true });
+    el.addEventListener("touchmove", e => {
+      if (!active) return; const t = e.touches[0]; dx = t.clientX - x0;
+      if (Math.abs(t.clientY - y0) > 40 && Math.abs(dx) < 30) { active = false; el.style.transform = ""; el.classList.remove("swipe-up", "swipe-down", "swiping"); return; }
+      el.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`;
+      el.classList.toggle("swipe-up", dx > 60); el.classList.toggle("swipe-down", dx < -60);
+    }, { passive: true });
+    const end = () => {
+      if (!active) return; active = false; el.classList.remove("swiping");
+      const ysel = $(".year", el); const year = ysel ? +ysel.value : undefined;
+      if (dx > 90) rate(it.id, "up", year); else if (dx < -90) rate(it.id, "down", year);
+      el.style.transform = ""; el.classList.remove("swipe-up", "swipe-down");
+    };
+    el.addEventListener("touchend", end); el.addEventListener("touchcancel", end);
   }
   function focusCard(id) { const el = $(`.card[data-id="${CSS.escape(id)}"]`); if (el) { el.focus({ preventScroll: false }); el.scrollIntoView({ block: "center", behavior: "smooth" }); } }
 
@@ -401,7 +420,11 @@
       playerVars: { autoplay: 1, rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
       events: {
         onReady: () => { state.playerReady = true; if (state.pendingVideo) { state.player.loadVideoById(state.pendingVideo); state.pendingVideo = null; } },
-        onStateChange: e => { if (e.data === YT.PlayerState.ENDED && $("#autoplay").checked) nextTrack(); },
+        onStateChange: e => {
+          if (e.data === YT.PlayerState.ENDED && $("#autoplay").checked) { clearAudition(); nextTrack(); }
+          if (e.data === YT.PlayerState.PLAYING) startAudition();
+          if (e.data === YT.PlayerState.PAUSED) clearAudition(false);
+        },
         onError: () => { toast("Can't embed this one – opening YouTube Music", true); const it = current(); if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank"); },
       },
     });
@@ -415,9 +438,33 @@
     $("#player").hidden = false;
     $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
     ensureApi();
+    clearAudition(); state.auditionArmed = null;
     if (state.playerReady) state.player.loadVideoById(vid); else state.pendingVideo = vid;
   }
-  function stopPlayer() { if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; }
+  function stopPlayer() { clearAudition(); if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; }
+
+  // ---------- audition mode: jump partway in, auto-advance after N seconds unless you intervene ----------
+  const auditionOn = () => !!state.settings.audition;
+  function clearAudition(hide = true) {
+    clearTimeout(state.auditionTimer); clearInterval(state.auditionTick); state.auditionTimer = state.auditionTick = null;
+    if (hide) { const bar = $("#audition-bar"); bar.hidden = true; $("i", bar).style.width = "0"; }
+  }
+  function startAudition() {
+    if (!auditionOn() || !state.playerReady || !state.currentId) return;
+    const vid = state.player.getVideoData && state.player.getVideoData().video_id;
+    if (state.auditionArmed !== vid) {
+      state.auditionArmed = vid;
+      const dur = state.player.getDuration() || 0;
+      const startAt = dur ? Math.min(dur - 10, dur * (Number(state.settings.auditionStart) || 0) / 100) : 0;
+      if (startAt > 3) state.player.seekTo(startAt, true);
+    }
+    clearAudition(false);
+    const secs = Math.max(10, Number(state.settings.auditionSeconds) || 30);
+    const bar = $("#audition-bar"); bar.hidden = false; const fill = $("i", bar); const t0 = Date.now();
+    state.auditionTick = setInterval(() => { fill.style.width = Math.min(100, (Date.now() - t0) / (secs * 10)) + "%"; }, 250);
+    state.auditionTimer = setTimeout(() => { clearAudition(); if (auditionOn() && state.currentId) nextTrack(); }, secs * 1000);
+  }
+  function holdAudition() { if (state.auditionTimer) { clearAudition(); toast("Audition timer cancelled for this track"); } }
   function step(delta) {
     const i = state.order.indexOf(state.currentId); let j = i < 0 ? 0 : i + delta;
     while (j >= 0 && j < state.order.length) { const id = state.order[j]; const it = byId(id) || visibleItems().find(x => x.id === id); if (it?.youtube?.videoId) { play(id); focusCard(id); return; } j += delta; }
@@ -450,7 +497,14 @@
     $("#only-playable").addEventListener("change", e => { f.onlyPlayable = e.target.checked; persist(); render(); });
     $("#only-known").addEventListener("change", e => { f.onlyKnown = e.target.checked; persist(); render(); });
     $("#signin").addEventListener("click", () => { if (state.auth && tokenValid()) signOut(); else signIn().catch(e => toast(e.message, true)); });
-    $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", toggle);
+    $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", () => { holdAudition(); toggle(); });
+    const aud = $("#audition"); aud.checked = auditionOn(); $("#audition-label").textContent = (state.settings.auditionSeconds || 30) + "s";
+    aud.addEventListener("change", () => { state.settings.audition = aud.checked; persist(); if (aud.checked && state.playerReady && state.player.getPlayerState() === YT.PlayerState.PLAYING) startAudition(); else clearAudition(); });
+    $("#s-aud-secs").value = state.settings.auditionSeconds || 30; $("#s-aud-start").value = state.settings.auditionStart ?? 25;
+    $("#s-aud-secs").addEventListener("change", e => { state.settings.auditionSeconds = Math.max(10, +e.target.value || 30); $("#audition-label").textContent = state.settings.auditionSeconds + "s"; persist(); });
+    $("#s-aud-start").addEventListener("change", e => { state.settings.auditionStart = Math.min(80, Math.max(0, +e.target.value || 0)); persist(); });
+    $("#yt").addEventListener("click", holdAudition, true);
+    if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});
     $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
     $("#settings-btn").addEventListener("click", () => {
@@ -481,6 +535,7 @@
         case "u": case "ArrowRight": if (id) rate(id, "up", currentYear(id)); break;
         case "d": case "ArrowLeft": if (id) rate(id, "down", currentYear(id)); break;
         case "o": { const it = byId(id); if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank"); break; }
+        case "a": { const cb = $("#audition"); cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); toast(cb.checked ? `Audition mode on (${state.settings.auditionSeconds}s)` : "Audition mode off"); break; }
         case "/": e.preventDefault(); $("#q").focus(); break;
         case "Escape": stopPlayer(); break;
       }

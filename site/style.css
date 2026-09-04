@@ -158,3 +158,12 @@ details summary { cursor: pointer; font-size: 13px; }
 .blog-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; max-height: 50vh; overflow: auto; }
 .sources-filter .pick { border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; color: var(--accent2); }
 body.guest .mode { color: var(--accent2); border-color: rgba(71,224,255,.4); }
+
+/* audition progress + swipe */
+.audition-bar { flex: 1 1 120px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; min-width: 80px; }
+.audition-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s linear; }
+.card { touch-action: pan-y; will-change: transform; }
+.card.swiping { transition: none; }
+.card.swipe-up { border-color: var(--up); background: rgba(61,220,132,.08); }
+.card.swipe-down { border-color: var(--down); background: rgba(255,93,93,.08); }
+@media (display-mode: standalone) { .top { padding-top: max(10px, env(safe-area-inset-top)); } .player { padding-bottom: max(10px, env(safe-area-inset-bottom)); } }
