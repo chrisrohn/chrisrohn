@@ -60,6 +60,7 @@ def build_feed(cfg: dict) -> dict:
             "skipped_playlist_title": ycfg.get("skipped_playlist_title", "Skipped"),
             "playlists": (profile.get("youtube") or {}).get("years") or {},
             "skipped_playlist_id": (profile.get("youtube") or {}).get("skipped") or ycfg.get("skipped_playlist_id") or "",
+            "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
         },
         "picks": profile.get("picks") or [],
         "lastfm_user": cfg["station"]["lastfm_user"],

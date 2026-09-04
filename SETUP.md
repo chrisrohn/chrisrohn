@@ -70,12 +70,16 @@ that is a normal "Sign in with Google" button on the site.
 On the site, click **Sign in with Google**, pick that account, allow "manage your YouTube account". The thumbs
 appear. Sessions last an hour; the button re-prompts (usually a silent popup) when needed.
 
-**Skipped playlist:** the first 👎 creates an unlisted playlist named `Indie Discotheque – Skipped` and shows its
-ID. Paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build can read it (unlisted
-playlists aren't discoverable by title). Year playlists are public and found automatically.
+**Quota:** YouTube's free API quota is 10,000 units/day (reset midnight Pacific); each write costs 50. Only 👍
+spends quota, so you get ~200 *saves* a day, and ⚙ shows a running meter. 👎 is free: skips are remembered in the
+browser and expire with the feed. Listening, filtering and playback cost nothing.
 
-**Quota:** YouTube's free API quota is 10,000 units/day; a thumb costs 50, so ~200 ratings per day. The quota
-resets at midnight Pacific. If you need more, request an increase in the Google Cloud console (free).
+**Optional – skips on YouTube too:** switch on **⚙ → Also file 👎 into the Skipped playlist** if you rate from
+several devices and want skips shared. The first 👎 then creates an unlisted `Indie Discotheque – Skipped`
+playlist and shows its ID; paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build
+can read it (unlisted playlists aren't discoverable by title). Year playlists are public and found automatically.
+If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
+YouTube API quota extension form in the Cloud console (free).
 
 ## Public vs. curator
 
@@ -90,8 +94,9 @@ that the playlist's owner approved in that browser.
 
 - Open chrisrohn.com. `j`/`k` move, `space` plays, `u` thumbs up, `d` thumbs down, `o` opens in YouTube Music, `/` searches.
 - Change the year dropdown on a card before thumbing up if a reissue/late release should go to another year.
-- 👍 files the track into the year playlist immediately (an **Undo** button shows for a few seconds). 👎 files it
-  into Skipped. Both disappear from the feed at once; the next daily build hides them on every device.
+- 👍 files the track into the year playlist immediately (an **Undo** button shows for a few seconds). 👎 hides
+  it. Both disappear from the feed at once; saves are hidden on every device after the next daily build, skips
+  on this device (or everywhere, with the optional Skipped playlist).
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list.
 
 ## Tuning
