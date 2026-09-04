@@ -3,7 +3,6 @@
   profile           rebuild the taste profile (Last.fm + your playlists + similar artists)
   build             fetch sources, score, resolve, write site/data/feed.json (+ feed.xml, history)
   daily             profile (if stale) + build
-  decisions         apply a decisions payload from $DECISIONS_JSON (approve → year playlist, archive both)
   seed-everynoise   scrape frozen Everynoise genre pages into data/seeds_everynoise.json
 """
 from __future__ import annotations
@@ -37,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
 
         prof = read_json(DATA_DIR / "profile.json", None)
         stale = True
-        if prof and prof.get("built_at"):
+        if prof and prof.get("built_at") and "youtube" in prof:  # profiles from older pipeline versions get rebuilt
             built = datetime.fromisoformat(prof["built_at"])
             stale = datetime.now(timezone.utc) - built > timedelta(days=int(cfg["profile"].get("rebuild_days", 3)))
         if stale or "--rebuild-profile" in argv:
@@ -45,12 +44,6 @@ def main(argv: list[str] | None = None) -> int:
         else:
             log.info("profile is fresh (built %s)", prof["built_at"])
         build_feed(cfg)
-        return 0
-    if cmd == "decisions":
-        from .sync import apply_decisions, payload_from_env
-
-        result = apply_decisions(cfg, payload_from_env())
-        log.info("decisions: %s", result)
         return 0
     if cmd == "seed-everynoise":
         from .profile import scrape_everynoise

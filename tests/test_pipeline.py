@@ -27,10 +27,8 @@ def sandbox(tmp_path, monkeypatch):
     import discovery.build as build
     import discovery.profile as profile
     import discovery.resolve as resolve
-    import discovery.sync as sync
     import discovery.sources.deezer as deezer
 
-    monkeypatch.setattr(build, "DECISIONS_PATH", tmp_path / "data" / "decisions.json")
     monkeypatch.setattr(build, "FEED_PATH", tmp_path / "site" / "data" / "feed.json")
     monkeypatch.setattr(build, "STATE_PATH", tmp_path / "data" / "state.json")
     monkeypatch.setattr(build, "SITE_DATA_DIR", tmp_path / "site" / "data")
@@ -38,8 +36,6 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(profile, "ARTIST_CACHE_PATH", tmp_path / "data" / "cache" / "artists.json")
     monkeypatch.setattr(profile, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(resolve, "YT_CACHE", tmp_path / "data" / "cache" / "youtube.json")
-    monkeypatch.setattr(sync, "DECISIONS_PATH", tmp_path / "data" / "decisions.json")
-    monkeypatch.setattr(sync, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(deezer, "ID_CACHE", tmp_path / "data" / "cache" / "deezer_artists.json")
     util.ensure_dirs()
     yield tmp_path
@@ -147,16 +143,21 @@ def test_bandcamp_and_rss_sources(monkeypatch):
     assert all(i.editorial for i in entries)
 
 
-def test_build_feed_and_decisions(monkeypatch, sandbox):
+def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     import discovery.build as build
-    import discovery.sync as sync
     from discovery import profile as prof
 
-    util.write_json(prof.PROFILE_PATH, PROFILE)
+    profile = dict(PROFILE)
+    profile["saved"] = dict(PROFILE["saved"])
+    profile["saved"][util.item_key("Roosevelt", "Lovers")] = {"artist": "Roosevelt", "title": "Lovers", "decision": "down"}
+    profile["picks"] = [{"artist": "Jungle", "title": "Back On 74", "videoId": "v1", "year": "2026", "thumbnail": None, "album": None}]
+    profile["youtube"] = {"years": {"2026": "PL2026"}, "skipped": "PLSKIP", "channel": "UC1"}
+    util.write_json(prof.PROFILE_PATH, profile)
     today = date.today()
     fake_items = [
         Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["rss:Pitchfork"], editorial=True),
-        Item(artist="Jungle", title="Back On 74", kind="track", release_date=today, sources=["bandcamp"]),  # already saved → hidden
+        Item(artist="Jungle", title="Back On 74", kind="track", release_date=today, sources=["bandcamp"]),   # already in a year playlist
+        Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["bandcamp"]),    # thumbed down → Skipped playlist
         Item(artist="Someone New", title="Disco Dream", kind="release", release_date=today, sources=["musicbrainz"], tags=["nu disco"]),
         Item(artist="Unknown Metal Band", title="Skull", kind="release", release_date=today, sources=["musicbrainz"], tags=["metal"]),
     ]
@@ -174,47 +175,37 @@ def test_build_feed_and_decisions(monkeypatch, sandbox):
     monkeypatch.setattr(build, "Http", NoNet)
 
     cfg = _cfg()
+    cfg["google"]["client_id"] = "abc.apps.googleusercontent.com"
     payload = build.build_feed(cfg)
-    ids = {(i["artist"], i["title"]): i for i in payload["items"]}
+    ids = {(i["artist"], i["title"]) for i in payload["items"]}
     assert ("Jungle", "Keep Moving") in ids
-    assert ("Jungle", "Back On 74") not in ids            # already in a year playlist
-    assert ("Unknown Metal Band", "Skull") not in ids       # negative score
+    assert ("Jungle", "Back On 74") not in ids
+    assert ("Roosevelt", "Lovers") not in ids
+    assert ("Unknown Metal Band", "Skull") not in ids
     assert ("Someone New", "Disco Dream") not in ids        # tag-only, no YouTube match → dropped
     assert payload["years"][0] >= 2026 and payload["years"][-1] == 1979
+    assert payload["google"] == {"client_id": "abc.apps.googleusercontent.com", "curators": ["chrisrohn@gmail.com"]}
+    assert payload["youtube"]["playlists"] == {"2026": "PL2026"} and payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
+    assert payload["picks"][0]["artist"] == "Jungle"
     assert (sandbox / "site" / "feed.xml").read_text().count("<item>") == len(payload["items"])
-    jungle_id = ids[("Jungle", "Keep Moving")]["id"]
 
-    # --- user thumbs up Jungle on the site → dispatch payload → filed into the 2026 playlist
+
+def test_discover_playlists_via_channel():
+    from discovery.profile import discover_playlists
+
     class FakeYT:
-        added: list = []
-        def get_library_playlists(self, limit=None):
-            return [{"title": f"{today.year} Indie Discotheque", "playlistId": "PL_THIS_YEAR"}, {"title": "Other", "playlistId": "PLX"}]
-        def add_playlist_items(self, pid, vids, duplicates=False):
-            FakeYT.added.append((pid, tuple(vids)))
-            return {"status": "STATUS_SUCCEEDED"}
-    monkeypatch.setattr(sync, "_ytmusic_authed", lambda: FakeYT())
-    result = sync.apply_decisions(cfg, {"decisions": [
-        {"id": jungle_id, "decision": "up", "year": today.year, "videoId": "vid123", "artist": "Jungle", "title": "Keep Moving"},
-        {"id": "deadbeef", "decision": "down", "year": today.year, "artist": "X", "title": "Y"},
-    ]})
-    assert result == {"recorded": 2, "filed": 1, "pending": 0}
-    assert FakeYT.added == [("PL_THIS_YEAR", ("vid123",))]
-    store = json.loads((sandbox / "data" / "decisions.json").read_text())
-    assert store["items"][jungle_id]["filed_at"] and store["items"]["deadbeef"]["decision"] == "down"
+        def get_playlist(self, pid, limit=None):
+            return {"author": {"id": "UC1"}, "tracks": []}
+        def get_user(self, cid):
+            return {"playlists": {"params": "p"}}
+        def get_user_playlists(self, cid, params):
+            return [{"title": "1999 Indie Discotheque", "playlistId": "PL1999"}, {"title": "Indie Discotheque – Skipped", "playlistId": "PLSKIP"},
+                    {"title": "Random Mix", "playlistId": "PLX"}, {"title": "2026 Indie Discotheque", "playlistId": "PLDUP"}]
 
-    # the rebuilt feed archives the rated item
-    payload2 = build.build_feed(cfg)
-    assert all(i["id"] != jungle_id for i in payload2["items"])
-    public = json.loads((sandbox / "site" / "data" / "decisions.json").read_text())
-    assert jungle_id in public["items"]
-
-    # without the secret, approvals stay pending and are retried later
-    monkeypatch.setattr(sync, "_ytmusic_authed", lambda: None)
-    r2 = sync.apply_decisions(cfg, {"decisions": [{"id": "cafe", "decision": "up", "year": 1999, "videoId": "v99", "artist": "A", "title": "B"}]})
-    assert r2["pending"] == 1
-    monkeypatch.setattr(sync, "_ytmusic_authed", lambda: FakeYT())
-    r3 = sync.apply_decisions(cfg, {"decisions": []})
-    assert r3["pending"] == 1  # no 1999 playlist in the fake library → still pending, not lost
+    cfg = _cfg()
+    years, skipped, channel = discover_playlists(cfg, FakeYT())
+    assert channel == "UC1" and skipped == "PLSKIP"
+    assert years["1999"] == "PL1999" and years["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN"  # configured id wins
 
 
 def test_resolve_pick():
@@ -226,25 +217,3 @@ def test_resolve_pick():
     ]
     assert _pick(res, "Jungle", "Keep Moving")["videoId"] == "a"
     assert _pick(res[1:], "Jungle", "Keep Moving") is None
-
-
-def test_device_flow_polls_until_approved(monkeypatch):
-    from discovery import oauth
-
-    calls = {"n": 0}
-
-    class FakeCreds:
-        def __init__(self, *a, **k): pass
-        def get_code(self):
-            return {"device_code": "dev", "user_code": "ABCD-EFGH", "verification_url": "https://www.google.com/device", "interval": 0, "expires_in": 60}
-        def token_from_code(self, device_code):
-            calls["n"] += 1
-            if calls["n"] < 3:
-                return {"error": "authorization_pending"}
-            return {"access_token": "at", "refresh_token": "rt", "scope": "s", "token_type": "Bearer", "expires_in": 3600}
-
-    import ytmusicapi.auth.oauth.credentials as c
-    monkeypatch.setattr(c, "OAuthCredentials", FakeCreds)
-    monkeypatch.setattr(oauth.time, "sleep", lambda s: None)
-    tok = oauth.device_flow("id", "secret")
-    assert calls["n"] == 3 and tok["access_token"] == "at" and tok["refresh_token"] == "rt" and tok["expires_at"] > 0

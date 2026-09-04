@@ -5,43 +5,35 @@ Everything here is free. Total setup is about 20 minutes, most of it DNS propaga
 ## What you are building
 
 ```
-GitHub Actions (daily 06:15 ET)                       chrisrohn.com (GitHub Pages)
-┌──────────────────────────────────────┐              ┌──────────────────────────────┐
-│ profile: Last.fm tt_discotheque      │              │ feed: listen inline, 👍 / 👎  │
-│   + your YT Music year playlists     │  feed.json   │ queue: unsynced thumbs        │
-│   + Last.fm & ListenBrainz similar   │ ───────────▶ │ archive: everything rated     │
-│ sources: ListenBrainz fresh releases │              └──────────────┬───────────────┘
-│   MusicBrainz tags · Bandcamp new    │                             │ "Sync approvals"
-│   Deezer artist releases · blog RSS  │   repository_dispatch       │ (you press it)
-│ score → resolve on YouTube Music     │ ◀───────────────────────────┘
+GitHub Actions (daily 06:15 ET)                        chrisrohn.com (GitHub Pages, public)
+┌──────────────────────────────────────┐               ┌───────────────────────────────────────┐
+│ profile: Last.fm tt_discotheque      │               │ anyone: listen, filter by source, Picks│
+│   + your public YT year playlists    │   feed.json   │                                       │
+│   + Last.fm & ListenBrainz similar   │ ────────────▶ │ you (Sign in with Google):            │
+│ sources: ListenBrainz fresh releases │               │   👍 → "<year> Indie Discotheque"      │
+│   MusicBrainz tags · Bandcamp new    │               │   👎 → unlisted "Skipped" playlist     │
+│   Deezer artist releases · blog RSS  │               │   (YouTube Data API, from your browser)│
+│ score → resolve on YouTube Music     │               └───────────────────────────────────────┘
+│ hides anything already in those      │ ◀── reads your playlists (public + unlisted-by-id) ──┘
+│ playlists                            │
 └──────────────────────────────────────┘
-        │  Decisions workflow: 👍 → "<year> Indie Discotheque" playlist, 👎 → archive
-        ▼
-   data/decisions.json (the archive)   — no database service needed; the repo is the database
 ```
 
-Nothing is ever written to a playlist by the daily job. Only tracks you thumbed up **and** synced are filed,
-into the year playlist you chose on the card (defaults to the release year, 1979–2026 all supported).
+No database, no server, no GitHub tokens: your YouTube playlists *are* the state. The daily job only builds the
+feed; the only thing that ever writes to a playlist is you pressing a thumb while signed in.
 
 ## 1. GitHub (required)
 
 1. Merge this branch to `main`.
 2. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
 3. **Settings → Actions → General → Workflow permissions: Read and write permissions.**
-4. **Settings → Secrets and variables → Actions → New repository secret**:
-
-   | Secret | Required | Where to get it |
-   |---|---|---|
-   | `LASTFM_API_KEY` | yes | https://www.last.fm/api/account/create — instant, free. Any app name. |
-   | `YTMUSIC_OAUTH_CLIENT_ID`, `YTMUSIC_OAUTH_CLIENT_SECRET`, `ADMIN_PAT` | for filing 👍 into playlists | step 3 below (all in the browser, no install) |
-   | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | no (source is off) | needs Premium since Feb 2026; skip |
-
+4. **Settings → Secrets and variables → Actions → New repository secret**: `LASTFM_API_KEY` from
+   https://www.last.fm/api/account/create (instant, free, any app name). That is the only secret.
 5. **Actions → Discover → Run workflow.** First run takes ~10–15 min (profile build + MusicBrainz rate limit).
-   The site is live at `https://chrisrohn.github.io/chrisrohn/` until DNS is done.
 
 ## 2. chrisrohn.com DNS (required for the custom domain)
 
-At your registrar, add:
+At your registrar (or DreamHost, if its name servers still run the domain), add:
 
 | Type | Name | Value |
 |---|---|---|
@@ -51,66 +43,55 @@ At your registrar, add:
 | A | `@` | `185.199.111.153` |
 | CNAME | `www` | `chrisrohn.github.io` |
 
-Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick **Enforce HTTPS** once the check passes
-(`site/CNAME` already contains the domain, so deploys keep it). Docs: https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site
+Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick **Enforce HTTPS** once the check passes.
 
-## 3. Connect YouTube Music (so 👍 lands in your year playlists)
+## 3. Sign in with Google (so 👍/👎 reach your playlists)
 
-Everything happens in a browser; nothing is installed and no developer console is needed. Use a **personal**
-Google account (a work/school account may be blocked from Google Cloud).
-
-**a. Create a free Google OAuth client (5 minutes, once)**
+One free Google Cloud OAuth client, created in the browser with a **personal** Google account. Everything after
+that is a normal "Sign in with Google" button on the site.
 
 1. https://console.cloud.google.com/projectcreate → name it `indie-discotheque` → Create.
 2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3).
-3. https://console.cloud.google.com/apis/credentials/consent → External → fill App name + your email → Save.
-   Under **Audience → Test users** add your own Google email. (Leave the app in "Testing"; that's fine for one user.)
-4. https://console.cloud.google.com/apis/credentials → **Create credentials → OAuth client ID** →
-   Application type **TVs and Limited Input devices** → Create. Copy the **Client ID** and **Client secret**.
+3. https://console.cloud.google.com/auth/overview → **Get started** → App name `Chris Rohn's New Music`, your
+   email, Audience **External**, contact email → Create. Then on **Branding** set Application home page
+   `https://chrisrohn.com`, Privacy policy `https://chrisrohn.com/privacy.html`, Terms of service
+   `https://chrisrohn.com/terms.html`, and add `chrisrohn.com` under Authorised domains. (Both pages ship with
+   the site and contain the disclosures YouTube API Services require.)
+4. https://console.cloud.google.com/auth/audience → **Publish app** (confirm). Unverified is fine: Google shows a
+   one-time "app isn't verified" screen that you click through (**Advanced → Go to …**). Publishing avoids the
+   7-day sign-in expiry of Testing mode. (If you'd rather stay in Testing, add yourself under **Test users**.)
+5. https://console.cloud.google.com/auth/clients → **Create client** → Application type **Web application** →
+   Authorised JavaScript origins: `https://chrisrohn.com`, `https://www.chrisrohn.com`, `https://chrisrohn.github.io`
+   (add `http://localhost:8000` if you run it locally) → Create. Copy the **Client ID** (ends in
+   `.apps.googleusercontent.com`). No secret is needed for this flow.
+6. Put it in `discovery/config.yaml` → `google.client_id`, and make sure `google.curators` lists the Google
+   account that owns the playlists. Commit (GitHub's web editor is fine). The next Discover run ships it in feed.json.
 
-**b. Store them + an admin token as repo secrets** (Settings → Secrets and variables → Actions):
+On the site, click **Sign in with Google**, pick that account, allow "manage your YouTube account". The thumbs
+appear. Sessions last an hour; the button re-prompts (usually a silent popup) when needed.
 
-| Secret | Value |
-|---|---|
-| `YTMUSIC_OAUTH_CLIENT_ID` | the Client ID |
-| `YTMUSIC_OAUTH_CLIENT_SECRET` | the Client secret |
-| `ADMIN_PAT` | a fine-grained GitHub token for this repo with **Secrets: Read and write** (https://github.com/settings/personal-access-tokens/new). Lets the workflow save the sign-in result as a secret. |
+**Skipped playlist:** the first 👎 creates an unlisted playlist named `Indie Discotheque – Skipped` and shows its
+ID. Paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build can read it (unlisted
+playlists aren't discoverable by title). Year playlists are public and found automatically.
 
-**c. Sign in**
+**Quota:** YouTube's free API quota is 10,000 units/day; a thumb costs 50, so ~200 ratings per day. The quota
+resets at midnight Pacific. If you need more, request an increase in the Google Cloud console (free).
 
-1. **Actions → Connect YouTube Music → Run workflow.**
-2. Open the running job. The **Summary** (and the log) shows: *Open google.com/device and enter code XXXX-XXXX.*
-3. On your phone or any browser go to https://www.google.com/device, enter the code, pick the Google account that
-   owns the playlists, click **Continue/Allow**. (Google warns the app is unverified because it's your own; continue.)
-4. The job finishes with "Saved as repository secret YTMUSIC_OAUTH_JSON. You're connected."
+## Public vs. curator
 
-Tokens from a "Testing" OAuth app expire after 7 days; publish the consent screen (**Audience → Publish app**, no
-verification needed for this scope) and the token refreshes itself indefinitely. If approvals ever show
-"pending" in the Archive, just run **Connect YouTube Music** again.
+chrisrohn.com is public: anyone can browse, filter by source, play tracks and see **Picks** (the newest tracks in
+your current-year playlist). Nothing on the public side can write anywhere.
 
-Alternative without Google Cloud: if you *can* open DevTools somewhere, paste the request headers from a
-`browse?` POST on music.youtube.com into a `YTMUSIC_HEADERS_RAW` secret instead (Network tab → Request Headers).
-
-Playlists are matched by title: `<year> Indie Discotheque` in your library. The three IDs in
-`discovery/config.yaml` are only a fallback.
-
-## 4. Site token (so the Sync button can reach GitHub)
-
-The site runs in your browser and needs a token to trigger the Decisions workflow:
-
-1. https://github.com/settings/personal-access-tokens/new → **Fine-grained**.
-2. Repository access: **Only select repositories → chrisrohn/chrisrohn**.
-3. Repository permissions: **Contents: Read and write** (that is what `repository_dispatch` needs). Nothing else.
-4. On the site: ⚙ → paste the token. It is stored only in that browser's localStorage.
-
-Without a token you can still rate everything and use **Export queue as CSV (Soundiiz)** from ⚙.
+**Curator mode** appears only when the signed-in Google account is in `google.curators`. Other Google accounts
+can sign in but stay listen-only. Nothing about the site can touch a playlist except through a Google session
+that the playlist's owner approved in that browser.
 
 ## Daily use
 
 - Open chrisrohn.com. `j`/`k` move, `space` plays, `u` thumbs up, `d` thumbs down, `o` opens in YouTube Music, `/` searches.
 - Change the year dropdown on a card before thumbing up if a reissue/late release should go to another year.
-- Press **Sync approvals** whenever you like (end of a session is fine). Confirm the list. Within ~3 minutes the
-  tracks are in your playlists, the feed rebuilds without them, and they appear under **Archive**.
+- 👍 files the track into the year playlist immediately (an **Undo** button shows for a few seconds). 👎 files it
+  into Skipped. Both disappear from the feed at once; the next daily build hides them on every device.
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list.
 
 ## Tuning

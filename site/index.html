@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Indie Discotheque · New Music</title>
-<meta name="description" content="Daily new-music discovery feed for Indie Discotheque. Listen, thumb up or down, file approvals into year playlists.">
+<title>Chris Rohn's New Music</title>
+<meta name="description" content="Chris Rohn's daily new-music discovery feed, built for the Indie Discotheque radio station. Listen to what's new in indie pop, nu-disco, indietronica and friends.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪩</text></svg>">
 <link rel="alternate" type="application/rss+xml" title="Indie Discotheque feed" href="/feed.xml">
 <link rel="preconnect" href="https://www.youtube.com">
@@ -15,24 +15,25 @@
   <div class="brand">
     <span class="ball">🪩</span>
     <div>
-      <h1>Indie Discotheque</h1>
+      <h1>Chris Rohn's New Music</h1>
       <div class="sub" id="meta">loading feed…</div>
     </div>
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-view="feed" role="tab">Feed <span class="pill" id="count-feed">0</span></button>
-    <button class="tab" data-view="queue" role="tab">Queue <span class="pill" id="count-queue">0</span></button>
-    <button class="tab" data-view="archive" role="tab">Archive <span class="pill" id="count-archive">0</span></button>
+    <button class="tab" data-view="picks" role="tab">Picks <span class="pill" id="count-picks">0</span></button>
   </nav>
   <div class="actions">
-    <button id="sync" class="btn primary" disabled>Sync approvals</button>
+    <span id="who" class="who" hidden></span>
+    <span class="mode curator" title="Curator mode: thumbs file straight into your YouTube playlists">curator</span>
+    <button id="signin" class="btn primary">Sign in with Google</button>
     <button id="settings-btn" class="btn ghost" title="Settings">⚙</button>
   </div>
 </header>
 
 <section class="filters" id="filters">
   <input id="q" type="search" placeholder="search artist / title / tag…" autocomplete="off">
-  <select id="source"><option value="">all sources</option></select>
+  <div id="sources" class="sources-filter" aria-label="sources"></div>
   <select id="sort">
     <option value="score">sort: score</option>
     <option value="date">sort: newest release</option>
@@ -42,7 +43,7 @@
   <label class="chk"><input type="checkbox" id="only-new"> new today</label>
   <label class="chk"><input type="checkbox" id="only-playable" checked> playable</label>
   <label class="chk"><input type="checkbox" id="only-known"> known artists</label>
-  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <kbd>u</kbd> up · <kbd>d</kbd> down · <kbd>o</kbd> open</span>
+  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · </span><kbd>o</kbd> open</span>
 </section>
 
 <main>
@@ -59,8 +60,8 @@
       <button class="btn" id="p-toggle" title="play/pause (space)">⏯</button>
       <button class="btn" id="p-next" title="next (j)">⏭</button>
       <label class="chk"><input type="checkbox" id="autoplay" checked> autoplay next</label>
-      <button class="btn down" id="p-down" title="thumbs down (d)">👎</button>
-      <button class="btn up" id="p-up" title="thumbs up (u)">👍</button>
+      <button class="btn down curator" id="p-down" title="thumbs down (d)">👎</button>
+      <button class="btn up curator" id="p-up" title="thumbs up (u)">👍</button>
     </div>
   </div>
 </aside>
@@ -68,29 +69,14 @@
 <dialog id="settings">
   <form method="dialog" class="settings-form">
     <h2>Settings</h2>
-    <p class="muted">Sync sends your thumbs to GitHub, which files the 👍 tracks into <code>&lt;year&gt; Indie Discotheque</code> in your YouTube Music library and archives everything you rated. Nothing happens until you press <b>Sync approvals</b>.</p>
-    <label>GitHub repository <input id="s-repo" placeholder="chrisrohn/chrisrohn"></label>
-    <label>Fine-grained token (Contents: read &amp; write) <input id="s-token" type="password" placeholder="github_pat_…" autocomplete="off"></label>
-    <p class="muted">Stored only in this browser. See <a href="https://github.com/chrisrohn/chrisrohn/blob/main/SETUP.md" target="_blank" rel="noopener">SETUP.md</a>.</p>
-    <label>Default year for approvals <select id="s-year"></select></label>
-    <label class="chk"><input type="checkbox" id="s-hide-downs"> also sync 👎 immediately (otherwise they wait for the next sync)</label>
+    <p class="muted">Signing in uses YouTube API Services; see the <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms</a>. Anyone can listen here. <b>Sign in with Google</b> as a curator account and the thumbs appear: 👍 adds the track to <code>&lt;year&gt; Indie Discotheque</code> in your YouTube library right away (Undo for a few seconds), 👎 adds it to the unlisted <code>Skipped</code> playlist so it never comes back. Nothing else is touched.</p>
+    <p class="muted" id="s-playlists"></p>
     <div class="row">
-      <button class="btn ghost" id="s-export" type="button">Export queue as CSV (Soundiiz)</button>
+      <button class="btn ghost curator" id="s-reload" type="button">Reload my playlists</button>
+      <button class="btn ghost curator" id="s-export" type="button">Export today's 👍 as CSV</button>
       <button class="btn ghost" id="s-clear" type="button">Clear local state</button>
       <span class="grow"></span>
       <button class="btn primary" value="ok">Done</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="confirm">
-  <form method="dialog" class="settings-form">
-    <h2>Sync to YouTube Music</h2>
-    <div id="confirm-body"></div>
-    <div class="row">
-      <button class="btn ghost" value="cancel">Cancel</button>
-      <span class="grow"></span>
-      <button class="btn primary" value="ok" id="confirm-ok">File approvals &amp; archive</button>
     </div>
   </form>
 </dialog>
@@ -115,19 +101,18 @@
     </div>
     <div class="side">
       <div class="score" title="relevance score"></div>
-      <select class="year" title="year playlist"></select>
-      <div class="thumbs">
+      <select class="year curator" title="year playlist"></select>
+      <div class="thumbs curator">
         <button class="btn down" title="thumbs down (d)">👎</button>
         <button class="btn up" title="thumbs up (u)">👍</button>
       </div>
-      <button class="btn ghost undo" title="undo">undo</button>
     </div>
   </article>
 </template>
 
 <footer>
-  <span>Built from Last.fm (<a id="lfm" href="https://www.last.fm/user/tt_discotheque" target="_blank" rel="noopener">tt_discotheque</a>), ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs.</span>
-  <span><a href="/feed.xml">RSS</a> · <a href="https://github.com/chrisrohn/chrisrohn" target="_blank" rel="noopener">source</a></span>
+  <span>A daily discovery feed for the <b>Indie Discotheque</b> radio station, built from Last.fm (<a id="lfm" href="https://www.last.fm/user/tt_discotheque" target="_blank" rel="noopener">tt_discotheque</a>), ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs.</span>
+  <span><a href="/feed.xml">RSS</a> · <a href="https://github.com/chrisrohn/chrisrohn" target="_blank" rel="noopener">source</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></span>
 </footer>
 
 <script src="app.js" defer></script>
