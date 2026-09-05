@@ -300,3 +300,53 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   expect(errors.filter(e => !/Failed to load resource|net::ERR_INTERNET_DISCONNECTED/.test(e))).toEqual([]);
   await ctx.close();
 });
+
+/** A small catalog.json in the shape discovery/catalog.py writes, made from the committed feed's playable tracks. */
+async function catalogFixture() {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const playable = feed.items.filter(i => i.youtube && i.youtube.videoId).slice(0, 40);
+  const years = {};
+  const items = playable.map((i, n) => {
+    const year = n % 5 === 0 ? null : 1995 + (n % 20);
+    if (year) years[year] = { playlist: 30 + n, candidates: (years[year]?.candidates || 0) + 1 };
+    return { ...i, id: "cat" + i.id, year, year_source: year ? "musicbrainz-search" : "unknown", year_confidence: year ? "high" : "low", release_date: null, first_seen: feed.generated_at.slice(0, 10),
+      sources: n % 3 ? ["lastfm:top tracks"] : ["lastfm:loved", "lastfm:artist top"], plays: 200 - n, loved: n % 3 === 0, score: 8 - n / 10, reasons: [`${200 - n} plays`] };
+  });
+  return { generated_at: feed.generated_at, candidates: 500, count: items.length, undated: items.filter(i => !i.year).length, sources: ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"], years, items };
+}
+
+test("the Catalog tab: earlier years with a year select, or a note until the first build", async ({ browser }) => {
+  // the service worker would answer data/catalog.json itself, past the route below: keep it out of this test
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  // before the daily job has ever built one, the tab explains itself instead of failing
+  let errors = await open(page);
+  await page.click(".tab[data-view=catalog]");
+  await expect(page.locator("#empty")).toContainText("No catalog yet");
+  expect(errors).toEqual([]);
+  // with a catalog: cards, Last.fm source chips, and the year select narrows the list
+  const cat = await catalogFixture();
+  await page.route("**/data/catalog.json", route => route.fulfill({ json: cat }));
+  errors = await open(page, "/?view=catalog");
+  const cards = page.locator("#list .card");
+  await expect.poll(() => cards.count()).toBe(cat.count);
+  await expect(page.locator("#count-catalog")).toHaveText(String(cat.count));
+  await expect(page.locator("#sources label").first()).toContainText(/Your artists|Loved|Most played/);
+  await expect(page.locator("#cat-year")).toBeVisible();
+  await expect(page.locator("#sort")).toBeHidden();
+  await expect(cards.first().locator(".reasons")).toContainText("plays");
+  const year = Object.keys(cat.years)[0];
+  await page.selectOption("#cat-year", year);
+  await expect.poll(() => cards.count()).toBe(cat.years[year].candidates);
+  await expect(cards.first().locator(".yearbadge")).toContainText(year);
+  await page.selectOption("#cat-year", "?");
+  await expect.poll(() => cards.count()).toBe(cat.undated);
+  await expect(cards.first().locator(".yearbadge")).toHaveText("year unknown");
+  // back to the feed: the feed's own chips and sort return
+  await page.click(".tab[data-view=feed]");
+  await expect(page.locator("#sort")).toBeVisible();
+  await expect(page.locator("#cat-year")).toBeHidden();
+  await expect(page.locator("#sources label").first()).not.toContainText(/Most played/);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

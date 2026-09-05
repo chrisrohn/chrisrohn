@@ -76,6 +76,32 @@ class LastFm:
             page += 1
         return out[:limit]
 
+    def _paged(self, method: str, outer: str, inner: str, limit: int, **params: Any) -> list[dict]:
+        out: list[dict] = []
+        page = 1
+        while len(out) < limit:
+            data = self.call(method, limit=min(1000, limit - len(out)), page=page, **params)
+            rows = (data.get(outer) or {}).get(inner) or []
+            if not rows:
+                break
+            out.extend(rows)
+            attrs = (data.get(outer) or {}).get("@attr") or {}
+            if page >= int(attrs.get("totalPages", 1) or 1):
+                break
+            page += 1
+        return out[:limit]
+
+    def top_tracks(self, user: str, limit: int, period: str = "overall") -> list[dict]:
+        """The tracks this user has played most, with play counts (the catalog's first source)."""
+        return self._paged("user.gettoptracks", "toptracks", "track", limit, user=user, period=period)
+
+    def loved_tracks(self, user: str, limit: int) -> list[dict]:
+        return self._paged("user.getlovedtracks", "lovedtracks", "track", limit, user=user)
+
+    def artist_top_tracks(self, artist: str, limit: int) -> list[dict]:
+        data = self.call("artist.gettoptracks", artist=artist, limit=limit, autocorrect=1)
+        return (data.get("toptracks") or {}).get("track") or []
+
     def similar(self, artist: str, limit: int) -> list[dict]:
         data = self.call("artist.getsimilar", artist=artist, limit=limit, autocorrect=1)
         return (data.get("similarartists") or {}).get("artist") or []

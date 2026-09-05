@@ -4,6 +4,7 @@ __pycache__/
 data/cache/http*.json
 data/cache/sources.json
 data/cache/profile.json
+data/cache/catalog.json
 data/cache/everynoise.json
 *.tmp
 browser.json

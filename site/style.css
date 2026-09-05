@@ -180,7 +180,7 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 .src { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border: 1px solid var(--hair); border-left: 3px solid var(--ink); color: var(--muted); }
 .src.listenbrainz { border-left-color: #eb743b; } .src.bandcamp { border-left-color: #1da0c3; } .src.musicbrainz { border-left-color: #ba478f; }
 .src.deezer, .src.deezer-editorial, .src.deezer-related { border-left-color: #a238ff; } .src.rss { border-left-color: var(--gold); } .src.spotify { border-left-color: #1db954; }
-.src.ytmusic, .src.youtube { border-left-color: #e00; } .src.radio { border-left-color: var(--blue); } .src.musicbrainz-label { border-left-color: var(--accent); }
+.src.ytmusic, .src.youtube { border-left-color: #e00; } .src.lastfm { border-left-color: #d51007; } .src.radio { border-left-color: var(--blue); } .src.musicbrainz-label { border-left-color: var(--accent); }
 .links { font: 12px var(--mono); color: var(--muted); }
 .share { font: inherit; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
@@ -318,6 +318,9 @@ body.guest .mode { background: var(--blue); }
 .who img { width: 24px; height: 24px; border: 1px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); }
 .who .muted { text-transform: none; letter-spacing: 0; }
 .filters.picks > *:not(#q) { display: none; }
+/* the Catalog tab has its own sort and a year select; the feed's date-bound filters make no sense there */
+.filters:not(.catalog) .catalog-only { display: none; }
+.filters.catalog #sort, .filters.catalog .feed-only { display: none; }
 
 /* legal pages */
 body.doc .top { position: relative; }   /* no sticking; still the box the floating toggle is placed in */

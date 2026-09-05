@@ -45,6 +45,7 @@
   </div>
   <nav class="tabs" aria-label="views">
     <button class="tab active" data-view="feed" aria-current="page">Feed <span class="pill" id="count-feed">0</span></button>
+    <button class="tab" data-view="catalog" title="Earlier years: what you have played and loved on Last.fm but never filed, and your artists' and their neighbours' best-known tracks">Catalog <span class="pill" id="count-catalog">…</span></button>
     <button class="tab" data-view="picks">Picks <span class="pill" id="count-picks">0</span></button>
     <button class="tab curator" data-view="skipped" title="What you thumbed down from this feed — restore any of them">Skipped <span class="pill" id="count-skipped">0</span></button>
   </nav>
@@ -71,17 +72,24 @@
   <input id="q" type="search" placeholder="search artist / title / tag…" autocomplete="off" aria-label="search artist, title or tag">
   <button class="btn ghost mobile-only" id="filters-more" type="button" aria-expanded="false" aria-controls="filters">filters ▾</button>
   <div id="sources" class="sources-filter" aria-label="sources"></div>
-  <select id="sort">
+  <select id="sort" aria-label="sort">
     <option value="score">sort: score</option>
     <option value="raw">sort: build score (unlearned)</option>
     <option value="date">sort: newest release</option>
     <option value="seen">sort: newest in feed</option>
     <option value="artist">sort: artist</option>
   </select>
-  <label class="chk"><input type="checkbox" id="only-new"> new today</label>
+  <select id="cat-year" class="catalog-only" aria-label="year" title="A playlist year: how many tracks it holds, and how many candidates wait here"><option value="">all years</option></select>
+  <select id="cat-sort" class="catalog-only" aria-label="sort">
+    <option value="score">sort: score</option>
+    <option value="plays">sort: most played</option>
+    <option value="year">sort: year</option>
+    <option value="artist">sort: artist</option>
+  </select>
+  <label class="chk feed-only" id="l-new"><input type="checkbox" id="only-new"> new today</label>
   <label class="chk"><input type="checkbox" id="only-playable" checked> playable</label>
-  <label class="chk"><input type="checkbox" id="only-known"> known artists</label>
-  <label class="chk" title="Hide tracks whose verified release year is older than last year (radio and recommendation sources surface catalog too)"><input type="checkbox" id="only-recent"> new releases only</label>
+  <label class="chk feed-only" id="l-known"><input type="checkbox" id="only-known"> known artists</label>
+  <label class="chk feed-only" id="l-recent" title="Hide tracks whose verified release year is older than last year (radio and recommendation sources surface catalog too)"><input type="checkbox" id="only-recent"> new releases only</label>
   <label class="chk" title="Only the top of the list by score (⚙ sets how many). A search or another sort shows everything."><input type="checkbox" id="shortlist" checked> shortlist</label>
   <button class="btn ghost mobile-only" id="layout-toggle" type="button">list view</button>
   <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open · <kbd>t</kbd> theme</span>

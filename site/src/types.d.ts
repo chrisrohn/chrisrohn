@@ -7,7 +7,9 @@ export interface FeedItem {
   year?: number | null; year_source?: string | null; year_confidence?: string | null; year_evidence?: string[]; original_year?: number | null;
   youtube?: YouTubeMatch | null; score: number; reasons?: string[]; matched_artist?: string | null; match_kind?: string | null; first_seen?: string | null;
   _pick?: boolean; _year?: string | number | null; _skipped?: boolean;
+  plays?: number; loved?: boolean;   // catalog items: Last.fm play count, loved track
 }
+export interface Catalog { generated_at: string; candidates: number; count: number; undated: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; items: FeedItem[] }
 export interface LearnedRow { n: number; k: number; rate: number; adj: number }
 export interface LearnedSummary { outcomes: number; kept: number; skipped: number; keep_rate: number; since?: string | null; sources: Record<string, LearnedRow>; tags: Record<string, LearnedRow> }
 export interface Feed {
@@ -30,12 +32,13 @@ export interface DupeEntry { year: string; playlistId: string; videoId: string; 
 export interface Dupe { key: string; videoId: string; artist: string; title: string; kind: string; years: string[]; count: number; entries: DupeEntry[]; verified_year?: number; verified_source?: string }
 
 export interface Settings { audition: boolean; auditionSeconds: number; auditionStart: number; deck: boolean | null; skipsInYouTube: boolean | null; dupesNoticed?: string; dupesDone: string[]; installDismissedAt?: number; shortlistSize: number }
-export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyPlayable: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean }
+export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyPlayable: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[] }
 export interface State {
   feed: Feed | null; rated: Record<string, Rated>; auth: Auth | null; playlists: Record<string, any>; settings: Settings;
   deckIndex: number; auditionTimer: any; auditionTick: any; auditionArmed: string | null;
   quota: { day: string; units: number }; filters: Filters; view: string; order: string[]; currentId: string | null; rendered: number;
   badVideos: Record<string, number>; ratedVersion: number; shortlistHidden: number; focusId: string | null;
+  catalog: Catalog | null; catalogState: "idle" | "loading" | "ready" | "missing" | "failed"; index: Map<string, FeedItem>;
   player: any; playerReady: boolean; pendingVideo: string | null; tokenClient: any; busy: Set<string>;
   sync: { fileId: string | null; at: number }; syncTimer: any; _years: number[]; dupes: Dupe[] | null; dupePage: number; dupeQT: any;
   library: any[] | null; notOwner: boolean; signingIn: Promise<boolean> | null; authCb: any; authErrCb: any; keepAliveAt: number;

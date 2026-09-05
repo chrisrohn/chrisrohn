@@ -553,13 +553,16 @@ def test_cli_parses_commands(monkeypatch):
     monkeypatch.setattr(cli, "ensure_dirs", lambda: None)
     monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}})
     import discovery.build as build
+    import discovery.catalog as catalog
     import discovery.profile as profile
     monkeypatch.setattr(build, "build_feed", lambda cfg: calls.append("build"))
     monkeypatch.setattr(profile, "build_profile", lambda cfg, http: calls.append("profile"))
+    monkeypatch.setattr(catalog, "build_catalog", lambda cfg, deadline_minutes=None: calls.append("catalog" if deadline_minutes is None else f"catalog<{deadline_minutes:.0f}"))
     monkeypatch.setattr(cli, "_profile_stale", lambda cfg: False)
     assert cli.main(["build"]) == 0 and calls == ["build"]
-    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls == ["build", "profile", "build"]
-    assert cli.main([]) == 0 and calls[-1] == "build"                                 # daily is the default
+    assert cli.main(["catalog"]) == 0 and calls[-1] == "catalog"
+    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls[-3:] == ["profile", "build", "catalog<40"]   # the catalog gets what is left of the job
+    assert cli.main([]) == 0 and calls[-2:] == ["build", "catalog<40"]                # daily is the default
     with pytest.raises(SystemExit):
         cli.main(["--no-such-flag"])
 
@@ -773,3 +776,71 @@ def test_headlines_become_cards_only_when_they_are_about_a_song():
     assert headline_track("Julia Jacklin Performs on Top of a Skyscraper in the Video for New Song “The Hardest Thing”", artists) == ("Julia Jacklin", "The Hardest Thing", "track")
     assert headline_track("M83 Shares Surprise New Album It’s Nothing Personal", artists) is None      # no quoted title: nothing to file
     assert looks_like_news("Modeselektor Dublin DJ set announced") and not looks_like_news("Blister Sunrise")
+
+
+def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox):
+    from discovery import catalog
+    from discovery import profile as prof
+
+    profile = dict(PROFILE)
+    profile["saved"] = {util.item_key("Jungle", "Back On 74"): {"artist": "Jungle", "title": "Back On 74", "videoId": "vBack", "decision": "up", "year": "2023"},
+                        util.item_key("Roosevelt", "Lovers"): {"artist": "Roosevelt", "title": "Lovers", "decision": "down"}}
+    profile["youtube"] = {"years": {"2016": "PL2016"}, "entries": [{"year": "2016", "playlistId": "PL2016", "position": 0, "videoId": "v"}] * 3 + [{"year": "2023", "playlistId": "PL2023", "position": 0, "videoId": "vBack"}]}
+    util.write_json(prof.PROFILE_PATH, profile)
+    monkeypatch.setattr(catalog, "CATALOG_PATH", sandbox / "site" / "data" / "catalog.json")
+    monkeypatch.setattr(catalog, "STATE_PATH", sandbox / "data" / "catalog_state.json")
+    monkeypatch.setattr(catalog, "TAGS_CACHE", sandbox / "data" / "cache" / "artist_tags.json")
+    monkeypatch.setenv("LASTFM_API_KEY", "k")
+    calls = []
+
+    class FakeLastFm:
+        def __init__(self, http, key): self.key = key
+        enabled = True
+        def top_tracks(self, user, limit, period="overall"):
+            calls.append("top")
+            return [{"name": "Back On 74", "artist": {"name": "Jungle"}, "playcount": "300", "url": "https://last.fm/1"},   # already filed → hidden
+                    {"name": "Fire", "artist": {"name": "Jungle"}, "playcount": "120", "url": "https://last.fm/2"},
+                    {"name": "Lovers", "artist": {"name": "Roosevelt"}, "playcount": "90"},                               # skipped → hidden
+                    {"name": "Moving On", "artist": {"name": "Roosevelt"}, "playcount": "40", "url": "javascript:x"}]
+        def loved_tracks(self, user, limit):
+            return [{"name": "Fire", "artist": {"name": "Jungle"}}, {"name": "Overnight", "artist": {"name": "Parcels"}}]
+        def artist_top_tracks(self, artist, limit):
+            return [{"name": f"{artist} Hit", "artist": {"name": artist}}] if artist in ("Jungle", "Parcels") else []
+        def top_tags(self, artist):
+            return [{"name": "Nu Disco", "count": 100}, {"name": "rare", "count": 3}]
+    monkeypatch.setattr(catalog, "LastFm", FakeLastFm)
+
+    def fake_resolve(items, cfg, deadline=None):
+        assert cfg["resolve"]["max_lookups_per_run"] == 250
+        for it in items:
+            if it.title != "Parcels Hit":
+                it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg"}
+    monkeypatch.setattr(catalog, "resolve_all", fake_resolve)
+
+    def fake_years(items, cfg, http, deadline=None):
+        for it in items:
+            it.year, it.year_source, it.year_confidence = (2016, "musicbrainz-search", "high") if it.artist == "Jungle" else (None, "unknown", "low")
+    monkeypatch.setattr(catalog, "verify_years", fake_years)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    monkeypatch.setattr(catalog, "Http", NoNet)
+
+    payload = catalog.build_catalog(_cfg(), deadline_minutes=5)
+    titles = {(i["artist"], i["title"]) for i in payload["items"]}
+    assert ("Jungle", "Back On 74") not in titles and ("Roosevelt", "Lovers") not in titles   # a playlist or the Skipped playlist already has them
+    assert ("Parcels", "Parcels Hit") not in titles                                           # no YouTube match: nothing to file
+    assert {("Jungle", "Fire"), ("Roosevelt", "Moving On"), ("Jungle", "Jungle Hit"), ("Parcels", "Overnight")} <= titles
+    fire = next(i for i in payload["items"] if i["title"] == "Fire")
+    assert fire["plays"] == 120 and fire["loved"] is True and "120 plays" in fire["reasons"] and "loved on Last.fm" in fire["reasons"]
+    assert sorted(fire["sources"]) == ["lastfm:loved", "lastfm:top tracks"] and fire["tags"] == ["nu disco"] and fire["links"] == {"last.fm": "https://last.fm/2"}
+    assert fire["year"] == 2016 and fire["release_date"] is None and "listen_count" not in fire and "blurb" not in fire
+    assert payload["items"][0]["title"] == "Fire"                                             # most played + loved ranks first
+    assert payload["years"]["2016"] == {"playlist": 3, "candidates": 2} and payload["years"]["2023"]["playlist"] == 1
+    assert payload["undated"] == 2 and payload["sources"] == ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"]
+    state = util.read_json(sandbox / "data" / "catalog_state.json", {})
+    assert state["fetched_at"] and len(state["candidates"]) == 8 and set(state["first_seen"]) == {i["id"] for i in payload["items"]}
+    # a fresh snapshot is reused: Last.fm is not asked again for a week
+    catalog.build_catalog(_cfg(), deadline_minutes=5)
+    assert calls == ["top"]

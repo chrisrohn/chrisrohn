@@ -50,8 +50,11 @@ export const state = {
   quota: LS.get("id:quota", { day: "", units: 0 }),   // YouTube API units spent today by this account's devices (resets midnight Pacific)
   // "new releases only" is on for a first visit: radio and recommendation sources surface catalogue too
   // "shortlist" keeps the day to the top N (⚙ sets N); "show all" on the list or the deck lifts it for that visit
-  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true, shortlist: true }, LS.get("id:filters", {})),
+  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true, shortlist: true, catYear: "", catSort: "score", catSourcesOff: [] }, LS.get("id:filters", {})),
   view: "feed",
+  catalog: null,                            // data/catalog.json: earlier years' candidates, loaded when the Catalog tab is first opened
+  catalogState: "idle",                     // idle | loading | ready | missing | failed
+  index: new Map(),                         // id → item, across the feed and the catalog
   shortlistHidden: 0,                       // how many tracks the shortlist is holding back under the current filters
   focusId: null,                            // ?t=<id> from a permalink: focus that card once the feed is in
   order: [],
@@ -66,10 +69,16 @@ export const state = {
   signingIn: null, authCb: null, authErrCb: null, keepAliveAt: 0, lastAuthError: null, ready: false,
 };
 
-/** @returns {FeedItem[]} */
+/** The feed's items (what is new). @returns {FeedItem[]} */
 export const items = () => (state.feed && state.feed.items) || [];
+/** The catalog's items (earlier years), once loaded. @returns {FeedItem[]} */
+export const catalogItems = () => (state.catalog && state.catalog.items) || [];
+/** @returns {FeedItem[]} */
+export const allItems = () => items().concat(catalogItems());
+/** Rebuild the id index after either payload changes. */
+export function reindex() { state.index = new Map(allItems().map(i => [i.id, i])); }
 /** @param {string} id */
-export const byId = id => items().find(i => i.id === id);
+export const byId = id => state.index.get(id);
 /** A rating that still counts: an "undone" record is a tombstone, not a decision. @param {string} id */
 export const decisionFor = id => { const r = state.rated[id]; return r && r.decision !== "undone" ? r : null; };
 /** YouTube refused to embed this video here recently (error 101/150): the feed keeps it, autoplay steps over it. @param {string | null | undefined} vid */
@@ -90,7 +99,7 @@ export const quotaText = () => `~${quotaUsed().toLocaleString()} of 10,000 YouTu
 // Local bookkeeping that has outlived its purpose: ratings the daily build now hides via the playlists, local skips
 // after a year, undo tombstones after 30 days, and optimistic entries whose request never came back.
 export function reconcileRated() {
-  const now = Date.now(); const ids = new Set(items().map(i => i.id));
+  const now = Date.now(); const ids = new Set(allItems().map(i => i.id));
   for (const [id, r] of Object.entries(state.rated)) {
     const age = now - (r.at || 0);
     if (r.pending && age > PENDING_MAX_MS) { delete state.rated[id]; continue; }   // it never reached YouTube; let it show again

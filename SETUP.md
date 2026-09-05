@@ -168,6 +168,16 @@ session that the playlist's owner approved in that browser.
   copies its own address (`/?t=<id>`), which opens the site on that card; the RSS items carry the same link.
 - A video YouTube refuses to embed here (removed, or the owner blocks embedding) is remembered for a month: the card
   stays, marked *no embed*, and autoplay steps over it.
+- **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
+  Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
+  the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
+  playlist already holds is hidden; the rest is resolved on YouTube Music and given a verified release year in daily
+  batches on the feed's caches, so the tab fills in over a couple of weeks and then keeps pace with your listening.
+  The year select shows every playlist year with how many tracks it holds and how many candidates wait, so the
+  thin years are easy to work through; each Keep files into the verified year (or asks when none was found). Plays,
+  loved, your keeps and skips all rank it; the shortlist, search, source chips and the phone deck work as in the
+  feed. Tuning is under `catalog:` in config.yaml (candidate counts, per-run lookup budgets, its share of the job's
+  time after the feed). Nothing here spends YouTube API quota; the Last.fm key is the only one it needs.
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list (with release dates, artwork and
   tags; the internal score stays internal).
 
@@ -213,6 +223,7 @@ pip install --require-hashes -r discovery/requirements.lock   # exact versions, 
 export LASTFM_API_KEY=...
 python -m discovery profile      # once, then every few days automatically
 python -m discovery build        # writes site/data/feed.json + site/feed.xml
+python -m discovery catalog      # writes site/data/catalog.json (the earlier years, from Last.fm history)
 npm install && npm run serve     # builds dist/ from site/src and serves it at http://localhost:8000
 
 pip install ruff pytest && ruff check discovery tests && python -m pytest tests   # lint + offline tests
@@ -220,7 +231,9 @@ npm run check && npm test        # eslint + type check (tsc --checkJs) + build, 
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
-`render`, `player`, `rank` (the personal ranking), `stats`, `dupes`, `settings`, `keys`, `theme`, `main`). `build.mjs` bundles them with esbuild into a content-hashed
+`render`, `player`, `rank` (the personal ranking), `stats`, `dupes`, `settings`, `keys`, `theme`, `main`); the Python side is
+`discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/learn.py` (what the playlists teach the
+ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
 pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the

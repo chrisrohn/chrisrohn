@@ -10,7 +10,7 @@ import { state, persist } from "./state.js";
 import { $, $$, toast } from "./dom.js";
 import { isSignedIn, isCurator, tokenValid, signIn, signOut } from "./auth.js";
 import { pullRatings } from "./sync.js";
-import { load } from "./feed.js";
+import { load, loadCatalog, fillSources } from "./feed.js";
 import { render, deckOn, deckItem, deckYear } from "./render.js";
 import { rate } from "./rating.js";
 import { play, toggle, nextTrack, prevTrack, holdAudition, stopPlayer } from "./player.js";
@@ -19,7 +19,12 @@ import { wireKeys, currentYear } from "./keys.js";
 import { wirePwa, applyLaunchParams } from "./pwa.js";
 
 function wire() {
-  $$(".tab").forEach(b => b.addEventListener("click", () => { state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b)); render(); }));
+  $$(".tab").forEach(b => b.addEventListener("click", () => {
+    const was = state.view; state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b));
+    if ((was === "catalog") !== (state.view === "catalog")) fillSources();   // the chips are the feed's sources or the catalog's lists
+    if (state.view === "catalog") loadCatalog().catch(() => {});
+    state.deckIndex = 0; render();
+  }));
   const f = state.filters;
   $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-playable").checked = f.onlyPlayable; $("#only-known").checked = f.onlyKnown; $("#only-recent").checked = f.onlyRecent; $("#shortlist").checked = f.shortlist;
   /** @type {any} */ let qTimer;
@@ -30,7 +35,10 @@ function wire() {
   $("#only-known").addEventListener("change", (/** @type {any} */ e) => { f.onlyKnown = e.target.checked; persist(); render(); });
   $("#only-recent").addEventListener("change", (/** @type {any} */ e) => { f.onlyRecent = e.target.checked; persist(); render(); });
   $("#shortlist").addEventListener("change", (/** @type {any} */ e) => { f.shortlist = e.target.checked; persist(); render(); });
-  $("#signin").addEventListener("click", () => { if (isSignedIn()) signOut(); else signIn().catch(e => toast(e.message, true)); });
+  $("#cat-sort").value = f.catSort || "score";
+  $("#cat-sort").addEventListener("change", (/** @type {any} */ e) => { f.catSort = e.target.value; persist(); render(); });
+  $("#cat-year").addEventListener("change", (/** @type {any} */ e) => { f.catYear = e.target.value; state.deckIndex = 0; persist(); render(); });
+  $("#signin").addEventListener("click", () => { if (isSignedIn()) signOut(); else signIn().then(() => { if (isCurator()) loadCatalog().catch(() => {}); }).catch(e => toast(e.message, true)); });
   $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", () => { holdAudition(); toggle(); });
   $("#yt").addEventListener("click", holdAudition, true);
   $("#deck-up").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "up", deckYear()); });

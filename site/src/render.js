@@ -15,7 +15,7 @@ import { personal, scoreOf } from "./rank.js";
 /** @typedef {import("./types").FeedItem} FeedItem */
 
 const isPhone = () => window.matchMedia("(max-width: 760px)").matches;
-export const deckOn = () => (state.settings.deck == null ? isPhone() : !!state.settings.deck) && state.view === "feed";
+export const deckOn = () => (state.settings.deck == null ? isPhone() : !!state.settings.deck) && (state.view === "feed" || state.view === "catalog");
 
 /** @type {IntersectionObserver | null} */
 let more = null;
@@ -40,15 +40,19 @@ export function render() {
   refreshNow();
   const empty = $("#empty"); empty.hidden = vis.length > 0;
   empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.")
-    : state.view === "skipped" ? "Nothing skipped from this feed." : "No picks yet.";
+    : state.view === "skipped" ? "Nothing skipped from this feed."
+    : state.view === "catalog" ? ({ idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog. Reload to try again." }[state.catalogState] || "Nothing here with these filters.")
+    : "No picks yet.";
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters (the
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
-  const counts = { feed: state.view === "feed" ? vis.length + state.shortlistHidden : visibleItems("feed").length + state.shortlistHidden, picks: state.view === "picks" ? vis.length : visibleItems("picks").length,
-    skipped: isCurator() ? (state.view === "skipped" ? vis.length : visibleItems("skipped").length) : 0 };
-  for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = String(n); }
+  const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
+  const counts = { feed: full("feed"), picks: visibleItems("picks").length, skipped: isCurator() ? visibleItems("skipped").length : 0, catalog: state.catalog ? full("catalog") : 0 };
+  state.shortlistHidden = hidden;
+  for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = k === "catalog" && !state.catalog ? "…" : String(n); }
   $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
   $$(".tab").forEach(t => { const on = t.dataset.view === state.view; t.classList.toggle("active", on); if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current"); });
-  $("#filters").classList.toggle("picks", state.view !== "feed");
+  $("#filters").classList.toggle("picks", state.view === "picks" || state.view === "skipped");
+  $("#filters").classList.toggle("catalog", state.view === "catalog");
 }
 /** Render up to `count` cards of the current list; a sentinel at the end pulls in the next page. @param {number} count */
 function appendCards(count) {
@@ -69,7 +73,7 @@ function appendCards(count) {
     const s = document.createElement("div"); s.id = "more-sentinel"; s.className = "more-sentinel"; s.textContent = `${lastVis.length - to} more…`; tail.push(s);
     if (!more) more = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) appendCards(state.rendered + PAGE); }, { rootMargin: "600px" });
     more.observe(s);
-  } else if (state.view === "feed" && state.shortlistHidden) tail.push(showAllNote());
+  } else if ((state.view === "feed" || state.view === "catalog") && state.shortlistHidden) tail.push(showAllNote());
   list.replaceChildren(...els, ...tail);
 }
 /** The shortlist's tail: how many more the filters would allow, and a way to see them. */

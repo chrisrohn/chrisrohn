@@ -30,6 +30,7 @@
   ],
   "shortcuts": [
     { "name": "New today", "short_name": "New", "description": "Only the tracks that arrived in today's build", "url": "/?new=1&source=shortcut", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Catalog", "short_name": "Catalog", "description": "Earlier years: fill the playlists from your listening history", "url": "/?view=catalog&source=shortcut", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Picks", "short_name": "Picks", "description": "Recent approvals and the library's latest picks", "url": "/?view=picks&source=shortcut", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Audition mode", "short_name": "Audition", "description": "Start playing with audition mode on: a taste of each track, then the next", "url": "/?audition=1&source=shortcut", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]

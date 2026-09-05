@@ -1,6 +1,6 @@
 // @ts-check
 /* The feed: loading feed.json, the filter bar, and which items are visible in each view. */
-import { state, persist, items, byId, decisionFor, reconcileRated, STALE_AFTER_MS } from "./state.js";
+import { state, persist, items, catalogItems, allItems, byId, reindex, decisionFor, reconcileRated, STALE_AFTER_MS } from "./state.js";
 import { $, $$, esc, relTime, range, toast } from "./dom.js";
 import { isSignedIn, isOwner, isCurator, tokenValid, emailHash, applyMode, ensureTokenClient, keepAlive } from "./auth.js";
 import { pullRatings } from "./sync.js";
@@ -18,7 +18,7 @@ const fetchFeed = () => fetch("data/feed.json", { cache: "no-cache" }).then(r =>
 /** @param {import("./types").Feed} feed */
 function absorb(feed) {
   state.feed = feed; loadedAt = Date.now();
-  hays.clear(); memo.clear(); invalidateRank();
+  hays.clear(); memo.clear(); invalidateRank(); reindex();
   reconcileRated();
   if (isOwner()) {
     for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
@@ -38,6 +38,7 @@ export async function load() {
   applyMode();
   render();
   openPermalink();
+  if (isCurator() || state.view === "catalog") loadCatalog().catch(() => {});
   if (isCurator() && tokenValid()) pullRatings().then(() => refreshRecent()).catch(() => {});
   if (isSignedIn()) ensureTokenClient().catch(() => {});
   document.addEventListener("pointerdown", keepAlive, { capture: true, passive: true });
@@ -52,9 +53,34 @@ export async function refreshFeed(force = false) {
   const keep = deckOnId();
   absorb(feed);
   render();
+  if (state.catalogState === "ready") loadCatalog(true).catch(() => {});
   if (keep) { const i = state.order.indexOf(keep); if (i >= 0) { state.deckIndex = i; render(); } }
   toast(`Feed updated · ${feed.new_today} new today`);
   return true;
+}
+/* The catalog (data/catalog.json): candidates for the earlier years, from your Last.fm history. Loaded the first
+ * time the Catalog tab opens (a curator gets it straight away), and again when a newer build lands. */
+export async function loadCatalog(force = false) {
+  if (state.catalogState === "loading" || (state.catalogState === "ready" && !force)) return;
+  state.catalogState = "loading"; render();
+  try {
+    const r = await fetch("data/catalog.json", { cache: "no-cache" });
+    if (r.status === 404) { state.catalogState = "missing"; render(); return; }
+    if (!r.ok) throw new Error("catalog.json " + r.status);
+    const cat = await r.json();
+    if (cat.generated_at !== state.catalog?.generated_at) { state.catalog = cat; memo.clear(); reindex(); reconcileRated(); }
+    state.catalogState = "ready";
+  } catch (e) { state.catalogState = "failed"; toast("Could not load the catalog: " + /** @type {Error} */ (e).message, true); }
+  fillSources(); fillCatalogYears(); render();
+}
+/** The year select in the Catalog view: every playlist year with how full it is and how many candidates wait. */
+export function fillCatalogYears() {
+  const sel = $("#cat-year"); const cat = state.catalog; if (!sel || !cat) return;
+  const years = Object.entries(cat.years || {}).sort((a, b) => Number(b[0]) - Number(a[0]));
+  sel.innerHTML = `<option value="">all years · ${cat.count} candidates</option>` + (cat.undated ? `<option value="?">year unknown · ${cat.undated}</option>` : "") +
+    years.map(([y, v]) => `<option value="${y}"${v.candidates ? "" : " disabled"}>${y} · ${v.playlist} in playlist · ${v.candidates} here</option>`).join("");
+  sel.value = state.filters.catYear || "";
+  if (sel.value !== (state.filters.catYear || "")) { state.filters.catYear = ""; sel.value = ""; }
 }
 /** ?t=<id> (a share, the RSS feed): put that card on screen — by searching for it if the filters would hide it. */
 function openPermalink() {
@@ -81,16 +107,20 @@ export function renderMeta() {
 }
 function fillYears() { const f = state.feed; state._years = (f?.years && f.years.length) ? f.years : range(new Date().getFullYear(), 1979); }
 /** @type {Record<string, string>} */
-const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", "musicbrainz-label": "Labels", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "Artist watch", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify" };
+const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", "musicbrainz-label": "Labels", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "Artist watch", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify",
+  "lastfm:top tracks": "Most played", "lastfm:loved": "Loved", "lastfm:artist top": "Your artists' hits", "lastfm:similar top": "Similar artists' hits" };
+/** The source chips: the feed's source families, or the catalog's Last.fm lists, whichever tab is open. */
 export function fillSources() {
-  const box = $("#sources"); const names = state.feed?.sources || []; const off = new Set(state.filters.sourcesOff || []);
-  const blogs = state.feed?.blogs || []; const boff = new Set(state.filters.blogsOff || []);
+  const box = $("#sources"); const catalog = state.view === "catalog";
+  const key = catalog ? "catSourcesOff" : "sourcesOff";
+  const names = catalog ? (state.catalog?.sources || []) : (state.feed?.sources || []); const off = new Set(state.filters[key] || []);
+  const blogs = catalog ? [] : (state.feed?.blogs || []); const boff = new Set(state.filters.blogsOff || []);
   const blogCount = blogs.filter(b => !boff.has(b)).length;
-  box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s)}</label>` +
+  box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s.split(":").slice(1).join(":") || s)}</label>` +
       (s === "rss" && blogs.length ? `<button class="all pick" type="button" id="blogs-btn" title="choose which blogs">${blogCount}/${blogs.length} blogs ▾</button>` : "")).join("") +
     (names.length > 1 ? `<button class="all" type="button" data-all="1">all</button><button class="all" type="button" data-all="0">none</button>` : "");
-  $$("input", box).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters.sourcesOff || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters.sourcesOff = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render(); }));
-  $$("button.all[data-all]", box).forEach(b => b.addEventListener("click", () => { state.filters.sourcesOff = b.dataset.all === "1" ? [] : [...names]; persist(); fillSources(); render(); }));
+  $$("input", box).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters[key] || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters[key] = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render(); }));
+  $$("button.all[data-all]", box).forEach(b => b.addEventListener("click", () => { state.filters[key] = b.dataset.all === "1" ? [] : [...names]; persist(); fillSources(); render(); }));
   const bb = $("#blogs-btn"); if (bb) bb.addEventListener("click", openBlogPicker);
 }
 function openBlogPicker() {
@@ -136,15 +166,16 @@ const memo = new Map();
 export function visibleItems(view = state.view) { return computeVisible(view).list; }
 /** @param {string} view */
 function computeVisible(view) {
-  const key = `${view}|${JSON.stringify(state.filters)}|${state.ratedVersion}|${state.feed?.generated_at || ""}|${Object.keys(state.badVideos).length}`;
+  const key = `${view}|${JSON.stringify(state.filters)}|${state.ratedVersion}|${state.feed?.generated_at || ""}|${state.catalog?.generated_at || ""}|${Object.keys(state.badVideos).length}`;
   const hit = memo.get(key); if (hit) { if (view === "feed") state.shortlistHidden = hit.hidden; return hit; }
   const res = { list: listFor(view), hidden: 0 };
   const f = state.filters;
-  if (view === "feed" && f.shortlist && (f.sort === "score" || !f.sort) && !f.q) {
+  const sortKey = view === "catalog" ? f.catSort : f.sort;
+  if ((view === "feed" || view === "catalog") && f.shortlist && (sortKey === "score" || !sortKey) && !f.q) {
     const n = Math.max(10, Number(state.settings.shortlistSize) || 60);
     if (res.list.length > n) { res.hidden = res.list.length - n; res.list = res.list.slice(0, n); }
   }
-  if (view === "feed") state.shortlistHidden = res.hidden;
+  if (view === "feed" || view === "catalog") state.shortlistHidden = res.hidden;
   if (memo.size > 8) memo.delete(/** @type {string} */ (memo.keys().next().value));
   memo.set(key, res);
   return res;
@@ -161,9 +192,28 @@ function listFor(view) {
     return all.filter(i => !q || hay(i).includes(q));
   }
   if (view === "skipped") {
-    // what this account thumbed down and is still in the feed, newest skip first; Undo brings any of them back
-    return items().filter(i => decisionFor(i.id)?.decision === "down" && (!q || hay(i).includes(q)))
+    // what this account thumbed down and is still in the feed or the catalog, newest skip first; Undo brings any back
+    return allItems().filter(i => decisionFor(i.id)?.decision === "down" && (!q || hay(i).includes(q)))
       .sort((a, b) => (state.rated[b.id]?.at || 0) - (state.rated[a.id]?.at || 0)).map(i => ({ ...i, _skipped: true }));
+  }
+  if (view === "catalog") {
+    const off = new Set(f.catSourcesOff || []); const y = f.catYear || "";
+    const list = catalogItems().filter(i => {
+      if (decisionFor(i.id)) return false;
+      if (q && !hay(i).includes(q)) return false;
+      if (off.size && !(i.sources || []).some(s => !off.has(s))) return false;
+      if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
+      if (y === "?" ? i.year != null : (y && String(i.year) !== y)) return false;
+      return true;
+    });
+    /** @type {Record<string, (a: FeedItem, b: FeedItem) => number>} */
+    const ccmp = {
+      score: (a, b) => scoreOf(b) - scoreOf(a) || b.score - a.score,
+      plays: (a, b) => (b.plays || 0) - (a.plays || 0) || scoreOf(b) - scoreOf(a),
+      year: (a, b) => (b.year || 0) - (a.year || 0) || scoreOf(b) - scoreOf(a),
+      artist: (a, b) => a.artist.localeCompare(b.artist),
+    };
+    return list.sort(ccmp[f.catSort] || ccmp.score);
   }
   const today = state.feed?.generated_at?.slice(0, 10); const lastYear = new Date().getFullYear() - 1;
   const list = items().filter(i => {

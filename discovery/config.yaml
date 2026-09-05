@@ -331,6 +331,32 @@ learn:
   min_exposures: 3       # fewer sightings than this: no opinion yet
   max_adjust: 1.5        # the log2 ratio is clamped to ±this, so one lucky blog can't dominate
 
+# ---------- The catalog: infill for earlier years (discovery/catalog.py) ----------
+# Runs after the feed in the daily job and publishes site/data/catalog.json for the Catalog tab. Candidates are your
+# own Last.fm history (most-played and loved tracks not yet in a playlist) plus the top tracks of the artists you
+# play and of their similar artists; the candidate snapshot is refreshed weekly, YouTube resolution and year
+# verification proceed in daily batches on the feed's caches, so the catalog grows over a couple of weeks.
+catalog:
+  enabled: true
+  refresh_days: 7
+  top_tracks: 3000          # user.getTopTracks, overall (1000 per request)
+  loved_tracks: 2000
+  artists_top_n: 150        # your top artists by affinity …
+  per_artist: 8             # … and this many of each one's top tracks
+  similar_top_n: 100        # the strongest similar artists (adjacent to what you play) …
+  per_similar: 5
+  max_items: 2000           # candidates carried into resolution, by score
+  time_budget_minutes: 8    # its own wall-clock share after the feed's …
+  job_budget_minutes: 40    # … but never past this point of the whole daily job (the workflow times out at 45)
+  max_lookups_per_run: 250
+  max_year_lookups_per_run: 250
+  tag_lookups_per_run: 300  # artists whose Last.fm tags get fetched per run (cached for good afterwards)
+  loved_bonus: 1.5
+  weights:                  # overrides of ranking.weights for the catalog: plays count for a lot, freshness for nothing
+    listens: 2.0
+    freshness: 0.0
+    editorial: 0.0
+
 resolve:
   youtube_music: true
   max_lookups_per_run: 400
