@@ -14,7 +14,10 @@ station:
 youtube_music:
   playlist_title_pattern: "{year} Indie Discotheque"
   first_year: 1979
-  # Any one of your year playlists; the build uses it to find your channel and then every other year playlist.
+  # Your YouTube channel id (UC…): open your channel on youtube.com → About → Share → Copy channel ID. Optional but
+  # recommended; without it the build tries to learn it from one of the playlists below.
+  channel_id: ""
+  # Any of your year playlists; the build lists the channel's public playlists to find every other year.
   playlists:
     "2026": PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN
     "2025": PLTW5JZnPjE_onNAnNNGWFyek1iTfsdSrS

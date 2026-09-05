@@ -132,7 +132,7 @@
           } catch {}
           if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
           persist(); applyMode(); render();
-          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); }
+          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); loadLibraryPlaylists().then(() => refreshRecent()).catch(() => {}); }
           else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); }
           else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
           resolve(true);
@@ -173,26 +173,55 @@
   const skippedTitle = () => (state.feed.youtube && state.feed.youtube.skipped_playlist_title) || "Skipped";
   const titleRegex = () => new RegExp("^" + pattern().split("{year}").map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(\\d{4})") + "$", "i");
 
+  const normTitle = s => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  // "2024 Indie Discotheque", "Indie Discotheque 2024", "2024 - indie discotheque" all count
+  function yearFromTitle(t) {
+    const words = normTitle(pattern().replace("{year}", " ")).trim();
+    const n = normTitle(t);
+    if (!words || !n.includes(words)) return null;
+    const m = /\b(19[5-9]\d|20\d\d)\b/.exec(n);
+    return m ? m[1] : null;
+  }
   async function loadLibraryPlaylists() {
-    const rx = titleRegex();
-    let pageToken; let n = 0;
+    let pageToken; let n = 0; const all = [];
     do {
-      const j = await yt("GET", "/playlists", { params: { part: "snippet", mine: "true", maxResults: 50, pageToken } });
+      const j = await yt("GET", "/playlists", { params: { part: "snippet,contentDetails", mine: "true", maxResults: 50, pageToken } });
       for (const p of j.items || []) {
         const t = (p.snippet.title || "").trim();
-        const m = rx.exec(t);
-        if (m) state.playlists[m[1]] = p.id;
-        else if (t.toLowerCase() === skippedTitle().toLowerCase()) state.playlists.__skipped = p.id;
+        all.push({ id: p.id, title: t, count: (p.contentDetails || {}).itemCount || 0, published: p.snippet.publishedAt, desc: p.snippet.description || "" });
+        const y = yearFromTitle(t);
+        if (y) { if (!state.playlists[y]) state.playlists[y] = p.id; }
+        else if (normTitle(t) === normTitle(skippedTitle())) state.playlists.__skipped = p.id;
         n++;
       }
       pageToken = j.nextPageToken;
     } while (pageToken && n < 500);
     state.playlists.__loaded_at = Date.now();
+    state.library = all;
     persist();
+    checkOwnership();
+    return all;
+  }
+  // Owner sanity check: the playlists the daily build found (feed.json) must be in THIS sign-in's library.
+  function checkOwnership() {
+    if (!isOwner() || !state.library) return;
+    const known = Object.values((state.feed.youtube && state.feed.youtube.playlists) || {});
+    if (!known.length) return;
+    const mine = new Set(state.library.map(p => p.id));
+    const missing = known.filter(id => !mine.has(id));
+    state.wrongChannel = missing.length === known.length;
+    if (state.wrongChannel) toast("This Google sign-in doesn't own the Indie Discotheque playlists (they're on another channel or brand account). Sign out, sign in again and pick that channel when Google asks.", true);
   }
   async function playlistFor(year) {
+    year = String(year);
+    // the daily build already knows the owner's year playlists by id — trust those first
+    if (isOwner()) { const known = (state.feed.youtube && state.feed.youtube.playlists) || {}; if (known[year] && !state.playlists[year]) state.playlists[year] = known[year]; }
     if (!state.playlists[year] || !state.playlists.__loaded_at) await loadLibraryPlaylists();
+    if (isOwner()) { const known = (state.feed.youtube && state.feed.youtube.playlists) || {}; if (known[year]) state.playlists[year] = known[year]; }
+    if (state.wrongChannel) throw new Error("this sign-in doesn't own the year playlists — sign in again and choose the right channel");
     if (!state.playlists[year]) {
+      const ok = confirm(`No playlist called “${titleFor(year)}” exists in this YouTube account (${state.auth.email}).\n\nCreate it now? (Cancel if it should already exist — then check the title spelling or the signed-in channel.)`);
+      if (!ok) throw new Error("no playlist for " + year);
       const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: titleFor(year), description: "Filed from chrisrohn.com" }, status: { privacyStatus: "public" } } });
       state.playlists[year] = j.id; persist(); toast(`Created playlist “${titleFor(year)}”`);
     }
@@ -207,6 +236,36 @@
     }
     return state.playlists.__skipped;
   }
+  // ---------- repair: merge duplicate year playlists (keeps the older/larger one, moves items, deletes the copy) ----------
+  async function mergeDuplicates() {
+    const lib = await loadLibraryPlaylists();
+    const groups = {};
+    for (const p of lib) { const y = yearFromTitle(p.title); if (y) (groups[y] ||= []).push(p); }
+    const dups = Object.entries(groups).filter(([, ps]) => ps.length > 1);
+    if (!dups.length) { toast("No duplicate year playlists found in this account."); return; }
+    const plan = dups.map(([y, ps]) => {
+      const sorted = [...ps].sort((a, b) => (a.desc.includes("chrisrohn.com") - b.desc.includes("chrisrohn.com")) || (b.count - a.count) || String(a.published).localeCompare(String(b.published)));
+      return { year: y, keep: sorted[0], drop: sorted.slice(1) };
+    });
+    const summary = plan.map(p => `${p.year}: keep “${p.keep.title}” (${p.keep.count} tracks), merge & delete ${p.drop.map(d => `“${d.title}” (${d.count})`).join(", ")}`).join("\n");
+    if (!confirm(`Merge duplicate year playlists?\n\n${summary}\n\nTracks from the copies are added to the kept playlist, then the copies are deleted. Costs ~${plan.reduce((n, p) => n + p.drop.reduce((m, d) => m + d.count * 50 + 50, 0), 0)} quota units.`)) return;
+    let moved = 0, deleted = 0;
+    for (const p of plan) {
+      for (const d of p.drop) {
+        let pageToken;
+        do {
+          const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: d.id, maxResults: 50, pageToken } });
+          for (const it of j.items || []) { const vid = it.snippet.resourceId && it.snippet.resourceId.videoId; if (vid) { try { await addToPlaylist(p.keep.id, vid); moved++; } catch (e) { toast("Could not move a track: " + e.message, true); } } }
+          pageToken = j.nextPageToken;
+        } while (pageToken);
+        await yt("DELETE", "/playlists", { params: { id: d.id } }); deleted++;
+      }
+      state.playlists[p.year] = p.keep.id;
+    }
+    persist();
+    toast(`Merged ${moved} track(s) and deleted ${deleted} duplicate playlist(s).`);
+  }
+
   async function addToPlaylist(playlistId, videoId) {
     const j = await yt("POST", "/playlistItems", { params: { part: "snippet" }, body: { snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } } });
     return j.id;
@@ -576,7 +635,8 @@
     $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
     $("#settings-btn").addEventListener("click", () => {
-      $("#s-playlists").textContent = Object.entries(state.playlists).filter(([k]) => !k.startsWith("__")).length + " year playlists known" + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : " · no skipped playlist yet");
+      const yrs = Object.keys(state.playlists).filter(k => !k.startsWith("__")).sort();
+      $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.wrongChannel ? " · ⚠ this sign-in does not own the station playlists" : "");
       $("#s-quota").textContent = quotaText();
       const g = $("#s-guests");
       if (isOwner()) {
@@ -591,7 +651,8 @@
     });
     $("#s-skips").addEventListener("change", e => { state.settings.skipsInYouTube = e.target.checked; persist(); });
     $("#s-export").addEventListener("click", exportCsv);
-    $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast("Playlists reloaded")).catch(e => toast(e.message, true)));
+    $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast(`Playlists reloaded: ${Object.keys(state.playlists).filter(k => !k.startsWith("__")).length} year playlists found`)).catch(e => toast(e.message, true)));
+    $("#s-merge").addEventListener("click", () => mergeDuplicates().catch(e => toast(e.message, true)));
     $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;

@@ -333,3 +333,20 @@ def test_youtube_channel_feed_and_radio(monkeypatch, sandbox):
     r = radio.fetch(cfg, PROFILE, FakeHttp())
     names = {(i.artist, i.title) for i in r}
     assert ("Roosevelt", "Lovers") in names and ("Jungle", "Back On 74") in names and ("Nobody", "Old") not in names and ("Stranger", "x") not in names
+
+
+def test_discover_playlists_tolerant_titles_and_channel_from_author():
+    from discovery.profile import discover_playlists
+
+    class FakeYT:
+        def get_playlist(self, pid, limit=None):
+            return {"author": {"name": "Chris", "id": "UCxyz"}, "tracks": []}
+        def get_user(self, cid):
+            return {"playlists": {"params": "p"}}
+        def get_user_playlists(self, cid, params):
+            return [{"title": "Indie Discotheque 1999", "playlistId": "PL1999"}, {"title": "2001 - indie discotheque", "playlistId": "PL2001"},
+                    {"title": "1987 Indie Discotheque", "playlistId": "PL1987"}, {"title": "Indie Discotheque favourites", "playlistId": "PLX"}]
+
+    years, skipped, channel = discover_playlists(_cfg(), FakeYT())
+    assert channel == "UCxyz"
+    assert years["1999"] == "PL1999" and years["2001"] == "PL2001" and years["1987"] == "PL1987" and "PLX" not in years.values()

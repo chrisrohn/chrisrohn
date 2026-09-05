@@ -132,6 +132,20 @@ def listenbrainz_similar(http: Http, mbid: str, limit: int) -> list[dict]:
     return rows[:limit]
 
 
+def _loose_year_match(title: str, pattern: str):
+    """Tolerant match: the pattern's words (any order/case/punctuation) plus a 4-digit year somewhere in the title."""
+    words = norm(pattern.replace("{year}", " "))
+    t = norm(title)
+    if words and words in t:
+        m = re.search(r"\b(19[5-9]\d|20\d\d)\b", t)
+        if m:
+            class _M:  # mimic re.Match.group(1)
+                def __init__(self, y): self._y = y
+                def group(self, i): return self._y
+            return _M(m.group(1))
+    return None
+
+
 def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str | None]:
     """Find every '<year> Indie Discotheque' playlist (+ the Skipped playlist) on your channel.
 
@@ -144,20 +158,31 @@ def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str |
     found: dict[str, str] = {str(y): pid for y, pid in (ycfg.get("playlists") or {}).items()}
     skipped = ycfg.get("skipped_playlist_id") or None
     skipped_title = (ycfg.get("skipped_playlist_title") or "").strip().lower()
-    channel = None
+    channel = ycfg.get("channel_id") or None
     for pid in list(found.values()):
+        if channel:
+            break
         try:
-            pl = yt.get_playlist(pid, limit=0)
-            channel = (pl.get("author") or {}).get("id")
-            if channel:
-                break
+            pl = yt.get_playlist(pid, limit=1)
+            author = pl.get("author")
+            if isinstance(author, list):
+                author = author[0] if author else {}
+            channel = (author or {}).get("id") or (author or {}).get("browseId")
+            if channel and not str(channel).startswith("UC"):
+                channel = None
         except Exception as exc:  # noqa: BLE001
-            log.debug("playlist %s lookup failed: %s", pid, exc)
+            log.warning("playlist %s lookup failed while finding your channel: %s", pid, exc)
+    if not channel:
+        log.warning("could not determine the YouTube channel that owns the year playlists; set youtube_music.channel_id in config.yaml (the UC… id of your channel)")
     if channel:
         try:
-            for pl in yt.get_user_playlists(channel, yt.get_user(channel)["playlists"]["params"]):
+            user = yt.get_user(channel)
+            params = ((user.get("playlists") or {}).get("params"))
+            pls = yt.get_user_playlists(channel, params) if params else []
+            log.info("channel %s: %d public playlists listed", channel, len(pls))
+            for pl in pls:
                 title = (pl.get("title") or "").strip()
-                m = rx.match(title)
+                m = rx.match(title) or _loose_year_match(title, pattern)
                 if m and pl.get("playlistId"):
                     found.setdefault(m.group(1), pl["playlistId"])
                 elif skipped_title and title.lower() == skipped_title and pl.get("playlistId"):
