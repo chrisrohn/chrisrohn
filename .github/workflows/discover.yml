@@ -47,7 +47,7 @@ jobs:
 
       # the HTTP response cache is gitignored (it is big and churns); keep it between runs so MusicBrainz, Deezer and
       # ListenBrainz answers from the last ~20 h are reused instead of re-fetched at 1 request/s
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             data/cache/sources.json
