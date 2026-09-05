@@ -94,7 +94,7 @@ export function renderDeck(vis) {
   attachSwipe(el, it, 110);
   if (state.currentId === it.id) el.classList.add("current");
   host.innerHTML = ""; host.appendChild(el);
-  $("#deck-play").textContent = state.currentId === it.id && state.playerReady && state.player.getPlayerState && state.player.getPlayerState() === 1 ? "⏸" : "▶";
+  $("#deck-play").textContent = state.currentId === it.id && state.playerReady && state.player.getPlayerState && state.player.getPlayerState() === 1 ? "⏸\uFE0E" : "▶\uFE0E";
   $("#deck-play").disabled = !yt.videoId;
 }
 export const deckItem = () => { const id = $("#deck-card .dcard")?.dataset.id; return id ? byId(id) : null; };

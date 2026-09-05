@@ -13,10 +13,11 @@
 <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#0b0b10">
+<meta name="theme-color" content="#e7e3da" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c1c1a" media="(prefers-color-scheme: dark)">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="New Music">
 <link rel="alternate" type="application/rss+xml" title="Chris Rohn's New Music" href="/feed.xml">
 <link rel="preconnect" href="https://www.youtube.com">
@@ -25,7 +26,7 @@
 <body>
 <header class="top">
   <div class="brand">
-    <span class="ball">🪩</span>
+    <span class="ball" aria-hidden="true"></span>
     <div>
       <h1>Chris Rohn's New Music</h1>
       <div class="sub" id="meta">loading feed…</div>
@@ -39,7 +40,7 @@
     <span id="who" class="who" hidden></span>
     <span class="mode curator" title="Curator mode: thumbs file straight into your YouTube playlists">curator</span>
     <button id="signin" class="btn primary" disabled title="loading the feed…">Sign in with Google</button>
-    <button id="settings-btn" class="btn ghost" title="Settings" disabled>⚙</button>
+    <button id="settings-btn" class="btn ghost" title="Settings" disabled aria-label="Settings">&#x2699;&#xFE0E;</button>
   </div>
 </header>
 
@@ -73,9 +74,9 @@
     </div>
     <div id="deck-card"></div>
     <div class="deck-actions">
-      <button class="btn down big curator" id="deck-down" title="thumbs down">👎</button>
-      <button class="btn big play" id="deck-play" title="play / pause">▶</button>
-      <button class="btn up big curator" id="deck-up" title="thumbs up">👍</button>
+      <button class="btn down big curator" id="deck-down" title="thumbs down">&#x25BC;&#xFE0E; skip</button>
+      <button class="btn big play" id="deck-play" title="play / pause">&#x25B6;&#xFE0E;</button>
+      <button class="btn up big curator" id="deck-up" title="thumbs up">&#x25B2;&#xFE0E; keep</button>
     </div>
   </section>
   <div id="empty" class="empty" hidden></div>
@@ -83,7 +84,7 @@
 
 <template id="deck-tpl">
   <article class="dcard" tabindex="0">
-    <div class="dart"><img alt="" loading="eager"><span class="dplay">▶</span><span class="yearbadge"></span></div>
+    <div class="dart"><img alt="" loading="eager"><span class="dplay">&#x25B6;&#xFE0E;</span><span class="yearbadge"></span></div>
     <div class="dbody">
       <div class="dartist"></div>
       <div class="dtitle"></div>
@@ -101,14 +102,14 @@
   <div class="player-meta">
     <div class="now" id="now"></div>
     <div class="player-controls">
-      <button class="btn" id="p-prev" title="previous (k)">⏮</button>
-      <button class="btn" id="p-toggle" title="play/pause (space)">⏯</button>
-      <button class="btn" id="p-next" title="next (j)">⏭</button>
+      <button class="btn" id="p-prev" title="previous (k)">&#x23EE;&#xFE0E;</button>
+      <button class="btn" id="p-toggle" title="play/pause (space)">&#x23EF;&#xFE0E;</button>
+      <button class="btn" id="p-next" title="next (j)">&#x23ED;&#xFE0E;</button>
       <label class="chk"><input type="checkbox" id="autoplay" checked> autoplay next</label>
       <label class="chk" title="Start each track partway in and move on automatically after a few seconds. Any key or click on the player cancels the timer for that track."><input type="checkbox" id="audition"> audition <span id="audition-label">30s</span></label>
       <span id="audition-bar" class="audition-bar" hidden><i></i></span>
-      <button class="btn down curator" id="p-down" title="thumbs down (d)">👎</button>
-      <button class="btn up curator" id="p-up" title="thumbs up (u)">👍</button>
+      <button class="btn down curator" id="p-down" title="thumbs down (d)">&#x25BC;&#xFE0E;</button>
+      <button class="btn up curator" id="p-up" title="thumbs up (u)">&#x25B2;&#xFE0E;</button>
     </div>
   </div>
 </aside>
@@ -169,7 +170,7 @@
 
 <template id="card-tpl">
   <article class="card" tabindex="0">
-    <div class="art"><img alt="" loading="lazy"><span class="play">▶</span></div>
+    <div class="art"><img alt="" loading="lazy"><span class="play">&#x25B6;&#xFE0E;</span></div>
     <div class="body">
       <div class="line1">
         <span class="artist"></span>
@@ -190,16 +191,18 @@
       <div class="score" title="relevance score"></div>
       <select class="year curator" title="year playlist"></select>
       <div class="thumbs curator">
-        <button class="btn down" title="thumbs down (d)">👎</button>
-        <button class="btn up" title="thumbs up (u)">👍</button>
+        <button class="btn down" title="thumbs down (d)">&#x25BC;&#xFE0E;</button>
+        <button class="btn up" title="thumbs up (u)">&#x25B2;&#xFE0E;</button>
       </div>
     </div>
   </article>
 </template>
 
-<footer>
-  <span>A daily discovery feed for the <b>Indie Discotheque</b> playlists on YouTube Music, built from Last.fm (<a id="lfm" href="https://www.last.fm/user/tt_discotheque" target="_blank" rel="noopener">tt_discotheque</a>), ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs.</span>
-  <span><a href="/feed.xml">RSS</a> · <a href="https://github.com/chrisrohn/chrisrohn" target="_blank" rel="noopener">source</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></span>
+<footer aria-label="title block">
+  <div class="tb-cell"><span class="tb-k">Project</span><span class="tb-v">A daily discovery feed for the <b>Indie Discotheque</b> playlists on YouTube Music, built from Last.fm (<a id="lfm" href="https://www.last.fm/user/tt_discotheque" target="_blank" rel="noopener">tt_discotheque</a>), ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs.</span></div>
+  <div class="tb-cell"><span class="tb-k">Drawn by</span><span class="tb-v">Chris Rohn</span></div>
+  <div class="tb-cell"><span class="tb-k">Revision</span><span class="tb-v mono" id="tb-rev">daily</span></div>
+  <div class="tb-cell"><span class="tb-k">Sheet</span><span class="tb-v"><a href="/feed.xml">RSS</a> · <a href="https://github.com/chrisrohn/chrisrohn" target="_blank" rel="noopener">source</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></span></div>
 </footer>
 
 <script src="app.js" defer></script>

@@ -34,7 +34,7 @@ function wire() {
   if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});
   $("#deck-up").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "up", deckYear()); });
   $("#deck-down").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "down", deckYear()); });
-  $("#deck-play").addEventListener("click", () => { const it = deckItem(); if (!it?.youtube?.videoId) return; if (state.currentId === it.id && state.playerReady) { holdAudition(); toggle(); $("#deck-play").textContent = $("#deck-play").textContent === "⏸" ? "▶" : "⏸"; } else play(it.id); });
+  $("#deck-play").addEventListener("click", () => { const it = deckItem(); if (!it?.youtube?.videoId) return; if (state.currentId === it.id && state.playerReady) { holdAudition(); toggle(); $("#deck-play").textContent = $("#deck-play").textContent.startsWith("⏸") ? "▶\uFE0E" : "⏸\uFE0E"; } else play(it.id); });
   $("#deck-next").addEventListener("click", () => { state.deckIndex++; render(); const it = deckItem(); if (it?.youtube?.videoId && state.currentId) play(it.id); });
   $("#deck-prev").addEventListener("click", () => { state.deckIndex = Math.max(0, state.deckIndex - 1); render(); });
   $("#layout-toggle").addEventListener("click", () => { state.settings.deck = !deckOn(); persist(); render(); });
