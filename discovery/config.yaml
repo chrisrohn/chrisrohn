@@ -16,7 +16,7 @@ youtube_music:
   first_year: 1979
   # Your YouTube channel id (UC…): open your channel on youtube.com → About → Share → Copy channel ID. Optional but
   # recommended; without it the build tries to learn it from one of the playlists below.
-  channel_id: ""
+  channel_id: "UCLyRuumpAkAqDKe3nmFZljw"
   # Any of your year playlists; the build lists the channel's public playlists to find every other year.
   playlists:
     "2026": PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN
