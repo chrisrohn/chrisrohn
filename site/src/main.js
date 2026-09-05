@@ -40,10 +40,14 @@ function wire() {
   $("#layout-toggle").addEventListener("click", () => { state.settings.deck = !deckOn(); persist(); render(); });
   const toggleFilters = () => { const open = document.body.classList.toggle("filters-open"); $("#filters-more").textContent = open ? "hide filters ▴" : "filters ▾"; $("#filters-more").setAttribute("aria-expanded", String(open)); };
   $("#deck-filters").addEventListener("click", toggleFilters); $("#filters-more").addEventListener("click", toggleFilters);
-  // keep the pinned deck buttons above the player bar whatever its height
-  const playerEl = $("#player");
-  const setPlayerH = () => document.documentElement.style.setProperty("--player-h", playerEl.hidden ? "0px" : playerEl.getBoundingClientRect().height + "px");
-  new ResizeObserver(setPlayerH).observe(playerEl); new MutationObserver(setPlayerH).observe(playerEl, { attributes: true, attributeFilter: ["hidden"] }); setPlayerH();
+  // keep the pinned deck buttons above the player bar whatever its height, and the deck card above the buttons
+  const playerEl = $("#player"), actionsEl = $("#deck-actions");
+  const setPlayerH = () => {
+    document.documentElement.style.setProperty("--player-h", playerEl.hidden ? "0px" : playerEl.getBoundingClientRect().height + "px");
+    document.documentElement.style.setProperty("--actions-h", actionsEl.getBoundingClientRect().height + "px");
+  };
+  new ResizeObserver(setPlayerH).observe(playerEl); new ResizeObserver(setPlayerH).observe(actionsEl);
+  new MutationObserver(setPlayerH).observe(playerEl, { attributes: true, attributeFilter: ["hidden"] }); setPlayerH();
   window.matchMedia("(max-width: 760px)").addEventListener("change", () => render());
   $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
   $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));

@@ -362,8 +362,11 @@ body.doc .tab { text-decoration: none; }
 @media (max-width: 760px) {
   .top { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand tools" "tabs actions"; align-items: center; row-gap: 6px; padding-bottom: 0; }
   .brand { grid-area: brand; min-width: 0; align-self: center; }
-  .brand h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; font-size: clamp(12px, 3.5vw, 15px); }
-  .tools { grid-area: tools; gap: 6px; }
+  /* the title breaks into two lines beside the ball rather than truncating */
+  .brand h1 { white-space: nowrap; letter-spacing: -.01em; font-size: 15px; line-height: 1.1; }
+  .brand h1 .h1-b { display: block; }
+  .brand .ball { align-self: center; }
+  .tools { grid-area: tools; gap: 6px; justify-self: end; }
   .tools .btn.icon { width: 40px; height: 40px; min-height: 40px; font-size: 16px; }
   body.deck-mode footer { display: none; }   /* Privacy/Terms stay reachable from ⚙ and on desktop */
   .tabs { grid-area: tabs; align-self: end; }
@@ -397,6 +400,18 @@ body.doc .tab { text-decoration: none; }
   .deck-actions { padding: 8px 0 max(10px, env(safe-area-inset-bottom)); gap: 14px; }
   .btn.big { font-size: 13px; padding: 14px 18px; }
   .btn.big.play { font-size: 18px; padding: 12px 18px; }
+}
+
+/* phone deck: the card runs from the header to the pinned Skip/Keep bar, a fixed distance every time; the artwork
+   takes up whatever the text leaves, so short cards show more picture and long ones scroll rather than squeeze */
+@media (max-width: 760px) {
+  body.deck-mode { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+  body.deck-mode main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; padding-bottom: calc(var(--player-h, 0px) + var(--actions-h, 96px) + 4px); }
+  body.deck-mode #deck-card { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  body.deck-mode .dcard { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  body.deck-mode .dart { flex: 1 1 0; height: auto; min-height: 30vw; max-height: none; aspect-ratio: auto; }
+  body.deck-mode .dbody { flex: none; }
 }
 
 /* duplicate report (settings) */
