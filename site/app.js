@@ -15,7 +15,10 @@
     del(k) { try { localStorage.removeItem(k); } catch {} },
   };
   const YT_API = "https://www.googleapis.com/youtube/v3";
-  const SCOPES = "openid email https://www.googleapis.com/auth/youtube";
+  const SCOPES = "openid email https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/drive.appdata";
+  const DRIVE = "https://www.googleapis.com/drive/v3";
+  const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3";
+  const SYNC_FILE = "newmusic-rated.json";
 
   const state = {
     feed: null,
@@ -33,6 +36,8 @@
     player: null, playerReady: false, pendingVideo: null,
     tokenClient: null,
     busy: new Set(),
+    sync: LS.get("id:sync", { fileId: null, at: 0 }),   // Drive appDataFolder file that mirrors `rated` across devices
+    syncTimer: null,
   };
 
   // ---------- data ----------
@@ -53,8 +58,10 @@
     renderMeta();
     applyMode();
     render();
-    if (isCurator()) refreshRecent().catch(() => {});
+    if (isCurator()) { pullRatings(); refreshRecent().catch(() => {}); }
   }
+  // another device may have rated things while this tab was in the background
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); });
   function persist() {
     LS.set("id:rated", state.rated);
     LS.set("id:auth", state.auth);
@@ -62,6 +69,69 @@
     LS.set("id:filters", state.filters);
     LS.set("id:settings", state.settings);
     LS.set("id:quota", state.quota);
+    LS.set("id:sync", state.sync);
+  }
+
+  // ---------- cross-device memory: ratings mirrored to a hidden per-app file in the signed-in account's Google Drive ----------
+  async function drive(method, url, { params = {}, body, raw } = {}) {
+    return withAuth(async token => {
+      const u = new URL(url); for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, v);
+      const headers = { Authorization: "Bearer " + token }; if (body && !raw) headers["Content-Type"] = "application/json";
+      const r = await fetch(u, { method, headers, body: raw ? body : (body ? JSON.stringify(body) : undefined) });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({})); const msg = (j.error && j.error.message) || r.statusText;
+        if (r.status === 403 && /Drive API has not been used|not enabled|accessNotConfigured/i.test(msg)) throw new Error("Google Drive API is not enabled for this project — enable it once in the Google Cloud console (see SETUP.md) so ratings can sync across devices");
+        if (r.status === 403 && /insufficient/i.test(msg)) throw new Error("Sign out and sign in again to grant the new 'app data' permission that syncs ratings across devices");
+        throw new Error(msg);
+      }
+      return r;
+    });
+  }
+  async function syncFileId() {
+    if (state.sync.fileId) return state.sync.fileId;
+    const r = await drive("GET", `${DRIVE}/files`, { params: { spaces: "appDataFolder", q: `name='${SYNC_FILE}'`, fields: "files(id,modifiedTime)", pageSize: 5 } });
+    const j = await r.json(); const f = (j.files || [])[0];
+    if (f) { state.sync.fileId = f.id; persist(); return f.id; }
+    return null;
+  }
+  function mergeRated(remote) {
+    let changed = false;
+    for (const [id, r] of Object.entries(remote || {})) {
+      const l = state.rated[id];
+      if (!l || (r.at || 0) > (l.at || 0)) { state.rated[id] = { ...r, pending: false }; changed = true; }
+    }
+    return changed;
+  }
+  async function pullRatings() {
+    if (!isCurator()) return;
+    try {
+      const id = await syncFileId(); if (!id) return;
+      const r = await drive("GET", `${DRIVE}/files/${id}`, { params: { alt: "media" } });
+      const data = await r.json().catch(() => null);
+      if (data && data.rated && mergeRated(data.rated)) { persist(); render(); }
+      state.sync.at = Date.now(); persist();
+    } catch (e) { toast("Rating sync (pull) failed: " + e.message, true); }
+  }
+  function schedulePush() { clearTimeout(state.syncTimer); state.syncTimer = setTimeout(() => pushRatings().catch(() => {}), 1500); }
+  async function pushRatings() {
+    if (!isCurator()) return;
+    // prune anything older than 90 days so the file stays small; the daily build hides old saves via the playlists anyway
+    const cutoff = Date.now() - 90 * 86400e3;
+    for (const [id, r] of Object.entries(state.rated)) if ((r.at || 0) < cutoff) delete state.rated[id];
+    const payload = JSON.stringify({ version: 1, account: state.auth.email, updatedAt: new Date().toISOString(), rated: state.rated });
+    try {
+      let id = await syncFileId();
+      if (id) {
+        await drive("PATCH", `${DRIVE_UPLOAD}/files/${id}`, { params: { uploadType: "media" }, body: payload, raw: true });
+      } else {
+        const boundary = "nm" + Date.now();
+        const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: SYNC_FILE, parents: ["appDataFolder"] })}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${payload}\r\n--${boundary}--`;
+        const r = await withAuth(token => fetch(`${DRIVE_UPLOAD}/files?uploadType=multipart&fields=id`, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": `multipart/related; boundary=${boundary}` }, body }));
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || r.statusText);
+        id = (await r.json()).id; state.sync.fileId = id;
+      }
+      state.sync.at = Date.now(); persist();
+    } catch (e) { toast("Rating sync (push) failed: " + e.message, true); }
   }
   const skipsInYouTube = () => state.settings.skipsInYouTube != null ? !!state.settings.skipsInYouTube : !!(state.feed && state.feed.youtube && state.feed.youtube.skips_in_youtube);
   // YouTube quota: 10,000 units/day, reset at midnight Pacific. Reads cost 1, writes cost 50.
@@ -79,6 +149,7 @@
   };
   const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — pick the year yourself" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const sameName = (a, b) => String(a || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "") === String(b || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
   // ---------- auth (Google Identity Services, token flow) ----------
   const tokenValid = () => !!(state.auth && state.auth.access_token && state.auth.expires_at > Date.now() + 30e3);
@@ -132,8 +203,8 @@
           } catch {}
           if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
           persist(); applyMode(); render();
-          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); loadLibraryPlaylists().then(() => refreshRecent()).catch(() => {}); }
-          else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); }
+          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); loadLibraryPlaylists().then(() => refreshRecent()).catch(() => {}); pullRatings(); }
+          else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); pullRatings(); }
           else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
           resolve(true);
         },
@@ -274,8 +345,8 @@
     if (deckOn()) { const nxt = deckItem(); if (nxt && wasCurrent && $("#autoplay").checked && nxt.youtube?.videoId) play(nxt.id); else if (wasCurrent && !nxt) stopPlayer(); if (nxt) render(); }
     else if (state.view === "feed") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasCurrent && $("#autoplay").checked && byId(next)?.youtube?.videoId) play(next); } else if (wasCurrent) stopPlayer(); }
     if (decision === "down" && !skipsInYouTube()) {
-      // free: remembered in this browser only (no quota). Turn on "skips in YouTube" in ⚙ to sync across devices.
-      state.rated[id] = { ...state.rated[id], pending: false, local: true }; persist(); state.busy.delete(id); render();
+      // free: no YouTube quota. Synced across your devices through the Drive app-data file.
+      state.rated[id] = { ...state.rated[id], pending: false, local: true }; persist(); state.busy.delete(id); render(); schedulePush();
       toast(`👎 ${credit(it)}`, false, { label: "Undo", fn: () => undo(id) });
       return;
     }
@@ -283,7 +354,7 @@
       const pid = decision === "up" ? await playlistFor(String(year)) : await skippedPlaylist();
       const itemId = await addToPlaylist(pid, vid);
       state.rated[id] = { ...state.rated[id], playlistItemId: itemId, playlistId: pid, pending: false };
-      persist();
+      persist(); schedulePush();
       const left = Math.floor((10000 - (state.quota.day === ptDay() ? state.quota.units : 0)) / 50);
       toast((decision === "up" ? `👍 ${credit(it)} → ${titleFor(year)}` : `👎 ${credit(it)} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
     } catch (e) {
@@ -295,7 +366,7 @@
     const r = state.rated[id]; if (!r) return;
     try {
       if (r.playlistItemId) await removePlaylistItem(r.playlistItemId);
-      delete state.rated[id]; persist(); render(); toast("Undone");
+      delete state.rated[id]; persist(); render(); schedulePush(); toast("Undone");
     } catch (e) { toast("Undo failed: " + e.message, true); }
   }
 
@@ -403,7 +474,7 @@
     if (!yt.videoId) $(".dplay", el).remove();
     $(".dartist", el).textContent = it.artist;
     $(".dtitle", el).textContent = it.display_title || it.title;
-    $(".release", el).textContent = [it.release_type, it.release && it.release !== it.title ? it.release : null].filter(Boolean).join(" · ");
+    $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
     $(".date", el).textContent = it.release_date || "";
     const yb = $(".yearbadge", el); const conf = it.year_confidence || "low"; yb.classList.add(conf); yb.title = YEAR_SOURCE[it.year_source] || "";
     yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? "year unknown" : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
@@ -413,7 +484,7 @@
     else if (it.match_kind === "similar") why.push(it.reasons.find(r => r.startsWith("similar to ")) || "similar artist");
     for (const r of it.reasons || []) if (!r.startsWith("you play") && !r.startsWith("similar to")) why.push(r);
     $(".dwhy", el).textContent = why.join(" · ");
-    $(".dtags", el).innerHTML = (it.tags || []).slice(0, 5).map(t => `<span class="tag">${esc(t)}</span>`).join("");
+    $(".dtags", el).innerHTML = (it.tags || []).slice(0, 4).map(t => `<span class="tag">${esc(t)}</span>`).join("");
     $(".dsources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}">${esc(n || k)}</span>`; }).join("");
     const links = [];
     if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
@@ -442,7 +513,7 @@
     const m = $(".match", el);
     if (it.match_kind) { m.textContent = it.match_kind === "direct" ? "you play " + (it.matched_artist === it.artist ? "them" : it.matched_artist) : "similar to " + (it.reasons.find(r => r.startsWith("similar to ")) || "").slice(11); m.classList.add(it.match_kind); } else m.remove();
     $(".title", el).textContent = it.display_title || it.title;
-    $(".release", el).textContent = [it.release_type, it.release && it.release !== it.title ? it.release : null].filter(Boolean).join(" · ");
+    $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
     $(".date", el).textContent = it.release_date || "";
     const yb = $(".yearbadge", el);
     if (it._pick) yb.remove();
@@ -520,7 +591,7 @@
     const el = $(`.card[data-id="${CSS.escape(id)}"], .dcard[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
     const dp = $("#deck-play"); if (dp) dp.textContent = "⏸";
     $("#player").hidden = false;
-    $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
+    $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release && !sameName(it.release, it.title) ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
     ensureApi();
     clearAudition(); state.auditionArmed = null;
     if (state.playerReady) state.player.loadVideoById(vid); else state.pendingVideo = vid;
@@ -610,6 +681,7 @@
       const yrs = [...new Set([...Object.keys(state.playlists).filter(k => !k.startsWith("__")), ...(isOwner() ? Object.keys((state.feed.youtube && state.feed.youtube.playlists) || {}) : [])])].sort();
       $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · station playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
       $("#s-quota").textContent = quotaText();
+      $("#s-sync").textContent = state.sync.at ? `Ratings synced across your devices via Google Drive app data · last sync ${relTime(new Date(state.sync.at))} · ${Object.keys(state.rated).length} rated tracks remembered` : "Ratings not synced yet — sign in to sync across devices (uses a hidden app-data file in your Google Drive).";
       const g = $("#s-guests");
       if (isOwner()) {
         g.hidden = false;
@@ -623,8 +695,9 @@
     });
     $("#s-skips").addEventListener("change", e => { state.settings.skipsInYouTube = e.target.checked; persist(); });
     $("#s-export").addEventListener("click", exportCsv);
+    $("#s-syncnow").addEventListener("click", () => pushRatings().then(() => pullRatings()).then(() => { $("#s-sync").textContent = `Synced just now · ${Object.keys(state.rated).length} rated tracks`; toast("Ratings synced"); }).catch(e => toast(e.message, true)));
     $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast(`Playlists reloaded: ${Object.keys(state.playlists).filter(k => !k.startsWith("__")).length} year playlists found`)).catch(e => toast(e.message, true)));
-    $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters"].forEach(LS.del); location.reload(); } });
+    $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters", "id:sync"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
       const id = deckOn() ? (deckItem()?.id || state.currentId) : (state.currentId || state.order[0]);

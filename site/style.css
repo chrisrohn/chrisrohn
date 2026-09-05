@@ -228,3 +228,34 @@ body.guest .mode { color: var(--accent2); border-color: rgba(71,224,255,.4); }
   .dart { aspect-ratio: auto; height: min(38vh, 92vw); width: 100%; }
   body.deck-mode .toast { bottom: calc(var(--player-h, 0px) + 130px); max-width: 92vw; }
 }
+
+/* ---- phone polish: two-row header, one-row player, card never hides under the pinned thumbs ---- */
+@media (max-width: 760px) {
+  body.deck-mode .top { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand settings" "tabs actions"; align-items: center; row-gap: 8px; }
+  body.deck-mode .brand { grid-area: brand; }
+  body.deck-mode .tabs { grid-area: tabs; }
+  body.deck-mode .actions { grid-area: actions; margin-left: 0; justify-content: flex-end; }
+  body.deck-mode .actions #settings-btn { grid-area: settings; position: absolute; right: 12px; top: 8px; }
+  body.deck-mode .who img { width: 20px; height: 20px; }
+  body.deck-mode .mode { padding: 2px 7px; font-size: 10px; }
+  body.deck-mode #signin { padding: 5px 10px; font-size: 13px; }
+
+  body.deck-mode .player { grid-template-columns: 64px 1fr; gap: 10px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); }
+  body.deck-mode .player-frame { width: 64px; align-self: center; }
+  body.deck-mode .now { font-size: 13px; }
+  body.deck-mode .player-controls { gap: 6px; }
+  body.deck-mode .player-controls .btn { padding: 4px 9px; font-size: 13px; }
+  body.deck-mode .player-controls .curator { display: none !important; }   /* the big thumbs already cover this */
+  body.deck-mode .player-controls .chk { font-size: 12px; gap: 4px; }
+  body.deck-mode .audition-bar { flex-basis: 100%; height: 3px; }
+
+  .dart { height: min(32vh, 92vw); }
+  .dbody { padding: 12px 14px 12px; gap: 5px; }
+  .dartist { font-size: 19px; }
+  .dtitle { font-size: 15px; }
+  .dmeta, .dwhy { font-size: 12px; }
+  .deck { padding-bottom: calc(var(--player-h, 0px) + 118px); }
+  .deck-actions { padding: 8px 0 max(10px, env(safe-area-inset-bottom)); gap: 16px; }
+  .btn.big { font-size: 26px; padding: 12px 24px; }
+  .btn.big.play { font-size: 20px; padding: 12px 20px; }
+}

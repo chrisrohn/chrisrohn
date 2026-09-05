@@ -23,6 +23,7 @@ def build_feed(cfg: dict) -> dict:
 
     raw = [i.normalize_credit() for i in run_sources(cfg, profile, http)]
     items = dedupe(raw)
+    _clean_tags(items, profile)
     log.info("%d raw sightings → %d unique items", len(raw), len(items))
 
     rcfg = cfg["ranking"]
@@ -84,6 +85,25 @@ def build_feed(cfg: dict) -> dict:
     http.save()
     log.info("feed: %d items (%d new today)", payload["count"], payload["new_today"])
     return payload
+
+
+def _clean_tags(items: list[Item], profile: dict) -> None:
+    """Blog/radio/channel feeds ship article categories ("news", "video", artist names) as tags. Keep only genre words:
+    tags the profile knows, or ones that look like genres. Catalogue sources (MusicBrainz, Bandcamp) already send genres."""
+    known = set(profile.get("tags") or {})
+    genre_words = ("pop", "disco", "house", "electro", "synth", "wave", "punk", "rock", "soul", "funk", "indie", "dance", "techno",
+                   "ambient", "folk", "jazz", "psych", "shoegaze", "dream", "lo-fi", "lofi", "r&b", "rnb", "hip hop", "garage", "balearic",
+                   "boogie", "italo", "krautrock", "downtempo", "trip hop", "breakbeat", "bass", "club", "alternative", "electronic")
+    for it in items:
+        if not it.tags:
+            continue
+        cleaned = []
+        for t in it.tags:
+            tn = t.lower().strip()
+            if tn.startswith("label:") or tn in known or any(w in tn for w in genre_words):
+                if tn not in cleaned and tn not in (it.artist or "").lower():
+                    cleaned.append(tn)
+        it.tags = cleaned[:6]
 
 
 def _feed_health() -> dict:
