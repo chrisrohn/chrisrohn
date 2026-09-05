@@ -161,7 +161,9 @@
       if (!r.ok) {
         const msg = (j.error && j.error.message) || r.statusText;
         if (r.status === 401) { state.auth.expires_at = 0; persist(); applyMode(); }
-        throw new Error(msg + (r.status === 403 && /quota/i.test(msg) ? " — daily YouTube API quota reached; try again after midnight Pacific" : ""));
+        if (r.status === 403 && /quota/i.test(msg)) throw new Error(msg + " — daily YouTube API quota reached; try again after midnight Pacific");
+        if (r.status === 403 && path.startsWith("/playlistItems") && method === "POST") throw new Error("YouTube refused to add to that playlist for this sign-in. Collaborative playlists can only be edited through the API by the channel that owns them (@indiedisco) — sign out and sign in again choosing that channel, or make the playlist owner account a curator.");
+        throw new Error(msg);
       }
       return j;
     });
@@ -202,23 +204,23 @@
     checkOwnership();
     return all;
   }
-  // Owner sanity check: the playlists the daily build found (feed.json) must be in THIS sign-in's library.
+  // The station playlists are collaborative: they belong to @indiedisco and are edited by collaborators. YouTube's
+  // "mine=true" listing only shows playlists this channel OWNS, so not finding them there is expected — we file into
+  // the ids the daily build discovered and let YouTube tell us if this sign-in may not edit them.
   function checkOwnership() {
     if (!isOwner() || !state.library) return;
     const known = Object.values((state.feed.youtube && state.feed.youtube.playlists) || {});
     if (!known.length) return;
     const mine = new Set(state.library.map(p => p.id));
-    const missing = known.filter(id => !mine.has(id));
-    state.wrongChannel = missing.length === known.length;
-    if (state.wrongChannel) toast("This Google sign-in doesn't own the Indie Discotheque playlists (they're on another channel or brand account). Sign out, sign in again and pick that channel when Google asks.", true);
+    state.notOwner = known.every(id => !mine.has(id));
   }
+  const knownYear = year => isOwner() ? (((state.feed.youtube && state.feed.youtube.playlists) || {})[String(year)] || null) : null;
   async function playlistFor(year) {
     year = String(year);
-    // the daily build already knows the owner's year playlists by id — trust those first
-    if (isOwner()) { const known = (state.feed.youtube && state.feed.youtube.playlists) || {}; if (known[year] && !state.playlists[year]) state.playlists[year] = known[year]; }
+    // the daily build knows the station's year playlists by id (from the @indiedisco channel) — always use those
+    const k = knownYear(year);
+    if (k) { state.playlists[year] = k; persist(); return k; }
     if (!state.playlists[year] || !state.playlists.__loaded_at) await loadLibraryPlaylists();
-    if (isOwner()) { const known = (state.feed.youtube && state.feed.youtube.playlists) || {}; if (known[year]) state.playlists[year] = known[year]; }
-    if (state.wrongChannel) throw new Error("this sign-in doesn't own the year playlists — sign in again and choose the right channel");
     if (!state.playlists[year]) {
       const ok = confirm(`No playlist called “${titleFor(year)}” exists in this YouTube account (${state.auth.email}).\n\nCreate it now? (Cancel if it should already exist — then check the title spelling or the signed-in channel.)`);
       if (!ok) throw new Error("no playlist for " + year);
@@ -241,14 +243,21 @@
     const lib = await loadLibraryPlaylists();
     const groups = {};
     for (const p of lib) { const y = yearFromTitle(p.title); if (y) (groups[y] ||= []).push(p); }
-    const dups = Object.entries(groups).filter(([, ps]) => ps.length > 1);
-    if (!dups.length) { toast("No duplicate year playlists found in this account."); return; }
-    const plan = dups.map(([y, ps]) => {
-      const sorted = [...ps].sort((a, b) => (a.desc.includes("chrisrohn.com") - b.desc.includes("chrisrohn.com")) || (b.count - a.count) || String(a.published).localeCompare(String(b.published)));
-      return { year: y, keep: sorted[0], drop: sorted.slice(1) };
-    });
+    const plan = [];
+    for (const [y, ps] of Object.entries(groups)) {
+      const known = knownYear(y);
+      if (known) {
+        // the station playlist for this year is the one the build found on @indiedisco; anything else in MY library with that year is a stray copy
+        const drop = ps.filter(p => p.id !== known);
+        if (drop.length) plan.push({ year: y, keep: lib.find(p => p.id === known) || { id: known, title: titleFor(y) + " (station playlist)", count: "?" }, drop });
+      } else if (ps.length > 1) {
+        const sorted = [...ps].sort((a, b) => (a.desc.includes("chrisrohn.com") - b.desc.includes("chrisrohn.com")) || (b.count - a.count) || String(a.published).localeCompare(String(b.published)));
+        plan.push({ year: y, keep: sorted[0], drop: sorted.slice(1) });
+      }
+    }
+    if (!plan.length) { toast("No stray or duplicate year playlists found in this account."); return; }
     const summary = plan.map(p => `${p.year}: keep “${p.keep.title}” (${p.keep.count} tracks), merge & delete ${p.drop.map(d => `“${d.title}” (${d.count})`).join(", ")}`).join("\n");
-    if (!confirm(`Merge duplicate year playlists?\n\n${summary}\n\nTracks from the copies are added to the kept playlist, then the copies are deleted. Costs ~${plan.reduce((n, p) => n + p.drop.reduce((m, d) => m + d.count * 50 + 50, 0), 0)} quota units.`)) return;
+    if (!confirm(`Merge duplicate year playlists?\n\n${summary}\n\nTracks from the copies are added to the kept playlist, then the copies are deleted. Costs ~${plan.reduce((n, p) => n + p.drop.reduce((m, d) => m + (Number(d.count) || 0) * 50 + 50, 0), 0)} quota units.`)) return;
     let moved = 0, deleted = 0;
     for (const p of plan) {
       for (const d of p.drop) {
@@ -635,8 +644,8 @@
     $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
     $("#settings-btn").addEventListener("click", () => {
-      const yrs = Object.keys(state.playlists).filter(k => !k.startsWith("__")).sort();
-      $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.wrongChannel ? " · ⚠ this sign-in does not own the station playlists" : "");
+      const yrs = [...new Set([...Object.keys(state.playlists).filter(k => !k.startsWith("__")), ...(isOwner() ? Object.keys((state.feed.youtube && state.feed.youtube.playlists) || {}) : [])])].sort();
+      $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · station playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
       $("#s-quota").textContent = quotaText();
       const g = $("#s-guests");
       if (isOwner()) {
