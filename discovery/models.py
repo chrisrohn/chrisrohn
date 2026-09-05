@@ -19,6 +19,7 @@ class Item:
     release: str | None = None       # album/EP name when known
     release_type: str | None = None  # Album / EP / Single
     release_date: date | None = None
+    stated_year: int | None = None   # the source knows only a year (YouTube Music artist page); a release_date beats it
     date_kind: str = "release"       # "release" = the source states the release date; "sighting" = post/upload/airplay date
     tags: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
@@ -102,6 +103,7 @@ class Item:
                 self.featuring.append(f)
         self.remixer = self.remixer or other.remixer
         self.remix_kind = self.remix_kind or other.remix_kind
+        self.stated_year = self.stated_year or other.stated_year
         if self.kind == "release" and other.kind == "track":
             self.kind = "track"
             self.title = other.title

@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from .models import Item
 from .profile import find_duplicates, load_profile
-from .resolve import resolve_all
+from .resolve import collapse_shared_videos, resolve_all
 from .score import dedupe, score_items
 from .sources import run_sources
 from .util import DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, read_json, safe_url, utcnow, write_json
@@ -41,6 +41,7 @@ def build_feed(cfg: dict) -> dict:
     items = score_items(items, profile, cfg)
     items = [i for i in items if i.score >= float(rcfg.get("min_score", 0))][: int(rcfg.get("max_items", 200)) + 60]
     resolve_all(items, cfg, deadline)
+    items = collapse_shared_videos(items)   # several items on one video are one song: one card
     # after resolution, drop things with no playable YouTube result unless they are strong matches
     items = [i for i in items if i.youtube or i.match_kind == "direct" or i.editorial]
     if rcfg.get("hide_seen", True):
@@ -121,7 +122,7 @@ def _email_hash(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
 
 
-_PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb")
+_PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb", "stated_year")
 _PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration")
 
 

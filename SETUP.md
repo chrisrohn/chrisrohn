@@ -99,8 +99,9 @@ so the answer is consistent instead of depending on how a blog spelled the title
    registration year is kept as a weak hint.
 4. **Discogs** master-release year (masters represent the original issue; strong for disco/electronic). Needs a
    free Discogs account: Settings → Developers → *Generate new token*, saved as the `DISCOGS_TOKEN` repo secret.
-5. iTunes Search API; then a release date the source itself states (Bandcamp, ListenBrainz, KEXP's album date);
-   then the YouTube album year. Blog post and upload dates are only sightings.
+5. iTunes Search API; then a release date the source itself states (Bandcamp, ListenBrainz, KEXP's album date)
+   or the year YouTube Music's artist page states for a watched release; then the YouTube album year. Blog post
+   and upload dates are only sightings.
 
 Every year found is kept as evidence (hover the year badge on the site to see it). The earliest year from the most
 trusted tier wins: ✓ = catalogue-verified, plain = a store/source date, ? = weak hint. If nothing anywhere says when
