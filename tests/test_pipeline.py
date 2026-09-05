@@ -137,6 +137,7 @@ def test_bandcamp_and_rss_sources(monkeypatch):
             <item><title>Roosevelt – &quot;Lovers&quot;</title><link>https://blog/1</link><pubDate>%s</pubDate><description>A shimmering new single.</description></item>
             <item><title>Some Unrelated News</title><link>https://blog/2</link></item>
             <item><title>Jungle announce tour</title><link>https://blog/3</link></item>
+            <item><title>Jungle Share New Single “Candle Flame”</title><link>https://blog/4</link></item>
             </channel></rss>""" % date.today().strftime("%a, %d %b %Y 10:00:00 GMT")
 
     cfg = _cfg()
@@ -146,7 +147,8 @@ def test_bandcamp_and_rss_sources(monkeypatch):
     cfg["sources"]["rss"]["feeds"] = [{"name": "Blog", "url": "https://blog/feed"}]
     entries = rss.fetch(cfg, PROFILE, FakeHttp())
     got = {(i.artist, i.title) for i in entries}
-    assert ("Roosevelt", "Lovers") in got and ("Jungle", "Jungle announce tour") in got and len(entries) == 2
+    # a headline is a card only when it is about one song: tour news never is, however well we know the band
+    assert got == {("Roosevelt", "Lovers"), ("Jungle", "Candle Flame")} and len(entries) == 2
     assert all(i.editorial for i in entries)
 
 
@@ -551,13 +553,16 @@ def test_cli_parses_commands(monkeypatch):
     monkeypatch.setattr(cli, "ensure_dirs", lambda: None)
     monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}})
     import discovery.build as build
+    import discovery.catalog as catalog
     import discovery.profile as profile
     monkeypatch.setattr(build, "build_feed", lambda cfg: calls.append("build"))
     monkeypatch.setattr(profile, "build_profile", lambda cfg, http: calls.append("profile"))
+    monkeypatch.setattr(catalog, "build_catalog", lambda cfg, deadline_minutes=None: calls.append("catalog" if deadline_minutes is None else f"catalog<{deadline_minutes:.0f}"))
     monkeypatch.setattr(cli, "_profile_stale", lambda cfg: False)
     assert cli.main(["build"]) == 0 and calls == ["build"]
-    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls == ["build", "profile", "build"]
-    assert cli.main([]) == 0 and calls[-1] == "build"                                 # daily is the default
+    assert cli.main(["catalog"]) == 0 and calls[-1] == "catalog"
+    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls[-3:] == ["profile", "build", "catalog<40"]   # the catalog gets what is left of the job
+    assert cli.main([]) == 0 and calls[-2:] == ["build", "catalog<40"]                # daily is the default
     with pytest.raises(SystemExit):
         cli.main(["--no-such-flag"])
 
@@ -645,3 +650,197 @@ def test_decide_uses_the_stated_year():
     assert decide({"musicbrainz": 1998}, it)[:2] == (1998, "musicbrainz")   # a catalogue fact beats a stated year
     it.release_date, it.date_kind = date(2026, 9, 5), "sighting"
     assert decide({}, it)[:2] == (2026, "ytmusic-year")             # a sighting date never outranks the stated year
+
+
+def test_learn_from_history_moves_scores_without_quota(tmp_path):
+    from discovery import learn
+
+    hist = tmp_path / "history"
+    hist.mkdir()
+    today = date(2026, 9, 10)
+    shown = [
+        {"id": "k1", "v": "vk1", "a": "Jungle", "s": ["rss:Stereogum", "deezer"], "t": ["nu disco"]},
+        {"id": "k2", "v": "vk2", "a": "Roosevelt", "s": ["rss:Stereogum"], "t": ["nu disco"]},
+        {"id": "k3", "v": "vk3", "a": "Parcels", "s": ["rss:Stereogum"], "t": ["nu disco", "indie pop"]},
+        {"id": "s1", "v": "vs1", "a": "Metalhead", "s": ["musicbrainz"], "t": ["metal"]},
+        {"id": "p1", "v": "vp1", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
+        {"id": "p2", "v": "vp2", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
+        {"id": "p3", "v": "vp3", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
+    ]
+    util.write_json(hist / "2026-09-01.json", {"date": "2026-09-01", "ids": [r["id"] for r in shown], "items": shown})
+    # too recent to judge: inside the grace period, so it must not count as a pass
+    util.write_json(hist / "2026-09-09.json", {"date": "2026-09-09", "ids": ["fresh"], "items": [{"id": "fresh", "v": "vf", "a": "Jungle", "s": ["rss:Stereogum"], "t": ["nu disco"]}]})
+    # ancient history is ignored entirely
+    util.write_json(hist / "2026-01-01.json", {"date": "2026-01-01", "ids": ["old"], "items": [{"id": "old", "v": "vo", "a": "Jungle", "s": ["rss:Stereogum"], "t": ["nu disco"]}]})
+    saved = {"k1": {"videoId": "vk1", "decision": "up"}, "other-key": {"videoId": "vk2", "decision": "up"}, "k3": {"decision": "up"},
+             "s1": {"videoId": "vs1", "decision": "down"}}
+    profile = {"saved": saved}
+    cfg = {"learn": {"grace_days": 3, "prior": 2, "min_exposures": 2}}
+    learned = learn.learn_from_history(profile, cfg, hist, today=today)
+    assert learned["outcomes"] == 7 and learned["kept"] == 3 and learned["skipped"] == 1     # k2 matched by video id, k3 by key
+    assert learned["sources"]["rss:Stereogum"]["adj"] > 0 > learned["sources"]["musicbrainz"]["adj"]
+    assert learned["tags"]["nu disco"]["adj"] > 0 > learned["tags"]["metal"]["adj"]
+    assert learned["artists"]["nobody"]["adj"] < 0 and learned["artists"]["jungle"]["adj"] == 0   # one sighting: no opinion yet
+    up, why = learn.adjustment(learned, ["rss:Stereogum"], ["nu disco"], "Jungle")
+    down, why_down = learn.adjustment(learned, ["musicbrainz"], ["metal"], "Nobody")
+    assert up > 0 > down and any(w.startswith("you keep") for w in why) and any("rarely" in w or "passed" in w for w in why_down)
+    assert learn.adjustment(None, ["rss:Stereogum"], [], "x") == (0.0, [])
+    assert learn.adjustment(learn.learn([]), ["rss:Stereogum"], [], "x") == (0.0, [])
+    pub = learn.public_summary(learned)
+    assert "artists" not in pub and pub["sources"]["rss:Stereogum"]["k"] == 3 and pub["keep_rate"] == learned["keep_rate"]
+
+    # the same learning reaches the scores: a kept-from source outranks an otherwise identical pass-from source
+    prof = {**PROFILE, "learned": learned}
+    a = Item(artist="Someone New", title="A", kind="track", release_date=today, sources=["rss:Stereogum"], tags=["nu disco"])
+    b = Item(artist="Someone New", title="B", kind="track", release_date=today, sources=["musicbrainz"], tags=["nu disco"])
+    scored = score_items([a, b], prof, _cfg())
+    assert scored[0].title == "A" and any(r.startswith("you keep") for r in scored[0].reasons)
+
+
+def test_freshness_and_playable_are_configurable():
+    today = date.today()
+    cfg = _cfg()
+    cfg["ranking"]["freshness_days"] = 10
+    cfg["ranking"]["undated_freshness"] = 0.2
+    cfg["ranking"]["weights"]["playable"] = 0.0
+    fresh = Item(artist="Someone New", title="Now", kind="track", release_date=today, sources=["bandcamp"])
+    stale = Item(artist="Someone New", title="Then", kind="track", release_date=today - timedelta(days=30), sources=["bandcamp"])
+    undated = Item(artist="Someone New", title="When", kind="track", sources=["bandcamp"], youtube={"videoId": "v"})
+    score_items([fresh, stale, undated], PROFILE, cfg)
+    assert fresh.score > undated.score > stale.score      # an undated track sits below this week's release, above last month's
+    assert undated.score == pytest.approx(0.2)          # the playable bonus is off, so only the undated share remains
+
+
+def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandbox):
+    import discovery.build as build
+    from discovery import profile as prof
+
+    util.write_json(prof.PROFILE_PATH, PROFILE)
+    today = date.today()
+    fake = [Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["rss:Pitchfork", "bandcamp"], tags=["nu disco"], artwork="https://i/x.jpg")]
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake))
+
+    def fake_resolve(items, cfg, deadline=None):
+        for it in items:
+            it.youtube = {"videoId": "vid1", "title": it.title, "artists": ["Jungle"]}
+    monkeypatch.setattr(build, "resolve_all", fake_resolve)
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    monkeypatch.setattr(build, "Http", NoNet)
+    payload = build.build_feed(_cfg())
+    hist = util.read_json(sandbox / "site" / "data" / "history" / f"{today.isoformat()}.json", {})
+    assert hist["ids"] == [payload["items"][0]["id"]]
+    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"]}
+    assert payload["learned"]["outcomes"] == 0 and payload["learned"]["sources"] == {}
+    rss = (sandbox / "site" / "feed.xml").read_text()
+    assert "<pubDate>" in rss and "<lastBuildDate>" in rss and 'media:thumbnail url="https://i/x.jpg"' in rss
+    assert "score" not in rss.split("<item>")[1] and "<category>nu disco</category>" in rss and f"/?t={payload['items'][0]['id']}" in rss
+
+
+def test_headlines_become_cards_only_when_they_are_about_a_song():
+    from discovery.headlines import headline_track, looks_like_news
+
+    artists = {"chat": {"name": "Chat"}, "system": {"name": "The System"}, "years": {"name": "The Years"}, "trip": {"name": "Trip"},
+               "fontaines d c": {"name": "Fontaines D.C."}, "m83": {"name": "M83"}, "pet shop boys": {"name": "Pet Shop Boys"}, "beyonce": {"name": "Beyoncé"},
+               "julia jacklin": {"name": "Julia Jacklin"}, "clash": {"name": "The Clash"}}
+    news = [
+        "Wheel of Fortune’s Jim Thornton Suspended for Allegedly Viewing Pedophile Support Chat Room",
+        "System of a Down Unveil Toxicity 25th Anniversary Reissue and Merch Capsule",
+        "Bruce Campbell Reveals He Has About Five Years to Live",
+        "Burning Man Sees Fourth Death In Four Years, Festival Gate Closed Again Due To Weather",
+        "Best New Albums this week: girlfriend., Cyst (Iglooghost), corto.alto, Last Apollo, Chat Pile",
+        "Trip Tease drops dreamy, 11-track debut album ‘Durango’ via clipp.art",     # the artist is Trip Tease, not Trip
+        "Maribou State: We want proper time to reset physically and mentally",
+        "Beyoncé Shares B’Day Selena Mashup Amid Escalating Dispute Between Late Singer’s Siblings",
+        "Fontaines D.C. add second Slane Castle gig due to demand",
+        "The Nialler9 Dublin Gig Guide: A$AP Rocky, Jack White, Marie Davidson",
+        "Live Review: Blood Orange and more at Rally, London, 29 August 2026",
+        "Clash Meets Quadeca: I Like Keeping Busy",
+        "14 Best Songs of the Week: Interpol, Aluminum, Disgusting Sisters",
+        "Aziz Ansari announce fall tour dates",
+        "Crosby, Stills & Nash (Rhino High Fidelity Vinyl Reissue)",
+    ]
+    for h in news:
+        assert headline_track(h, artists, {"clash"}) is None, h
+    assert headline_track('Jungle – "Keep Moving"', artists) == ("Jungle", "Keep Moving", "track")
+    assert headline_track('Watch: Roosevelt - "Lovers" (Official Video)', artists) == ("Roosevelt", "Lovers", "track")
+    assert headline_track("Nighttime :: Looking Glass", artists) == ("Nighttime", "Looking Glass", "track")
+    assert headline_track('Roosevelt: "Lovers"', artists) == ("Roosevelt", "Lovers", "track")
+    assert headline_track("M83 Shares New Song “Blister Sunrise”", artists) == ("M83", "Blister Sunrise", "track")
+    assert headline_track("Fontaines D.C. announce new album ‘Dopamine Chamber,’ share ‘Marianne,’", artists) == ("Fontaines D.C.", "Marianne", "track")
+    assert headline_track("Pet Shop Boys announce new album ‘A Man From The Future’", artists) == ("Pet Shop Boys", "A Man From The Future", "release")
+    assert headline_track("Julia Jacklin Performs on Top of a Skyscraper in the Video for New Song “The Hardest Thing”", artists) == ("Julia Jacklin", "The Hardest Thing", "track")
+    assert headline_track("M83 Shares Surprise New Album It’s Nothing Personal", artists) is None      # no quoted title: nothing to file
+    assert looks_like_news("Modeselektor Dublin DJ set announced") and not looks_like_news("Blister Sunrise")
+
+
+def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox):
+    from discovery import catalog
+    from discovery import profile as prof
+
+    profile = dict(PROFILE)
+    profile["saved"] = {util.item_key("Jungle", "Back On 74"): {"artist": "Jungle", "title": "Back On 74", "videoId": "vBack", "decision": "up", "year": "2023"},
+                        util.item_key("Roosevelt", "Lovers"): {"artist": "Roosevelt", "title": "Lovers", "decision": "down"}}
+    profile["youtube"] = {"years": {"2016": "PL2016"}, "entries": [{"year": "2016", "playlistId": "PL2016", "position": 0, "videoId": "v"}] * 3 + [{"year": "2023", "playlistId": "PL2023", "position": 0, "videoId": "vBack"}]}
+    util.write_json(prof.PROFILE_PATH, profile)
+    monkeypatch.setattr(catalog, "CATALOG_PATH", sandbox / "site" / "data" / "catalog.json")
+    monkeypatch.setattr(catalog, "STATE_PATH", sandbox / "data" / "catalog_state.json")
+    monkeypatch.setattr(catalog, "TAGS_CACHE", sandbox / "data" / "cache" / "artist_tags.json")
+    monkeypatch.setenv("LASTFM_API_KEY", "k")
+    calls = []
+
+    class FakeLastFm:
+        def __init__(self, http, key): self.key = key
+        enabled = True
+        def top_tracks(self, user, limit, period="overall"):
+            calls.append("top")
+            return [{"name": "Back On 74", "artist": {"name": "Jungle"}, "playcount": "300", "url": "https://last.fm/1"},   # already filed → hidden
+                    {"name": "Fire", "artist": {"name": "Jungle"}, "playcount": "120", "url": "https://last.fm/2"},
+                    {"name": "Lovers", "artist": {"name": "Roosevelt"}, "playcount": "90"},                               # skipped → hidden
+                    {"name": "Moving On", "artist": {"name": "Roosevelt"}, "playcount": "40", "url": "javascript:x"}]
+        def loved_tracks(self, user, limit):
+            return [{"name": "Fire", "artist": {"name": "Jungle"}}, {"name": "Overnight", "artist": {"name": "Parcels"}}]
+        def artist_top_tracks(self, artist, limit):
+            return [{"name": f"{artist} Hit", "artist": {"name": artist}}] if artist in ("Jungle", "Parcels") else []
+        def top_tags(self, artist):
+            return [{"name": "Nu Disco", "count": 100}, {"name": "rare", "count": 3}]
+    monkeypatch.setattr(catalog, "LastFm", FakeLastFm)
+
+    def fake_resolve(items, cfg, deadline=None):
+        assert cfg["resolve"]["max_lookups_per_run"] == 250
+        for it in items:
+            if it.title != "Parcels Hit":
+                it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg"}
+    monkeypatch.setattr(catalog, "resolve_all", fake_resolve)
+
+    def fake_years(items, cfg, http, deadline=None):
+        for it in items:
+            it.year, it.year_source, it.year_confidence = (2016, "musicbrainz-search", "high") if it.artist == "Jungle" else (None, "unknown", "low")
+    monkeypatch.setattr(catalog, "verify_years", fake_years)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    monkeypatch.setattr(catalog, "Http", NoNet)
+
+    payload = catalog.build_catalog(_cfg(), deadline_minutes=5)
+    titles = {(i["artist"], i["title"]) for i in payload["items"]}
+    assert ("Jungle", "Back On 74") not in titles and ("Roosevelt", "Lovers") not in titles   # a playlist or the Skipped playlist already has them
+    assert ("Parcels", "Parcels Hit") not in titles                                           # no YouTube match: nothing to file
+    assert {("Jungle", "Fire"), ("Roosevelt", "Moving On"), ("Jungle", "Jungle Hit"), ("Parcels", "Overnight")} <= titles
+    fire = next(i for i in payload["items"] if i["title"] == "Fire")
+    assert fire["plays"] == 120 and fire["loved"] is True and "120 plays" in fire["reasons"] and "loved on Last.fm" in fire["reasons"]
+    assert sorted(fire["sources"]) == ["lastfm:loved", "lastfm:top tracks"] and fire["tags"] == ["nu disco"] and fire["links"] == {"last.fm": "https://last.fm/2"}
+    assert fire["year"] == 2016 and fire["release_date"] is None and "listen_count" not in fire and "blurb" not in fire
+    assert payload["items"][0]["title"] == "Fire"                                             # most played + loved ranks first
+    assert payload["years"]["2016"] == {"playlist": 3, "candidates": 2} and payload["years"]["2023"]["playlist"] == 1
+    assert payload["undated"] == 2 and payload["sources"] == ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"]
+    state = util.read_json(sandbox / "data" / "catalog_state.json", {})
+    assert state["fetched_at"] and len(state["candidates"]) == 8 and set(state["first_seen"]) == {i["id"] for i in payload["items"]}
+    # a fresh snapshot is reused: Last.fm is not asked again for a week
+    catalog.build_catalog(_cfg(), deadline_minutes=5)
+    assert calls == ["top"]

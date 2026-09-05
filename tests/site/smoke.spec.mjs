@@ -21,12 +21,29 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   // list view on a desktop viewport; deck mode on a phone
   const cards = page.locator("#list .card");
   expect(await cards.count()).toBeGreaterThan(50);
-  // the list is paged: 80 cards first, the rest as you scroll; the pill counts everything that matches
+  // a first visit shows the shortlist (top 60 by score); the pill counts everything the filters allow
   const total = Number(await page.locator("#count-feed").innerText());
-  expect(await cards.count()).toBe(Math.min(80, total));
-  if (total > 80) {
-    await page.locator("#more-sentinel").scrollIntoViewIfNeeded();
-    await expect.poll(() => cards.count()).toBeGreaterThan(80);
+  expect(await cards.count()).toBe(Math.min(60, total));
+  if (total > 60) {
+    await expect(page.locator("#shortlist-note")).toContainText(`show all ${total}`);
+    await page.click("#show-all");
+    await expect(page.locator("#shortlist")).not.toBeChecked();
+    // the full list is paged: 80 cards first, the rest as you scroll
+    await expect.poll(() => cards.count()).toBe(Math.min(80, total));
+    if (total > 80) {
+      await page.locator("#more-sentinel").scrollIntoViewIfNeeded();
+      await expect.poll(() => cards.count()).toBeGreaterThan(80);
+    }
+  }
+  // a tag on a card is a filter: it lands in the search box and narrows the list
+  const tag = page.locator("#list .card .tag").first();
+  if (await tag.count()) {
+    const t = await tag.innerText();
+    await tag.click();
+    await expect(page.locator("#q")).toHaveValue(t.toLowerCase());
+    await expect.poll(() => cards.count()).toBeLessThan(total);
+    await page.fill("#q", "");
+    await expect.poll(() => cards.count()).toBeGreaterThan(50);
   }
   // the sign-in button and settings unlock once the feed is in (they read feed.json)
   await expect(page.locator("#signin")).toBeEnabled();
@@ -38,8 +55,9 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   await expect.poll(() => cards.count()).toBeLessThan(before);
   await page.fill("#q", "");
   await expect.poll(() => cards.count()).toBeGreaterThan(50);
-  // no thumbs for a listener; no fabricated years
+  // no thumbs, no Skipped tab for a listener; no fabricated years
   await expect(page.locator("#list .card .btn.up").first()).toBeHidden();
+  await expect(page.locator(".tab[data-view=skipped]")).toBeHidden();
   const unknown = feed.items.find(i => i.year_source === "unknown" && i.youtube);
   if (unknown) {
     const card = page.locator(`.card[data-id="${unknown.id}"]`);
@@ -60,6 +78,60 @@ test("settings dialog opens and lists feed health", async ({ page }) => {
   await expect(page.locator("#settings")).toBeVisible();
   expect(await page.locator("#s-feeds span").count()).toBeGreaterThan(10);
   await expect(page.locator("#s-quota")).toContainText("YouTube API units");
+  // the stats sheet opens from ⚙ and, for a listener, explains what it would show
+  await page.click("#s-stats");
+  await expect(page.locator("#settings")).toBeHidden();
+  await expect(page.locator("#stats")).toBeVisible();
+  await expect(page.locator("#stats-body")).toContainText("The daily build");
+  expect(errors).toEqual([]);
+});
+
+test("a card's permalink (?t=id) opens on that card, even past the shortlist", async ({ page }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  // a low-ranked playable, recent track: the shortlist would not show it, so the site has to search for it
+  const playable = feed.items.filter(i => i.youtube && i.youtube.videoId && !(Number.isFinite(i.year) && i.year < new Date().getFullYear() - 1));
+  const target = playable[playable.length - 1];
+  const errors = await open(page, `/?t=${encodeURIComponent(target.id)}`);
+  const card = page.locator(`.card[data-id="${target.id}"]`);
+  await expect(card).toBeVisible();
+  await expect(card).toHaveClass(/current/);
+  await expect(page.locator("#q")).not.toHaveValue("");
+  expect(errors).toEqual([]);
+});
+
+test("a rated track feeds the personal ranking and the stats", async ({ page }) => {
+  // pretend this account kept four tracks from one blog and skipped three from another (the Drive mirror shape)
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const blogs = [...new Set(feed.items.flatMap(i => i.sources || []).filter(s => s.startsWith("rss:")))];
+  const only = src => feed.items.filter(i => (i.sources || []).includes(src) && !(i.sources || []).some(s => s !== src && blogs.includes(s)));
+  const srcs = blogs.filter(s => only(s).length >= 4).slice(0, 2);
+  test.skip(srcs.length < 2, "needs two blogs with four or more tracks of their own in the committed feed");
+  const rated = {};
+  only(srcs[0]).slice(0, 4).forEach((i, n) => { rated[i.id] = { decision: "up", at: Date.now() - n * 1000, videoId: i.youtube?.videoId, artist: i.artist, title: i.title, sources: i.sources, tags: i.tags, year: i.year }; });
+  only(srcs[1]).slice(0, 3).forEach((i, n) => { rated[i.id] = { decision: "down", at: Date.now() - n * 1000, local: true, videoId: i.youtube?.videoId, artist: i.artist, title: i.title, sources: i.sources, tags: i.tags }; });
+  await page.addInitScript(([r, hash]) => {
+    localStorage.setItem("id:rated", JSON.stringify(r));
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:filters", JSON.stringify({ shortlist: false }));
+  }, [rated, feed.google.curator_hashes[0]]);
+  const errors = await open(page);
+  await expect(page.locator("body")).toHaveClass(/curator/);
+  // the Skipped tab lists the three local skips and offers to restore them
+  await page.click(".tab[data-view=skipped]");
+  await expect(page.locator("#list .card")).toHaveCount(3);
+  await expect(page.locator("#list .card .btn.restore").first()).toBeVisible();
+  await page.locator("#list .card .btn.restore").first().click();
+  await expect(page.locator("#list .card")).toHaveCount(2);
+  // a track from the kept-from blog carries a learned bonus on its score (four keeps: a nudge, not yet a reason line)
+  await page.click(".tab[data-view=feed]");
+  const next = only(srcs[0]).find(i => !rated[i.id] && i.youtube?.videoId && !(Number.isFinite(i.year) && i.year < new Date().getFullYear() - 1));
+  await page.fill("#q", next.title);
+  const liked = page.locator(`.card[data-id="${next.id}"]`);
+  await expect(liked).toBeVisible();
+  await expect(liked.locator(".score")).toHaveAttribute("title", /\+ 0\.\d learned from your keeps and skips/);
+  await page.click("#settings-btn"); await page.click("#s-stats");
+  await expect(page.locator("#stats-body")).toContainText("4 kept · 2 skipped");
+  await expect(page.locator("#stats-body")).toContainText("Keep rate by source");
   expect(errors).toEqual([]);
 });
 
@@ -226,5 +298,55 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   await expect(page.locator("#meta")).toContainText("candidates", { timeout: 15_000 });
   await ctx.setOffline(false);
   expect(errors.filter(e => !/Failed to load resource|net::ERR_INTERNET_DISCONNECTED/.test(e))).toEqual([]);
+  await ctx.close();
+});
+
+/** A small catalog.json in the shape discovery/catalog.py writes, made from the committed feed's playable tracks. */
+async function catalogFixture() {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const playable = feed.items.filter(i => i.youtube && i.youtube.videoId).slice(0, 40);
+  const years = {};
+  const items = playable.map((i, n) => {
+    const year = n % 5 === 0 ? null : 1995 + (n % 20);
+    if (year) years[year] = { playlist: 30 + n, candidates: (years[year]?.candidates || 0) + 1 };
+    return { ...i, id: "cat" + i.id, year, year_source: year ? "musicbrainz-search" : "unknown", year_confidence: year ? "high" : "low", release_date: null, first_seen: feed.generated_at.slice(0, 10),
+      sources: n % 3 ? ["lastfm:top tracks"] : ["lastfm:loved", "lastfm:artist top"], plays: 200 - n, loved: n % 3 === 0, score: 8 - n / 10, reasons: [`${200 - n} plays`] };
+  });
+  return { generated_at: feed.generated_at, candidates: 500, count: items.length, undated: items.filter(i => !i.year).length, sources: ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"], years, items };
+}
+
+test("the Catalog tab: earlier years with a year select, or a note until the first build", async ({ browser }) => {
+  // the service worker would answer data/catalog.json itself, past the route below: keep it out of this test
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  // before the daily job has ever built one, the tab explains itself instead of failing
+  let errors = await open(page);
+  await page.click(".tab[data-view=catalog]");
+  await expect(page.locator("#empty")).toContainText("No catalog yet");
+  expect(errors).toEqual([]);
+  // with a catalog: cards, Last.fm source chips, and the year select narrows the list
+  const cat = await catalogFixture();
+  await page.route("**/data/catalog.json", route => route.fulfill({ json: cat }));
+  errors = await open(page, "/?view=catalog");
+  const cards = page.locator("#list .card");
+  await expect.poll(() => cards.count()).toBe(cat.count);
+  await expect(page.locator("#count-catalog")).toHaveText(String(cat.count));
+  await expect(page.locator("#sources label").first()).toContainText(/Your artists|Loved|Most played/);
+  await expect(page.locator("#cat-year")).toBeVisible();
+  await expect(page.locator("#sort")).toBeHidden();
+  await expect(cards.first().locator(".reasons")).toContainText("plays");
+  const year = Object.keys(cat.years)[0];
+  await page.selectOption("#cat-year", year);
+  await expect.poll(() => cards.count()).toBe(cat.years[year].candidates);
+  await expect(cards.first().locator(".yearbadge")).toContainText(year);
+  await page.selectOption("#cat-year", "?");
+  await expect.poll(() => cards.count()).toBe(cat.undated);
+  await expect(cards.first().locator(".yearbadge")).toHaveText("year unknown");
+  // back to the feed: the feed's own chips and sort return
+  await page.click(".tab[data-view=feed]");
+  await expect(page.locator("#sort")).toBeVisible();
+  await expect(page.locator("#cat-year")).toBeHidden();
+  await expect(page.locator("#sources label").first()).not.toContainText(/Most played/);
+  expect(errors).toEqual([]);
   await ctx.close();
 });

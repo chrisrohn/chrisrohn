@@ -52,6 +52,7 @@ jobs:
           path: |
             data/cache/sources.json
             data/cache/profile.json
+            data/cache/catalog.json
           key: http-cache-${{ github.run_id }}
           restore-keys: http-cache-
 

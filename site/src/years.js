@@ -29,7 +29,8 @@ export function yearBadge(it) {
   let text = it.original_year ? `reissue? originally ${it.original_year}`
     : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`)
     : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
-  if (Number.isFinite(it.year) && /** @type {number} */ (it.year) < new Date().getFullYear() - 1 && it.year_source !== "unknown") text += " · catalog";
+  // in the feed an older year is a warning (radio and recommendations surface catalogue); in the Catalog tab it is the point
+  if (Number.isFinite(it.year) && /** @type {number} */ (it.year) < new Date().getFullYear() - 1 && it.year_source !== "unknown" && it.plays == null) text += " · catalog";
   return { text, conf, title: (YEAR_SOURCE[it.year_source || ""] || "") + ((it.year_evidence || []).length ? "\n" + (it.year_evidence || []).join("\n") : "") };
 }
 /** @param {string} r */

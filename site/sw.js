@@ -14,7 +14,7 @@ const BUILD = "__BUILD__";
 const CACHE = "newmusic-" + BUILD;
 const ART = "newmusic-art";                          // survives builds: artwork does not change with the app
 const ART_MAX = 400;
-const SHELL = ["/", "/index.html", "__APP_JS__", "/style.css", "/theme.js", "/manifest.webmanifest", "/data/feed.json",
+const SHELL = ["/", "/index.html", "__APP_JS__", "/style.css", "/theme.js", "/manifest.webmanifest", "/data/feed.json", "/data/catalog.json",
   "/privacy.html", "/terms.html", "/icons/icon.svg", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png", "/icons/favicon-32.png"];
 const SHELL_SET = new Set(SHELL);
 

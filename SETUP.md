@@ -151,7 +151,35 @@ session that the playlist's owner approved in that browser.
   open. A new site build shows a *Reload* toast rather than switching under you. Swipe a card right to keep, left to
   skip (curator or guest mode only); **share** on a card opens the system share sheet. Desktop Chrome/Edge/Safari 17
   install it too (the Install button in the header, or the icon in the address bar).
-- Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list.
+- **Shortlist:** the Feed tab opens on the top 60 by score (⚙ sets how many); *show all* at the end of the list, or the
+  `+N` next to the deck counter, lifts it for the visit. A search or another sort always shows everything.
+- **It learns from you, without API quota.** Every keep and skip remembers the card's sources, blogs, tags and artist.
+  The site works out a keep rate for each against your overall rate and nudges the scores (the number on the card
+  hovers to show `build score ± learned`), so a blog you keep from floats up and one you skip through sinks; tracks
+  left unrated for three days count as a weak pass. It travels with the Drive mirror, so every device agrees.
+  The daily build does the same from the other side: `site/data/history/` records what each feed showed, and
+  three days later anything that reached a year playlist counts as kept, the Skipped playlist as skipped (only when
+  skips are filed on YouTube), the rest as a weak pass — `discovery/learn.py`, tuned under `learn:` in config.yaml
+  and weighted by `ranking.weights.learned`. Cards say why: "you keep 71% from KEXP", "you rarely keep hip hop".
+- **Skipped** tab: what you thumbed down from this feed, newest first, with **restore** (an Undo that no longer needs
+  the toast; a skip filed on YouTube costs 50 units to take back). **Stats** (⚙ → *Stats*): keeps and skips by week,
+  keep rate by source and tag, most-kept artists, and what the build has learned so far.
+- A tag chip or an artist name on a card is a filter (it lands in the search box). The **link** control on a card
+  copies its own address (`/?t=<id>`), which opens the site on that card; the RSS items carry the same link.
+- A video YouTube refuses to embed here (removed, or the owner blocks embedding) is remembered for a month: the card
+  stays, marked *no embed*, and autoplay steps over it.
+- **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
+  Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
+  the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
+  playlist already holds is hidden; the rest is resolved on YouTube Music and given a verified release year in daily
+  batches on the feed's caches, so the tab fills in over a couple of weeks and then keeps pace with your listening.
+  The year select shows every playlist year with how many tracks it holds and how many candidates wait, so the
+  thin years are easy to work through; each Keep files into the verified year (or asks when none was found). Plays,
+  loved, your keeps and skips all rank it; the shortlist, search, source chips and the phone deck work as in the
+  feed. Tuning is under `catalog:` in config.yaml (candidate counts, per-run lookup budgets, its share of the job's
+  time after the feed). Nothing here spends YouTube API quota; the Last.fm key is the only one it needs.
+- Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list (with release dates, artwork and
+  tags; the internal score stays internal).
 
 ## Sources
 
@@ -168,7 +196,7 @@ All in `discovery/config.yaml → sources`, each with an `enabled` switch. Per-f
 | `deezer` | newest albums of your top artists + editorial new releases | nothing |
 | `radio` | recent KEXP plays (API) and SomaFM channel logs, profile-matched | nothing |
 | `listenbrainz_playlists` | ListenBrainz Weekly Exploration / Weekly Jams (collaborative filtering) | a ListenBrainz username with your Last.fm history imported |
-| `rss` | 40+ blogs and radio shows; `Artist – "Song"` headlines become cards | nothing |
+| `rss` | 40+ blogs and radio shows; `Artist – "Song"` and `Artist shares new single "Song"` headlines become cards, news never does (`discovery/headlines.py`) | nothing |
 | `spotify` | off; Spotify's API is no longer viable | Premium + dev app |
 
 ## Tuning
@@ -178,8 +206,13 @@ Everything lives in `discovery/config.yaml`:
 - `profile.tag_boosts` / `tag_penalties` — push genres up or down.
 - `profile.seed_artists` — hand-add artists Last.fm under-counts.
 - `sources.*.tags` — the Bandcamp and MusicBrainz genre lists (this replaces the "Edge of <genre>" playlists).
-- `sources.rss.feeds` — add any blog/radio RSS; headlines like `Artist – "Song"` become playable cards.
-- `ranking.weights` — how much artist affinity vs. tags vs. editorial picks vs. freshness matter.
+- `sources.rss.feeds` — add any blog/radio RSS; headlines like `Artist – "Song"` or `Artist shares "Song"` become
+  playable cards. Tour dates, interviews, listicles, obituaries and the rest are dropped by `discovery/headlines.py`
+  (its `NEWS` pattern is the place to add a cue if a kind of post still slips through).
+- `ranking.weights` — how much artist affinity vs. tags vs. editorial picks vs. freshness vs. what you kept matter;
+  `freshness_days` is how long a release keeps its freshness bonus, `undated_freshness` what a dateless item gets.
+- `learn` — the outcome learning: `grace_days` before a shown track is judged, `pass_weight` for tracks never filed,
+  `prior` pseudo-observations before a source or tag moves anything, `min_exposures`, `max_adjust`.
 - `profile.everynoise_genres` + `python -m discovery seed-everynoise` — harvest the frozen Everynoise genre pages
   as one-time seed artists (commit `data/seeds_everynoise.json`).
 
@@ -190,6 +223,7 @@ pip install --require-hashes -r discovery/requirements.lock   # exact versions, 
 export LASTFM_API_KEY=...
 python -m discovery profile      # once, then every few days automatically
 python -m discovery build        # writes site/data/feed.json + site/feed.xml
+python -m discovery catalog      # writes site/data/catalog.json (the earlier years, from Last.fm history)
 npm install && npm run serve     # builds dist/ from site/src and serves it at http://localhost:8000
 
 pip install ruff pytest && ruff check discovery tests && python -m pytest tests   # lint + offline tests
@@ -197,7 +231,9 @@ npm run check && npm test        # eslint + type check (tsc --checkJs) + build, 
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
-`render`, `player`, `dupes`, `settings`, `keys`, `theme`, `main`). `build.mjs` bundles them with esbuild into a content-hashed
+`render`, `player`, `rank` (the personal ranking), `stats`, `dupes`, `settings`, `keys`, `theme`, `main`); the Python side is
+`discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/learn.py` (what the playlists teach the
+ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
 pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the

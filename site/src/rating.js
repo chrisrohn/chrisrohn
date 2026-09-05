@@ -30,7 +30,8 @@ export async function rate(id, decision, year) {
   if (decision === "up" || skipsInYouTube()) { if (!(await ensureToken())) { needSignIn("Could not refresh your Google sign-in"); return; } }
   state.busy.add(id);
   // optimistic: hide it now, move focus to the next card
-  state.rated[id] = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, at: Date.now(), pending: true };
+  // the card's sources and tags travel with the rating: the personal ranking and the stats learn from them later
+  state.rated[id] = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, sources: it.sources || [], tags: it.tags || [], at: Date.now(), pending: true };
   persist();
   const wasCurrent = state.currentId === id; const idx = state.order.indexOf(id);
   render();

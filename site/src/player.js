@@ -1,25 +1,32 @@
 // @ts-check
 /* The YouTube embed, autoplay through the list, and audition mode (start partway in, move on after N seconds). */
-import { state, byId } from "./state.js";
+import { state, byId, badVideo, markBadVideo } from "./state.js";
 import { $, $$, esc, sameName, toast } from "./dom.js";
 import { visibleItems } from "./feed.js";
 import { renderDeck, deckOn, deckItem, focusCard } from "./render.js";
 import { matchLabel } from "./years.js";
+import { scoreOf } from "./rank.js";
 
 window.onYouTubeIframeAPIReady = () => {
   state.player = new YT.Player("yt", {
     width: "356", height: "200", videoId: state.pendingVideo || undefined,
     playerVars: { autoplay: 1, rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
     events: {
-      onReady: () => { state.playerReady = true; if (state.pendingVideo) { state.player.loadVideoById(state.pendingVideo); state.pendingVideo = null; } },
+      onReady: () => {
+        state.playerReady = true;
+        const frame = $("#yt iframe"); if (frame && !frame.title) frame.title = "YouTube player";
+        if (state.pendingVideo) { state.player.loadVideoById(state.pendingVideo); state.pendingVideo = null; }
+      },
       onStateChange: (/** @type {any} */ e) => {
         if (e.data === YT.PlayerState.ENDED && $("#autoplay").checked) { clearAudition(); nextTrack(); }
         if (e.data === YT.PlayerState.PLAYING) { startAudition(); setPlaybackState("playing"); reflectPlaying(true); }
         if (e.data === YT.PlayerState.PAUSED) { clearAudition(false); setPlaybackState("paused"); reflectPlaying(false); }
         if (e.data === YT.PlayerState.ENDED) { setPlaybackState("none"); reflectPlaying(false); }
       },
-      onError: () => {
-        const it = current(); const url = it?.youtube?.videoId ? "https://music.youtube.com/watch?v=" + it.youtube.videoId : null;
+      onError: (/** @type {any} */ e) => {
+        const it = current(); const vid = it?.youtube?.videoId; const url = vid ? "https://music.youtube.com/watch?v=" + vid : null;
+        // 100 = removed or private, 101/150 = the owner disallows embedding: remember it so autoplay steps over it next time
+        if (vid && [100, 101, 150].includes(Number(e && e.data))) { markBadVideo(vid); $$(`.card[data-id="${CSS.escape(it.id)}"], .dcard[data-id="${CSS.escape(it.id)}"]`).forEach(c => c.classList.add("noembed")); }
         toast("Can't embed this one", true, url ? { label: "Open in YT Music", fn: () => window.open(url, "_blank", "noopener") } : undefined);
         if ($("#autoplay").checked) nextTrack();   // keep the queue moving; a popup here would be blocked anyway
       },
@@ -72,7 +79,7 @@ export function reflectPlaying(on) { $$("#deck-play, #p-toggle").forEach(b => b.
 const lookup = id => byId(id) || visibleItems().find(x => x.id === id);
 /** The next playable id in list order from index `i` in the given direction, or null at the end. @param {number} i @param {number} delta */
 function playableFrom(i, delta) {
-  for (let j = i + delta; j >= 0 && j < state.order.length; j += delta) { const id = state.order[j]; if (lookup(id)?.youtube?.videoId) return id; }
+  for (let j = i + delta; j >= 0 && j < state.order.length; j += delta) { const id = state.order[j]; const vid = lookup(id)?.youtube?.videoId; if (vid && !badVideo(vid)) return id; }
   return null;
 }
 /** What "next" would play: the following card in the deck, or the next playable row of the list. */
@@ -91,7 +98,7 @@ function renderNow(it) {
   $("#now").innerHTML = `<b class="np-artist">${esc(it.artist)}${ml ? ` <span class="match ${esc(it.match_kind || "")}">${esc(ml)}</span>` : ""}</b><span class="np-sep"> - </span><span class="np-title">${esc(it.display_title || it.title)}${rel}</span>`;
   $("#np-spec").textContent = [it.release_type, it.release_date, (it.tags || []).slice(0, 4).join(", ")].filter(Boolean).join(" · ");
   $("#np-sources").innerHTML = (it.sources || []).map(s => { const [k, name] = s.split(":"); return `<span class="src ${esc(k)}" title="${esc(s)}">${esc(name || k)}</span>`; }).join("");
-  $("#np-score").textContent = it.score ? it.score.toFixed(1) : "";
+  $("#np-score").textContent = it.score ? scoreOf(it).toFixed(1) : "";
   const nx = upNext(); const b = $("#np-next"); b.hidden = !nx;
   if (nx) b.innerHTML = `<b>${esc(nx.artist)}</b><span>${esc(nx.display_title || nx.title)}</span>`;
 }

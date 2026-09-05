@@ -313,9 +313,49 @@ ranking:
     freshness: 1.0         # decays over `freshness_days`
     editorial: 1.5         # appeared in a curated feed (RSS/Bandcamp Daily/KEXP)
     listens: 0.4           # log10(listen_count) from ListenBrainz
-  freshness_days: 1200
+    playable: 0.3          # a YouTube match exists (it can be played and filed)
+    learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
+  freshness_days: 60       # a release this many days old has spent its freshness bonus (the sources look back ~90 days)
+  undated_freshness: 0.2   # share of the freshness weight for an item nobody dates; below anything released this month
   # Hide anything already in your year playlists, saved or skipped from the site.
   hide_seen: true
+
+# ---------- Learning from outcomes (discovery/learn.py) ----------
+# No API quota involved: what each day's feed showed (site/data/history/) is compared with what reached the year
+# playlists (kept) or the Skipped playlist (skipped, only when skips are filed on YouTube). Sources, blogs, tags and
+# artists get a keep rate against the overall rate, added to the score as a bounded log2 ratio.
+learn:
+  grace_days: 3          # a track shown more recently than this may simply not have been listened to yet
+  pass_weight: 0.35      # shown for grace_days and never filed anywhere: a weak "no" (a filed skip counts as 1.0)
+  prior: 8               # pseudo-observations at the overall keep rate before a source / tag / artist moves the score
+  min_exposures: 3       # fewer sightings than this: no opinion yet
+  max_adjust: 1.5        # the log2 ratio is clamped to ±this, so one lucky blog can't dominate
+
+# ---------- The catalog: infill for earlier years (discovery/catalog.py) ----------
+# Runs after the feed in the daily job and publishes site/data/catalog.json for the Catalog tab. Candidates are your
+# own Last.fm history (most-played and loved tracks not yet in a playlist) plus the top tracks of the artists you
+# play and of their similar artists; the candidate snapshot is refreshed weekly, YouTube resolution and year
+# verification proceed in daily batches on the feed's caches, so the catalog grows over a couple of weeks.
+catalog:
+  enabled: true
+  refresh_days: 7
+  top_tracks: 3000          # user.getTopTracks, overall (1000 per request)
+  loved_tracks: 2000
+  artists_top_n: 150        # your top artists by affinity …
+  per_artist: 8             # … and this many of each one's top tracks
+  similar_top_n: 100        # the strongest similar artists (adjacent to what you play) …
+  per_similar: 5
+  max_items: 2000           # candidates carried into resolution, by score
+  time_budget_minutes: 8    # its own wall-clock share after the feed's …
+  job_budget_minutes: 40    # … but never past this point of the whole daily job (the workflow times out at 45)
+  max_lookups_per_run: 250
+  max_year_lookups_per_run: 250
+  tag_lookups_per_run: 300  # artists whose Last.fm tags get fetched per run (cached for good afterwards)
+  loved_bonus: 1.5
+  weights:                  # overrides of ranking.weights for the catalog: plays count for a lot, freshness for nothing
+    listens: 2.0
+    freshness: 0.0
+    editorial: 0.0
 
 resolve:
   youtube_music: true

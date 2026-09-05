@@ -5,6 +5,7 @@ import hashlib
 import html
 from datetime import date, timedelta
 
+from .learn import learn_from_history, public_summary
 from .models import Item
 from .profile import find_duplicates, load_profile
 from .resolve import collapse_shared_videos, resolve_all
@@ -20,6 +21,8 @@ STATE_PATH = DATA_DIR / "state.json"
 def build_feed(cfg: dict) -> dict:
     http = Http("sources", ttl_hours=20)
     profile = load_profile()
+    # keep rates per source / tag / artist from what earlier feeds showed and what reached the playlists (quota-free)
+    profile["learned"] = learn_from_history(profile, cfg, SITE_DATA_DIR / "history")
     state = read_json(STATE_PATH, {"first_seen": {}})
     first_seen: dict[str, str] = state.setdefault("first_seen", {})
 
@@ -100,6 +103,7 @@ def build_feed(cfg: dict) -> dict:
             "duplicates_checked_at": checked_at,
         },
         "picks": profile.get("picks") or [],
+        "learned": public_summary(profile["learned"]),
         "feed_health": _feed_health(),
         "lastfm_user": cfg["station"]["lastfm_user"],
         "profile": {"built_at": profile.get("built_at"), "counts": profile.get("counts")},
@@ -139,8 +143,10 @@ def _public_item(it: Item, first_seen: str | None) -> dict:
 
 
 def _write_history(today_s: str, items: list[Item], keep_days: int = 90) -> None:
+    """One file per build: the ids, plus the per-item facts learn.py needs later (source, tags, artist, video)."""
     hist = SITE_DATA_DIR / "history"
-    write_json(hist / f"{today_s}.json", {"date": today_s, "ids": [i.key for i in items]}, compact=True)
+    rows = [{"id": i.key, "v": (i.youtube or {}).get("videoId"), "a": i.artist, "s": i.sources, "t": i.tags} for i in items]
+    write_json(hist / f"{today_s}.json", {"date": today_s, "ids": [i.key for i in items], "items": rows}, compact=True)
     cutoff = (date.today() - timedelta(days=keep_days)).isoformat()
     for f in hist.glob("*.json"):
         if f.stem < cutoff:
@@ -183,23 +189,42 @@ def _write_rss(cfg: dict, payload: dict) -> None:
     esc = html.escape
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>',
+        '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/"><channel>',
         f"<title>{esc(cfg['station'].get('site_name') or payload['station'])}</title>",
         f"<link>https://{domain}/</link>",
         f"<description>Daily new-music discovery feed: candidates for the {esc(payload['station'])} playlists on YouTube Music</description>",
         f'<atom:link href="https://{domain}/feed.xml" rel="self" type="application/rss+xml"/>',
+        f"<lastBuildDate>{_rfc822(payload['generated_at'])}</lastBuildDate>",
     ]
     for it in payload["items"][:100]:
         yt = it.get("youtube") or {}
         link = f"https://music.youtube.com/watch?v={yt['videoId']}" if yt.get("videoId") else next(iter(it.get("links", {}).values()), f"https://{domain}/")
-        desc = f"{it.get('release_type') or ''} {it.get('release') or ''} · score {it['score']} · {', '.join(it.get('reasons', []))}".strip()
+        # a reader sees what the card says (release, why it is here), never the internal score
+        bits = [" ".join(b for b in (it.get("release_type"), it.get("release")) if b), ", ".join(it.get("reasons", [])), f"card: https://{domain}/?t={it['id']}"]
+        desc = " · ".join(b for b in bits if b)
+        seen = it.get("first_seen") or it.get("release_date")
+        art = it.get("artwork") or yt.get("thumbnail")
         parts.append(
             "<item>"
             f"<title>{esc(it.get('display') or (it['artist'] + ' - ' + it['title']))}</title>"
             f"<link>{esc(link)}</link>"
             f"<guid isPermaLink=\"false\">{it['id']}</guid>"
-            f"<description>{esc(desc)}</description>"
+            + (f"<pubDate>{_rfc822(seen)}</pubDate>" if seen else "")
+            + "".join(f"<category>{esc(t)}</category>" for t in (it.get("tags") or [])[:6])
+            + (f'<media:thumbnail url="{esc(art)}"/>' if safe_url(art) else "")
+            + f"<description>{esc(desc)}</description>"
             "</item>"
         )
     parts.append("</channel></rss>")
     (SITE_DATA_DIR.parent / "feed.xml").write_text("\n".join(parts), encoding="utf-8")
+
+
+def _rfc822(iso: str) -> str:
+    """RSS wants RFC 822 dates; ours are ISO (a date, or a timestamp with offset)."""
+    from datetime import datetime
+    from email.utils import format_datetime
+    try:
+        dt = datetime.fromisoformat(iso) if "T" in iso else datetime.fromisoformat(iso + "T06:00:00+00:00")
+    except ValueError:
+        return iso
+    return format_datetime(dt)

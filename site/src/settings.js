@@ -8,6 +8,8 @@ import { loadLibraryPlaylists } from "./youtube.js";
 import { renderDupes, scanYear, bulkRemoveExtras } from "./dupes.js";
 import { startAudition, clearAudition, auditionOn } from "./player.js";
 import { wireTheme } from "./theme.js";
+import { openStats } from "./stats.js";
+import { render } from "./render.js";
 
 function exportCsv() {
   const rows = [["Title", "Artist", "Notation", "Year", "YouTube"], ...Object.values(state.rated).filter(d => d.decision === "up").map(d => [d.title, d.artist, `${d.artist} - ${d.title}`, d.year, d.videoId ? "https://music.youtube.com/watch?v=" + d.videoId : ""])];
@@ -47,6 +49,9 @@ export function wireSettings() {
   $("#s-dupe-bulk").addEventListener("click", bulkRemoveExtras);
   $("#s-skips").addEventListener("change", (/** @type {any} */ e) => { state.settings.skipsInYouTube = e.target.checked; persist(); });
   $("#s-export").addEventListener("click", exportCsv);
+  $("#s-stats").addEventListener("click", () => { $("#settings").close(); openStats(); });
+  $("#s-shortlist").value = state.settings.shortlistSize || 60;
+  $("#s-shortlist").addEventListener("change", (/** @type {any} */ e) => { state.settings.shortlistSize = Math.min(500, Math.max(10, +e.target.value || 60)); e.target.value = state.settings.shortlistSize; persist(); render(); });
   $("#s-syncnow").addEventListener("click", () => pushRatings().then(() => pullRatings()).then(() => { $("#s-sync").textContent = `Synced just now · ${Object.keys(state.rated).length} rated tracks`; toast("Ratings synced"); }).catch(e => toast(e.message, true)));
   $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast(`Playlists reloaded: ${Object.keys(state.playlists).filter(k => !k.startsWith("__")).length} year playlists found`)).catch(e => toast(e.message, true)));
   $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, settings, local rating mirror)? Nothing in YouTube or Drive is touched.")) { clearLocalState(); location.reload(); } });
