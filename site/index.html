@@ -32,6 +32,7 @@
 <link rel="alternate" type="application/rss+xml" title="Chris Rohn's New Music" href="/feed.xml">
 <link rel="preconnect" href="https://www.youtube.com">
 <link rel="stylesheet" href="style.css">
+<script src="/theme.js"></script>   <!-- before first paint: applies a saved light/dark choice so nothing flashes -->
 </head>
 <body>
 <header class="top">
@@ -51,6 +52,7 @@
     <span class="mode curator" title="Curator mode: thumbs file straight into your YouTube playlists">curator</span>
     <button id="install-btn" class="btn ghost" type="button" hidden title="Install this site as an app">Install</button>
     <button id="signin" class="btn primary" disabled title="loading the feed…">Sign in with Google</button>
+    <button id="theme-btn" class="btn ghost" type="button" data-theme-toggle title="Theme" aria-label="Theme">&#x25D0;&#xFE0E;</button>
     <button id="settings-btn" class="btn ghost" title="Settings" disabled aria-label="Settings">&#x2699;&#xFE0E;</button>
   </div>
 </header>
@@ -77,7 +79,7 @@
   <label class="chk"><input type="checkbox" id="only-known"> known artists</label>
   <label class="chk" title="Hide tracks whose verified release year is older than last year (radio and recommendation sources surface catalog too)"><input type="checkbox" id="only-recent"> new releases only</label>
   <button class="btn ghost mobile-only" id="layout-toggle" type="button">list view</button>
-  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open</span>
+  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open · <kbd>t</kbd> theme</span>
 </section>
 
 <div id="stale" class="stale" role="status" hidden></div>
@@ -185,6 +187,9 @@
     </details>
     <p class="muted owner" id="s-guests"></p>
     <details><summary class="muted">Blog feed health (tracks kept / posts seen in the last build)</summary><div id="s-feeds" class="feeds"></div></details>
+    <div class="row">
+      <label>Theme <select id="s-theme"><option value="auto">system (follow the device)</option><option value="light">light · concrete</option><option value="dark">dark · charcoal</option></select></label>
+    </div>
     <div class="row">
       <label>Audition length (seconds) <input id="s-aud-secs" type="number" min="10" max="120" step="1" style="width:90px"></label>
       <label>Audition starts at (% into the track) <input id="s-aud-start" type="number" min="0" max="80" step="1" style="width:90px"></label>
