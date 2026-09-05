@@ -34,11 +34,15 @@ def _match_artist(it: Item, profile: dict) -> tuple[dict | None, str | None]:
         n = mbid_index.get(m)
         if n and n in artists:
             return artists[n], artists[n]["kind"]
-    candidates = [it.artist] + split_artists(it.artist)
-    for c in candidates:
-        n = norm(c)
-        if n in artists:
-            return artists[n], artists[n]["kind"]
+    n = norm(it.artist)
+    if n in artists:
+        return artists[n], artists[n]["kind"]
+    # a collaboration credit: each named act counts, but only when the credit is unambiguously split ("A & B",
+    # "A feat. B"), never on "and" / "with" / "x", and never for a one-letter fragment
+    for c in split_artists(it.artist, strict=True):
+        cn = norm(c)
+        if len(cn) > 1 and cn != n and cn in artists:
+            return artists[cn], artists[cn]["kind"]
     return None, None
 
 

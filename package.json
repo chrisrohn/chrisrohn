@@ -1,12 +1,22 @@
 {
   "name": "chrisrohn-new-music-site",
   "private": true,
-  "description": "Browser smoke test for chrisrohn.com (site/) — run with `npm test`",
+  "type": "module",
+  "description": "The chrisrohn.com client (site/src) with its build, lint, type check and browser smoke test",
   "scripts": {
+    "build": "node build.mjs",
+    "lint": "eslint",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "npm run lint && npm run typecheck && npm run build",
     "test": "playwright test",
-    "serve": "python3 -m http.server -d site 8000"
+    "serve": "npm run build && python3 -m http.server -d dist 8000"
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0"
+    "@eslint/js": "^9.12.0",
+    "@playwright/test": "^1.55.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.12.0",
+    "globals": "^15.11.0",
+    "typescript": "^5.6.0"
   }
 }

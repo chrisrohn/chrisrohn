@@ -283,3 +283,4 @@ select.year.attention { animation: attention .5s ease 2; }
   .card, .dcard, .card.swiping, .art .play, .audition-bar i { transition: none !important; }
   select.year.attention { animation: none; }
 }
+.more-sentinel { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 13px; padding: 14px; }

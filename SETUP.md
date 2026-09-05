@@ -184,14 +184,17 @@ pip install --require-hashes -r discovery/requirements.lock   # exact versions, 
 export LASTFM_API_KEY=...
 python -m discovery profile      # once, then every few days automatically
 python -m discovery build        # writes site/data/feed.json + site/feed.xml
-python -m http.server -d site    # http://localhost:8000
+npm install && npm run serve     # builds dist/ from site/src and serves it at http://localhost:8000
 
 pip install ruff pytest && ruff check discovery tests && python -m pytest tests   # lint + offline tests
-npm install && npm test          # Playwright smoke test of the site against the committed feed.json
+npm run check && npm test        # eslint + type check (tsc --checkJs) + build, then the Playwright smoke test
 ```
 
-The **CI** workflow runs those three checks on every pull request; **Publish site** runs the browser test again before
-anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the
+The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
+`render`, `player`, `dupes`, `settings`, `keys`, `main`). `build.mjs` bundles them with esbuild into a content-hashed
+`app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
+both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
+pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the
 lockfile with `cd discovery && pip-compile --generate-hashes --strip-extras -o requirements.lock requirements.txt`
 (Dependabot opens that pull request weekly). If a daily build fails, the workflow opens a **build-failure** issue and
 the site shows a banner once the feed is more than 36 hours old.

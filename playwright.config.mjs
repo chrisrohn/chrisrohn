@@ -1,5 +1,5 @@
-// Smoke test for the static site. Serves ./site with Python's http.server (the same files GitHub Pages deploys)
-// and drives it in headless Chromium against the committed feed.json.
+// Smoke test for the static site. Builds it (build.mjs → dist/), serves dist/ with Python's http.server (the same
+// files GitHub Pages deploys) and drives it in headless Chromium against the committed feed.json.
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
@@ -13,7 +13,7 @@ export default defineConfig({
     launchOptions: process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {},
   },
   webServer: {
-    command: "python3 -m http.server -d site 8765 --bind 127.0.0.1",
+    command: "node build.mjs && python3 -m http.server -d dist 8765 --bind 127.0.0.1",
     url: "http://127.0.0.1:8765/index.html",
     reuseExistingServer: true,
     timeout: 20_000,

@@ -1,8 +1,9 @@
 /* Service worker: network first, cache fallback, so the installed app still opens offline with the last feed.
  * Only the app shell and the feed are cached, each under one key (the feed URL never varies, so there is exactly one
- * copy and offline mode gets the newest one). Never serves stale app code when the network is available. */
-const CACHE = "newmusic-v2";
-const SHELL = new Set(["/", "/index.html", "/app.js", "/style.css", "/manifest.webmanifest", "/data/feed.json", "/icons/icon-192.png", "/icons/icon-512.png"]);
+ * copy and offline mode gets the newest one). Never serves stale app code when the network is available.
+ * __APP_JS__ and __BUILD__ are filled in by build.mjs from the bundle's content hash. */
+const CACHE = "newmusic-__BUILD__";
+const SHELL = new Set(["/", "/index.html", "__APP_JS__", "/style.css", "/manifest.webmanifest", "/data/feed.json", "/icons/icon-192.png", "/icons/icon-512.png"]);
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener("fetch", e => {

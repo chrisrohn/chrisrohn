@@ -80,6 +80,14 @@ jobs:
       - name: Pick up site changes merged while this build ran
         run: git pull --rebase origin main || true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Build the site (dist/)
+        run: npm run build
+
       # a failed build means the site keeps serving yesterday's feed with nothing to say so: open (or update) one issue
       - name: Report a failed build
         if: failure()
@@ -94,7 +102,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: dist
 
   deploy:
     needs: build

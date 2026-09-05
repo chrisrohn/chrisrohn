@@ -7,7 +7,7 @@ name: Publish site
 on:
   push:
     branches: [main]
-    paths: ["site/**", "!site/data/**", "!site/feed.xml", ".github/workflows/publish.yml"]
+    paths: ["site/**", "!site/data/**", "!site/feed.xml", "build.mjs", "package.json", "package-lock.json", ".github/workflows/publish.yml"]
   workflow_dispatch:
 
 concurrency:
@@ -36,10 +36,11 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - run: npm run check          # lint, type check, then build dist/
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: dist
       - id: deployment
         uses: actions/deploy-pages@v4

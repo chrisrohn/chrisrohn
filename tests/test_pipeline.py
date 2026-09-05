@@ -49,6 +49,8 @@ def test_norm_and_parse():
     assert util.norm_track("Lovers - Remastered 2026") == "lovers"
     assert util.norm_track("Lovers (Club Remix)") == "lovers club remix"   # a remix is a different recording
     assert util.split_artists("Jungle & Roosevelt feat. Nao") == ["Jungle", "Roosevelt", "Nao"]
+    assert util.split_artists("Belle and Sebastian with Kid x Ray") == ["Belle", "Sebastian", "Kid", "Ray"]
+    assert util.split_artists("Belle and Sebastian with Kid x Ray", strict=True) == ["Belle and Sebastian with Kid x Ray"]
     assert util.parse_artist_title('Jungle – "Back On 74"') == ("Jungle", "Back On 74")
     assert util.parse_artist_title("Magdalena Bay Share New Song: Death & Romance") is None
     assert util.parse_date("2026-09-01") == date(2026, 9, 1)
@@ -527,3 +529,34 @@ def test_rss_feed_name_is_not_an_artist(monkeypatch):
     out = rss.fetch(cfg, profile, FakeHttp())
     assert [(i.artist, i.title) for i in out] == [("Jungle", "Keep Moving")]
     assert out[0].links == {}                                                    # a javascript: link never makes it in
+
+
+def test_collaboration_credits_match_only_on_real_separators():
+    from discovery.score import _match_artist
+
+    profile = dict(PROFILE, artists={**PROFILE["artists"], "belle": {"name": "Belle", "affinity": 0.9, "kind": "direct", "mbid": None, "via": []}})
+    entry, kind = _match_artist(Item(artist="Belle and Sebastian", title="x"), profile)
+    assert entry is None                                                            # "and" is not a credit separator
+    entry, kind = _match_artist(Item(artist="Jungle & Someone", title="x"), profile)
+    assert entry["name"] == "Jungle" and kind == "direct"                          # "&" is
+    entry, kind = _match_artist(Item(artist="Belle & Sebastian", title="x"), profile)
+    assert entry["name"] == "Belle"
+
+
+def test_cli_parses_commands(monkeypatch):
+    from discovery import cli
+
+    calls = []
+    monkeypatch.setattr(cli, "setup_logging", lambda: None)
+    monkeypatch.setattr(cli, "ensure_dirs", lambda: None)
+    monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}})
+    import discovery.build as build
+    import discovery.profile as profile
+    monkeypatch.setattr(build, "build_feed", lambda cfg: calls.append("build"))
+    monkeypatch.setattr(profile, "build_profile", lambda cfg, http: calls.append("profile"))
+    monkeypatch.setattr(cli, "_profile_stale", lambda cfg: False)
+    assert cli.main(["build"]) == 0 and calls == ["build"]
+    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls == ["build", "profile", "build"]
+    assert cli.main([]) == 0 and calls[-1] == "build"                                 # daily is the default
+    with pytest.raises(SystemExit):
+        cli.main(["--no-such-flag"])

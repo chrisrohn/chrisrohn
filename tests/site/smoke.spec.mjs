@@ -21,14 +21,21 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   // list view on a desktop viewport; deck mode on a phone
   const cards = page.locator("#list .card");
   expect(await cards.count()).toBeGreaterThan(50);
-  expect(await cards.count()).toBe(Number(await page.locator("#count-feed").innerText()));
+  // the list is paged: 80 cards first, the rest as you scroll; the pill counts everything that matches
+  const total = Number(await page.locator("#count-feed").innerText());
+  expect(await cards.count()).toBe(Math.min(80, total));
+  if (total > 80) {
+    await page.locator("#more-sentinel").scrollIntoViewIfNeeded();
+    await expect.poll(() => cards.count()).toBeGreaterThan(80);
+  }
   // the sign-in button and settings unlock once the feed is in (they read feed.json)
   await expect(page.locator("#signin")).toBeEnabled();
   await expect(page.locator("#settings-btn")).toBeEnabled();
   // search narrows the list (debounced)
   const first = await cards.first().locator(".artist").innerText();
+  const before = await cards.count();
   await page.fill("#q", first.slice(0, Math.min(6, first.length)));
-  await expect.poll(() => cards.count()).toBeLessThan(await page.evaluate(() => JSON.parse(localStorage.getItem("id:filters")) && 500));
+  await expect.poll(() => cards.count()).toBeLessThan(before);
   await page.fill("#q", "");
   await expect.poll(() => cards.count()).toBeGreaterThan(50);
   // no thumbs for a listener; no fabricated years

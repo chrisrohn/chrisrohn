@@ -195,11 +195,19 @@ def norm_track(s: str | None) -> str:
     return norm(s)
 
 
-def split_artists(credit: str | None) -> list[str]:
-    """'A & B feat. C' -> ['A', 'B', 'C']"""
+_SPLIT_LOOSE = re.compile(r"\s*(?:,|&|\+|/|\bfeat\.?(?=\s)|\bft\.?(?=\s)|\bfeaturing\b|\bwith\b|\bx\b|\bvs\.?(?=\s)|\band\b)\s*", re.I)
+_SPLIT_STRICT = re.compile(r"\s*(?:,|&|\+|/|\bfeat\.?(?=\s)|\bft\.?(?=\s)|\bfeaturing\b|\bvs\.?(?=\s))\s*", re.I)
+
+
+def split_artists(credit: str | None, *, strict: bool = False) -> list[str]:
+    """'A & B feat. C' -> ['A', 'B', 'C'].
+
+    strict=True only splits on the separators a credit really uses (comma, &, +, /, feat., vs.) and leaves "and",
+    "with" and "x" alone, so "Belle and Sebastian" or "Florence + the Machine x Kid" cannot turn into a match on
+    "Belle" or "Kid" against some unrelated profile artist."""
     if not credit:
         return []
-    parts = re.split(r"\s*(?:,|&|\+|/|\bfeat\.?(?=\s)|\bft\.?(?=\s)|\bfeaturing\b|\bwith\b|\bx\b|\bvs\.?(?=\s)|\band\b)\s*", credit, flags=re.I)
+    parts = (_SPLIT_STRICT if strict else _SPLIT_LOOSE).split(credit)
     return [p.strip() for p in parts if p and p.strip()]
 
 
