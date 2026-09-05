@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- the disco ball from the header: safety orange, ink grid, hard offset shadow, on poured-concrete paper -->
+  <rect width="512" height="512" fill="#e7e3da"/>
+  <circle cx="270" cy="270" r="158" fill="#141412"/>
+  <clipPath id="ball"><circle cx="252" cy="252" r="158"/></clipPath>
+  <g clip-path="url(#ball)">
+    <rect x="94" y="94" width="316" height="316" fill="#e4531b"/>
+    <path fill="none" stroke="#141412" stroke-width="6" d="M94 133h316M94 172h316M94 211h316M94 250h316M94 289h316M94 328h316M94 367h316M133 94v316M172 94v316M211 94v316M250 94v316M289 94v316M328 94v316M367 94v316"/>
+  </g>
+</svg>

@@ -8,4 +8,5 @@ approvals land in the matching `<year> | Indie Discotheque` playlist.
 - Site: [chrisrohn.com](https://chrisrohn.com) · RSS: [chrisrohn.com/feed.xml](https://chrisrohn.com/feed.xml)
 - How it works and how to set it up: [SETUP.md](SETUP.md)
 - Pipeline: [`discovery/`](discovery) · Site: [`site/`](site) · Workflows: [`.github/workflows/`](.github/workflows)
-- Checks: `ruff check discovery tests`, `python -m pytest tests`, `npm run check` (eslint, tsc, build) and `npm test` (Playwright smoke test of the built site) — all run in CI on every pull request
+- Installable: on a phone tap **Install** (or ⚙ → *Install as an app*) for a full-screen app that works offline, with lock-screen controls and home-screen shortcuts; desktop Chrome, Edge and Safari install it from the header button
+- Checks: `ruff check discovery tests`, `python -m pytest tests`, `npm run check` (eslint, tsc, build) and `npm test` (Playwright smoke test of the built site, including the installable-app checks) — all run in CI on every pull request

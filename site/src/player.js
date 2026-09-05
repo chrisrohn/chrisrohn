@@ -13,8 +13,9 @@ window.onYouTubeIframeAPIReady = () => {
       onReady: () => { state.playerReady = true; if (state.pendingVideo) { state.player.loadVideoById(state.pendingVideo); state.pendingVideo = null; } },
       onStateChange: (/** @type {any} */ e) => {
         if (e.data === YT.PlayerState.ENDED && $("#autoplay").checked) { clearAudition(); nextTrack(); }
-        if (e.data === YT.PlayerState.PLAYING) startAudition();
-        if (e.data === YT.PlayerState.PAUSED) clearAudition(false);
+        if (e.data === YT.PlayerState.PLAYING) { startAudition(); setPlaybackState("playing"); }
+        if (e.data === YT.PlayerState.PAUSED) { clearAudition(false); setPlaybackState("paused"); }
+        if (e.data === YT.PlayerState.ENDED) setPlaybackState("none");
       },
       onError: () => {
         const it = current(); const url = it?.youtube?.videoId ? "https://music.youtube.com/watch?v=" + it.youtube.videoId : null;
@@ -25,6 +26,31 @@ window.onYouTubeIframeAPIReady = () => {
   });
 };
 const current = () => (state.currentId && byId(state.currentId)) || visibleItems().find(i => i.id === state.currentId);
+
+/* Media Session: the lock screen, notification shade, headphone buttons and keyboard media keys drive the queue.
+ * The top frame's session takes precedence over the YouTube iframe's, so the artwork and title shown are ours. */
+const ms = () => ("mediaSession" in navigator ? navigator.mediaSession : null);
+let msWired = false;
+function wireMediaSession() {
+  const s = ms(); if (!s || msWired) return; msWired = true;
+  /** @param {MediaSessionAction} a @param {() => void} fn */
+  const on = (a, fn) => { try { s.setActionHandler(a, fn); } catch { /* not every browser knows every action */ } };
+  on("play", () => { if (state.playerReady) state.player.playVideo(); });
+  on("pause", () => { if (state.playerReady) state.player.pauseVideo(); });
+  on("stop", stopPlayer);
+  on("nexttrack", nextTrack);
+  on("previoustrack", prevTrack);
+  on("seekbackward", () => { if (state.playerReady) state.player.seekTo(Math.max(0, state.player.getCurrentTime() - 10), true); });
+  on("seekforward", () => { if (state.playerReady) state.player.seekTo(state.player.getCurrentTime() + 10, true); });
+}
+/** @param {import("./types").FeedItem} it */
+function announce(it) {
+  const s = ms(); if (!s) return;
+  const art = it.artwork || (it.youtube && it.youtube.thumbnail);
+  try { s.metadata = new MediaMetadata({ title: it.display_title || it.title, artist: it.artist, album: it.release || "", artwork: art ? [{ src: art }] : [] }); } catch { /* ignore */ }
+}
+/** @param {"none" | "paused" | "playing"} st */
+function setPlaybackState(st) { const s = ms(); if (s) { try { s.playbackState = st; } catch { /* ignore */ } } }
 function ensureApi() { if (window.YT && window.YT.Player) return; if ($("#yt-api")) return; const s = document.createElement("script"); s.id = "yt-api"; s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s); }
 /** @param {string | null | undefined} id */
 export function play(id) {
@@ -35,11 +61,11 @@ export function play(id) {
   const dp = $("#deck-play"); if (dp) dp.textContent = "⏸\uFE0E";
   $("#player").hidden = false;
   $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release && !sameName(it.release, it.title) ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
-  ensureApi();
+  ensureApi(); wireMediaSession(); announce(it);
   clearAudition(); state.auditionArmed = null;
   if (state.playerReady) state.player.loadVideoById(vid); else state.pendingVideo = vid;
 }
-export function stopPlayer() { clearAudition(); if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; }
+export function stopPlayer() { clearAudition(); if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; setPlaybackState("none"); }
 
 export const auditionOn = () => !!state.settings.audition;
 export function clearAudition(hide = true) {
