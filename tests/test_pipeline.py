@@ -208,6 +208,7 @@ def test_discover_playlists_via_channel():
                     {"title": "Random Mix", "playlistId": "PLX"}, {"title": "2026 Indie Discotheque", "playlistId": "PLDUP"}]
 
     cfg = _cfg()
+    cfg["youtube_music"]["channel_id"] = ""          # learn the channel from a playlist's author
     years, skipped, channel = discover_playlists(cfg, FakeYT())
     assert channel == "UC1" and skipped == "PLSKIP"
     assert years["1999"] == "PL1999" and years["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN"  # configured id wins
@@ -347,6 +348,9 @@ def test_discover_playlists_tolerant_titles_and_channel_from_author():
             return [{"title": "Indie Discotheque 1999", "playlistId": "PL1999"}, {"title": "2001 - indie discotheque", "playlistId": "PL2001"},
                     {"title": "1987 Indie Discotheque", "playlistId": "PL1987"}, {"title": "Indie Discotheque favourites", "playlistId": "PLX"}]
 
-    years, skipped, channel = discover_playlists(_cfg(), FakeYT())
-    assert channel == "UCxyz"
+    cfg = _cfg()
+    years, skipped, channel = discover_playlists(cfg, FakeYT())
+    assert channel == cfg["youtube_music"]["channel_id"] == "UCLyRuumpAkAqDKe3nmFZljw"   # configured id wins
+    cfg["youtube_music"]["channel_id"] = ""
+    assert discover_playlists(cfg, FakeYT())[2] == "UCxyz"                                   # otherwise learned from the author
     assert years["1999"] == "PL1999" and years["2001"] == "PL2001" and years["1987"] == "PL1987" and "PLX" not in years.values()
