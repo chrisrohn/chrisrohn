@@ -1,8 +1,8 @@
-## Hi there 👋
+## Hi there
 
-🪩 **[Chris Rohn's New Music](https://chrisrohn.com)** — a daily new-music discovery feed where I find tracks to add to
+**[Chris Rohn's New Music](https://chrisrohn.com)** — a daily new-music discovery feed where I find tracks to add to
 the Indie Discotheque library playlists on YouTube Music. Built from Last.fm ([tt_discotheque](https://www.last.fm/user/tt_discotheque)),
-ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs. Sign in with Google, thumb tracks up or down, and
+ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs. Sign in with Google, keep or skip tracks, and
 approvals land in the matching `<year> | Indie Discotheque` playlist.
 
 - Site: [chrisrohn.com](https://chrisrohn.com) · RSS: [chrisrohn.com/feed.xml](https://chrisrohn.com/feed.xml)

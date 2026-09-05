@@ -10,8 +10,8 @@ GitHub Actions (daily 06:15 ET)                        chrisrohn.com (GitHub Pag
 │ profile: Last.fm tt_discotheque      │               │ anyone: listen, filter by source, Picks│
 │   + your public YT year playlists    │   feed.json   │                                       │
 │   + Last.fm & ListenBrainz similar   │ ────────────▶ │ you (Sign in with Google):            │
-│ sources: ListenBrainz fresh releases │               │   👍 → "<year> | Indie Discotheque"      │
-│   MusicBrainz tags · Bandcamp new    │               │   👎 → unlisted "Skipped" playlist     │
+│ sources: ListenBrainz fresh releases │               │   keep → "<year> | Indie Discotheque" │
+│   MusicBrainz tags · Bandcamp new    │               │   skip → unlisted "Skipped" playlist  │
 │   Deezer artist releases · blog RSS  │               │   (YouTube Data API, from your browser)│
 │ score → resolve on YouTube Music     │               └───────────────────────────────────────┘
 │ hides anything already in those      │ ◀── reads your playlists (public + unlisted-by-id) ──┘
@@ -51,7 +51,7 @@ At your registrar (or DreamHost, if its name servers still run the domain), add:
 
 Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick **Enforce HTTPS** once the check passes.
 
-## 3. Sign in with Google (so 👍/👎 reach your playlists)
+## 3. Sign in with Google (so keeps and skips reach your playlists)
 
 One free Google Cloud OAuth client, created in the browser with a **personal** Google account. Everything after
 that is a normal "Sign in with Google" button on the site.
@@ -79,12 +79,12 @@ that is a normal "Sign in with Google" button on the site.
 On the site, click **Sign in with Google**, pick that account, allow "manage your YouTube account". The thumbs
 appear. Sessions last an hour; the button re-prompts (usually a silent popup) when needed.
 
-**Quota:** YouTube's free API quota is 10,000 units/day (reset midnight Pacific); each write costs 50. Only 👍
-spends quota, so you get ~200 *saves* a day, and ⚙ shows a running meter. 👎 is free: skips are remembered in the
+**Quota:** YouTube's free API quota is 10,000 units/day (reset midnight Pacific); each write costs 50. Only Keep
+spends quota, so you get ~200 *saves* a day, and ⚙ shows a running meter. Skip is free: skips are remembered in the
 browser and expire with the feed. Listening, filtering and playback cost nothing.
 
-**Optional – skips on YouTube too:** switch on **⚙ → Also file 👎 into the Skipped playlist** if you rate from
-several devices and want skips shared. The first 👎 then creates an unlisted `Indie Discotheque – Skipped`
+**Optional – skips on YouTube too:** switch on **⚙ → Also file skips into the Skipped playlist** if you rate from
+several devices and want skips shared. The first skip then creates an unlisted `Indie Discotheque – Skipped`
 playlist and shows its ID; paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build
 can read it (unlisted playlists aren't discoverable by title). All 48 year playlists (1979–2026) are pinned by ID in
 `youtube_music.playlists`; when you create a new year's playlist, add its ID there (the build also finds it by title).
@@ -105,7 +105,7 @@ so the answer is consistent instead of depending on how a blog spelled the title
 
 Every year found is kept as evidence (hover the year badge on the site to see it). The earliest year from the most
 trusted tier wins: ✓ = catalogue-verified, plain = a store/source date, ? = weak hint. If nothing anywhere says when
-a song came out the card shows `year?` and 👍 refuses until you pick, so a catalogue track can't slip into this
+a song came out the card shows `year?` and Keep refuses until you pick, so a catalogue track can't slip into this
 year's playlist by default. Lookups are cached and budgeted per run (`resolve.max_year_lookups_per_run`; MusicBrainz
 allows 1 request/s), undated tracks first.
 
@@ -113,7 +113,7 @@ allows 1 request/s), undated tracks first.
 for as long as your Google session lasts. Signing out only forgets that device. To disconnect the site from your
 Google account entirely use https://myaccount.google.com/permissions.
 
-**No duplicates:** every 👍 first asks YouTube whether that video is already in the target playlist (1 quota unit)
+**No duplicates:** every Keep first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so. The daily build scans all year playlists for the exact same video appearing twice in a
 year or in two different years — a different upload of the same song is deliberately not counted (full report in
 `site/data/duplicates.json`). The site warns you on load; ⚙ → Duplicate check
@@ -130,7 +130,7 @@ your current-year playlist). Nothing on the public side can write anywhere.
 
 **Curator mode** appears when the signed-in Google account is in `google.curators`: thumbs file into the
 `<year> | Indie Discotheque` playlists. **Guests** are off by default: other Google accounts can sign in but get a listen-only site. Flip
-`google.guests: true` (your ⚙ panel links straight to the line) and they can rate too, with their 👍 going into
+`google.guests: true` (your ⚙ panel links straight to the line) and they can rate too, with their keeps going into
 `<year> Picks from chrisrohn.com` playlists in *their own* library, never yours. Everyone who signs in
 shares the project's daily YouTube API quota. Nothing about the site can touch a playlist except through a Google
 session that the playlist's owner approved in that browser.
@@ -139,7 +139,7 @@ session that the playlist's owner approved in that browser.
 
 - Open chrisrohn.com. `j`/`k` move, `space` plays, `u` thumbs up, `d` thumbs down, `o` opens in YouTube Music, `/` searches.
 - Change the year dropdown on a card before thumbing up if a reissue/late release should go to another year.
-- 👍 files the track into the year playlist immediately (an **Undo** button shows for a few seconds). 👎 hides
+- **Keep** files the track into the year playlist immediately (an **Undo** button shows for a few seconds). **Skip** hides
   it. Both disappear from the feed at once on every device: ratings are mirrored to a hidden app-data file in your
   Google Drive (free, no quota), pulled when you open the site or return to the tab and pushed after each thumb.
 - **Audition mode** (`a`, or the checkbox in the player bar): each track starts partway in and the site moves on by
@@ -148,8 +148,8 @@ session that the playlist's owner approved in that browser.
   walks through Share → Add to Home Screen). The installed app runs full-screen from its own icon, opens offline with
   the last feed, shows the track on the lock screen with play/pause/next, offers **New today**, **Picks** and
   **Audition** as long-press shortcuts on the icon, and refreshes itself when a new daily build lands while it is
-  open. A new site build shows a *Reload* toast rather than switching under you. Swipe a card right for 👍, left for
-  👎 (curator or guest mode only); **share** on a card opens the system share sheet. Desktop Chrome/Edge/Safari 17
+  open. A new site build shows a *Reload* toast rather than switching under you. Swipe a card right to keep, left to
+  skip (curator or guest mode only); **share** on a card opens the system share sheet. Desktop Chrome/Edge/Safari 17
   install it too (the Install button in the header, or the icon in the address bar).
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list.
 

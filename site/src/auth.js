@@ -91,7 +91,7 @@ export async function signIn({ silent = false } = {}) {
       persist(); applyMode(); render();
       if (silent) { if (isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); return done(true); }
       if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); pullRatings().then(() => refreshRecent()).catch(() => {}); }
-      else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); pullRatings().then(() => refreshRecent()).catch(() => {}); }
+      else if (isCurator()) { toast(`Signed in as a guest. Keep files into “${titleFor("<year>")}” in your own YouTube library.`); pullRatings().then(() => refreshRecent()).catch(() => {}); }
       else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
       done(true);
     };

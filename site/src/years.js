@@ -6,7 +6,7 @@ import { state } from "./state.js";
 
 // The build already weighed every date it could find (catalogues, store dates, the YouTube album year); when it says
 // "unknown" the only date left is the day a blog or channel mentioned the track, and that is not a release year.
-// null here makes the card show "year?" and 👍 ask you to pick. Picks carry their playlist year in _year.
+// null here makes the card show "year?" and Keep asks you to pick. Picks carry their playlist year in _year.
 /** @param {FeedItem} it @returns {number | null} */
 export const yearGuess = it => {
   if (Number.isFinite(it.year)) return /** @type {number} */ (it.year);
