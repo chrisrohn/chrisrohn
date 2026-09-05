@@ -1,7 +1,7 @@
 {
   "name": "Chris Rohn's New Music",
   "short_name": "New Music",
-  "description": "Daily new-music discovery feed for the Indie Discotheque radio station.",
+  "description": "Chris Rohn's daily new-music discovery feed: candidates for the Indie Discotheque playlists on YouTube Music.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

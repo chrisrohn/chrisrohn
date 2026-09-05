@@ -1,4 +1,4 @@
-# Indie Discotheque discovery feed — setup
+# Chris Rohn's New Music — setup
 
 Everything here is free. Total setup is about 20 minutes, most of it DNS propagation.
 
@@ -20,7 +20,8 @@ GitHub Actions (daily 06:15 ET)                        chrisrohn.com (GitHub Pag
 ```
 
 No database, no server, no GitHub tokens: your YouTube playlists *are* the state. The daily job only builds the
-feed; the only thing that ever writes to a playlist is you pressing a thumb while signed in.
+feed; the only thing that ever writes to a playlist is you pressing a thumb while signed in. ("Indie Discotheque" below
+always means the YouTube Music library playlists, `<year> | Indie Discotheque`, that the picks are filed into.)
 
 ## 1. GitHub (required)
 
@@ -55,7 +56,7 @@ Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick
 One free Google Cloud OAuth client, created in the browser with a **personal** Google account. Everything after
 that is a normal "Sign in with Google" button on the site.
 
-1. https://console.cloud.google.com/projectcreate → name it `indie-discotheque` → Create.
+1. https://console.cloud.google.com/projectcreate → name it `chrisrohn-new-music` (any name works) → Create.
 2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3), and
    https://console.cloud.google.com/apis/library/drive.googleapis.com → **Enable** (Google Drive API — used only for a
    hidden app-data file that keeps your thumbs in sync across devices; the site never sees your real Drive files).
@@ -72,7 +73,8 @@ that is a normal "Sign in with Google" button on the site.
    (add `http://localhost:8000` if you run it locally) → Create. Copy the **Client ID** (ends in
    `.apps.googleusercontent.com`). No secret is needed for this flow.
 6. Put it in `discovery/config.yaml` → `google.client_id`, and make sure `google.curators` lists the Google
-   account that owns the playlists. Commit (GitHub's web editor is fine). The next Discover run ships it in feed.json.
+   account that owns the playlists. Commit (GitHub's web editor is fine). The next Discover run ships it in feed.json
+   (the curator addresses are published only as SHA-256 hashes; the site hashes the signed-in address to compare).
 
 On the site, click **Sign in with Google**, pick that account, allow "manage your YouTube account". The thumbs
 appear. Sessions last an hour; the button re-prompts (usually a silent popup) when needed.
@@ -178,13 +180,28 @@ Everything lives in `discovery/config.yaml`:
 Run locally:
 
 ```bash
-pip install -r discovery/requirements.txt
+pip install --require-hashes -r discovery/requirements.lock   # exact versions, same as the daily job
 export LASTFM_API_KEY=...
 python -m discovery profile      # once, then every few days automatically
 python -m discovery build        # writes site/data/feed.json + site/feed.xml
-python -m http.server -d site    # http://localhost:8000
-python -m pytest tests           # offline tests
+npm install && npm run serve     # builds dist/ from site/src and serves it at http://localhost:8000
+
+pip install ruff pytest && ruff check discovery tests && python -m pytest tests   # lint + offline tests
+npm run check && npm test        # eslint + type check (tsc --checkJs) + build, then the Playwright smoke test
 ```
+
+The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
+`render`, `player`, `dupes`, `settings`, `keys`, `main`). `build.mjs` bundles them with esbuild into a content-hashed
+`app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
+both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
+pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the
+lockfile with `cd discovery && pip-compile --generate-hashes --strip-extras -o requirements.lock requirements.txt`
+(Dependabot opens that pull request weekly). If a daily build fails, the workflow opens a **build-failure** issue and
+the site shows a banner once the feed is more than 36 hours old.
+
+**Time budget:** YouTube resolution and year verification share `resolve.time_budget_minutes` (28 by default, against
+the job's 45-minute limit) and write their caches every 25 lookups, so a slow catalogue day leaves the rest for
+tomorrow instead of losing the run. Cache rows nothing has touched for `resolve.cache_keep_days` are dropped.
 
 ## Why these sources (state of the world, Sept 2026)
 

@@ -3,8 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Everything this page may load or talk to. Google sign-in (accounts.google.com/gsi), the YouTube player and
+     iframe API (www.youtube.com), and the YouTube Data / Drive / userinfo APIs (www.googleapis.com). Artwork comes
+     from many CDNs, so images are open to any https host. If sign-in ever breaks after a Google change, this is
+     the first line to check. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com https://www.youtube.com https://s.ytimg.com; frame-src https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://youtubei.googleapis.com; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://accounts.google.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none'">
 <title>Chris Rohn's New Music</title>
-<meta name="description" content="Chris Rohn's daily new-music discovery feed, built for the Indie Discotheque radio station. Listen to what's new in indie pop, nu-disco, indietronica and friends.">
+<meta name="description" content="Chris Rohn's daily new-music discovery feed, where he finds tracks for the Indie Discotheque playlists on YouTube Music. Listen to what's new in indie pop, nu-disco, indietronica and friends.">
 <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -27,14 +32,14 @@
     </div>
   </div>
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-view="feed" role="tab">Feed <span class="pill" id="count-feed">0</span></button>
-    <button class="tab" data-view="picks" role="tab">Picks <span class="pill" id="count-picks">0</span></button>
+    <button class="tab active" data-view="feed" role="tab" aria-selected="true">Feed <span class="pill" id="count-feed">0</span></button>
+    <button class="tab" data-view="picks" role="tab" aria-selected="false">Picks <span class="pill" id="count-picks">0</span></button>
   </nav>
   <div class="actions">
     <span id="who" class="who" hidden></span>
     <span class="mode curator" title="Curator mode: thumbs file straight into your YouTube playlists">curator</span>
-    <button id="signin" class="btn primary">Sign in with Google</button>
-    <button id="settings-btn" class="btn ghost" title="Settings">⚙</button>
+    <button id="signin" class="btn primary" disabled title="loading the feed…">Sign in with Google</button>
+    <button id="settings-btn" class="btn ghost" title="Settings" disabled>⚙</button>
   </div>
 </header>
 
@@ -55,9 +60,11 @@
   <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open</span>
 </section>
 
+<div id="stale" class="stale" role="status" hidden></div>
+
 <main>
-  <div id="list" class="list" aria-live="polite"></div>
-  <section id="deck" class="deck" hidden aria-live="polite">
+  <div id="list" class="list"></div>
+  <section id="deck" class="deck" hidden>
     <div class="deck-top">
       <button class="btn ghost" id="deck-prev" title="back">‹ back</button>
       <span class="deck-count" id="deck-count"></span>
@@ -127,7 +134,7 @@
     <p class="muted" id="s-playlists"></p>
     <p class="muted" id="s-quota"></p>
     <p class="muted curator" id="s-sync"></p>
-    <p class="muted" id="s-account">Google sign-in lasts an hour at a time and renews itself the next time you tap a thumb. <b>Sign out</b> only forgets this device; to disconnect the site from your Google account entirely, remove it at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</p>
+    <p class="muted" id="s-account">Google sign-in lasts an hour at a time and renews itself the next time you tap a thumb. <b>Sign out</b> only forgets this device; to disconnect the site from your Google account entirely, remove it at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>. <span id="s-auth-problem"></span></p>
     <details class="curator" id="s-dupes-details">
       <summary class="muted" id="s-dupes-summary">Duplicate check</summary>
       <p class="muted">Every 👍 first checks the target playlist, so the same video is never added twice. The daily build also scans all year playlists for the exact same video appearing twice in a year or in two different years (a different upload of the same song is not counted). Where the catalogues know the original year, the copy in the wrong year is marked <span class="chip wrong">2011 ✕</span>. Each removal costs 50 quota units.</p>
@@ -191,7 +198,7 @@
 </template>
 
 <footer>
-  <span>A daily discovery feed for the <b>Indie Discotheque</b> radio station, built from Last.fm (<a id="lfm" href="https://www.last.fm/user/tt_discotheque" target="_blank" rel="noopener">tt_discotheque</a>), ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs.</span>
+  <span>A daily discovery feed for the <b>Indie Discotheque</b> playlists on YouTube Music, built from Last.fm (<a id="lfm" href="https://www.last.fm/user/tt_discotheque" target="_blank" rel="noopener">tt_discotheque</a>), ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs.</span>
   <span><a href="/feed.xml">RSS</a> · <a href="https://github.com/chrisrohn/chrisrohn" target="_blank" rel="noopener">source</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></span>
 </footer>
 

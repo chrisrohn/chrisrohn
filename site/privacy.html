@@ -16,7 +16,7 @@
 <p class="muted">Effective date: September 4, 2026 · Operator: Chris Rohn ("we", "us") · Contact: <a href="mailto:chrisrohn@gmail.com">chrisrohn@gmail.com</a></p>
 
 <h2>1. What this site is</h2>
-<p>chrisrohn.com ("the Site") is a personal new-music discovery feed for the Indie Discotheque radio station. It is a static website hosted on GitHub Pages. We run no servers of our own, we do not operate user accounts, and we do not sell, rent, or trade any personal information.</p>
+<p>chrisrohn.com ("the Site") is Chris Rohn's personal new-music discovery feed, used to pick tracks for the "Indie Discotheque" playlists on YouTube Music. It is a static website hosted on GitHub Pages. We run no servers of our own, we do not operate user accounts, and we do not sell, rent, or trade any personal information.</p>
 
 <h2>2. Information we collect</h2>
 <h3>2.1 Visitors who just listen</h3>
@@ -36,10 +36,10 @@
 </ul>
 <p><b>Where this data lives.</b> The Google access token, your email, name, and picture, and the IDs of your year playlists are stored <b>only in your browser's local storage on the device you signed in from</b>. The list of tracks you rated is kept in that local storage and mirrored to the hidden app-data file in <b>your own</b> Google Drive described above; deleting that file (Google Drive → Settings → Manage apps → this app → Delete hidden app data) or revoking access removes it. The access token expires after about one hour. Nothing is transmitted to us or to any server we control, because there is none; all YouTube API calls go directly from your browser to Google.</p>
 <p><b>Sharing.</b> We do not share, sell, or transfer any Google user data to third parties. We do not use it for advertising, profiling, or any purpose other than the playlist functions described above.</p>
-<p><b>Retention and deletion.</b> Press <b>Sign out</b> to revoke the token and clear your identity from the browser, or use <b>⚙ → Clear local state</b> to erase everything the Site stored. You can also revoke the Site's access at any time from your <a href="https://security.google.com/settings/security/permissions" rel="noopener" target="_blank">Google security settings</a>. Because we hold no copies, revoking access removes all of it.</p>
+<p><b>Retention and deletion.</b> Press <b>Sign out</b> to forget your identity, ratings mirror and playlist IDs on that device (the hour-long access token is kept only for the browser session and is discarded when the tab closes), or use <b>⚙ → Clear local state</b> to erase everything the Site stored. You can also revoke the Site's access at any time from your <a href="https://security.google.com/settings/security/permissions" rel="noopener" target="_blank">Google security settings</a>. Because we hold no copies, revoking access removes all of it.</p>
 
 <h3>2.3 The daily feed build</h3>
-<p>Once a day an automated job builds the feed from public data: Last.fm listening statistics for the Indie Discotheque station account, public MusicBrainz and ListenBrainz release data, Bandcamp, Deezer, and music-blog RSS feeds. It also reads the curator's <b>public</b> YouTube year playlists and the unlisted "Skipped" playlist (by ID) to avoid re-suggesting tracks that were already saved or skipped. Artist names and track titles derived from those playlists are stored in the Site's public source repository. This concerns the curator's own playlists only; no other user's YouTube data is read.</p>
+<p>Once a day an automated job builds the feed from public data: Last.fm listening statistics for the curator's account, public MusicBrainz and ListenBrainz release data, Bandcamp, Deezer, and music-blog RSS feeds. It also reads the curator's <b>public</b> YouTube year playlists and the unlisted "Skipped" playlist (by ID) to avoid re-suggesting tracks that were already saved or skipped. Artist names and track titles derived from those playlists are stored in the Site's public source repository. This concerns the curator's own playlists only; no other user's YouTube data is read.</p>
 
 <h2>3. YouTube API Services disclosures</h2>
 <ul>

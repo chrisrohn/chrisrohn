@@ -1,8 +1,8 @@
 """Source plugins. Each exposes `fetch(cfg, profile, http) -> list[Item]`."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from importlib import import_module
-from typing import Callable
 
 from ..models import Item
 from ..util import log
@@ -37,7 +37,7 @@ def run_sources(cfg: dict, profile: dict, http) -> list[Item]:
             continue
         try:
             mod = import_module(f".{modname}", __name__)
-            fetch: Callable = getattr(mod, "fetch")
+            fetch: Callable = mod.fetch
             got = fetch(cfg, profile, http)
             log.info("source %s: %d items", key, len(got))
             items.extend(got)

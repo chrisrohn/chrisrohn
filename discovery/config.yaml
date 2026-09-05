@@ -1,14 +1,14 @@
-# Indie Discotheque discovery feed — configuration.
+# Chris Rohn's New Music — configuration.
 # Everything here is free to use. Secrets (API keys, auth) live in GitHub Actions secrets, never here.
 
 station:
-  name: Indie Discotheque          # the radio station / playlist naming
+  name: Indie Discotheque          # the YouTube Music library the picks are filed into (playlist naming)
   site_name: "Chris Rohn's New Music"   # what the public feed calls itself
   domain: chrisrohn.com
   lastfm_user: tt_discotheque
   timezone: America/New_York
 
-# Your YouTube Music year playlists ("2026 Indie Discotheque", "2025 Indie Discotheque", ... back to 1979).
+# The Indie Discotheque library on YouTube Music: one playlist per year ("2026 | Indie Discotheque" ... back to 1979).
 # The site signs you in with Google and writes to these playlists from your browser. The daily build reads them
 # (they're public) to seed your taste profile and to hide anything already saved or skipped.
 youtube_music:
@@ -196,10 +196,10 @@ sources:
       - { name: "Razor-N-Tape", channel: "@RazorNTape" }
       - { name: "Italians Do It Better", channel: "@ItaliansDoItBetter" }
       - { name: "Kitsuné Musique", channel: "@KitsuneMusique" }
-      - { name: "Ed Banger Records", channel: "@edbangerrecords" }
+      # - { name: "Ed Banger Records", channel: "@edbangerrecords" }      # handle not found (2026-09-05): check the @handle
       - { name: "Roche Musique", channel: "@RocheMusique" }
       - { name: "Future Classic", channel: "@futureclassic" }
-      - { name: "Ghostly International", channel: "@ghostly" }
+      # - { name: "Ghostly International", channel: "@ghostly" }           # handle not found (2026-09-05): check the @handle
       - { name: "Ninja Tune", channel: "@ninjatune" }
       - { name: "Cascine", channel: "@cascine" }
       - { name: "Majestic Casual", channel: "@majesticcasual" }
@@ -251,12 +251,12 @@ sources:
     # profile artist. Dead or noisy feeds show up in ⚙ → feed health on the site; prune freely.
     feeds:
       # --- disco / nu-disco / indie dance / balearic (closest to the station) ---
-      - { name: "Le Visiteur", url: "https://levisiteuronline.com/feed/" }
+      - { name: "Le Visiteur", url: "https://levisiteuronline.com/feed/" }                 # 526 on 2026-09-05 (origin TLS); retrying
       - { name: "Ransom Note", url: "https://www.theransomnote.com/feed/" }
-      - { name: "Test Pressing", url: "https://testpressing.org/feed/" }
-      - { name: "Music Is My Sanctuary", url: "https://musicismysanctuary.com/feed/" }
+      # - { name: "Test Pressing", url: "https://testpressing.org/feed/" }              # returns HTML, not a feed (2026-09-05)
+      - { name: "Music Is My Sanctuary", url: "https://musicismysanctuary.com/feed/" }   # 415 with the old User-Agent; browser UA now
       - { name: "Acid Stag", url: "https://acidstag.com/feed/" }
-      - { name: "Discobelle", url: "https://discobelle.net/feed/" }
+      # - { name: "Discobelle", url: "https://discobelle.net/feed/" }                    # returns HTML, not a feed (2026-09-05)
       - { name: "Bolting Bits", url: "https://boltingbits.com/feed/" }
       - { name: "Magnetic Magazine", url: "https://www.magneticmag.com/feed/" }
       - { name: "When We Dip", url: "https://whenwedip.com/feed/" }
@@ -268,34 +268,34 @@ sources:
       # --- indie pop / indietronica / dream pop ---
       - { name: "Gorilla vs. Bear", url: "https://www.gorillavsbear.net/feed/" }
       - { name: "Nialler9", url: "https://nialler9.com/feed/" }
-      - { name: "Indie Shuffle", url: "https://www.indieshuffle.com/feed/" }
+      # - { name: "Indie Shuffle", url: "https://www.indieshuffle.com/feed/" }           # returns HTML, not a feed (2026-09-05)
       - { name: "Stereofox", url: "https://www.stereofox.com/feed/" }
-      - { name: "EARMILK", url: "https://earmilk.com/feed/" }
+      - { name: "EARMILK", url: "https://earmilk.com/feed/" }                           # 403 with the old User-Agent; browser UA now
       - { name: "Atwood Magazine", url: "https://atwoodmagazine.com/feed/" }
       - { name: "Various Small Flames", url: "https://varioussmallflames.co.uk/feed/" }
       - { name: "Obscure Sound", url: "https://obscuresound.com/feed/" }
       - { name: "Beats Per Minute", url: "https://beatsperminute.com/feed/" }
-      - { name: "Post-Trash", url: "https://post-trash.com/home?format=rss" }
-      - { name: "Gold Flake Paint", url: "https://goldflakepaint.co.uk/feed/" }
-      - { name: "The Wild Honey Pie", url: "https://www.thewildhoneypie.com/feed/" }
+      # - { name: "Post-Trash", url: "https://post-trash.com/home?format=rss" }         # 400 (2026-09-05): find the Squarespace feed URL
+      - { name: "Gold Flake Paint", url: "https://goldflakepaint.co.uk/feed/" }         # TLS error on 2026-09-05; retrying
+      # - { name: "The Wild Honey Pie", url: "https://www.thewildhoneypie.com/feed/" }  # 404 (2026-09-05): feed moved
       - { name: "Aquarium Drunkard", url: "https://aquariumdrunkard.com/feed/" }
-      - { name: "The Line of Best Fit", url: "https://www.thelineofbestfit.com/rss" }
+      # - { name: "The Line of Best Fit", url: "https://www.thelineofbestfit.com/rss" } # 404 (2026-09-05): feed moved
       - { name: "Loud and Quiet", url: "https://www.loudandquiet.com/feed/" }
       - { name: "Clash", url: "https://www.clashmusic.com/feed/" }
-      - { name: "Under the Radar", url: "https://www.undertheradarmag.com/rss/news" }
+      - { name: "Under the Radar", url: "https://www.undertheradarmag.com/rss/news" }   # 415 with the old User-Agent; browser UA now
       # --- big tents (lots of news; the artist filter keeps them useful) ---
       - { name: "Pitchfork Best New Tracks", url: "https://pitchfork.com/feed/feed-track-reviews/rss" }
-      - { name: "Pitchfork Best New Music", url: "https://pitchfork.com/feed/feed-best-new/rss" }
+      # - { name: "Pitchfork Best New Music", url: "https://pitchfork.com/feed/feed-best-new/rss" }   # 404 (2026-09-05): feed moved
       - { name: "Stereogum", url: "https://www.stereogum.com/feed/" }
-      - { name: "Brooklyn Vegan", url: "https://www.brooklynvegan.com/feed/" }
+      - { name: "Brooklyn Vegan", url: "https://www.brooklynvegan.com/feed/" }           # 415 with the old User-Agent; browser UA now
       - { name: "Consequence", url: "https://consequence.net/feed/" }
-      - { name: "The FADER", url: "https://www.thefader.com/rss.xml" }
+      # - { name: "The FADER", url: "https://www.thefader.com/rss.xml" }                # 404 (2026-09-05): feed moved
       # --- radio + curated ---
-      - { name: "KEXP Song of the Day", url: "https://www.kexp.org/podcasts/song-of-the-day/feed.xml" }
+      # - { name: "KEXP Song of the Day", url: "https://www.kexp.org/podcasts/song-of-the-day/feed.xml" }   # 410 Gone: podcast retired
       - { name: "KCRW Today's Top Tune", url: "https://www.kcrw.com/music/shows/todays-top-tune/rss" }
       - { name: "Bandcamp Daily", url: "https://daily.bandcamp.com/feed" }
-      - { name: "Hype Machine Popular", url: "https://hypem.com/feed/popular/1/feed.xml" }
-      - { name: "Hype Machine Latest", url: "https://hypem.com/feed/latest/all/1/feed.xml" }
+      # - { name: "Hype Machine Popular", url: "https://hypem.com/feed/popular/1/feed.xml" }   # 1 entry, never a track (2026-09-05)
+      # - { name: "Hype Machine Latest", url: "https://hypem.com/feed/latest/all/1/feed.xml" }  # 1 entry, never a track (2026-09-05)
   spotify:
     # Optional. Requires a Premium account + a dev-mode app since Feb 2026. Off by default.
     enabled: false
@@ -306,7 +306,8 @@ ranking:
   max_items: 500
   min_score: 0.6
   weights:
-    affinity: 4.0          # direct artist match
+    affinity: 4.0          # direct artist match (Last.fm / seeds: you play them)
+    saved: 2.0             # artist only known from the year playlists (in your library, never scrobbled)
     similar: 2.5           # similar-artist match
     tags: 1.2              # summed matched tag weights
     source_count: 0.6      # each additional source that surfaced the same track
@@ -326,5 +327,7 @@ resolve:
   # at MusicBrainz's 1 req/s, so the budget below bounds a run to roughly 15 minutes; the rest is picked up next run.
   max_year_lookups_per_run: 500
   max_duplicate_year_lookups_per_run: 120   # cross-year duplicates in your playlists get a verified year, a batch per run
+  time_budget_minutes: 28       # wall clock shared by YouTube + year lookups; whatever is left over waits for tomorrow (job timeout is 45)
+  cache_keep_days: 120          # drop YouTube / year cache entries that no feed item has touched for this long
   discogs: true                 # use Discogs when DISCOGS_TOKEN is set
   always_cross_check: false     # true = also ask Deezer/ISRC even when MusicBrainz already answered (slower, more evidence)

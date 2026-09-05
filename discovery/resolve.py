@@ -5,12 +5,14 @@ Results are cached in data/cache/youtube.json.
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 from .models import Item
-from .util import CACHE_DIR, log, norm, norm_track, read_json, write_json
+from .util import CACHE_DIR, Deadline, log, norm, norm_track, read_json, write_json
 
 YT_CACHE = CACHE_DIR / "youtube.json"
+FLUSH_EVERY = 25   # lookups between cache writes, so a killed job keeps what it already found
 MB_RECORDING = "https://musicbrainz.org/ws/2/recording/"
 
 
@@ -48,7 +50,22 @@ def _shape(r: dict, via: str) -> dict[str, Any]:
     }
 
 
-def resolve_all(items: list[Item], cfg: dict) -> None:
+def _entry(v: Any, today: str) -> dict:
+    """Cache rows are {"seen": date, "yt": result|None}; rows written before the prune existed are the bare result."""
+    if isinstance(v, dict) and "yt" in v and "seen" in v:
+        return v
+    return {"seen": today, "yt": v or None}
+
+
+def prune_cache(cache: dict[str, Any], today: date, keep_days: int, seen_key: str = "seen") -> dict[str, Any]:
+    """Drop rows no feed item has touched for `keep_days` (the caches are committed daily, so they must not grow forever)."""
+    if not keep_days:
+        return cache
+    cutoff = (today - timedelta(days=keep_days)).isoformat()
+    return {k: v for k, v in cache.items() if (v.get(seen_key) if isinstance(v, dict) else None) and v[seen_key] >= cutoff}
+
+
+def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) -> None:
     rcfg = cfg.get("resolve") or {}
     if not rcfg.get("youtube_music", True):
         return
@@ -58,17 +75,31 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
         log.warning("ytmusicapi not installed; skipping YouTube resolution")
         return
     yt = YTMusic()
-    cache: dict[str, Any] = read_json(YT_CACHE, {})
+    today = date.today()
+    today_s = today.isoformat()
+    keep_days = int(rcfg.get("cache_keep_days", 120))
+    cache: dict[str, Any] = {k: _entry(v, today_s) for k, v in read_json(YT_CACHE, {}).items()}
+    deadline = deadline or Deadline(None)
     budget = int(rcfg.get("max_lookups_per_run", 400))
     looked = 0
+    skipped_deadline = 0
+
+    def flush() -> None:
+        write_json(YT_CACHE, prune_cache(cache, today, keep_days), compact=True)
+
     for it in items:
         if it.youtube:
             continue
         key = it.key
         if key in cache:
-            it.youtube = cache[key] or None
+            row = cache[key]
+            row["seen"] = today_s
+            it.youtube = row["yt"] or None
             continue
         if looked >= budget:
+            continue
+        if deadline.expired:
+            skipped_deadline += 1
             continue
         looked += 1
         found: dict | None = None
@@ -123,11 +154,15 @@ def resolve_all(items: list[Item], cfg: dict) -> None:
         except Exception as exc:  # noqa: BLE001
             log.debug("yt resolve failed for %s – %s: %s", it.artist, it.title, exc)
             found = None
-        cache[key] = found
+        cache[key] = {"seen": today_s, "yt": found}
         it.youtube = found
         if found and not it.artwork:
             it.artwork = found.get("thumbnail")
-    write_json(YT_CACHE, cache, compact=True)
+        if looked % FLUSH_EVERY == 0:
+            flush()
+    flush()
+    if skipped_deadline:
+        log.warning("youtube: time budget reached; %d lookups left for the next run", skipped_deadline)
     log.info("youtube: %d lookups this run, %d cached", looked, len(cache))
 
 

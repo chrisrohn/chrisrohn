@@ -34,11 +34,15 @@ def _match_artist(it: Item, profile: dict) -> tuple[dict | None, str | None]:
         n = mbid_index.get(m)
         if n and n in artists:
             return artists[n], artists[n]["kind"]
-    candidates = [it.artist] + split_artists(it.artist)
-    for c in candidates:
-        n = norm(c)
-        if n in artists:
-            return artists[n], artists[n]["kind"]
+    n = norm(it.artist)
+    if n in artists:
+        return artists[n], artists[n]["kind"]
+    # a collaboration credit: each named act counts, but only when the credit is unambiguously split ("A & B",
+    # "A feat. B"), never on "and" / "with" / "x", and never for a one-letter fragment
+    for c in split_artists(it.artist, strict=True):
+        cn = norm(c)
+        if len(cn) > 1 and cn != n and cn in artists:
+            return artists[cn], artists[cn]["kind"]
     return None, None
 
 
@@ -59,6 +63,9 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
             if kind == "direct":
                 s += w["affinity"] * (0.5 + entry["affinity"])
                 reasons.append(f"you play {entry['name']}")
+            elif kind == "saved":
+                s += w.get("saved", 2.0) * (0.5 + entry["affinity"])
+                reasons.append(f"{entry['name']} is in your playlists")
             else:
                 s += w["similar"] * (0.4 + entry["affinity"])
                 via = ", ".join(entry.get("via", [])[:2])

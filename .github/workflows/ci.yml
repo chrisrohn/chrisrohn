@@ -1,0 +1,55 @@
+name: CI
+
+# Every pull request and push to main: lint + offline tests for the pipeline, and a headless-browser smoke test of
+# the site against the committed feed.json. Nothing here touches the network services the daily build uses.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore: ["data/**", "site/data/**", "site/feed.xml"]   # the daily data commit is not a code change
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    name: pipeline (ruff + pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: discovery/requirements.lock
+      - run: pip install --require-hashes -r discovery/requirements.lock && pip install ruff pytest
+      - run: ruff check discovery tests
+      - run: python -m pytest tests
+
+  site:
+    name: site (lint, types, build, Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check          # eslint, tsc --checkJs, esbuild → dist/
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7

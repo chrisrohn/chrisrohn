@@ -25,10 +25,11 @@ from dataclasses import dataclass
 from datetime import date
 
 from .models import Item
-from .util import CACHE_DIR, format_title, item_key, log, norm, norm_track, read_json, split_artists, write_json
+from .util import CACHE_DIR, Deadline, format_title, item_key, log, norm, norm_track, read_json, split_artists, write_json
 
 YEAR_CACHE = CACHE_DIR / "years.json"
 CACHE_VERSION = 2
+FLUSH_EVERY = 25   # lookups between cache writes, so a killed job keeps what it already found
 MB = "https://musicbrainz.org/ws/2"
 LB_LOOKUP = "https://api.listenbrainz.org/1/metadata/lookup/"
 DEEZER = "https://api.deezer.com"
@@ -340,20 +341,45 @@ def decide(found: dict[str, int], it: Item) -> tuple[int | None, str, str, list[
     return best.year, best.source, conf, sorted(ev, key=lambda e: (-e.trust, e.year))
 
 
-def verify_years(items: list[Item], cfg: dict, http) -> None:
+def _load_cache() -> dict:
+    today_s = date.today().isoformat()
+    cache: dict = read_json(YEAR_CACHE, {})
+    for v in cache.values():          # rows written before the prune existed start their clock now
+        if isinstance(v, dict):
+            v.setdefault("seen", today_s)
+    return cache
+
+
+def _save_cache(cache: dict, cfg: dict) -> None:
+    from .resolve import prune_cache
+    keep_days = int((cfg.get("resolve") or {}).get("cache_keep_days", 120))
+    write_json(YEAR_CACHE, prune_cache(cache, date.today(), keep_days), compact=True)
+
+
+def verify_years(items: list[Item], cfg: dict, http, deadline: Deadline | None = None) -> None:
     rcfg = cfg.get("resolve") or {}
     budget = int(rcfg.get("max_year_lookups_per_run", 500))
-    cache: dict = read_json(YEAR_CACHE, {})
+    deadline = deadline or Deadline(None)
+    cache = _load_cache()
+    today_s = date.today().isoformat()
     looked = 0
+    skipped_deadline = 0
     # undated tracks first (they'd otherwise have nothing), then by score; the cache carries the rest to later runs
     order = sorted(items, key=lambda i: (0 if (i.release_date is None or i.date_kind != "release") else 1, -i.score))
     for it in order:
         lookup_title = format_title(it.title, None, it.remixer, it.remix_kind)   # base title + remix suffix, never "feat."
         entry = cache.get(it.key)
         if (entry is None or entry.get("v") != CACHE_VERSION) and it.kind == "track" and looked < budget:
-            looked += 1
-            entry = lookup_track(http, it.artist, lookup_title, cfg)
-            cache[it.key] = entry
+            if deadline.expired:
+                skipped_deadline += 1
+            else:
+                looked += 1
+                entry = lookup_track(http, it.artist, lookup_title, cfg)
+                cache[it.key] = entry
+                if looked % FLUSH_EVERY == 0:
+                    _save_cache(cache, cfg)
+        if entry is not None:
+            entry["seen"] = today_s
         found = (entry or {}).get("found") or {}
         if entry and entry.get("v") != CACHE_VERSION:   # legacy entry shape: {"mb":..,"dz":..,"it":..}
             found = {k: v for k, v in (("musicbrainz-search", entry.get("mb")), ("deezer", entry.get("dz")), ("itunes", entry.get("it"))) if v}
@@ -366,7 +392,9 @@ def verify_years(items: list[Item], cfg: dict, http) -> None:
             it.original_year = year            # the source announced a reissue; we found the original
         elif year and (yt := year_of((it.youtube or {}).get("year"))) and yt < year - 1:
             it.original_year = yt
-    write_json(YEAR_CACHE, cache, compact=True)
+    _save_cache(cache, cfg)
+    if skipped_deadline:
+        log.warning("years: time budget reached; %d recordings left for the next run", skipped_deadline)
     log.info("years: %d recordings looked up this run (%d cached)", looked, len(cache))
 
 
@@ -380,28 +408,32 @@ def decide_found(found: dict[str, int]) -> tuple[int | None, str | None]:
     return best.year, best.source
 
 
-def annotate_duplicate_years(dups: list[dict], cfg: dict, http) -> int:
+def annotate_duplicate_years(dups: list[dict], cfg: dict, http, deadline: Deadline | None = None) -> int:
     """Attach the catalogue-verified year to duplicate reports so the wrong-year copy is obvious.
 
     Songs already verified for the feed come free from the cache (same key). Otherwise a bounded number of
     cross-year duplicates are looked up per run; the rest follow on later runs."""
     rcfg = cfg.get("resolve") or {}
     budget = int(rcfg.get("max_duplicate_year_lookups_per_run", 120))
-    cache: dict = read_json(YEAR_CACHE, {})
+    deadline = deadline or Deadline(None)
+    cache = _load_cache()
+    today_s = date.today().isoformat()
     looked = 0
     order = sorted(dups, key=lambda d: (0 if d.get("kind") == "cross-year" else 1, -int(d["years"][0]) if d.get("years") else 0))
     for d in order:
         k = item_key(d["artist"], d["title"])          # same key the feed uses, so feed verifications come free
         entry = cache.get(k)
-        if (entry is None or entry.get("v") != CACHE_VERSION) and looked < budget and d.get("kind") == "cross-year":
+        if (entry is None or entry.get("v") != CACHE_VERSION) and looked < budget and d.get("kind") == "cross-year" and not deadline.expired:
             looked += 1
             entry = lookup_track(http, d["artist"], d["title"], cfg)
             cache[k] = entry
+            if looked % FLUSH_EVERY == 0:
+                _save_cache(cache, cfg)
         if entry and entry.get("v") == CACHE_VERSION:
+            entry["seen"] = today_s
             y, src = decide_found(entry.get("found") or {})
             if y:
                 d["verified_year"], d["verified_source"] = y, LABEL.get(src, src)
-    if looked:
-        write_json(YEAR_CACHE, cache, compact=True)
+    _save_cache(cache, cfg)
     log.info("duplicate report: %d cross-year songs verified this run", looked)
     return looked

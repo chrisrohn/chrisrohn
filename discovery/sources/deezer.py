@@ -113,7 +113,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 title=al.get("title") or "",
                 kind="release",
                 release=al.get("title"),
-                release_type={"single": "Single", "ep": "EP", "album": "Album"}.get(rt, None),
+                release_type={"single": "Single", "ep": "EP", "album": "Album"}.get(rt),
                 release_date=rd,
                 tags=[],
                 sources=["deezer-editorial"],

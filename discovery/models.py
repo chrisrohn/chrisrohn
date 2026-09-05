@@ -29,7 +29,7 @@ class Item:
     editorial: bool = False          # surfaced by a curated human feed
     blurb: str | None = None
     # filled in by resolve/score
-    year: int | None = None                 # best year for filing into "<year> Indie Discotheque"
+    year: int | None = None                 # best year for filing into "<year> | Indie Discotheque"
     year_source: str | None = None          # "musicbrainz-recording" | "release-date" | "youtube" | "feed-date" | "unknown"
     year_confidence: str | None = None      # "high" | "medium" | "low"
     year_evidence: list[str] = field(default_factory=list)   # every year the catalogues reported, e.g. "MusicBrainz recording: 2009"
@@ -40,7 +40,7 @@ class Item:
     matched_artist: str | None = None
     match_kind: str | None = None    # "direct" | "similar" | None
 
-    def normalize_credit(self) -> "Item":
+    def normalize_credit(self) -> Item:
         """Apply Rohn Standard Notation: pull feat./remix info out of raw artist + title into fields."""
         p = parse_credit(self.artist, self.title)
         if p["artist"]:
@@ -74,7 +74,7 @@ class Item:
     def title_norm(self) -> str:
         return norm_track(self.title)
 
-    def merge(self, other: "Item") -> None:
+    def merge(self, other: Item) -> None:
         """Fold another sighting of the same item into this one."""
         for s in other.sources:
             if s not in self.sources:

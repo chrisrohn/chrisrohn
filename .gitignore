@@ -9,3 +9,8 @@ data/cache/everynoise.json
 browser.json
 oauth.json
 .env
+
+node_modules/
+test-results/
+playwright-report/
+dist/
