@@ -1,5 +1,5 @@
 // @ts-check
-/* The ⚙ dialog: account, quota, sync, duplicates, feed health, audition settings. */
+/* The ⚙ dialog: account, quota, sync, duplicates, feed health, theme and audition settings. */
 import { state, persist, quotaText, skipsInYouTube, clearLocalState } from "./state.js";
 import { $, esc, relTime, toast } from "./dom.js";
 import { isOwner, guestsAllowed } from "./auth.js";
@@ -7,6 +7,7 @@ import { pushRatings, pullRatings } from "./sync.js";
 import { loadLibraryPlaylists } from "./youtube.js";
 import { renderDupes, scanYear, bulkRemoveExtras } from "./dupes.js";
 import { startAudition, clearAudition, auditionOn } from "./player.js";
+import { wireTheme } from "./theme.js";
 
 function exportCsv() {
   const rows = [["Title", "Artist", "Notation", "Year", "YouTube"], ...Object.values(state.rated).filter(d => d.decision === "up").map(d => [d.title, d.artist, `${d.artist} - ${d.title}`, d.year, d.videoId ? "https://music.youtube.com/watch?v=" + d.videoId : ""])];
@@ -34,6 +35,7 @@ function openSettings() {
 }
 export function wireSettings() {
   $("#settings-btn").addEventListener("click", openSettings);
+  wireTheme();
   const aud = $("#audition"); aud.checked = auditionOn(); $("#audition-label").textContent = (state.settings.auditionSeconds || 30) + "s";
   aud.addEventListener("change", () => { state.settings.audition = aud.checked; persist(); if (aud.checked && state.playerReady && state.player.getPlayerState() === YT.PlayerState.PLAYING) startAudition(); else clearAudition(); });
   $("#s-aud-secs").value = state.settings.auditionSeconds || 30; $("#s-aud-start").value = state.settings.auditionStart ?? 25;

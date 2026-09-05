@@ -197,7 +197,7 @@ npm run check && npm test        # eslint + type check (tsc --checkJs) + build, 
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
-`render`, `player`, `dupes`, `settings`, `keys`, `main`). `build.mjs` bundles them with esbuild into a content-hashed
+`render`, `player`, `dupes`, `settings`, `keys`, `theme`, `main`). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
 pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the
@@ -209,7 +209,9 @@ The installable app is `site/manifest.webmanifest` (icons in `site/icons/`, the 
 `site/screenshots/`) plus `site/sw.js` (network first with a cached fallback for the shell and the feed, a capped
 cache for artwork, and a waiting worker the page promotes on *Reload*) and `site/src/pwa.js` (install button, how-to
 sheet, shortcuts, foreground refresh). `npm run screenshots` rebuilds the three pictures from `dist/` after a visible
-redesign.
+redesign. The light/dark switch is `site/theme.js`, a classic script every page loads in `<head>` before the first paint:
+it keeps the choice in `localStorage` (`id:theme`), sets `<html data-theme>`, which `style.css` reads through `light-dark()`
+tokens, and wires the header buttons; `site/src/theme.js` hooks ⚙ → *Theme* and the `t` key into it.
 
 **Time budget:** YouTube resolution and year verification share `resolve.time_budget_minutes` (28 by default, against
 the job's 45-minute limit) and write their caches every 25 lookups, so a slow catalogue day leaves the rest for
