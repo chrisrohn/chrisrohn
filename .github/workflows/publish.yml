@@ -27,11 +27,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
       # the site must load and render the committed feed in a real browser before it goes live
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -39,8 +39,9 @@ jobs:
       - run: npm run check          # lint, type check, then build dist/
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
+          include-hidden-files: true   # dist/.nojekyll comes from site/; v4+ skips dotfiles by default
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
