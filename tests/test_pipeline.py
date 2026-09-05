@@ -359,3 +359,23 @@ def test_discover_playlists_tolerant_titles_and_channel_from_author():
     assert discover_playlists(cfg, FakeYT())[2] == "UCxyz"                                   # otherwise learned from the author
     assert years["2027"] == "PL2027" and years["2028"] == "PL2028" and years["1978"] == "PL1978" and "PLX" not in years.values()
     assert years["1999"] == "PLTW5JZnPjE_rgIDfV4vL5g4EZ3SCc-R_d"             # pinned ids are never overridden by title matches
+
+
+def test_find_duplicates_groups_same_video_other_upload_and_cross_year():
+    from discovery.profile import find_duplicates
+    from discovery.util import item_key
+
+    def e(year, vid, artist, title, pos):
+        return {"year": year, "playlistId": "PL" + year, "position": pos, "videoId": vid, "artist": artist, "title": title}
+
+    where = {
+        item_key("Dark Chisme", "Suffer Like Me"): [e("2026", "v1", "Dark Chisme", "Suffer Like Me", 3), e("2026", "v1", "Dark Chisme", "Suffer Like Me", 6)],
+        item_key("Jungle", "Back On 74"): [e("2023", "v2", "Jungle", "Back On 74", 0), e("2023", "v3", "Jungle", "Back On 74 (Official Video)", 9)],
+        item_key("Roosevelt", "Lovers"): [e("2016", "v4", "Roosevelt", "Lovers", 0), e("2017", "v4", "Roosevelt", "Lovers (2017 Remaster)", 1)],
+        item_key("Solo", "Fine"): [e("2026", "v5", "Solo", "Fine", 0)],
+    }
+    out = find_duplicates(where)
+    kinds = {d["artist"]: d["kind"] for d in out}
+    assert kinds == {"Dark Chisme": "same-video", "Jungle": "other-upload", "Roosevelt": "cross-year"}
+    roosevelt = next(d for d in out if d["artist"] == "Roosevelt")
+    assert roosevelt["years"] == ["2017", "2016"] and roosevelt["count"] == 2 and out[0]["artist"] == "Dark Chisme"  # newest year first

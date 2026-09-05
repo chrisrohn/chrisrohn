@@ -81,6 +81,11 @@ several devices and want skips shared. The first 👎 then creates an unlisted `
 playlist and shows its ID; paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build
 can read it (unlisted playlists aren't discoverable by title). All 48 year playlists (1979–2026) are pinned by ID in
 `youtube_music.playlists`; when you create a new year's playlist, add its ID there (the build also finds it by title).
+**No duplicates:** every 👍 first asks YouTube whether that video is already in the target playlist (1 quota unit)
+and skips the add if so; a song already thumbed up today under another feed entry is caught too. The daily build
+scans all year playlists and reports the same video added twice, a second upload of the same song, or one song
+filed under two years; the site warns you on load and ⚙ → Duplicate check lists them with one-tap removal, plus a
+live "scan this year now" for anything added since the last build.
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free).
 
