@@ -154,7 +154,7 @@
     ysel.innerHTML = (g == null ? `<option value="">year?</option>` : "") + state._years.map(y => `<option value="${y}">${y}</option>`).join("");
     ysel.value = g == null ? "" : String(g); ysel.classList.toggle("unknown", g == null);
   }
-  const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — pick the year yourself" };
+  const YEAR_SOURCE = { musicbrainz: "verified: MusicBrainz's earliest release of this exact recording (identified via ListenBrainz)", "musicbrainz-search": "verified: earliest MusicBrainz release matching artist + title", "musicbrainz-isrc": "verified: earliest MusicBrainz release sharing this track's ISRC", discogs: "verified: Discogs master (original issue) year", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "the release date the source itself stated", isrc: "from the ISRC registration year only", youtube: "from the YouTube album only", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — pick the year yourself" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const sameName = (a, b) => String(a || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "") === String(b || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
@@ -589,7 +589,7 @@
     $(".dtitle", el).textContent = it.display_title || it.title;
     $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
     $(".date", el).textContent = it.release_date || "";
-    const yb = $(".yearbadge", el); const conf = it.year_confidence || "low"; yb.classList.add(conf); yb.title = YEAR_SOURCE[it.year_source] || "";
+    const yb = $(".yearbadge", el); const conf = it.year_confidence || "low"; yb.classList.add(conf); yb.title = (YEAR_SOURCE[it.year_source] || "") + ((it.year_evidence || []).length ? "\n" + it.year_evidence.join("\n") : "");
     yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`) : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
     if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
     const why = [];
@@ -633,7 +633,7 @@
     else {
       const conf = it.year_confidence || "low";
       yb.classList.add(conf);
-      yb.title = YEAR_SOURCE[it.year_source] || "";
+      yb.title = (YEAR_SOURCE[it.year_source] || "") + ((it.year_evidence || []).length ? "\n" + it.year_evidence.join("\n") : "");
       yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`) : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
       if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
     }

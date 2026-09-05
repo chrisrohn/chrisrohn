@@ -32,6 +32,7 @@ class Item:
     year: int | None = None                 # best year for filing into "<year> Indie Discotheque"
     year_source: str | None = None          # "musicbrainz-recording" | "release-date" | "youtube" | "feed-date" | "unknown"
     year_confidence: str | None = None      # "high" | "medium" | "low"
+    year_evidence: list[str] = field(default_factory=list)   # every year the catalogues reported, e.g. "MusicBrainz recording: 2009"
     original_year: int | None = None        # set when MusicBrainz knows an earlier release than the feed date (reissue)
     youtube: dict[str, Any] | None = None
     score: float = 0.0
