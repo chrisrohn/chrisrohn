@@ -58,10 +58,11 @@
     renderMeta();
     applyMode();
     render();
-    if (isCurator()) { pullRatings(); refreshRecent().catch(() => {}); }
+    if (isCurator() && tokenValid()) { pullRatings(); refreshRecent().catch(() => {}); }
   }
-  // another device may have rated things while this tab was in the background
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); });
+  // another device may have rated things while this tab was in the background (only while the token is valid:
+  // a background refresh would need a popup, which browsers block without a tap — the next 👍 refreshes it instead)
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isCurator() && tokenValid() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); });
   function persist() {
     LS.set("id:rated", state.rated);
     LS.set("id:auth", state.auth);
@@ -80,6 +81,7 @@
       const r = await fetch(u, { method, headers, body: raw ? body : (body ? JSON.stringify(body) : undefined) });
       if (!r.ok) {
         const j = await r.json().catch(() => ({})); const msg = (j.error && j.error.message) || r.statusText;
+        if (r.status === 401) { state.auth.expires_at = 0; persist(); throw new Error("Google session expired — it will refresh on your next tap"); }
         if (r.status === 403 && /Drive API has not been used|not enabled|accessNotConfigured/i.test(msg)) throw new Error("Google Drive API is not enabled for this project — enable it once in the Google Cloud console (see SETUP.md) so ratings can sync across devices");
         if (r.status === 403 && /insufficient/i.test(msg)) throw new Error("Sign out and sign in again to grant the new 'app data' permission that syncs ratings across devices");
         throw new Error(msg);
@@ -103,7 +105,7 @@
     return changed;
   }
   async function pullRatings() {
-    if (!isCurator()) return;
+    if (!isCurator() || !tokenValid()) return;
     try {
       const id = await syncFileId(); if (!id) return;
       const r = await drive("GET", `${DRIVE}/files/${id}`, { params: { alt: "media" } });
@@ -161,7 +163,8 @@
   // ---------- auth (Google Identity Services, token flow) ----------
   const tokenValid = () => !!(state.auth && state.auth.access_token && state.auth.expires_at > Date.now() + 30e3);
   const curators = () => ((state.feed && state.feed.google && state.feed.google.curators) || []).map(e => e.toLowerCase());
-  const isSignedIn = () => tokenValid() && !!state.auth.email;
+  // identity = a remembered Google account. Access tokens only live an hour; they are re-requested silently when needed.
+  const isSignedIn = () => !!(state.auth && state.auth.email);
   const isOwner = () => isSignedIn() && curators().includes(state.auth.email.toLowerCase());
   const guestsAllowed = () => !!(state.feed && state.feed.google && state.feed.google.guests);
   // "curator" = anyone allowed to rate: the owner, or a guest when guests are enabled. Guests file into their own library.
@@ -177,8 +180,8 @@
     if (state.auth && state.auth.email) {
       who.hidden = false;
       who.innerHTML = `${state.auth.picture ? `<img src="${esc(state.auth.picture)}" alt="">` : ""}<span>${esc(state.auth.name || state.auth.email)}</span>` +
-        (on ? "" : (tokenValid() ? ` <span class="muted">(listener)</span>` : ` <span class="muted">(session expired)</span>`));
-      $("#signin").textContent = tokenValid() ? "Sign out" : "Sign in again";
+        (on ? "" : ` <span class="muted">(listener)</span>`);
+      $("#signin").textContent = "Sign out";
     } else {
       who.hidden = true;
       $("#signin").textContent = "Sign in with Google";
@@ -194,43 +197,58 @@
       s.onload = resolve; s.onerror = () => reject(new Error("could not load Google sign-in")); document.head.appendChild(s);
     });
   }
-  async function signIn() {
+  async function signIn({ silent = false } = {}) {
     const cid = state.feed.google && state.feed.google.client_id;
     if (!cid) { toast("Google client ID not configured yet — see SETUP.md", true); return false; }
     await ensureGis();
-    return new Promise(resolve => {
+    if (state.signingIn) return state.signingIn;          // one popup at a time
+    state.signingIn = new Promise(resolve => {
+      const done = v => { state.signingIn = null; resolve(v); };
       state.tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: cid, scope: SCOPES,
+        error_callback: err => { if (!silent) toast("Sign-in " + (err && err.type === "popup_closed" ? "cancelled" : "failed: " + ((err && err.message) || err && err.type || "unknown")), true); done(false); },
         callback: async resp => {
-          if (resp.error) { toast("Sign-in failed: " + resp.error, true); return resolve(false); }
-          const prevEmail = state.auth && state.auth.email;
-          state.auth = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in || 3600) * 1000 };
+          if (resp.error) { if (!silent) toast("Sign-in failed: " + resp.error, true); return done(false); }
+          const prev = state.auth || {}; const prevEmail = prev.email;
+          state.auth = { ...prev, access_token: resp.access_token, expires_at: Date.now() + (Number(resp.expires_in) || 3600) * 1000 };
           try {
             const me = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + resp.access_token } }).then(r => r.json());
-            Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture });
+            if (me && me.email) Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture });
           } catch {}
           if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
           persist(); applyMode(); render();
+          if (silent) { if (isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); return done(true); }
           if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); loadLibraryPlaylists().then(() => refreshRecent()).catch(() => {}); pullRatings(); }
           else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); pullRatings(); }
           else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
-          resolve(true);
+          done(true);
         },
       });
+      // prompt "" = no consent screen when Google already remembers this grant; the hint skips the account chooser
       state.tokenClient.requestAccessToken({ prompt: "", hint: state.auth && state.auth.email ? state.auth.email : undefined });
     });
+    return state.signingIn;
   }
+  // Sign-out only forgets this device. It deliberately does NOT revoke the Google grant: revoking kills the tokens on
+  // your other devices too (and can even race a fresh sign-in on this one). Disconnecting the site for good is a
+  // Google-account action: https://myaccount.google.com/permissions
   function signOut() {
-    try { if (state.auth && state.auth.access_token && window.google) google.accounts.oauth2.revoke(state.auth.access_token, () => {}); } catch {}
-    state.auth = null; state.playlists = {}; persist(); applyMode(); render(); toast("Signed out");
+    state.auth = null; state.playlists = {}; persist(); applyMode(); render(); toast("Signed out on this device");
+  }
+  // A valid token for the next few minutes, refreshing silently when it is about to lapse. Call it first thing in a
+  // click handler so the (auto-closing) Google popup is still allowed by the browser.
+  async function ensureToken({ minutes = 3 } = {}) {
+    if (state.auth && state.auth.access_token && state.auth.expires_at > Date.now() + minutes * 60e3) return true;
+    if (!isSignedIn()) return false;
+    return signIn({ silent: true });
   }
   async function withAuth(fn) {
-    if (!tokenValid()) { const ok = await signIn(); if (!ok || !tokenValid()) throw new Error("not signed in"); }
+    if (!(await ensureToken({ minutes: 1 }))) { const ok = isSignedIn() ? false : await signIn(); if (!ok || !tokenValid()) throw new Error("Session expired — tap Sign in"); }
     return fn(state.auth.access_token);
   }
 
   // ---------- YouTube Data API ----------
-  async function yt(method, path, { params = {}, body } = {}) {
+  async function yt(method, path, { params = {}, body, _retried = false } = {}) {
     return withAuth(async token => {
       const url = new URL(YT_API + path); for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
       const r = await fetch(url, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -239,7 +257,12 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
         const msg = (j.error && j.error.message) || r.statusText;
-        if (r.status === 401) { state.auth.expires_at = 0; persist(); applyMode(); }
+        if (r.status === 401) {
+          // token revoked or expired early: get a fresh one silently and retry once
+          state.auth.expires_at = 0; persist();
+          if (!_retried && await signIn({ silent: true })) return yt(method, path, { params, body, _retried: true });
+          applyMode(); throw new Error("Google session expired — tap Sign in to continue");
+        }
         if (r.status === 403 && /quota/i.test(msg)) throw new Error(msg + " — daily YouTube API quota reached; try again after midnight Pacific");
         if (r.status === 403 && path.startsWith("/playlistItems") && method === "POST") throw new Error("YouTube refused to add to that playlist for this sign-in. Collaborative playlists can only be edited through the API by the channel that owns them (@indiedisco) — sign out and sign in again choosing that channel, or make the playlist owner account a curator.");
         throw new Error(msg);
@@ -437,6 +460,7 @@
       return;
     }
     year = year || yearOf(it);
+    if (decision === "up" || skipsInYouTube()) { if (!(await ensureToken())) { toast("Session expired — tap Sign in to continue", true); return; } }
     state.busy.add(id);
     // optimistic: hide it now, move focus to the next card
     state.rated[id] = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, at: Date.now(), pending: true };
@@ -770,7 +794,7 @@
     $("#only-known").addEventListener("change", e => { f.onlyKnown = e.target.checked; persist(); render(); });
     $("#only-recent").checked = f.onlyRecent;
     $("#only-recent").addEventListener("change", e => { f.onlyRecent = e.target.checked; persist(); render(); });
-    $("#signin").addEventListener("click", () => { if (state.auth && tokenValid()) signOut(); else signIn().catch(e => toast(e.message, true)); });
+    $("#signin").addEventListener("click", () => { if (isSignedIn()) signOut(); else signIn().catch(e => toast(e.message, true)); });
     $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", () => { holdAudition(); toggle(); });
     const aud = $("#audition"); aud.checked = auditionOn(); $("#audition-label").textContent = (state.settings.auditionSeconds || 30) + "s";
     aud.addEventListener("change", () => { state.settings.audition = aud.checked; persist(); if (aud.checked && state.playerReady && state.player.getPlayerState() === YT.PlayerState.PLAYING) startAudition(); else clearAudition(); });
