@@ -187,9 +187,12 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
    tall and the two other zones fill it rather than float beside it. The columns add up to the feed's 1160px
    (356 + 4px of frame border, 650, 150) so the block lines up with the cards. The fixed strip itself is invisible
    and lets clicks through; only the three zones catch them. Each zone carries the border and shadow: the parts of a
-   shadow that fall under the next zone are painted over, so the three read as one continuous frame. */
-.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: minmax(20px, 1fr) 360px minmax(0, 650px) 150px minmax(20px, 1fr); align-items: stretch; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); color: var(--ink); pointer-events: none; }
-.player > * { pointer-events: auto; }
+   shadow that fall under the next zone are painted over, so the three read as one continuous frame. Under the
+   block, a second row of plain paper as wide as the block and its shadow keeps the list from showing through the
+   blank space beneath it (the gutters beside it hold nothing, so they stay open). */
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: minmax(20px, 1fr) 360px minmax(0, 650px) 150px minmax(20px, 1fr); grid-template-rows: auto calc(24px + env(safe-area-inset-bottom, 0px)); align-items: stretch; color: var(--ink); pointer-events: none; }
+.player > * { position: relative; z-index: 1; grid-row: 1; pointer-events: auto; }
+.player::after { content: ""; grid-column: 2 / 5; grid-row: 2; margin-right: -8px; background: var(--paper); background-image: var(--grain); background-size: 240px 240px; pointer-events: auto; }
 /* content-box: the iframe inside is the full 356×200 (YouTube's minimum), the borders sit outside it */
 .player-frame { grid-column: 2; box-sizing: content-box; width: 356px; height: 200px; overflow: hidden; background: #000; border: 2px solid var(--ink); box-shadow: 8px 8px 0 var(--ink); }
 .player-frame iframe { width: 100%; height: 100%; display: block; }
@@ -417,7 +420,9 @@ body.doc .tab { text-decoration: none; }
   .dlinks { order: -1; flex: 1 1 100%; justify-content: flex-start; }
   .dbody { gap: 7px; }
 
-  .player { grid-template-columns: 1fr; gap: 8px; padding: 0 0 max(8px, env(safe-area-inset-bottom)); background: var(--paper2); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); pointer-events: auto; }
+  .player { grid-template-columns: 1fr; grid-template-rows: none; gap: 8px; padding: 0 0 max(8px, env(safe-area-inset-bottom)); background: var(--paper2); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); pointer-events: auto; }
+  .player::after { display: none; }
+  .player > * { position: static; z-index: auto; grid-row: auto; }
   .player-frame, .player-meta { grid-column: auto; }
   .player-frame { box-sizing: border-box; width: 100%; height: auto; aspect-ratio: 16/9; border: 0; border-bottom: 2px solid var(--ink); box-shadow: none; }
   .player-meta { padding: 0 12px; background: transparent; border: 0; box-shadow: none; justify-content: center; }
@@ -459,8 +464,11 @@ body.doc .tab { text-decoration: none; }
    takes up whatever the text leaves, so short cards show more picture and long ones scroll rather than squeeze */
 @media (max-width: 760px) {
   body.deck-mode { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
-  body.deck-mode main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
-  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; padding-bottom: calc(var(--actions-h, 96px) + 4px); }
+  /* both carry margin: 0 auto, and an auto cross-axis margin in a column flexbox stops the item stretching: without
+     an explicit width each card would be as wide as its own text (a short title narrows it, a long link row pushes
+     it past the screen). Full width, still capped by their max-widths. */
+  body.deck-mode main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; width: 100%; }
+  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; width: 100%; padding-bottom: calc(var(--actions-h, 96px) + 4px); }
   body.deck-mode .deck-actions { bottom: 0; }
   body.deck-mode .toast { bottom: calc(var(--actions-h, 96px) + 20px); }
   body.deck-mode #deck-card { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
