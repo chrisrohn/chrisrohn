@@ -51,7 +51,9 @@ One free Google Cloud OAuth client, created in the browser with a **personal** G
 that is a normal "Sign in with Google" button on the site.
 
 1. https://console.cloud.google.com/projectcreate → name it `indie-discotheque` → Create.
-2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3).
+2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3), and
+   https://console.cloud.google.com/apis/library/drive.googleapis.com → **Enable** (Google Drive API — used only for a
+   hidden app-data file that keeps your thumbs in sync across devices; the site never sees your real Drive files).
 3. https://console.cloud.google.com/auth/overview → **Get started** → App name `Chris Rohn's New Music`, your
    email, Audience **External**, contact email → Create. Then on **Branding** set Application home page
    `https://chrisrohn.com`, Privacy policy `https://chrisrohn.com/privacy.html`, Terms of service
@@ -98,8 +100,8 @@ session that the playlist's owner approved in that browser.
 - Open chrisrohn.com. `j`/`k` move, `space` plays, `u` thumbs up, `d` thumbs down, `o` opens in YouTube Music, `/` searches.
 - Change the year dropdown on a card before thumbing up if a reissue/late release should go to another year.
 - 👍 files the track into the year playlist immediately (an **Undo** button shows for a few seconds). 👎 hides
-  it. Both disappear from the feed at once; saves are hidden on every device after the next daily build, skips
-  on this device (or everywhere, with the optional Skipped playlist).
+  it. Both disappear from the feed at once on every device: ratings are mirrored to a hidden app-data file in your
+  Google Drive (free, no quota), pulled when you open the site or return to the tab and pushed after each thumb.
 - **Audition mode** (`a`, or the checkbox in the player bar): each track starts partway in and the site moves on by
   itself after 30 seconds unless you press a key or click the player. Length and start point are in ⚙.
 - **On a phone**, open chrisrohn.com and choose "Add to Home Screen" / "Install app": it runs full-screen with its
