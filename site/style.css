@@ -390,6 +390,18 @@ body.doc .tab { text-decoration: none; }
   .player-controls .curator { display: none !important; }   /* the big thumbs already cover this */
   .player-controls .chk { font-size: 10px; gap: 4px; }
   .audition-bar { flex-basis: 100%; height: 4px; }
+  /* autoplay / audition as toggles in the same cast as the transport buttons: a bordered chip with a small
+     indicator square that lights orange when on (the native checkbox is what iOS turned into a big orange block) */
+  .player .chk { min-height: 40px; padding: 0 9px; border: 1px solid var(--ink); gap: 7px; font-size: 10px; letter-spacing: .06em; color: var(--muted); background: var(--card); }
+  .player .chk:has(input:checked) { color: var(--ink); }
+  .player .chk input { appearance: none; -webkit-appearance: none; width: 10px; height: 10px; margin: 0; border: 1px solid currentColor; background: transparent; }
+  .player .chk input:checked { background: var(--accent); border-color: var(--accent); }
+  .player .chk .full { display: none; }
+  .player-controls { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; align-items: stretch; }
+  #p-prev, #p-toggle, #p-next { grid-column: span 2; min-height: 40px; }
+  .player .chk { grid-column: span 3; justify-content: center; }
+  .audition-bar { grid-column: 1 / -1; }
+  .player-frame { align-self: start; margin-top: 2px; }
 
   .dart { height: min(32svh, 92vw); }
   .dbody { padding: 12px 14px 12px; gap: 5px; }
