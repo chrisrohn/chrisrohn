@@ -1,4 +1,4 @@
-requests>=2.32
-PyYAML>=6.0
-feedparser>=6.0.11
-ytmusicapi>=1.12,<2
+requests>=2.34.2
+PyYAML>=6.0.3
+feedparser>=6.0.14
+ytmusicapi>=1.12.2,<2

@@ -13,11 +13,11 @@
     "screenshots": "npm run build && node screenshots.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.12.0",
-    "@playwright/test": "^1.55.0",
-    "esbuild": "^0.24.0",
-    "eslint": "^9.12.0",
-    "globals": "^15.11.0",
-    "typescript": "^5.6.0"
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "typescript": "^7.0.2"
   }
 }
