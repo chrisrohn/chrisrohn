@@ -81,6 +81,13 @@ several devices and want skips shared. The first 👎 then creates an unlisted `
 playlist and shows its ID; paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build
 can read it (unlisted playlists aren't discoverable by title). All 48 year playlists (1979–2026) are pinned by ID in
 `youtube_music.playlists`; when you create a new year's playlist, add its ID there (the build also finds it by title).
+**Release years:** each track's year comes from MusicBrainz (earliest non-compilation release of that recording),
+then Deezer, then the iTunes Search API, then a release date the source itself states (Bandcamp, ListenBrainz, KEXP's
+album date), then the YouTube album. Blog post and upload dates are only sightings, never release dates. If nothing
+anywhere says when a song came out, the card shows "year unknown" with a `year?` dropdown, and 👍 refuses until you
+pick one, so a catalogue track can't slip into this year's playlist by default. Lookups are budgeted per run
+(`resolve.max_year_lookups_per_run`, MusicBrainz allows 1 request/s) and cached, with undated tracks looked up first.
+
 **No duplicates:** every 👍 first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so; a song already thumbed up today under another feed entry is caught too. The daily build
 scans all year playlists and reports the same video added twice, a second upload of the same song, or one song

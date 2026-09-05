@@ -76,7 +76,7 @@ def _cfg():
 def test_dedupe_and_score():
     today = date.today()
     items = [
-        Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["rss:Pitchfork"], editorial=True),
+        Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today - timedelta(days=1), date_kind="sighting", sources=["rss:Pitchfork"], editorial=True),
         Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["bandcamp"], tags=["nu disco"]),
         Item(artist="Parcels", title="Day/Night II", kind="release", release="Day/Night II", release_date=today - timedelta(days=3), sources=["listenbrainz"], artist_mbids=[]),
         Item(artist="Unknown Metal Band", title="Skull", kind="release", release_date=today, sources=["musicbrainz"], tags=["metal"]),
@@ -85,6 +85,7 @@ def test_dedupe_and_score():
     merged = dedupe(items)
     assert len(merged) == 4
     jungle = next(i for i in merged if i.artist == "Jungle")
+    assert jungle.date_kind == "release" and jungle.release_date == today   # bandcamp's real date outranks the blog post date
     assert sorted(jungle.sources) == ["bandcamp", "rss:Pitchfork"] and jungle.editorial and "nu disco" in jungle.tags
     scored = score_items(merged, PROFILE, _cfg())
     assert scored[0].artist == "Jungle" and scored[0].match_kind == "direct"
@@ -264,11 +265,19 @@ def test_verify_years_uses_musicbrainz_then_deezer_then_itunes(monkeypatch):
         Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["listenbrainz"]),
         Item(artist="RAC", title="I Should've Guessed", featuring=["Speak"], kind="track", sources=["radio:SomaFM poptron"]),
         Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["bandcamp"]),
-        Item(artist="Someone", title="Blog Only", kind="track", release_date=today, sources=["rss:Pitchfork"], youtube={"videoId": "x", "year": "2019"}),
+        Item(artist="Someone", title="Blog Only", kind="track", release_date=today, date_kind="sighting", sources=["rss:Pitchfork"], youtube={"videoId": "x", "year": "2019"}),
         Item(artist="Nobody", title="Nothing", kind="track", sources=["rss:Blog"]),
+        # KEXP states the album's real release date; MusicBrainz knows nothing → that date must win, not "this year"
+        Item(artist="Tiga", title="Shoes", featuring=["Soulwax", "Chilly Gonzales"], kind="track", release="Ciao!", release_date=date(2009, 5, 11), sources=["radio:KEXP"]),
+        Item(artist="Blogger", title="Old Song", kind="track", release_date=today, date_kind="sighting", sources=["rss:Blog"]),
     ]
-    resolve.verify_years(items, _cfg(), FakeHttp())
-    r, rac, j, s, n = items
+    cfg = _cfg(); cfg["resolve"]["max_year_lookups_per_run"] = 6   # Tiga + Blogger still get a lookup: undated items go first
+    resolve.verify_years(items, cfg, FakeHttp())
+    r, rac, j, s, n, tiga, blog = items
+    assert (tiga.year, tiga.year_source, tiga.year_confidence) == (2009, "release-date", "medium")
+    assert (blog.year, blog.year_source, blog.year_confidence) == (today.year, "feed-date", "low")   # a post date is only a hint
+    lookup_order = [p["query"] for u, p in calls if "musicbrainz" in u]
+    assert lookup_order.index('recording:"Old Song" AND artist:"Blogger"') < lookup_order.index('recording:"Lovers" AND artist:"Roosevelt"')
     assert (r.year, r.year_source, r.year_confidence, r.original_year) == (2016, "musicbrainz-recording", "high", 2016)
     assert (rac.year, rac.year_source, rac.year_confidence) == (2014, "deezer", "medium")           # radio play, no date → Deezer knew
     # the MusicBrainz query used the plain title, not "… feat. Speak"
@@ -276,7 +285,7 @@ def test_verify_years_uses_musicbrainz_then_deezer_then_itunes(monkeypatch):
     assert 'recording:"I Should\'ve Guessed" AND artist:"RAC"' == mbq
     assert (j.year, j.year_source, j.year_confidence) == (today.year, "release-date", "medium")
     assert (s.year, s.year_source) == (2019, "itunes")                                              # iTunes beats the blog date
-    assert (n.year, n.year_source, n.year_confidence) == (today.year, "unknown", "low")
+    assert (n.year, n.year_source, n.year_confidence) == (None, "unknown", "low")                   # never guess "this year"
     assert r.to_dict()["original_year"] == 2016
 
 

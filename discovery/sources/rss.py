@@ -73,7 +73,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 artist=artist,
                 title=track,
                 kind="track" if pair else "release",
-                release_date=when,
+                release_date=when, date_kind="sighting",
                 tags=tags,
                 sources=[f"rss:{name}"],
                 links={"article": link} if link else {},

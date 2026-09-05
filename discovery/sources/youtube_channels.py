@@ -81,7 +81,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
             if media:
                 thumb = media[0].get("url")
             out.append(Item(
-                artist=artist, title=track, kind="track", release_date=when,
+                artist=artist, title=track, kind="track", release_date=when, date_kind="sighting",
                 sources=[f"youtube:{name}"], links={"youtube": f"https://www.youtube.com/watch?v={vid}"},
                 artwork=thumb, editorial=bool(ch.get("editorial", True)),
                 youtube={"videoId": vid, "title": title, "artists": [artist], "thumbnail": thumb, "via": "channel-feed"},

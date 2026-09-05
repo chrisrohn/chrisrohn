@@ -322,5 +322,5 @@ resolve:
   max_lookups_per_run: 400
   # Year verification: MusicBrainz earliest release of each artist + title (1 req/s, cached); when MusicBrainz
   # doesn't know the recording, fall back to Deezer, then the iTunes Search API (~20 req/min). All free, all cached.
-  max_year_lookups_per_run: 300
-  max_fallback_year_lookups_per_run: 150
+  max_year_lookups_per_run: 700
+  max_fallback_year_lookups_per_run: 350
