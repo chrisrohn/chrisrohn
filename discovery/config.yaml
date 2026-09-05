@@ -325,5 +325,6 @@ resolve:
   # (needs a free DISCOGS_TOKEN secret) and the iTunes Search API. All free, all cached. Each track costs 2–6 requests
   # at MusicBrainz's 1 req/s, so the budget below bounds a run to roughly 15 minutes; the rest is picked up next run.
   max_year_lookups_per_run: 500
+  max_duplicate_year_lookups_per_run: 120   # cross-year duplicates in your playlists get a verified year, a batch per run
   discogs: true                 # use Discogs when DISCOGS_TOKEN is set
   always_cross_check: false     # true = also ask Deezer/ISRC even when MusicBrainz already answered (slower, more evidence)

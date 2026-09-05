@@ -414,3 +414,60 @@ def test_find_duplicates_groups_same_video_other_upload_and_cross_year():
     assert kinds == {"Dark Chisme": "same-video", "Jungle": "other-upload", "Roosevelt": "cross-year"}
     roosevelt = next(d for d in out if d["artist"] == "Roosevelt")
     assert roosevelt["years"] == ["2017", "2016"] and roosevelt["count"] == 2 and out[0]["artist"] == "Dark Chisme"  # newest year first
+
+
+def test_lb_identify_falls_back_and_records_status(monkeypatch):
+    import requests
+    from discovery import years
+
+    class Resp:
+        def __init__(self, code, text): self.status_code, self.text = code, text
+
+    class FakeHttp:
+        def __init__(self): self.calls = []
+        def get(self, url, **kw):
+            p = kw.get("params", {}); self.calls.append(p)
+            if "metadata" in p:                                   # the rich form is refused
+                raise requests.HTTPError("400", response=Resp(400, "inc not allowed"))
+            return {"artist_credit_name": "Tiga", "recording_name": "Shoes", "recording_mbid": "rec-1"}
+
+    h = FakeHttp()
+    data, status = years.lb_identify(h, "Tiga", "Shoes")
+    assert status == "matched" and data["recording_mbid"] == "rec-1" and len(h.calls) == 2 and "metadata" not in h.calls[1]
+
+    class Down:
+        def get(self, url, **kw): raise requests.HTTPError("503", response=Resp(503, "<html>maintenance</html>"))
+    assert years.lb_identify(Down(), "Tiga", "Shoes") == (None, "http 503: <html>maintenance</html>")
+
+    class Wander:
+        def get(self, url, **kw): return {"artist_credit_name": "Tiga", "recording_name": "Sunglasses at Night", "recording_mbid": "x"}
+    assert years.lb_identify(Wander(), "Tiga", "Shoes")[1].startswith("rejected:")
+
+
+def test_duplicates_get_verified_years_and_their_own_file(monkeypatch):
+    from discovery import build, years
+    from discovery.util import item_key, write_json
+
+    # one cross-year duplicate already verified for the feed (cache hit, free), one needing a lookup
+    write_json(years.YEAR_CACHE, {item_key("Roosevelt", "Lovers"): {"v": 2, "found": {"musicbrainz": 2016, "deezer": 2016}}})
+    dups = [
+        {"key": item_key("Roosevelt", "Lovers"), "artist": "Roosevelt", "title": "Lovers", "kind": "cross-year", "years": ["2017", "2016"], "count": 2, "entries": []},
+        {"key": item_key("Bag Raiders", "Shooting Stars"), "artist": "Bag Raiders", "title": "Shooting Stars", "kind": "cross-year", "years": ["2010", "2009"], "count": 2, "entries": []},
+        {"key": item_key("Austra", "Home"), "artist": "Austra", "title": "Home", "kind": "same-video", "years": ["2013"], "count": 2, "entries": []},
+    ]
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            p = kw.get("params", {})
+            if "metadata/lookup" in url:
+                return {"artist_credit_name": "Bag Raiders", "recording_name": "Shooting Stars", "recording_mbid": "rec-br"}
+            if url.endswith("/recording/rec-br"):
+                return {"first-release-date": "2008-11-01", "isrcs": [], "releases": [{"date": "2008-11-01", "release-group": {"first-release-date": "2008-11-01"}}]}
+            return {}
+
+    cfg = _cfg(); cfg["resolve"]["max_duplicate_year_lookups_per_run"] = 5
+    looked = years.annotate_duplicate_years(dups, cfg, FakeHttp())
+    assert looked == 1                                                     # only the unverified cross-year song hit the network
+    assert (dups[0]["verified_year"], dups[0]["verified_source"]) == (2016, "MusicBrainz recording")
+    assert (dups[1]["verified_year"], dups[1]["verified_source"]) == (2008, "MusicBrainz recording")
+    assert "verified_year" not in dups[2]                                   # same-video needs no year to clean up

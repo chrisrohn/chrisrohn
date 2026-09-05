@@ -279,3 +279,7 @@ body.guest .mode { color: var(--accent2); border-color: rgba(71,224,255,.4); }
 select.year.unknown { border-color: var(--warn, #e0b341); color: var(--warn, #e0b341); }
 select.year.attention { animation: attention .5s ease 2; }
 @keyframes attention { 50% { transform: scale(1.08); box-shadow: 0 0 0 3px rgba(224,179,65,.45); } }
+.dupe .chip.wrong, .chip.wrong { border-color: rgba(255,93,93,.6); color: var(--down); }
+.dupe .verified { color: var(--up, #6fdc8c); }
+.dupe-filters { flex-wrap: wrap; gap: 8px; align-items: center; }
+.dupe-filters input[type=search] { flex: 1 1 160px; min-width: 120px; }

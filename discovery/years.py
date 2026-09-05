@@ -78,19 +78,44 @@ def _title_ok(candidate: str | None, ours: str) -> bool:
 
 
 # ---------------------------------------------------------------- 1. identify the recording
-def lb_identify(http, artist: str, title: str) -> dict | None:
-    """ListenBrainz's mbid-mapping: fuzzy artist + recording → MusicBrainz ids. Returns the mapping or None."""
-    try:
-        data = http.get(LB_LOOKUP, params={"artist_name": artist, "recording_name": title, "metadata": "true", "inc": "release"})
-    except Exception as exc:  # noqa: BLE001
-        log.debug("LB lookup failed for %s – %s: %s", artist, title, exc)
-        return None
-    if not isinstance(data, dict) or not data.get("recording_mbid"):
-        return None
+_LB_WARNINGS = [0]
+
+
+def lb_identify(http, artist: str, title: str) -> tuple[dict | None, str]:
+    """ListenBrainz's mbid-mapping: fuzzy artist + recording → MusicBrainz ids.
+
+    Returns (mapping or None, status) where status is one of "matched", "nomatch", "rejected:<what LB returned>",
+    or "http <code>: <body>" — the status is kept in the year cache so a silent failure is visible in data/cache/years.json.
+    """
+    import requests
+
+    attempts = [{"artist_name": artist, "recording_name": title, "metadata": "true", "inc": "release"},
+                {"artist_name": artist, "recording_name": title}]            # plain form if the metadata options are refused
+    data, status = None, "nomatch"
+    for params in attempts:
+        try:
+            data = http.get(LB_LOOKUP, params=params)
+            break
+        except requests.HTTPError as exc:
+            resp = exc.response
+            status = f"http {resp.status_code if resp is not None else '?'}: {(resp.text if resp is not None else str(exc))[:160]}"
+            if resp is not None and resp.status_code == 400 and params is attempts[0]:
+                continue
+            data = None
+            break
+        except Exception as exc:  # noqa: BLE001
+            status = f"error: {str(exc)[:160]}"
+            data = None
+            break
+    if data is None or not isinstance(data, dict) or not data.get("recording_mbid"):
+        if status.startswith(("http", "error")) and _LB_WARNINGS[0] < 5:
+            _LB_WARNINGS[0] += 1
+            log.warning("ListenBrainz lookup failed for %s – %s: %s", artist, title, status)
+        return None, status if data is None else "nomatch"
     # the mapper is fuzzy on purpose; make sure it didn't wander to a different artist or a different song
     if not _artist_ok(data.get("artist_credit_name"), _names(artist)) or not _title_ok(data.get("recording_name"), norm_track(title)):
-        return None
-    return data
+        return None, f"rejected: {data.get('artist_credit_name')} – {data.get('recording_name')}"
+    return data, "matched"
 
 
 # ---------------------------------------------------------------- 2. MusicBrainz dates for a recording
@@ -244,7 +269,7 @@ def lookup_track(http, artist: str, title: str, cfg: dict) -> dict:
     """Run the catalogue chain for one recording. Returns a cache entry with every year found."""
     rcfg = cfg.get("resolve") or {}
     entry: dict = {"v": CACHE_VERSION, "found": {}}
-    lb = lb_identify(http, artist, title)
+    lb, entry["lb"] = lb_identify(http, artist, title)
     isrcs: list[str] = []
     if lb:
         entry["mbid"] = lb["recording_mbid"]
@@ -343,3 +368,39 @@ def verify_years(items: list[Item], cfg: dict, http) -> None:
             it.original_year = yt
     write_json(YEAR_CACHE, cache, compact=True)
     log.info("years: %d recordings looked up this run (%d cached)", looked, len(cache))
+
+
+def decide_found(found: dict[str, int]) -> tuple[int | None, str | None]:
+    """Earliest year from the most trusted tier of catalogue evidence (no item context)."""
+    ev = [Evidence(y, s) for s, y in (found or {}).items() if y and TRUST.get(s, 0) >= 2]
+    if not ev:
+        return None, None
+    top = max(e.trust for e in ev)
+    best = min((e for e in ev if e.trust == top), key=lambda e: e.year)
+    return best.year, best.source
+
+
+def annotate_duplicate_years(dups: list[dict], cfg: dict, http) -> int:
+    """Attach the catalogue-verified year to duplicate reports so the wrong-year copy is obvious.
+
+    Songs already verified for the feed come free from the cache (same key). Otherwise a bounded number of
+    cross-year duplicates are looked up per run; the rest follow on later runs."""
+    rcfg = cfg.get("resolve") or {}
+    budget = int(rcfg.get("max_duplicate_year_lookups_per_run", 120))
+    cache: dict = read_json(YEAR_CACHE, {})
+    looked = 0
+    order = sorted(dups, key=lambda d: (0 if d.get("kind") == "cross-year" else 1, -int(d["years"][0]) if d.get("years") else 0))
+    for d in order:
+        entry = cache.get(d["key"])
+        if (entry is None or entry.get("v") != CACHE_VERSION) and looked < budget and d.get("kind") == "cross-year":
+            looked += 1
+            entry = lookup_track(http, d["artist"], d["title"], cfg)
+            cache[d["key"]] = entry
+        if entry and entry.get("v") == CACHE_VERSION:
+            y, src = decide_found(entry.get("found") or {})
+            if y:
+                d["verified_year"], d["verified_source"] = y, LABEL.get(src, src)
+    if looked:
+        write_json(YEAR_CACHE, cache, compact=True)
+    log.info("duplicate report: %d cross-year songs verified this run", looked)
+    return looked

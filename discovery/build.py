@@ -7,6 +7,7 @@ from datetime import date
 from .models import Item
 from .profile import load_profile
 from .resolve import resolve_all, verify_years
+from .years import annotate_duplicate_years
 from .score import dedupe, score_items
 from .sources import run_sources
 from .util import DATA_DIR, SITE_DATA_DIR, Http, log, read_json, utcnow, write_json
@@ -41,6 +42,14 @@ def build_feed(cfg: dict) -> dict:
     items = [i for i in items if i.youtube or i.match_kind == "direct" or i.editorial]
     items = score_items(items, profile, cfg)[: int(rcfg.get("max_items", 200))]
     verify_years(items, cfg, http)
+    dups = list((profile.get("youtube") or {}).get("duplicates") or [])
+    annotate_duplicate_years(dups, cfg, http)
+    dup_kinds: dict[str, int] = {}
+    for d in dups:
+        dup_kinds[d.get("kind", "?")] = dup_kinds.get(d.get("kind", "?"), 0) + 1
+    checked_at = (profile.get("youtube") or {}).get("checked_at")
+    # the full report lives in its own file (thousands of rows on a big library); feed.json only carries the counts
+    write_json(SITE_DATA_DIR / "duplicates.json", {"checked_at": checked_at, "count": len(dups), "kinds": dup_kinds, "duplicates": dups}, compact=True)
 
     today_s = date.today().isoformat()
     for it in items:
@@ -68,9 +77,10 @@ def build_feed(cfg: dict) -> dict:
             "skipped_playlist_id": (profile.get("youtube") or {}).get("skipped") or ycfg.get("skipped_playlist_id") or "",
             "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
             "channel_id": (profile.get("youtube") or {}).get("channel") or ycfg.get("channel_id") or "",
-            # songs that appear more than once across the year playlists (same video twice, another upload, or two years)
-            "duplicates": (profile.get("youtube") or {}).get("duplicates") or [],
-            "duplicates_checked_at": (profile.get("youtube") or {}).get("checked_at"),
+            # songs that appear more than once across the year playlists: counts here, the full list in data/duplicates.json
+            "duplicates_count": len(dups),
+            "duplicates_kinds": dup_kinds,
+            "duplicates_checked_at": checked_at,
         },
         "picks": profile.get("picks") or [],
         "feed_health": _feed_health(),
