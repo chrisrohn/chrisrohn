@@ -366,7 +366,7 @@ body.doc .tab { text-decoration: none; }
   .brand h1 { white-space: nowrap; letter-spacing: -.01em; font-size: 15px; line-height: 1.1; }
   .brand h1 .h1-b { display: block; }
   .brand .ball { align-self: center; }
-  .tools { grid-area: tools; gap: 6px; }
+  .tools { grid-area: tools; gap: 6px; justify-self: end; }
   .tools .btn.icon { width: 40px; height: 40px; min-height: 40px; font-size: 16px; }
   body.deck-mode footer { display: none; }   /* Privacy/Terms stay reachable from ⚙ and on desktop */
   .tabs { grid-area: tabs; align-self: end; }
