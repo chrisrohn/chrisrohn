@@ -23,6 +23,7 @@ code { background: var(--card2); padding: 1px 5px; border-radius: 4px; }
 .muted { color: var(--muted); }
 .grow { flex: 1; }
 
+[hidden] { display: none !important; }   /* class display rules must never resurrect an element marked hidden */
 .top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 18px; padding: 10px 18px; background: linear-gradient(180deg, rgba(11,11,16,.98), rgba(11,11,16,.92)); border-bottom: 1px solid var(--line); backdrop-filter: blur(8px); flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 240px; }
 .ball { font-size: 30px; filter: drop-shadow(0 0 10px var(--accent)); }
@@ -231,8 +232,11 @@ body.guest .mode { color: var(--accent2); border-color: rgba(71,224,255,.4); }
 
 /* ---- phone polish: two-row header, one-row player, card never hides under the pinned thumbs ---- */
 @media (max-width: 760px) {
-  body.deck-mode .top { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand settings" "tabs actions"; align-items: center; row-gap: 8px; }
-  body.deck-mode .brand { grid-area: brand; }
+  body.deck-mode .top { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand brand" "tabs actions"; align-items: center; row-gap: 8px; }
+  /* the brand owns the whole first row (the ⚙ floats over its right end), so the title never wraps */
+  body.deck-mode .brand { grid-area: brand; padding-right: 48px; min-width: 0; }
+  body.deck-mode .brand h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .03em; font-size: clamp(12px, 3.9vw, 15px); }
+  body.deck-mode footer { display: none; }   /* Privacy/Terms stay reachable from ⚙ and on desktop */
   body.deck-mode .tabs { grid-area: tabs; }
   body.deck-mode .actions { grid-area: actions; margin-left: 0; justify-content: flex-end; }
   body.deck-mode .actions #settings-btn { grid-area: settings; position: absolute; right: 12px; top: 8px; }
