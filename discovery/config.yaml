@@ -163,7 +163,7 @@ profile:
 sources:
   listenbrainz_fresh:
     enabled: true
-    days: 10                 # look back (max 90)
+    days: 90                 # look back (max 90)
     min_listen_count: 0
   musicbrainz_tags:
     enabled: true
@@ -176,7 +176,7 @@ sources:
     per_tag: 60
   deezer:
     enabled: true
-    top_artists: 150         # check newest albums of your top N artists
+    top_artists: 500         # check newest albums of your top N artists
     related_per_artist: 0    # set >0 to also pull related artists' newest releases (slower)
     editorial_genres:        # Deezer editorial "new releases" feeds by genre id
       - 85    # Alternative
@@ -186,7 +186,7 @@ sources:
   # New singles/albums from your top artists, straight from YouTube Music (video IDs included; replaces Release Radar).
   ytmusic_artists:
     enabled: true
-    top_artists: 150          # checked per run, rotating through the pool so everyone gets covered every few days
+    top_artists: 500          # checked per run, rotating through the pool so everyone gets covered every few days
     pool: 600
   # Label / curator / session channels on YouTube. Free RSS per channel; wrong handles show up in ⚙ feed health.
   youtube_channels:
@@ -204,8 +204,7 @@ sources:
       - { name: "Cascine", channel: "@cascine" }
       - { name: "Majestic Casual", channel: "@majesticcasual" }
       - { name: "Eton Messy", channel: "@EtonMessy" }
-      - { name: "KEXP live sessions", channel: "@kexp" }
-      - { name: "COLORS", channel: "@COLORSxSTUDIOS" }
+
   # ListenBrainz "Weekly Exploration" / "Weekly Jams" — free collaborative filtering. Make a ListenBrainz account,
   # import your Last.fm history (Settings → Import), then put the username here.
   listenbrainz_playlists:
@@ -303,7 +302,7 @@ sources:
 
 # ---------- Ranking ----------
 ranking:
-  max_items: 500
+  max_items: 1000
   min_score: 0.6
   weights:
     affinity: 4.0          # direct artist match (Last.fm / seeds: you play them)
@@ -314,7 +313,7 @@ ranking:
     freshness: 1.0         # decays over `freshness_days`
     editorial: 1.5         # appeared in a curated feed (RSS/Bandcamp Daily/KEXP)
     listens: 0.4           # log10(listen_count) from ListenBrainz
-  freshness_days: 14
+  freshness_days: 1200
   # Hide anything already in your year playlists, saved or skipped from the site.
   hide_seen: true
 
