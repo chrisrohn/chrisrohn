@@ -27,6 +27,7 @@ export const SYNC_FILE = "newmusic-rated.json";
 export const STALE_AFTER_MS = 36 * 3600e3;   // the build runs daily; older than this and something upstream failed
 export const PENDING_MAX_MS = 10 * 60e3;      // an optimistic rating that never finished (tab closed mid-request)
 export const PAGE = 80;                       // cards rendered at a time in list view; more appear as you scroll
+export const BAD_VIDEO_MS = 30 * 86400e3;     // a video that would not embed is remembered this long, then tried again
 
 /** @returns {import("./types").Auth | null} */
 function loadAuth() {
@@ -41,13 +42,18 @@ export const state = {
   rated: LS.get("id:rated", {}),          // local mirror of what this account rated
   auth: loadAuth(),
   playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL...", "__loaded_at": ms}
-  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [] }, LS.get("id:settings", {})),   // deck: null = auto (phones)
+  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60 }, LS.get("id:settings", {})),   // deck: null = auto (phones)
+  badVideos: LS.get("id:badvideos", {}),   // videoId → when YouTube refused to embed it here (autoplay steps over these)
+  ratedVersion: 0,                          // bumps whenever `rated` is persisted with a change: the personal ranking recomputes
   deckIndex: 0,
   auditionTimer: null, auditionTick: null, auditionArmed: null,
   quota: LS.get("id:quota", { day: "", units: 0 }),   // YouTube API units spent today by this account's devices (resets midnight Pacific)
   // "new releases only" is on for a first visit: radio and recommendation sources surface catalogue too
-  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true }, LS.get("id:filters", {})),
+  // "shortlist" keeps the day to the top N (⚙ sets N); "show all" on the list or the deck lifts it for that visit
+  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true, shortlist: true }, LS.get("id:filters", {})),
   view: "feed",
+  shortlistHidden: 0,                       // how many tracks the shortlist is holding back under the current filters
+  focusId: null,                            // ?t=<id> from a permalink: focus that card once the feed is in
   order: [],
   currentId: null,
   rendered: 0,                                   // cards currently in the list (paged)
@@ -66,6 +72,10 @@ export const items = () => (state.feed && state.feed.items) || [];
 export const byId = id => items().find(i => i.id === id);
 /** A rating that still counts: an "undone" record is a tombstone, not a decision. @param {string} id */
 export const decisionFor = id => { const r = state.rated[id]; return r && r.decision !== "undone" ? r : null; };
+/** YouTube refused to embed this video here recently (error 101/150): the feed keeps it, autoplay steps over it. @param {string | null | undefined} vid */
+export const badVideo = vid => !!(vid && state.badVideos[vid] && Date.now() - state.badVideos[vid] < BAD_VIDEO_MS);
+/** @param {string} vid */
+export function markBadVideo(vid) { for (const [k, at] of Object.entries(state.badVideos)) if (Date.now() - at > BAD_VIDEO_MS) delete state.badVideos[k]; state.badVideos[vid] = Date.now(); persist(); }
 export const skipsInYouTube = () => state.settings.skipsInYouTube != null ? !!state.settings.skipsInYouTube : !!(state.feed && state.feed.youtube && state.feed.youtube.skips_in_youtube);
 
 // YouTube quota: 10,000 units/day, reset at midnight Pacific. Reads cost 1, writes cost 50. The count is per account
@@ -93,8 +103,8 @@ export function reconcileRated() {
 const written = {};
 export function persist() {
   const keep = { "id:rated": state.rated, "id:auth": state.auth && { email: state.auth.email, name: state.auth.name, picture: state.auth.picture, hash: state.auth.hash },
-    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync };
-  for (const [k, v] of Object.entries(keep)) { const j = JSON.stringify(v ?? null); if (written[k] !== j) { written[k] = j; LS.set(k, v ?? null); } }
+    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync, "id:badvideos": state.badVideos };
+  for (const [k, v] of Object.entries(keep)) { const j = JSON.stringify(v ?? null); if (written[k] !== j) { written[k] = j; LS.set(k, v ?? null); if (k === "id:rated") state.ratedVersion++; } }
   const tok = state.auth && state.auth.access_token ? { access_token: state.auth.access_token, expires_at: state.auth.expires_at } : null;
   const tj = JSON.stringify(tok); if (written["id:token"] !== tj) { written["id:token"] = tj; tok ? SS.set("id:token", tok) : SS.del("id:token"); }
 }

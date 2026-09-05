@@ -30,6 +30,9 @@ export async function shareTrack(it) {
   }
 }
 
+/** Copy a link or a line of text, with a toast either way. @param {string} text */
+export async function copyText(text) { try { await navigator.clipboard.writeText(text); toast("Link copied"); } catch { toast("Could not copy — the link is " + text, true); } }
+
 /** @type {any} */
 let toastTimer;
 /** @param {string} msg @param {boolean} [err] @param {{label: string, fn: () => void}} [action] */

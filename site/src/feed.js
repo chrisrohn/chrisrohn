@@ -5,7 +5,8 @@ import { $, $$, esc, relTime, range, toast } from "./dom.js";
 import { isSignedIn, isOwner, isCurator, tokenValid, emailHash, applyMode, ensureTokenClient, keepAlive } from "./auth.js";
 import { pullRatings } from "./sync.js";
 import { refreshRecent } from "./youtube.js";
-import { render } from "./render.js";
+import { render, deckOn, focusCard } from "./render.js";
+import { scoreOf, invalidateRank } from "./rank.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -17,6 +18,7 @@ const fetchFeed = () => fetch("data/feed.json", { cache: "no-cache" }).then(r =>
 /** @param {import("./types").Feed} feed */
 function absorb(feed) {
   state.feed = feed; loadedAt = Date.now();
+  hays.clear(); memo.clear(); invalidateRank();
   reconcileRated();
   if (isOwner()) {
     for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
@@ -35,6 +37,7 @@ export async function load() {
   state.ready = true; $("#settings-btn").disabled = false;
   applyMode();
   render();
+  openPermalink();
   if (isCurator() && tokenValid()) pullRatings().then(() => refreshRecent()).catch(() => {});
   if (isSignedIn()) ensureTokenClient().catch(() => {});
   document.addEventListener("pointerdown", keepAlive, { capture: true, passive: true });
@@ -52,6 +55,15 @@ export async function refreshFeed(force = false) {
   if (keep) { const i = state.order.indexOf(keep); if (i >= 0) { state.deckIndex = i; render(); } }
   toast(`Feed updated · ${feed.new_today} new today`);
   return true;
+}
+/** ?t=<id> (a share, the RSS feed): put that card on screen — by searching for it if the filters would hide it. */
+function openPermalink() {
+  const id = state.focusId; if (!id) return; state.focusId = null;
+  const it = byId(id); if (!it) { toast("That track is no longer in the feed", true); return; }
+  if (state.view !== "feed") { state.view = "feed"; $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === "feed")); render(); }
+  if (!state.order.includes(id)) searchFor(`${it.artist} ${it.display_title || it.title}`);   // the search index joins the fields with spaces
+  if (!state.order.includes(id)) { toast(`${credit(it)} is hidden by your filters`, true); return; }
+  if (deckOn()) { state.deckIndex = state.order.indexOf(id); render(); } else focusCard(id);
 }
 /** The track showing in the deck, so a refresh can stay on it. */
 function deckOnId() { const el = $("#deck-card .dcard"); return el ? /** @type {HTMLElement} */ (el).dataset.id : null; }
@@ -99,23 +111,59 @@ const sourceOn = s => {
   if (fam === "rss" && (state.filters.blogsOff || []).includes(s.slice(4))) return false;
   return true;
 };
+/* Search text per item, built once per feed rather than per keystroke. */
+/** @type {Map<string, string>} */
+const hays = new Map();
 /** @param {FeedItem} i */
-const hay = i => [i.artist, i.display_title || i.title, i.release, ...(i.tags || []), ...(i.reasons || [])].join(" ").toLowerCase();
+const hay = i => { let h = hays.get(i.id); if (h == null) { h = [i.artist, i.display_title || i.title, i.release, ...(i.tags || []), ...(i.reasons || [])].join(" ").toLowerCase(); hays.set(i.id, h); } return h; };
 /** @param {FeedItem} i */
 export const credit = i => i.display || `${i.artist} - ${i.display_title || i.title}`;
 /** @param {NonNullable<import("./types").Feed["picks"]>[number]} p @param {number} i @returns {FeedItem} */
 function pickAsItem(p, i) { return { id: "pick" + i, artist: p.artist, title: p.title, release: p.album, sources: [], tags: [], reasons: [], score: 0, youtube: p.videoId ? { videoId: p.videoId, thumbnail: p.thumbnail } : null, artwork: p.thumbnail, release_date: p.year ? String(p.year) : null, _pick: true, _year: p.year }; }
 
+/** A tag or an artist name on a card is a filter: the search box takes it, so it is visible and easy to clear. @param {string} text */
+export function searchFor(text) {
+  state.filters.q = text; $("#q").value = text; persist(); render();
+  // on a phone the filter strip is folded away: unfold it so the search box (and how to clear it) is in view
+  if (window.matchMedia("(max-width: 760px)").matches && !document.body.classList.contains("filters-open")) { document.body.classList.add("filters-open"); const b = $("#filters-more"); if (b) { b.textContent = "hide filters ▴"; b.setAttribute("aria-expanded", "true"); } }
+}
+
+/* The visible list is memoised on everything it depends on: filters, view, the feed build, the ratings and the
+ * embed blacklist. A render asks for both tabs' lists (the pills), a keystroke re-asks with one thing changed. */
+/** @type {Map<string, {list: FeedItem[], hidden: number}>} */
+const memo = new Map();
 /** @param {string} [view] @returns {FeedItem[]} */
-export function visibleItems(view = state.view) {
+export function visibleItems(view = state.view) { return computeVisible(view).list; }
+/** @param {string} view */
+function computeVisible(view) {
+  const key = `${view}|${JSON.stringify(state.filters)}|${state.ratedVersion}|${state.feed?.generated_at || ""}|${Object.keys(state.badVideos).length}`;
+  const hit = memo.get(key); if (hit) { if (view === "feed") state.shortlistHidden = hit.hidden; return hit; }
+  const res = { list: listFor(view), hidden: 0 };
+  const f = state.filters;
+  if (view === "feed" && f.shortlist && (f.sort === "score" || !f.sort) && !f.q) {
+    const n = Math.max(10, Number(state.settings.shortlistSize) || 60);
+    if (res.list.length > n) { res.hidden = res.list.length - n; res.list = res.list.slice(0, n); }
+  }
+  if (view === "feed") state.shortlistHidden = res.hidden;
+  if (memo.size > 8) memo.delete(/** @type {string} */ (memo.keys().next().value));
+  memo.set(key, res);
+  return res;
+}
+/** @param {string} view @returns {FeedItem[]} */
+function listFor(view) {
   const f = state.filters; const q = f.q.trim().toLowerCase();
   if (view === "picks") {
     const picks = (state.feed?.picks || []).map(pickAsItem);
     const mine = Object.entries(state.rated).filter(([, r]) => r.decision === "up").sort((a, b) => b[1].at - a[1].at)
-      .map(([id, r]) => byId(id) || /** @type {FeedItem} */ ({ id, artist: r.artist || "", title: r.title || "", sources: [], tags: [], reasons: [], score: 0, youtube: { videoId: r.videoId || null }, release_date: String(r.year), _pick: true, _year: r.year }));
+      .map(([id, r]) => byId(id) || /** @type {FeedItem} */ ({ id, artist: r.artist || "", title: r.title || "", sources: r.sources || [], tags: r.tags || [], reasons: [], score: 0, youtube: { videoId: r.videoId || null }, release_date: String(r.year), _pick: true, _year: r.year }));
     const seen = new Set(); /** @type {FeedItem[]} */ const all = [];
     for (const it of [...mine, ...picks]) { const k = ((it.youtube && it.youtube.videoId) || it.id); if (seen.has(k)) continue; seen.add(k); all.push({ ...it, _pick: true, _year: it._year || (state.rated[it.id] && state.rated[it.id].year) }); }
     return all.filter(i => !q || hay(i).includes(q));
+  }
+  if (view === "skipped") {
+    // what this account thumbed down and is still in the feed, newest skip first; Undo brings any of them back
+    return items().filter(i => decisionFor(i.id)?.decision === "down" && (!q || hay(i).includes(q)))
+      .sort((a, b) => (state.rated[b.id]?.at || 0) - (state.rated[a.id]?.at || 0)).map(i => ({ ...i, _skipped: true }));
   }
   const today = state.feed?.generated_at?.slice(0, 10); const lastYear = new Date().getFullYear() - 1;
   const list = items().filter(i => {
@@ -130,7 +178,8 @@ export function visibleItems(view = state.view) {
   });
   /** @type {Record<string, (a: FeedItem, b: FeedItem) => number>} */
   const cmp = {
-    score: (a, b) => b.score - a.score,
+    score: (a, b) => scoreOf(b) - scoreOf(a) || b.score - a.score,
+    raw: (a, b) => b.score - a.score,
     date: (a, b) => String(b.release_date || "").localeCompare(String(a.release_date || "")) || b.score - a.score,
     seen: (a, b) => String(b.first_seen || "").localeCompare(String(a.first_seen || "")) || b.score - a.score,
     artist: (a, b) => a.artist.localeCompare(b.artist),

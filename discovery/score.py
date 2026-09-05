@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 from datetime import date
 
+from .learn import adjustment
 from .models import Item
 from .util import log, norm, split_artists
 
@@ -49,8 +50,10 @@ def _match_artist(it: Item, profile: dict) -> tuple[dict | None, str | None]:
 def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
     r = cfg["ranking"]
     w = r["weights"]
-    fresh_days = float(r.get("freshness_days", 14))
+    fresh_days = float(r.get("freshness_days", 60))
+    undated = float(r.get("undated_freshness", 0.2))   # no date at all: less than anything released recently
     tags_w: dict[str, float] = profile["tags"]
+    learned = profile.get("learned")
     today = date.today()
 
     for it in items:
@@ -94,9 +97,14 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
             age = (today - it.release_date).days
             s += w["freshness"] * max(0.0, 1.0 - age / fresh_days)
         else:
-            s += w["freshness"] * 0.4
+            s += w["freshness"] * undated
         if it.youtube:
-            s += 0.3
+            s += float(w.get("playable", 0.3))
+        # what the curator actually kept: sources, blogs, tags and artists with a track record (see learn.py)
+        adj, why = adjustment(learned, it.sources, it.tags, it.artist)
+        if adj:
+            s += float(w.get("learned", 1.0)) * adj
+            reasons.extend(why)
         it.score = round(s, 3)
         it.reasons = reasons
     items.sort(key=lambda i: (-i.score, i.artist_norm))

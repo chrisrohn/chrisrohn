@@ -645,3 +645,92 @@ def test_decide_uses_the_stated_year():
     assert decide({"musicbrainz": 1998}, it)[:2] == (1998, "musicbrainz")   # a catalogue fact beats a stated year
     it.release_date, it.date_kind = date(2026, 9, 5), "sighting"
     assert decide({}, it)[:2] == (2026, "ytmusic-year")             # a sighting date never outranks the stated year
+
+
+def test_learn_from_history_moves_scores_without_quota(tmp_path):
+    from discovery import learn
+
+    hist = tmp_path / "history"
+    hist.mkdir()
+    today = date(2026, 9, 10)
+    shown = [
+        {"id": "k1", "v": "vk1", "a": "Jungle", "s": ["rss:Stereogum", "deezer"], "t": ["nu disco"]},
+        {"id": "k2", "v": "vk2", "a": "Roosevelt", "s": ["rss:Stereogum"], "t": ["nu disco"]},
+        {"id": "k3", "v": "vk3", "a": "Parcels", "s": ["rss:Stereogum"], "t": ["nu disco", "indie pop"]},
+        {"id": "s1", "v": "vs1", "a": "Metalhead", "s": ["musicbrainz"], "t": ["metal"]},
+        {"id": "p1", "v": "vp1", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
+        {"id": "p2", "v": "vp2", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
+        {"id": "p3", "v": "vp3", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
+    ]
+    util.write_json(hist / "2026-09-01.json", {"date": "2026-09-01", "ids": [r["id"] for r in shown], "items": shown})
+    # too recent to judge: inside the grace period, so it must not count as a pass
+    util.write_json(hist / "2026-09-09.json", {"date": "2026-09-09", "ids": ["fresh"], "items": [{"id": "fresh", "v": "vf", "a": "Jungle", "s": ["rss:Stereogum"], "t": ["nu disco"]}]})
+    # ancient history is ignored entirely
+    util.write_json(hist / "2026-01-01.json", {"date": "2026-01-01", "ids": ["old"], "items": [{"id": "old", "v": "vo", "a": "Jungle", "s": ["rss:Stereogum"], "t": ["nu disco"]}]})
+    saved = {"k1": {"videoId": "vk1", "decision": "up"}, "other-key": {"videoId": "vk2", "decision": "up"}, "k3": {"decision": "up"},
+             "s1": {"videoId": "vs1", "decision": "down"}}
+    profile = {"saved": saved}
+    cfg = {"learn": {"grace_days": 3, "prior": 2, "min_exposures": 2}}
+    learned = learn.learn_from_history(profile, cfg, hist, today=today)
+    assert learned["outcomes"] == 7 and learned["kept"] == 3 and learned["skipped"] == 1     # k2 matched by video id, k3 by key
+    assert learned["sources"]["rss:Stereogum"]["adj"] > 0 > learned["sources"]["musicbrainz"]["adj"]
+    assert learned["tags"]["nu disco"]["adj"] > 0 > learned["tags"]["metal"]["adj"]
+    assert learned["artists"]["nobody"]["adj"] < 0 and learned["artists"]["jungle"]["adj"] == 0   # one sighting: no opinion yet
+    up, why = learn.adjustment(learned, ["rss:Stereogum"], ["nu disco"], "Jungle")
+    down, why_down = learn.adjustment(learned, ["musicbrainz"], ["metal"], "Nobody")
+    assert up > 0 > down and any(w.startswith("you keep") for w in why) and any("rarely" in w or "passed" in w for w in why_down)
+    assert learn.adjustment(None, ["rss:Stereogum"], [], "x") == (0.0, [])
+    assert learn.adjustment(learn.learn([]), ["rss:Stereogum"], [], "x") == (0.0, [])
+    pub = learn.public_summary(learned)
+    assert "artists" not in pub and pub["sources"]["rss:Stereogum"]["k"] == 3 and pub["keep_rate"] == learned["keep_rate"]
+
+    # the same learning reaches the scores: a kept-from source outranks an otherwise identical pass-from source
+    prof = {**PROFILE, "learned": learned}
+    a = Item(artist="Someone New", title="A", kind="track", release_date=today, sources=["rss:Stereogum"], tags=["nu disco"])
+    b = Item(artist="Someone New", title="B", kind="track", release_date=today, sources=["musicbrainz"], tags=["nu disco"])
+    scored = score_items([a, b], prof, _cfg())
+    assert scored[0].title == "A" and any(r.startswith("you keep") for r in scored[0].reasons)
+
+
+def test_freshness_and_playable_are_configurable():
+    today = date.today()
+    cfg = _cfg()
+    cfg["ranking"]["freshness_days"] = 10
+    cfg["ranking"]["undated_freshness"] = 0.2
+    cfg["ranking"]["weights"]["playable"] = 0.0
+    fresh = Item(artist="Someone New", title="Now", kind="track", release_date=today, sources=["bandcamp"])
+    stale = Item(artist="Someone New", title="Then", kind="track", release_date=today - timedelta(days=30), sources=["bandcamp"])
+    undated = Item(artist="Someone New", title="When", kind="track", sources=["bandcamp"], youtube={"videoId": "v"})
+    score_items([fresh, stale, undated], PROFILE, cfg)
+    assert fresh.score > undated.score > stale.score      # an undated track sits below this week's release, above last month's
+    assert undated.score == pytest.approx(0.2)          # the playable bonus is off, so only the undated share remains
+
+
+def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandbox):
+    import discovery.build as build
+    from discovery import profile as prof
+
+    util.write_json(prof.PROFILE_PATH, PROFILE)
+    today = date.today()
+    fake = [Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["rss:Pitchfork", "bandcamp"], tags=["nu disco"], artwork="https://i/x.jpg")]
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake))
+
+    def fake_resolve(items, cfg, deadline=None):
+        for it in items:
+            it.youtube = {"videoId": "vid1", "title": it.title, "artists": ["Jungle"]}
+    monkeypatch.setattr(build, "resolve_all", fake_resolve)
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    monkeypatch.setattr(build, "Http", NoNet)
+    payload = build.build_feed(_cfg())
+    hist = util.read_json(sandbox / "site" / "data" / "history" / f"{today.isoformat()}.json", {})
+    assert hist["ids"] == [payload["items"][0]["id"]]
+    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"]}
+    assert payload["learned"]["outcomes"] == 0 and payload["learned"]["sources"] == {}
+    rss = (sandbox / "site" / "feed.xml").read_text()
+    assert "<pubDate>" in rss and "<lastBuildDate>" in rss and 'media:thumbnail url="https://i/x.jpg"' in rss
+    assert "score" not in rss.split("<item>")[1] and "<category>nu disco</category>" in rss and f"/?t={payload['items'][0]['id']}" in rss

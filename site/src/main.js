@@ -21,7 +21,7 @@ import { wirePwa, applyLaunchParams } from "./pwa.js";
 function wire() {
   $$(".tab").forEach(b => b.addEventListener("click", () => { state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b)); render(); }));
   const f = state.filters;
-  $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-playable").checked = f.onlyPlayable; $("#only-known").checked = f.onlyKnown; $("#only-recent").checked = f.onlyRecent;
+  $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-playable").checked = f.onlyPlayable; $("#only-known").checked = f.onlyKnown; $("#only-recent").checked = f.onlyRecent; $("#shortlist").checked = f.shortlist;
   /** @type {any} */ let qTimer;
   $("#q").addEventListener("input", (/** @type {any} */ e) => { f.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(() => { persist(); render(); }, 120); });
   $("#sort").addEventListener("change", (/** @type {any} */ e) => { f.sort = e.target.value; persist(); render(); });
@@ -29,6 +29,7 @@ function wire() {
   $("#only-playable").addEventListener("change", (/** @type {any} */ e) => { f.onlyPlayable = e.target.checked; persist(); render(); });
   $("#only-known").addEventListener("change", (/** @type {any} */ e) => { f.onlyKnown = e.target.checked; persist(); render(); });
   $("#only-recent").addEventListener("change", (/** @type {any} */ e) => { f.onlyRecent = e.target.checked; persist(); render(); });
+  $("#shortlist").addEventListener("change", (/** @type {any} */ e) => { f.shortlist = e.target.checked; persist(); render(); });
   $("#signin").addEventListener("click", () => { if (isSignedIn()) signOut(); else signIn().catch(e => toast(e.message, true)); });
   $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", () => { holdAudition(); toggle(); });
   $("#yt").addEventListener("click", holdAudition, true);

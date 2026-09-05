@@ -29,6 +29,7 @@ export function applyLaunchParams() {
   if (p.get("view") === "picks") { state.view = "picks"; $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === "picks")); }
   if (p.get("new") === "1") { state.filters.onlyNew = true; $("#only-new").checked = true; }
   if (p.get("audition") === "1") { state.settings.audition = true; const cb = $("#audition"); if (cb) cb.checked = true; }
+  if (p.get("t")) state.focusId = p.get("t");   // a card's own link (share, RSS): feed.js opens it once the feed is in
   if (p.has("view") || p.has("new") || p.has("audition")) persist();
   history.replaceState(null, "", location.pathname);
 }
