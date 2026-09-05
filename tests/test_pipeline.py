@@ -396,24 +396,21 @@ def test_discover_playlists_tolerant_titles_and_channel_from_author():
     assert years["1999"] == "PLTW5JZnPjE_rgIDfV4vL5g4EZ3SCc-R_d"             # pinned ids are never overridden by title matches
 
 
-def test_find_duplicates_groups_same_video_other_upload_and_cross_year():
+def test_find_duplicates_only_counts_the_exact_same_video():
     from discovery.profile import find_duplicates
-    from discovery.util import item_key
 
-    def e(year, vid, artist, title, pos):
-        return {"year": year, "playlistId": "PL" + year, "position": pos, "videoId": vid, "artist": artist, "title": title}
+    def e(year, artist, title, pos):
+        return {"year": year, "playlistId": "PL" + year, "position": pos, "artist": artist, "title": title}
 
     where = {
-        item_key("Dark Chisme", "Suffer Like Me"): [e("2026", "v1", "Dark Chisme", "Suffer Like Me", 3), e("2026", "v1", "Dark Chisme", "Suffer Like Me", 6)],
-        item_key("Jungle", "Back On 74"): [e("2023", "v2", "Jungle", "Back On 74", 0), e("2023", "v3", "Jungle", "Back On 74 (Official Video)", 9)],
-        item_key("Roosevelt", "Lovers"): [e("2016", "v4", "Roosevelt", "Lovers", 0), e("2017", "v4", "Roosevelt", "Lovers (2017 Remaster)", 1)],
-        item_key("Solo", "Fine"): [e("2026", "v5", "Solo", "Fine", 0)],
+        "v1": [e("2026", "Dark Chisme", "Suffer Like Me", 3), e("2026", "Dark Chisme", "Suffer Like Me", 6)],   # twice in one playlist
+        "v4": [e("2016", "Roosevelt", "Lovers", 0), e("2017", "Roosevelt", "Lovers (2017 Remaster)", 1)],       # same video, two years
+        "v2": [e("2023", "Jungle", "Back On 74", 0)],                                                             # another upload lives under v3
+        "v3": [e("2023", "Jungle", "Back On 74 (Official Video)", 9)],
     }
     out = find_duplicates(where)
-    kinds = {d["artist"]: d["kind"] for d in out}
-    assert kinds == {"Dark Chisme": "same-video", "Jungle": "other-upload", "Roosevelt": "cross-year"}
-    roosevelt = next(d for d in out if d["artist"] == "Roosevelt")
-    assert roosevelt["years"] == ["2017", "2016"] and roosevelt["count"] == 2 and out[0]["artist"] == "Dark Chisme"  # newest year first
+    assert [(d["videoId"], d["kind"], d["count"]) for d in out] == [("v1", "same-video", 2), ("v4", "cross-year", 2)]   # newest year first
+    assert out[1]["years"] == ["2017", "2016"] and all(x["videoId"] == "v4" for x in out[1]["entries"])
 
 
 def test_lb_identify_falls_back_and_records_status(monkeypatch):

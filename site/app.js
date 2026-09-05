@@ -218,7 +218,7 @@
           if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
           persist(); applyMode(); render();
           if (silent) { if (isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); return done(true); }
-          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); loadLibraryPlaylists().then(() => refreshRecent()).catch(() => {}); pullRatings(); }
+          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); pullRatings(); }   // year playlists are pinned: no library listing needed
           else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); pullRatings(); }
           else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
           done(true);
@@ -355,9 +355,6 @@
     const j = await yt("GET", "/playlistItems", { params: { part: "id", playlistId, videoId, maxResults: 50 } });
     return (j.items || []).map(i => i.id);
   }
-  const songNorm = t => (t || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\s*[\(\[](feat\.?|ft\.?|with|official|lyric|audio|visuali|video|hd|remaster|\d{4} remaster|deluxe|anniversary)[^\)\]]*[\)\]]/gi, "").replace(/\s+feat\.?\s.*$/i, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, " ").trim();
-  const sameSong = (a, b) => songNorm(a.artist) === songNorm(b.artist) && songNorm(a.title) === songNorm(b.display_title || b.title);
-
   // ---------- duplicates ----------
   // The daily build scans every year playlist; feed.json carries the counts, data/duplicates.json the full report.
   const dupCount = () => (isOwner() && state.feed.youtube && state.feed.youtube.duplicates_count) || 0;
@@ -376,7 +373,7 @@
   const dupeDone = (key, vid) => (state.settings.dupesDone || []).includes(key + ":" + (vid || ""));
   function markDupeDone(key, vid) { state.settings.dupesDone = [...(state.settings.dupesDone || []), key + ":" + (vid || "")].slice(-3000); }
   const dupOpen = d => !d.entries.every(e => dupeDone(d.key, e.videoId));
-  const KIND = { "same-video": "same video added twice", "other-upload": "two different uploads", "cross-year": "filed under two years" };
+  const KIND = { "same-video": "same video added twice", "cross-year": "same video in two years" };
   const wrongYear = (d, e) => d.verified_year && String(e.year) !== String(d.verified_year);
   function dupeFilters() {
     return { kind: $("#s-dupe-kind").value, year: $("#s-dupe-yr").value, q: $("#s-dupe-q").value.trim().toLowerCase() };
@@ -467,17 +464,14 @@
         n++;
         const sn = it.snippet || {}; const v = sn.resourceId && sn.resourceId.videoId; if (!v) continue;
         const artist = (sn.videoOwnerChannelTitle || "").replace(/\s*-\s*Topic$/i, "");
-        const k = "v:" + v; const nk = "n:" + songNorm(artist) + "|" + songNorm(sn.title);
-        for (const kk of [k, nk]) { const g = seen.get(kk) || []; g.push({ id: it.id, videoId: v, title: sn.title, artist }); seen.set(kk, g); }
+        const g = seen.get(v) || []; g.push({ id: it.id, videoId: v, title: sn.title, artist }); seen.set(v, g);
       }
       pageToken = j.nextPageToken;
     } while (pageToken);
-    const groups = [...seen.entries()].filter(([, g]) => g.length > 1);
-    const byVideo = groups.filter(([k]) => k.startsWith("v:"));
-    const byName = groups.filter(([k]) => k.startsWith("n:") && !byVideo.some(([, g]) => g.length === seen.get(k).length && g.every(x => seen.get(k).some(y => y.id === x.id))));
-    status.textContent = `${n} tracks in ${titleFor(year)} · ${byVideo.length} exact duplicate${byVideo.length === 1 ? "" : "s"} · ${byName.length} same-name`;
+    const byVideo = [...seen.entries()].filter(([, g]) => g.length > 1);
+    status.textContent = `${n} tracks in ${titleFor(year)} · ${byVideo.length} video${byVideo.length === 1 ? "" : "s"} added more than once`;
     const box = $("#s-dupes-live");
-    box.innerHTML = [...byVideo, ...byName].map(([k, g]) => `<div class="dupe"><div class="dupe-song"><b>${esc(g[0].artist)}</b> - ${esc(g[0].title)} <span class="muted">· ${k.startsWith("v:") ? "same video" : "same name, different uploads"} · ×${g.length}</span></div>
+    box.innerHTML = byVideo.map(([k, g]) => `<div class="dupe"><div class="dupe-song"><b>${esc(g[0].artist)}</b> - ${esc(g[0].title)} <span class="muted">· same video · ×${g.length}</span></div>
       <div class="dupe-entries">${g.map((x, i) => `<span class="chip"><a href="https://music.youtube.com/watch?v=${esc(x.videoId)}&list=${esc(pid)}" target="_blank" rel="noopener">▶ ${i + 1}</a> ${i ? `<button class="x" type="button" data-item="${esc(x.id)}" title="remove this copy">✕</button>` : "<span class=\"muted\">keep</span>"}</span>`).join("")}</div></div>`).join("") || `<span class="muted">No duplicates in ${esc(titleFor(year))} 🎉</span>`;
     $$("button[data-item]", box).forEach(b => b.addEventListener("click", async () => {
       if (!confirm("Remove this copy from the playlist? (50 quota units)")) return;
@@ -488,7 +482,8 @@
 
   // Hide things rated from another device since the last daily build: read the newest entries of the current-year + skipped playlists.
   async function refreshRecent() {
-    const ids = [state.playlists[String(new Date().getFullYear())], state.playlists.__skipped].filter(Boolean);
+    const y = String(new Date().getFullYear());
+    const ids = [knownYear(y) || state.playlists[y], state.playlists.__skipped].filter(Boolean);
     const seen = new Set();
     for (const pid of ids) {
       const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50 } }).catch(() => ({}));
@@ -532,11 +527,9 @@
     try {
       const pid = decision === "up" ? await playlistFor(String(year)) : await skippedPlaylist();
       if (decision === "up") {
-        // never file the same song twice: same video already in the playlist (1 quota unit), or the same
-        // artist + title already thumbed up today from another feed entry / device
-        const twin = Object.entries(state.rated).find(([k, r]) => k !== id && r.decision === "up" && r.artist && sameSong(r, it));
-        const present = twin ? [] : await playlistItemsFor(pid, vid);
-        if (twin || present.length) {
+        // never file the same video twice (1 quota unit to check)
+        const present = await playlistItemsFor(pid, vid);
+        if (present.length) {
           state.rated[id] = { ...state.rated[id], pending: false, duplicate: true, playlistId: pid };
           persist(); schedulePush(); state.busy.delete(id); render();
           toast(`Already in ${titleFor(year)} — ${credit(it)} was not added again`, false, { label: "Undo", fn: () => undo(id) });
@@ -641,7 +634,7 @@
     if (deckOn()) { list.innerHTML = ""; renderDeck(vis); }
     else { $("#deck").hidden = true;
     list.innerHTML = ""; const tpl = $("#card-tpl"); const frag = document.createDocumentFragment();
-    for (const it of vis) frag.appendChild(card(it, tpl));
+    vis.forEach((it, i) => { const el = card(it, tpl); if (i < 8) { const im = el.querySelector(".art img"); if (im) im.loading = "eager"; } frag.appendChild(el); });
     list.appendChild(frag); }
     const empty = $("#empty"); empty.hidden = vis.length > 0;
     empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : "No picks yet.";

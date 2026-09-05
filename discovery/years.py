@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from .models import Item
-from .util import CACHE_DIR, format_title, log, norm, norm_track, read_json, split_artists, write_json
+from .util import CACHE_DIR, format_title, item_key, log, norm, norm_track, read_json, split_artists, write_json
 
 YEAR_CACHE = CACHE_DIR / "years.json"
 CACHE_VERSION = 2
@@ -391,11 +391,12 @@ def annotate_duplicate_years(dups: list[dict], cfg: dict, http) -> int:
     looked = 0
     order = sorted(dups, key=lambda d: (0 if d.get("kind") == "cross-year" else 1, -int(d["years"][0]) if d.get("years") else 0))
     for d in order:
-        entry = cache.get(d["key"])
+        k = item_key(d["artist"], d["title"])          # same key the feed uses, so feed verifications come free
+        entry = cache.get(k)
         if (entry is None or entry.get("v") != CACHE_VERSION) and looked < budget and d.get("kind") == "cross-year":
             looked += 1
             entry = lookup_track(http, d["artist"], d["title"], cfg)
-            cache[d["key"]] = entry
+            cache[k] = entry
         if entry and entry.get("v") == CACHE_VERSION:
             y, src = decide_found(entry.get("found") or {})
             if y:
