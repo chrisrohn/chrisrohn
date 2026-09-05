@@ -238,43 +238,6 @@
     }
     return state.playlists.__skipped;
   }
-  // ---------- repair: merge duplicate year playlists (keeps the older/larger one, moves items, deletes the copy) ----------
-  async function mergeDuplicates() {
-    const lib = await loadLibraryPlaylists();
-    const groups = {};
-    for (const p of lib) { const y = yearFromTitle(p.title); if (y) (groups[y] ||= []).push(p); }
-    const plan = [];
-    for (const [y, ps] of Object.entries(groups)) {
-      const known = knownYear(y);
-      if (known) {
-        // the station playlist for this year is the one the build found on @indiedisco; anything else in MY library with that year is a stray copy
-        const drop = ps.filter(p => p.id !== known);
-        if (drop.length) plan.push({ year: y, keep: lib.find(p => p.id === known) || { id: known, title: titleFor(y) + " (station playlist)", count: "?" }, drop });
-      } else if (ps.length > 1) {
-        const sorted = [...ps].sort((a, b) => (a.desc.includes("chrisrohn.com") - b.desc.includes("chrisrohn.com")) || (b.count - a.count) || String(a.published).localeCompare(String(b.published)));
-        plan.push({ year: y, keep: sorted[0], drop: sorted.slice(1) });
-      }
-    }
-    if (!plan.length) { toast("No stray or duplicate year playlists found in this account."); return; }
-    const summary = plan.map(p => `${p.year}: keep “${p.keep.title}” (${p.keep.count} tracks), merge & delete ${p.drop.map(d => `“${d.title}” (${d.count})`).join(", ")}`).join("\n");
-    if (!confirm(`Merge duplicate year playlists?\n\n${summary}\n\nTracks from the copies are added to the kept playlist, then the copies are deleted. Costs ~${plan.reduce((n, p) => n + p.drop.reduce((m, d) => m + (Number(d.count) || 0) * 50 + 50, 0), 0)} quota units.`)) return;
-    let moved = 0, deleted = 0;
-    for (const p of plan) {
-      for (const d of p.drop) {
-        let pageToken;
-        do {
-          const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: d.id, maxResults: 50, pageToken } });
-          for (const it of j.items || []) { const vid = it.snippet.resourceId && it.snippet.resourceId.videoId; if (vid) { try { await addToPlaylist(p.keep.id, vid); moved++; } catch (e) { toast("Could not move a track: " + e.message, true); } } }
-          pageToken = j.nextPageToken;
-        } while (pageToken);
-        await yt("DELETE", "/playlists", { params: { id: d.id } }); deleted++;
-      }
-      state.playlists[p.year] = p.keep.id;
-    }
-    persist();
-    toast(`Merged ${moved} track(s) and deleted ${deleted} duplicate playlist(s).`);
-  }
-
   async function addToPlaylist(playlistId, videoId) {
     const j = await yt("POST", "/playlistItems", { params: { part: "snippet" }, body: { snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } } });
     return j.id;
@@ -661,7 +624,6 @@
     $("#s-skips").addEventListener("change", e => { state.settings.skipsInYouTube = e.target.checked; persist(); });
     $("#s-export").addEventListener("click", exportCsv);
     $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast(`Playlists reloaded: ${Object.keys(state.playlists).filter(k => !k.startsWith("__")).length} year playlists found`)).catch(e => toast(e.message, true)));
-    $("#s-merge").addEventListener("click", () => mergeDuplicates().catch(e => toast(e.message, true)));
     $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
