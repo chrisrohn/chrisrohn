@@ -88,7 +88,7 @@ export function renderDeck(vis) {
   const links = [];
   if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
-  $(".dlinks", el).innerHTML = links.join(" · ");
+  $(".dlinks", el).innerHTML = links.join("");
   addShare($(".dlinks", el), it);
   fillYearSelect($(".year", el), it);
   $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
@@ -128,7 +128,7 @@ function card(it, tpl) {
   if (!yt.videoId) links.push(`<a href="https://music.youtube.com/search?q=${encodeURIComponent(it.artist + " " + it.title)}" target="_blank" rel="noopener">search YT Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
   links.push(`<a href="https://www.last.fm/music/${encodeURIComponent(it.artist)}" target="_blank" rel="noopener">last.fm</a>`);
-  $(".links", el).innerHTML = links.join(" · ");
+  $(".links", el).innerHTML = links.join("");
   addShare($(".links", el), it);
   $(".score", el).textContent = it.score ? it.score.toFixed(1) : "";
   const ysel = $(".year", el);
@@ -151,7 +151,6 @@ function addShare(host, it) {
   if (!canShare()) return;
   const b = document.createElement("button"); b.type = "button"; b.className = "share"; b.textContent = "share"; b.title = "share this track";
   b.addEventListener("click", e => { e.stopPropagation(); shareTrack(it); });
-  if (host.childNodes.length) host.append(" · ");
   host.appendChild(b);
 }
 /** @param {HTMLElement} el @param {FeedItem} it @param {number} [threshold] */

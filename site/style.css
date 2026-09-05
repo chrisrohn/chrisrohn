@@ -66,12 +66,14 @@ b, strong { font-weight: 700; }
 
 /* ---------- header: the drawing's title strip ---------- */
 .top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 22px; padding: 12px 20px; background: var(--paper); border-top: 8px solid var(--ink); border-bottom: 3px solid var(--ink); flex-wrap: wrap; }
-.brand { display: flex; align-items: center; gap: 14px; min-width: 260px; }
+.brand { display: flex; align-items: center; gap: 14px; min-width: 200px; flex: 1 1 260px; }
+.brand > div { min-width: 0; }
 .ball { display: block; flex: none; width: 42px; height: 42px; border-radius: 50%; background: var(--accent); position: relative; overflow: hidden; box-shadow: 3px 3px 0 var(--ink); }
 .ball::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent 0 6px, var(--ink) 6px 7px), repeating-linear-gradient(90deg, transparent 0 6px, var(--ink) 6px 7px); opacity: .85; }
 .brand h1 { margin: 0; font: 800 20px/1 var(--sans); letter-spacing: -.02em; text-transform: uppercase; }
 .brand h1 a { color: inherit; text-decoration: none; }
-.sub { color: var(--muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; margin-top: 5px; }
+.sub { color: var(--muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 761px) { .top { flex-wrap: nowrap; } .tabs, .actions, .tools { flex: none; } }
 .tabs { display: flex; gap: 18px; align-self: stretch; align-items: stretch; }
 .tab { display: inline-flex; align-items: center; background: transparent; color: var(--muted); border: 0; border-bottom: 4px solid transparent; padding: 8px 2px 4px; margin-bottom: -12px; cursor: pointer; font: 700 13px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; text-decoration: none; }
 .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
@@ -79,6 +81,7 @@ b, strong { font-weight: 700; }
 .pill::before { content: "["; } .pill::after { content: "]"; }
 .tab.active .pill { color: var(--accent); }
 .actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.tools { display: flex; gap: 8px; align-items: center; }
 
 /* ---------- buttons: cast blocks with a hard shadow ---------- */
 .btn { font: 600 12px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .06em; background: var(--card); color: var(--ink); border: 2px solid var(--ink); border-radius: 0; padding: 8px 12px; cursor: pointer; box-shadow: 3px 3px 0 var(--ink); transition: transform .08s, box-shadow .08s, background-color .08s; }
@@ -90,8 +93,7 @@ b, strong { font-weight: 700; }
 .btn.up { color: var(--up); border-color: var(--up); }
 .btn.down { color: var(--down); border-color: var(--down); }
 .btn.small { padding: 3px 9px; font-size: 11px; }
-#settings-btn, #theme-btn { display: inline-flex; align-items: center; justify-content: center; font-size: 17px; line-height: 1; padding: 6px 10px; }
-#theme-btn { min-width: 38px; }
+.btn.icon { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; min-height: 38px; padding: 0; font-size: 17px; line-height: 1; }
 .btn, .tab, .art, .dart, .dplay, .sources-filter label, .chk, .share, details summary { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .btn, .tab, .share, .dplay { user-select: none; -webkit-user-select: none; }
 .art img, .dart img { -webkit-touch-callout: none; }   /* a long press on the art must not open the save-image sheet mid-swipe */
@@ -153,7 +155,10 @@ main { padding: 20px 20px 160px; max-width: 1200px; margin: 0 auto; }
 .title { font-size: 15px; margin-top: 2px; }
 .line3 { color: var(--muted); font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .reasons { color: var(--muted); font-size: 11px; margin-top: 4px; }
-.tags, .sources, .links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tags, .sources { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.links { display: flex; flex-wrap: wrap; align-items: baseline; row-gap: 4px; margin-top: 8px; }
+.links, .dlinks { overflow: hidden; margin-left: -8px; }
+.links > *, .dlinks > * { border-left: 1px solid var(--rule); padding-left: 9px; padding-right: 9px; margin-left: -1px; }
 .tag { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--hair); padding: 2px 6px; color: var(--muted); }
 .src { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border: 1px solid var(--hair); border-left: 3px solid var(--ink); color: var(--muted); }
 .src.listenbrainz { border-left-color: #eb743b; } .src.bandcamp { border-left-color: #1da0c3; } .src.musicbrainz { border-left-color: #ba478f; }
@@ -311,7 +316,7 @@ body.doc .tab { text-decoration: none; }
 .dwhy { font-size: 11px; color: var(--blue); }
 .dtags, .dsources { display: flex; gap: 5px; flex-wrap: wrap; }
 .drow { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
-.dlinks { font: 12px var(--mono); color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.dlinks { font: 12px var(--mono); color: var(--muted); display: flex; row-gap: 4px; flex-wrap: wrap; align-items: baseline; }
 .deck-actions { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 4px 0; }
 .btn.big { font: 700 15px/1 var(--mono); letter-spacing: .1em; padding: 16px 22px; border-width: 3px; box-shadow: 5px 5px 0 var(--ink); }
 .btn.big.play { font-size: 20px; padding: 14px 22px; background: var(--ink); color: var(--on-ink); }
@@ -355,20 +360,24 @@ body.doc .tab { text-decoration: none; }
 
 /* ---- phone polish: two-row header, one-row player, card never hides under the pinned thumbs ---- */
 @media (max-width: 760px) {
-  .top { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand brand" "tabs actions"; align-items: center; row-gap: 8px; }
-  /* the brand owns the whole first row (the ⚙ floats over its right end), so the title never wraps */
-  .brand { grid-area: brand; padding-right: 92px; min-width: 0; }
-  body.doc .brand { padding-right: 48px; }
-  .brand h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; font-size: clamp(12px, 3.9vw, 15px); }
+  .top { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand tools" "tabs actions"; align-items: center; row-gap: 6px; padding-bottom: 0; }
+  .brand { grid-area: brand; min-width: 0; align-self: center; }
+  .brand h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; font-size: clamp(12px, 3.5vw, 15px); }
+  .tools { grid-area: tools; gap: 6px; }
+  .tools .btn.icon { width: 40px; height: 40px; min-height: 40px; font-size: 16px; }
   body.deck-mode footer { display: none; }   /* Privacy/Terms stay reachable from ⚙ and on desktop */
-  .tabs { grid-area: tabs; }
-  .actions { grid-area: actions; margin-left: 0; justify-content: flex-end; }
-  .actions #settings-btn { grid-area: settings; position: absolute; right: 12px; top: 12px; }
-  .actions #theme-btn { position: absolute; right: 54px; top: 12px; }
-  body.doc .actions #theme-btn { right: 12px; }
-  .who img { width: 20px; height: 20px; }
+  .tabs { grid-area: tabs; align-self: end; }
+  .tabs .tab { min-height: 40px; padding: 8px 0 10px; margin-bottom: 0; border-bottom-width: 3px; }
+  .actions { grid-area: actions; margin-left: 0; justify-content: flex-end; align-self: center; padding-bottom: 6px; }
+  .who img { width: 26px; height: 26px; }
   .mode { padding: 3px 6px; font-size: 9px; }
-  #signin { padding: 5px 10px; font-size: 11px; white-space: nowrap; letter-spacing: .02em; }
+  #signin { padding: 6px 10px; font-size: 11px; white-space: nowrap; letter-spacing: .02em; min-height: 40px; }
+  /* signed in, the account cluster goes quiet: the tabs are the loud element on this row */
+  body.curator #signin, body.guest #signin { background: transparent; color: var(--ink); border-width: 1px; box-shadow: none; }
+  /* the deck's link row: links first on their own line, the year select below it */
+  .drow { flex-wrap: wrap; gap: 8px 10px; }
+  .dlinks { order: -1; flex: 1 1 100%; justify-content: flex-start; }
+  .dbody { gap: 7px; }
 
   .player { grid-template-columns: 64px 1fr; gap: 10px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); }
   .player-frame { width: 64px; align-self: center; box-shadow: 2px 2px 0 var(--accent); }
@@ -428,7 +437,7 @@ select.year.attention { animation: attention .5s ease 2; }
   input[type=checkbox] { width: 20px; height: 20px; }
   .sources-filter label { min-height: 40px; padding: 6px 12px 6px 8px; }
   .sources-filter .all { min-height: 40px; padding: 0 8px; }
-  .links a, .dlinks a, .share { display: inline-block; padding: 6px 0; }
+  .links a, .dlinks a, .share { display: inline-block; padding-top: 6px; padding-bottom: 6px; }
   .year { min-height: 40px; }
   .dupe .x { font-size: 18px; padding: 6px 8px; }
   details summary { padding: 8px 0; }
