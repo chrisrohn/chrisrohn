@@ -1,7 +1,8 @@
 """Music-blog / radio RSS feeds (Pitchfork, Gorilla vs. Bear, Stereogum, Hype Machine, KEXP, Bandcamp Daily...).
 
-Headlines are parsed into (artist, track) when they look like `Artist – "Track"`. Anything that can't be parsed
-is kept only if the headline mentions an artist from the profile.
+Headlines become cards only when they are about one song: `Artist – "Track"`, or `Artist shares new single "Track"`
+with a known artist opening the headline (see discovery/headlines.py). News, listicles, interviews, tour dates and
+the like are dropped, however many artist names they mention.
 """
 from __future__ import annotations
 
@@ -11,8 +12,9 @@ from datetime import date, timedelta
 
 import feedparser
 
+from ..headlines import headline_track
 from ..models import Item
-from ..util import BROWSER_USER_AGENT, Http, log, norm, parse_artist_title, parse_date, safe_url, struct_time_to_date
+from ..util import BROWSER_USER_AGENT, Http, log, norm, parse_date, safe_url, struct_time_to_date
 from . import report
 
 STRIP_HTML = re.compile(r"<[^>]+>")
@@ -54,24 +56,14 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
             summary = re.sub(r"\s+", " ", summary)[:280]
             tags = [norm(t.get("term")) for t in (entry.get("tags") or []) if t.get("term")]
 
-            pair = parse_artist_title(title)
-            artist = track = None
-            if pair:
-                artist, track = pair
-            else:
-                # fall back: does the headline name someone we know?
-                lower = norm(title)
-                for key, e in artists.items():
-                    if len(key) > 3 and key not in feed_words and re.search(rf"\b{re.escape(key)}\b", lower):
-                        artist = e["name"]
-                        break
-                if not artist:
-                    continue
-                track = title
+            hit = headline_track(title, artists, feed_words)
+            if not hit:
+                continue
+            artist, track, kind = hit
             out.append(Item(
                 artist=artist,
                 title=track,
-                kind="track" if pair else "release",
+                kind=kind,
                 release_date=when, date_kind="sighting",
                 tags=tags,
                 sources=[f"rss:{name}"],

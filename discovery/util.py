@@ -282,7 +282,8 @@ def parse_artist_title(text: str) -> tuple[str, str] | None:
         return None
     t = re.sub(r"\s+", " ", text).strip()
     t = re.sub(r"^(new music|listen|premiere|watch|stream|hear|video|track review|song of the day)\s*[:\-–—]\s*", "", t, flags=re.I)
-    m = re.match(r"^(?P<a>.+?)\s+[-–—:]\s+[\"“']?(?P<t>.+?)[\"”']?\s*(\([^)]*\))?$", t)
+    # "Artist – Song", "Artist :: Song" (Aquarium Drunkard), or 'Artist: "Song"' — a bare colon is a headline, not a credit
+    m = re.match(r"^(?P<a>.+?)(?:\s+[-–—]\s+|\s*::\s*|:\s+(?=[\"“]))[\"“']?(?P<t>.+?)[\"”']?\s*(\([^)]*\))?$", t)
     if not m:
         m = re.match(r"^(?P<a>.+?)\s+[\"“](?P<t>[^\"”]+)[\"”]", t)
     if not m:

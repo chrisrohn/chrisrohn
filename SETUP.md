@@ -186,7 +186,7 @@ All in `discovery/config.yaml → sources`, each with an `enabled` switch. Per-f
 | `deezer` | newest albums of your top artists + editorial new releases | nothing |
 | `radio` | recent KEXP plays (API) and SomaFM channel logs, profile-matched | nothing |
 | `listenbrainz_playlists` | ListenBrainz Weekly Exploration / Weekly Jams (collaborative filtering) | a ListenBrainz username with your Last.fm history imported |
-| `rss` | 40+ blogs and radio shows; `Artist – "Song"` headlines become cards | nothing |
+| `rss` | 40+ blogs and radio shows; `Artist – "Song"` and `Artist shares new single "Song"` headlines become cards, news never does (`discovery/headlines.py`) | nothing |
 | `spotify` | off; Spotify's API is no longer viable | Premium + dev app |
 
 ## Tuning
@@ -196,7 +196,9 @@ Everything lives in `discovery/config.yaml`:
 - `profile.tag_boosts` / `tag_penalties` — push genres up or down.
 - `profile.seed_artists` — hand-add artists Last.fm under-counts.
 - `sources.*.tags` — the Bandcamp and MusicBrainz genre lists (this replaces the "Edge of <genre>" playlists).
-- `sources.rss.feeds` — add any blog/radio RSS; headlines like `Artist – "Song"` become playable cards.
+- `sources.rss.feeds` — add any blog/radio RSS; headlines like `Artist – "Song"` or `Artist shares "Song"` become
+  playable cards. Tour dates, interviews, listicles, obituaries and the rest are dropped by `discovery/headlines.py`
+  (its `NEWS` pattern is the place to add a cue if a kind of post still slips through).
 - `ranking.weights` — how much artist affinity vs. tags vs. editorial picks vs. freshness vs. what you kept matter;
   `freshness_days` is how long a release keeps its freshness bonus, `undated_freshness` what a dateless item gets.
 - `learn` — the outcome learning: `grace_days` before a shown track is judged, `pass_weight` for tracks never filed,

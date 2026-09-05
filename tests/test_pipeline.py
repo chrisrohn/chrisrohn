@@ -137,6 +137,7 @@ def test_bandcamp_and_rss_sources(monkeypatch):
             <item><title>Roosevelt – &quot;Lovers&quot;</title><link>https://blog/1</link><pubDate>%s</pubDate><description>A shimmering new single.</description></item>
             <item><title>Some Unrelated News</title><link>https://blog/2</link></item>
             <item><title>Jungle announce tour</title><link>https://blog/3</link></item>
+            <item><title>Jungle Share New Single “Candle Flame”</title><link>https://blog/4</link></item>
             </channel></rss>""" % date.today().strftime("%a, %d %b %Y 10:00:00 GMT")
 
     cfg = _cfg()
@@ -146,7 +147,8 @@ def test_bandcamp_and_rss_sources(monkeypatch):
     cfg["sources"]["rss"]["feeds"] = [{"name": "Blog", "url": "https://blog/feed"}]
     entries = rss.fetch(cfg, PROFILE, FakeHttp())
     got = {(i.artist, i.title) for i in entries}
-    assert ("Roosevelt", "Lovers") in got and ("Jungle", "Jungle announce tour") in got and len(entries) == 2
+    # a headline is a card only when it is about one song: tour news never is, however well we know the band
+    assert got == {("Roosevelt", "Lovers"), ("Jungle", "Candle Flame")} and len(entries) == 2
     assert all(i.editorial for i in entries)
 
 
@@ -734,3 +736,40 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
     rss = (sandbox / "site" / "feed.xml").read_text()
     assert "<pubDate>" in rss and "<lastBuildDate>" in rss and 'media:thumbnail url="https://i/x.jpg"' in rss
     assert "score" not in rss.split("<item>")[1] and "<category>nu disco</category>" in rss and f"/?t={payload['items'][0]['id']}" in rss
+
+
+def test_headlines_become_cards_only_when_they_are_about_a_song():
+    from discovery.headlines import headline_track, looks_like_news
+
+    artists = {"chat": {"name": "Chat"}, "system": {"name": "The System"}, "years": {"name": "The Years"}, "trip": {"name": "Trip"},
+               "fontaines d c": {"name": "Fontaines D.C."}, "m83": {"name": "M83"}, "pet shop boys": {"name": "Pet Shop Boys"}, "beyonce": {"name": "Beyoncé"},
+               "julia jacklin": {"name": "Julia Jacklin"}, "clash": {"name": "The Clash"}}
+    news = [
+        "Wheel of Fortune’s Jim Thornton Suspended for Allegedly Viewing Pedophile Support Chat Room",
+        "System of a Down Unveil Toxicity 25th Anniversary Reissue and Merch Capsule",
+        "Bruce Campbell Reveals He Has About Five Years to Live",
+        "Burning Man Sees Fourth Death In Four Years, Festival Gate Closed Again Due To Weather",
+        "Best New Albums this week: girlfriend., Cyst (Iglooghost), corto.alto, Last Apollo, Chat Pile",
+        "Trip Tease drops dreamy, 11-track debut album ‘Durango’ via clipp.art",     # the artist is Trip Tease, not Trip
+        "Maribou State: We want proper time to reset physically and mentally",
+        "Beyoncé Shares B’Day Selena Mashup Amid Escalating Dispute Between Late Singer’s Siblings",
+        "Fontaines D.C. add second Slane Castle gig due to demand",
+        "The Nialler9 Dublin Gig Guide: A$AP Rocky, Jack White, Marie Davidson",
+        "Live Review: Blood Orange and more at Rally, London, 29 August 2026",
+        "Clash Meets Quadeca: I Like Keeping Busy",
+        "14 Best Songs of the Week: Interpol, Aluminum, Disgusting Sisters",
+        "Aziz Ansari announce fall tour dates",
+        "Crosby, Stills & Nash (Rhino High Fidelity Vinyl Reissue)",
+    ]
+    for h in news:
+        assert headline_track(h, artists, {"clash"}) is None, h
+    assert headline_track('Jungle – "Keep Moving"', artists) == ("Jungle", "Keep Moving", "track")
+    assert headline_track('Watch: Roosevelt - "Lovers" (Official Video)', artists) == ("Roosevelt", "Lovers", "track")
+    assert headline_track("Nighttime :: Looking Glass", artists) == ("Nighttime", "Looking Glass", "track")
+    assert headline_track('Roosevelt: "Lovers"', artists) == ("Roosevelt", "Lovers", "track")
+    assert headline_track("M83 Shares New Song “Blister Sunrise”", artists) == ("M83", "Blister Sunrise", "track")
+    assert headline_track("Fontaines D.C. announce new album ‘Dopamine Chamber,’ share ‘Marianne,’", artists) == ("Fontaines D.C.", "Marianne", "track")
+    assert headline_track("Pet Shop Boys announce new album ‘A Man From The Future’", artists) == ("Pet Shop Boys", "A Man From The Future", "release")
+    assert headline_track("Julia Jacklin Performs on Top of a Skyscraper in the Video for New Song “The Hardest Thing”", artists) == ("Julia Jacklin", "The Hardest Thing", "track")
+    assert headline_track("M83 Shares Surprise New Album It’s Nothing Personal", artists) is None      # no quoted title: nothing to file
+    assert looks_like_news("Modeselektor Dublin DJ set announced") and not looks_like_news("Blister Sunrise")
