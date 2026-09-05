@@ -126,6 +126,13 @@
     <p class="muted" id="s-playlists"></p>
     <p class="muted" id="s-quota"></p>
     <p class="muted curator" id="s-sync"></p>
+    <details class="curator" id="s-dupes-details">
+      <summary class="muted" id="s-dupes-summary">Duplicate check</summary>
+      <p class="muted">Every 👍 first checks the target playlist, so the same song is never added twice. The daily build also scans all year playlists for the same video added twice, a second upload of the same song, or one song filed under two years.</p>
+      <div id="s-dupes" class="dupes"></div>
+      <div class="row"><select id="s-dupe-year"></select><button class="btn ghost" type="button" id="s-dupe-scan">Scan this year now</button><span class="muted" id="s-dupe-status"></span></div>
+      <div id="s-dupes-live" class="dupes"></div>
+    </details>
     <p class="muted owner" id="s-guests"></p>
     <details><summary class="muted">Blog feed health (tracks kept / posts seen in the last build)</summary><div id="s-feeds" class="feeds"></div></details>
     <div class="row">

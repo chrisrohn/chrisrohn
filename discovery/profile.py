@@ -192,12 +192,30 @@ def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str |
     return found, skipped, channel
 
 
+def find_duplicates(where: dict[str, list[dict]]) -> list[dict]:
+    """Songs present more than once: the same video added twice, a second upload of the same song, or the same
+    song filed under two different years. Groups are keyed by normalised artist + title (feat./remaster noise
+    stripped), so a remix stays distinct from the original."""
+    out: list[dict] = []
+    for k, entries in where.items():
+        if len(entries) < 2:
+            continue
+        years = sorted({e["year"] for e in entries}, reverse=True)
+        vids = [e["videoId"] for e in entries if e.get("videoId")]
+        kind = "cross-year" if len(years) > 1 else ("same-video" if len(set(vids)) == 1 else "other-upload")
+        first = entries[0]
+        out.append({"key": k, "artist": first["artist"], "title": first["title"], "kind": kind, "years": years, "count": len(entries),
+                    "entries": [{"year": e["year"], "playlistId": e["playlistId"], "videoId": e["videoId"], "position": e["position"]} for e in entries]})
+    out.sort(key=lambda d: (d["years"][0], d["artist"].lower(), d["title"].lower()), reverse=True)
+    return out
+
+
 def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict], list[dict], dict]:
     """Read your public year playlists (no auth) → artist counts, saved/skipped keys, recent picks, playlist map."""
     artists: dict[str, float] = defaultdict(float)
     saved: dict[str, dict] = {}
     picks: list[dict] = []
-    meta: dict = {"years": {}, "skipped": None, "channel": None}
+    meta: dict = {"years": {}, "skipped": None, "channel": None, "duplicates": [], "checked_at": None}
     try:
         from ytmusicapi import YTMusic
     except ImportError:
@@ -207,6 +225,7 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
     meta.update({"years": years, "skipped": skipped, "channel": channel})
     picks_n = int((cfg.get("youtube_music") or {}).get("picks_count", 40))
     current = str(date.today().year)
+    where: dict[str, list[dict]] = {}   # song key → every playlist entry it appears in (across all years)
     for year, pid in sorted(years.items(), reverse=True):
         try:
             pl = yt.get_playlist(pid, limit=None)
@@ -215,13 +234,16 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
             continue
         tracks = pl.get("tracks") or []
         weight = 1.0 + 0.25 * max(0, int(year) - 2023) if str(year).isdigit() else 1.0
-        for t in tracks:
+        for pos, t in enumerate(tracks):
             title = t.get("title") or ""
             names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
             for nme in names:
                 artists[nme] += weight
             if names:
-                saved[item_key(names[0], title)] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId"), "decision": "up"}
+                k = item_key(names[0], title)
+                saved[k] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId"), "decision": "up"}
+                where.setdefault(k, []).append({"year": year, "playlistId": pid, "position": pos, "videoId": t.get("videoId"),
+                                                "artist": names[0], "title": title})
         if year == current:
             for t in tracks[-picks_n:][::-1]:
                 names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
@@ -229,6 +251,10 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
                 picks.append({"artist": names[0] if names else "", "title": t.get("title") or "", "videoId": t.get("videoId"),
                               "year": year, "thumbnail": thumbs[-1]["url"] if thumbs else None, "album": (t.get("album") or {}).get("name")})
         log.info("playlist %s: %d tracks", year, len(tracks))
+    meta["duplicates"] = find_duplicates(where)
+    meta["checked_at"] = utcnow().isoformat()
+    if meta["duplicates"]:
+        log.warning("%d duplicated songs across the year playlists", len(meta["duplicates"]))
     if skipped:
         try:
             pl = yt.get_playlist(skipped, limit=None)

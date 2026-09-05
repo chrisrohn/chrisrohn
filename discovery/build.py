@@ -68,6 +68,9 @@ def build_feed(cfg: dict) -> dict:
             "skipped_playlist_id": (profile.get("youtube") or {}).get("skipped") or ycfg.get("skipped_playlist_id") or "",
             "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
             "channel_id": (profile.get("youtube") or {}).get("channel") or ycfg.get("channel_id") or "",
+            # songs that appear more than once across the year playlists (same video twice, another upload, or two years)
+            "duplicates": (profile.get("youtube") or {}).get("duplicates") or [],
+            "duplicates_checked_at": (profile.get("youtube") or {}).get("checked_at"),
         },
         "picks": profile.get("picks") or [],
         "feed_health": _feed_health(),

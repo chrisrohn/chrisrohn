@@ -164,6 +164,7 @@
     const on = isCurator();
     document.body.classList.toggle("curator", on);
     document.body.classList.toggle("guest", on && !isOwner());
+    noticeDupes();
     const badge = $(".mode"); if (badge) { badge.textContent = role(); badge.title = isOwner() ? "Curator: thumbs file into the Indie Discotheque year playlists" : `Guest: thumbs file into your own “${titleFor("<year>")}” playlists`; }
     const who = $("#who");
     if (state.auth && state.auth.email) {
@@ -319,6 +320,87 @@
     return j.id;
   }
   async function removePlaylistItem(playlistItemId) { await yt("DELETE", "/playlistItems", { params: { id: playlistItemId } }); }
+  // every playlist item holding this video (1 quota unit) — the duplicate guard and the cleanup tool both use it
+  async function playlistItemsFor(playlistId, videoId) {
+    const j = await yt("GET", "/playlistItems", { params: { part: "id", playlistId, videoId, maxResults: 50 } });
+    return (j.items || []).map(i => i.id);
+  }
+  const songNorm = t => (t || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\s*[\(\[](feat\.?|ft\.?|with|official|lyric|audio|visuali|video|hd|remaster|\d{4} remaster|deluxe|anniversary)[^\)\]]*[\)\]]/gi, "").replace(/\s+feat\.?\s.*$/i, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, " ").trim();
+  const sameSong = (a, b) => songNorm(a.artist) === songNorm(b.artist) && songNorm(a.title) === songNorm(b.display_title || b.title);
+
+  // ---------- duplicates ----------
+  function noticeDupes() {
+    const list = dupes().filter(d => !d.entries.every(e => dupeDone(d.key, e.videoId)));
+    const stamp = (state.feed.youtube || {}).duplicates_checked_at || "";
+    if (!list.length || state.settings.dupesNoticed === stamp) return;
+    state.settings.dupesNoticed = stamp; persist();
+    setTimeout(() => toast(`⚠ ${list.length} duplicated song${list.length === 1 ? "" : "s"} in the year playlists`, true, { label: "Review", fn: () => { $("#settings-btn").click(); $("#s-dupes-details").open = true; } }), 2500);
+  }
+  const dupes = () => (isOwner() && state.feed.youtube && state.feed.youtube.duplicates) || [];
+  const dupeDone = (key, vid) => (state.settings.dupesDone || []).includes(key + ":" + (vid || ""));
+  function markDupeDone(key, vid) { state.settings.dupesDone = [...(state.settings.dupesDone || []), key + ":" + (vid || "")].slice(-500); persist(); }
+  function renderDupes() {
+    const box = $("#s-dupes"); if (!box) return;
+    const list = dupes().filter(d => !d.entries.every(e => dupeDone(d.key, e.videoId)));
+    const yt0 = state.feed.youtube || {};
+    $("#s-dupes-summary").textContent = list.length
+      ? `⚠ ${list.length} duplicated song${list.length === 1 ? "" : "s"} in the year playlists (found by the daily build${yt0.duplicates_checked_at ? " " + relTime(new Date(yt0.duplicates_checked_at)) : ""})`
+      : `Duplicate check: none found by the last build${yt0.duplicates_checked_at ? " (" + relTime(new Date(yt0.duplicates_checked_at)) + ")" : ""}`;
+    const sel = $("#s-dupe-year");
+    if (!sel.options.length) { const cur = new Date().getFullYear(); sel.innerHTML = (state._years || []).map(y => `<option value="${y}" ${y === cur ? "selected" : ""}>${y}</option>`).join(""); }
+    const KIND = { "same-video": "same video added twice", "other-upload": "two different uploads", "cross-year": "filed under two years" };
+    box.innerHTML = list.map(d => `<div class="dupe" data-key="${esc(d.key)}">
+        <div class="dupe-song"><b>${esc(d.artist)}</b> - ${esc(d.title)} <span class="muted">· ${KIND[d.kind] || d.kind} · ×${d.count}</span></div>
+        <div class="dupe-entries">${d.kind === "same-video"
+          ? `<span class="chip">${esc(d.entries[0].year)} <a href="https://music.youtube.com/watch?v=${esc(d.entries[0].videoId)}&list=${esc(d.entries[0].playlistId)}" target="_blank" rel="noopener">▶</a></span><button class="btn ghost small" type="button" data-fix="extra" data-pid="${esc(d.entries[0].playlistId)}" data-vid="${esc(d.entries[0].videoId)}">remove the extra copy</button>`
+          : d.entries.map(e => `<span class="chip">${esc(e.year)} <a href="https://music.youtube.com/watch?v=${esc(e.videoId)}&list=${esc(e.playlistId)}" target="_blank" rel="noopener">▶</a> <button class="x" type="button" title="remove from ${esc(e.year)}" data-fix="one" data-pid="${esc(e.playlistId)}" data-vid="${esc(e.videoId)}" data-year="${esc(e.year)}">✕</button></span>`).join("")}</div>
+      </div>`).join("");
+    $$("button[data-fix]", box).forEach(b => b.addEventListener("click", () => fixDupe(b)));
+  }
+  async function fixDupe(btn) {
+    const row = btn.closest(".dupe"); const key = row.dataset.key; const { pid, vid, fix, year } = btn.dataset;
+    const d = dupes().find(x => x.key === key) || {};
+    const what = fix === "extra" ? `Remove the extra copy of “${d.artist} - ${d.title}” (keeps one)?` : `Remove “${d.artist} - ${d.title}” from ${year}? (50 quota units)`;
+    if (!confirm(what)) return;
+    btn.disabled = true;
+    try {
+      const ids = await playlistItemsFor(pid, vid);
+      const victims = fix === "extra" ? ids.slice(1) : ids;
+      for (const i of victims) await removePlaylistItem(i);
+      if (fix === "extra") d.entries.forEach(e => markDupeDone(key, e.videoId)); else markDupeDone(key, vid);
+      toast(victims.length ? `Removed ${victims.length} · ${d.artist} - ${d.title}` : "Nothing to remove — already cleaned up");
+      renderDupes();
+    } catch (e) { btn.disabled = false; toast("Could not remove: " + e.message, true); }
+  }
+  // Live scan of one year playlist (1 quota unit per 50 tracks): catches today's double-taps before the nightly build does.
+  async function scanYear(year) {
+    const pid = knownYear(year) || state.playlists[String(year)]; if (!pid) throw new Error("no playlist id for " + year);
+    const status = $("#s-dupe-status"); status.textContent = "scanning…";
+    const seen = new Map(); let pageToken, n = 0;
+    do {
+      const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50, pageToken } });
+      for (const it of j.items || []) {
+        n++;
+        const sn = it.snippet || {}; const v = sn.resourceId && sn.resourceId.videoId; if (!v) continue;
+        const artist = (sn.videoOwnerChannelTitle || "").replace(/\s*-\s*Topic$/i, "");
+        const k = "v:" + v; const nk = "n:" + songNorm(artist) + "|" + songNorm(sn.title);
+        for (const kk of [k, nk]) { const g = seen.get(kk) || []; g.push({ id: it.id, videoId: v, title: sn.title, artist }); seen.set(kk, g); }
+      }
+      pageToken = j.nextPageToken;
+    } while (pageToken);
+    const groups = [...seen.entries()].filter(([, g]) => g.length > 1);
+    const byVideo = groups.filter(([k]) => k.startsWith("v:"));
+    const byName = groups.filter(([k]) => k.startsWith("n:") && !byVideo.some(([, g]) => g.length === seen.get(k).length && g.every(x => seen.get(k).some(y => y.id === x.id))));
+    status.textContent = `${n} tracks in ${titleFor(year)} · ${byVideo.length} exact duplicate${byVideo.length === 1 ? "" : "s"} · ${byName.length} same-name`;
+    const box = $("#s-dupes-live");
+    box.innerHTML = [...byVideo, ...byName].map(([k, g]) => `<div class="dupe"><div class="dupe-song"><b>${esc(g[0].artist)}</b> - ${esc(g[0].title)} <span class="muted">· ${k.startsWith("v:") ? "same video" : "same name, different uploads"} · ×${g.length}</span></div>
+      <div class="dupe-entries">${g.map((x, i) => `<span class="chip"><a href="https://music.youtube.com/watch?v=${esc(x.videoId)}&list=${esc(pid)}" target="_blank" rel="noopener">▶ ${i + 1}</a> ${i ? `<button class="x" type="button" data-item="${esc(x.id)}" title="remove this copy">✕</button>` : "<span class=\"muted\">keep</span>"}</span>`).join("")}</div></div>`).join("") || `<span class="muted">No duplicates in ${esc(titleFor(year))} 🎉</span>`;
+    $$("button[data-item]", box).forEach(b => b.addEventListener("click", async () => {
+      if (!confirm("Remove this copy from the playlist? (50 quota units)")) return;
+      b.disabled = true;
+      try { await removePlaylistItem(b.dataset.item); b.closest(".chip").remove(); toast("Removed"); } catch (e) { b.disabled = false; toast(e.message, true); }
+    }));
+  }
 
   // Hide things rated from another device since the last daily build: read the newest entries of the current-year + skipped playlists.
   async function refreshRecent() {
@@ -357,6 +439,18 @@
     }
     try {
       const pid = decision === "up" ? await playlistFor(String(year)) : await skippedPlaylist();
+      if (decision === "up") {
+        // never file the same song twice: same video already in the playlist (1 quota unit), or the same
+        // artist + title already thumbed up today from another feed entry / device
+        const twin = Object.entries(state.rated).find(([k, r]) => k !== id && r.decision === "up" && r.artist && sameSong(r, it));
+        const present = twin ? [] : await playlistItemsFor(pid, vid);
+        if (twin || present.length) {
+          state.rated[id] = { ...state.rated[id], pending: false, duplicate: true, playlistId: pid };
+          persist(); schedulePush(); state.busy.delete(id); render();
+          toast(`Already in ${titleFor(year)} — ${credit(it)} was not added again`, false, { label: "Undo", fn: () => undo(id) });
+          return;
+        }
+      }
       const itemId = await addToPlaylist(pid, vid);
       state.rated[id] = { ...state.rated[id], playlistItemId: itemId, playlistId: pid, pending: false };
       persist(); schedulePush();
@@ -696,8 +790,10 @@
       const rows = Object.entries(fh).sort((x, y) => (y[1].kept - x[1].kept) || x[0].localeCompare(y[0]));
       $("#s-feeds").innerHTML = rows.length ? rows.map(([n, h]) => `<span class="${h.ok ? (h.kept ? "ok" : "quiet") : "dead"}" title="${esc(h.error || "")}">${esc(n)} ${h.ok ? h.kept + "/" + h.entries : "✗"}</span>`).join("") : "<span class=\"muted\">no blog feed data yet</span>";
       $("#s-skips").checked = skipsInYouTube();
+      renderDupes();
       $("#settings").showModal();
     });
+    $("#s-dupe-scan").addEventListener("click", () => scanYear(+$("#s-dupe-year").value).catch(e => { $("#s-dupe-status").textContent = ""; toast(e.message, true); }));
     $("#s-skips").addEventListener("change", e => { state.settings.skipsInYouTube = e.target.checked; persist(); });
     $("#s-export").addEventListener("click", exportCsv);
     $("#s-syncnow").addEventListener("click", () => pushRatings().then(() => pullRatings()).then(() => { $("#s-sync").textContent = `Synced just now · ${Object.keys(state.rated).length} rated tracks`; toast("Ratings synced"); }).catch(e => toast(e.message, true)));
