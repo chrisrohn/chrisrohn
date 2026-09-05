@@ -13,7 +13,7 @@ import { pullRatings } from "./sync.js";
 import { load } from "./feed.js";
 import { render, deckOn, deckItem, deckYear } from "./render.js";
 import { rate } from "./rating.js";
-import { play, toggle, nextTrack, prevTrack, holdAudition } from "./player.js";
+import { play, toggle, nextTrack, prevTrack, holdAudition, stopPlayer } from "./player.js";
 import { wireSettings } from "./settings.js";
 import { wireKeys, currentYear } from "./keys.js";
 import { wirePwa, applyLaunchParams } from "./pwa.js";
@@ -53,6 +53,8 @@ function wire() {
   window.matchMedia("(max-width: 760px)").addEventListener("change", () => render());
   $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
   $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
+  $("#p-close").addEventListener("click", stopPlayer);
+  $("#np-next").addEventListener("click", nextTrack);
   wireSettings();
   wireKeys();
   wirePwa();

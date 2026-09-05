@@ -130,7 +130,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; m
 .hint kbd { font-size: 10px; }
 
 /* ---------- the ledger of cards ---------- */
-main { padding: 20px 20px 160px; max-width: 1200px; margin: 0 auto; }
+main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; margin: 0 auto; }
 .list { display: grid; grid-template-columns: 1fr; gap: 0; counter-reset: row; }
 .list:not(:empty) { border: 2px solid var(--ink); background: var(--card); box-shadow: 8px 8px 0 var(--ink); }
 .card { position: relative; display: grid; grid-template-columns: 96px 1fr 150px; gap: 16px; background: var(--card); border: 0; border-top: 1px solid var(--rule); border-radius: 0; padding: 14px 16px 14px 14px; outline: none; counter-increment: row; transition: background-color .12s, transform .15s; }
@@ -179,16 +179,39 @@ main { padding: 20px 20px 160px; max-width: 1200px; margin: 0 auto; }
 .empty { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; border: 2px dashed var(--rule); }
 .more-sentinel { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 14px; border-top: 1px solid var(--rule); }
 
-/* ---------- player: the basement level, poured in ink ---------- */
+/* ---------- player: the title block along the bottom edge of the sheet ---------- */
 .deck.off { display: contents; }   /* list view: the deck contributes no box, only the (fixed) player inside it */
-.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: 356px 1fr; gap: 16px; padding: 8px 20px; background: var(--paper2); color: var(--ink); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); }
-/* YouTube's embed minimum is 200px tall: at 16:9 that is 356×200, the smallest the bar's frame can be */
-.player-frame { width: 356px; height: 200px; overflow: hidden; background: #000; border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--accent); }
-.player-frame iframe { width: 100%; height: 100%; }
-.player-meta { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; }
-.now { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
-.now::before { content: "now playing"; font: 700 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin-right: 12px; }
+/* A band across the whole sheet, and on it one boxed block centred on the feed's column: video | now playing | verdict.
+   YouTube's embed rules fix the video at 200px tall or more, unobscured and on screen while it plays; at 16:9 that is
+   356×200, so the block is exactly that tall and the two other zones fill it rather than float beside it. The
+   columns add up to the feed's 1160px (356 + 4px of frame border, 650, 150) so the block lines up with the cards. */
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: minmax(20px, 1fr) 360px minmax(0, 650px) 150px minmax(20px, 1fr); align-items: stretch; background: var(--paper2); color: var(--ink); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); }
+/* content-box: the iframe inside is the full 356×200 (YouTube's minimum), the borders sit outside it */
+.player-frame { grid-column: 2; box-sizing: content-box; width: 356px; height: 200px; overflow: hidden; background: #000; border: 0 solid var(--ink); border-width: 0 2px; }
+.player-frame iframe { width: 100%; height: 100%; display: block; }
+.player-meta { grid-column: 3; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 12px 18px 12px 20px; background: var(--card); }
+.np-eyebrow { font: 700 10px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-eyebrow .muted { color: var(--muted); font-weight: 400; }
+.now { min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now .muted { color: var(--muted); }
+.np-artist { display: block; font: 800 20px/1.15 var(--sans); text-transform: uppercase; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; }
+.np-artist .match { font-weight: 400; margin-left: 8px; vertical-align: 3px; }
+.np-sep { display: none; }
+.np-title { display: block; font-size: 15px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; }
+.np-spec { font: 11px/1.45 var(--mono); color: var(--muted); letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-sources { display: flex; gap: 6px; flex-wrap: wrap; max-height: 20px; overflow: hidden; margin-top: 2px; }
+.np-sources:empty { display: none; }
+.player-meta .player-controls { margin-top: auto; }
+/* the verdict column: score above, the thumbs, and what plays next; the close tab sits in the corner */
+.player-side { grid-column: 4; position: relative; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 28px 16px 12px 14px; background: var(--card); border: 0 solid var(--ink); border-width: 0 2px; text-align: right; }
+.np-close { position: absolute; top: 0; right: 0; width: 26px; height: 24px; border: 0; padding: 0; background: var(--ink); color: var(--on-ink); font: 700 15px/1 var(--mono); cursor: pointer; }
+.np-close:hover { background: var(--accent); color: #fff; }
+.player-side .thumbs .btn { padding: 7px 14px; }
+.np-next { max-width: 100%; border: 0; background: none; padding: 0; text-align: right; cursor: pointer; font: 11px/1.35 var(--mono); color: var(--muted); }
+.np-next::before { content: "up next"; display: block; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 2px; }
+.np-next b, .np-next span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-next b { color: var(--ink); }
+.np-next:hover b { color: var(--accent); }
 .player-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 #p-prev, #p-toggle, #p-next { line-height: 1; padding: 8px 12px; }
 /* transport icons are inline SVG: every platform draws them the same, and none can fall back to an emoji face */
@@ -227,12 +250,12 @@ details summary::marker { color: var(--accent); }
 .steps li { margin: 6px 0; }
 .steps li::marker { color: var(--accent); font: 700 12px var(--mono); }
 #s-build { font-family: var(--mono); font-size: 11px; }
-.toast { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); background: var(--ink); border: 0; border-left: 8px solid var(--accent); color: var(--on-ink); padding: 12px 18px; font: 13px var(--mono); z-index: 30; box-shadow: 5px 5px 0 var(--accent); max-width: min(92vw, 640px); }
+.toast { position: fixed; left: 50%; bottom: calc(var(--player-h, 0px) + 24px); transform: translateX(-50%); background: var(--ink); border: 0; border-left: 8px solid var(--accent); color: var(--on-ink); padding: 12px 18px; font: 13px var(--mono); z-index: 30; box-shadow: 5px 5px 0 var(--accent); max-width: min(92vw, 640px); }
 .toast.err { border-left-color: var(--down); box-shadow: 5px 5px 0 var(--down); }
 .toast .btn { margin-left: 12px; padding: 3px 10px; font-size: 11px; color: var(--on-ink); border-color: var(--on-ink); background: transparent; box-shadow: none; }
 
 /* ---------- footer: the title block in the corner of the sheet ---------- */
-footer { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 0; margin: 0 20px 160px; max-width: 1200px; border: 2px solid var(--ink); background: var(--card); color: var(--ink); font-size: 12px; box-shadow: 8px 8px 0 var(--ink); }
+footer { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 0; margin: 0 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; border: 2px solid var(--ink); background: var(--card); color: var(--ink); font-size: 12px; box-shadow: 8px 8px 0 var(--ink); }
 @media (min-width: 1240px) { footer { margin-left: auto; margin-right: auto; } }
 .tb-cell { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-left: 1px solid var(--ink); min-width: 0; }
 .tb-cell:first-child { border-left: 0; }
@@ -248,7 +271,6 @@ body.doc footer { display: flex; justify-content: space-between; flex-wrap: wrap
   .side::before { display: none; }
   .list:not(:empty) { box-shadow: 5px 5px 0 var(--ink); }
   .hint { display: none; }
-  .now::before { display: none; }
   main { padding: 14px 12px calc(var(--player-h, 0px) + 24px); }
   footer { margin-bottom: calc(var(--player-h, 0px) + 24px); }
   footer { grid-template-columns: 1fr 1fr; margin: 0 12px; box-shadow: 5px 5px 0 var(--ink); }
@@ -300,7 +322,8 @@ body.doc .tab { text-decoration: none; }
 .card.swiping { transition: none; }
 .card.swipe-up { box-shadow: inset 6px 0 0 var(--up); background: color-mix(in srgb, var(--up) 12%, var(--card)); }
 .card.swipe-down { box-shadow: inset 6px 0 0 var(--down); background: color-mix(in srgb, var(--down) 12%, var(--card)); }
-@media (display-mode: standalone) { .top { padding-top: max(12px, env(safe-area-inset-top)); } .player { padding-bottom: max(12px, env(safe-area-inset-bottom)); } }
+@media (display-mode: standalone) { .top { padding-top: max(12px, env(safe-area-inset-top)); } .player { padding-bottom: env(safe-area-inset-bottom, 0px); } }
+@media (display-mode: standalone) and (max-width: 760px) { .player { padding-bottom: max(12px, env(safe-area-inset-bottom)); } }
 
 /* ---------- deck mode (one card at a time; default on phones) ---------- */
 .mobile-only { display: none; }
@@ -391,8 +414,13 @@ body.doc .tab { text-decoration: none; }
   .dbody { gap: 7px; }
 
   .player { grid-template-columns: 1fr; gap: 8px; padding: 0 0 max(8px, env(safe-area-inset-bottom)); }
-  .player-frame { width: 100%; height: auto; aspect-ratio: 16/9; border: 0; border-bottom: 2px solid var(--ink); box-shadow: none; }
-  .player-meta { padding: 0 12px; }
+  .player-frame, .player-meta { grid-column: auto; }
+  .player-frame { box-sizing: border-box; width: 100%; height: auto; aspect-ratio: 16/9; border: 0; border-bottom: 2px solid var(--ink); box-shadow: none; }
+  .player-meta { padding: 0 12px; background: transparent; justify-content: center; }
+  .player-side, .np-eyebrow, .np-spec, .np-sources, .np-artist .match { display: none; }
+  .np-artist, .np-sep, .np-title { display: inline; font: inherit; text-transform: none; letter-spacing: 0; }
+  .np-artist { font-weight: 700; }
+  .player-meta .player-controls { margin-top: 0; }
   .now { font-size: 13px; }
   .player-controls { gap: 6px; }
   .player-controls .btn { padding: 4px 9px; font-size: 12px; box-shadow: 2px 2px 0 var(--accent); }
@@ -410,7 +438,7 @@ body.doc .tab { text-decoration: none; }
   #p-prev, #p-toggle, #p-next { grid-column: span 2; min-height: 40px; }
   .player .chk { grid-column: span 3; justify-content: center; }
   .audition-bar { grid-column: 1 / -1; }
-  .now::before { display: inline; }
+  .now::before { content: "now playing"; font: 700 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin-right: 12px; }
 
   .dart { height: min(32svh, 92vw); }
   .dbody { padding: 12px 14px 12px; gap: 5px; }

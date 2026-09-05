@@ -98,7 +98,10 @@
   <aside class="player" id="player" hidden>
     <div class="player-frame"><div id="yt"></div></div>
     <div class="player-meta">
+      <div class="np-eyebrow" id="np-eyebrow">now playing</div>
       <div class="now" id="now"></div>
+      <div class="np-spec" id="np-spec"></div>
+      <div class="np-sources" id="np-sources"></div>
       <div class="player-controls">
         <button class="btn" id="p-prev" title="previous (k)" aria-label="previous"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h3v16H4zM20 4 8 12l12 8z"/></svg></button>
         <button class="btn" id="p-toggle" title="play/pause (space)" aria-label="play / pause"><svg class="ic ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5 20 12 6 20.5z"/></svg><svg class="ic ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h5v16H5zM14 4h5v16h-5z"/></svg></button>
@@ -106,9 +109,16 @@
         <label class="chk"><input type="checkbox" id="autoplay" checked> autoplay <span class="full">next</span></label>
         <label class="chk" title="Start each track partway in and move on automatically after a few seconds. Any key or click on the player cancels the timer for that track."><input type="checkbox" id="audition"> audition <span id="audition-label">30s</span></label>
         <span id="audition-bar" class="audition-bar" hidden><i></i></span>
-        <button class="btn down curator" id="p-down" title="thumbs down (d)">&#x25BC;&#xFE0E;</button>
-        <button class="btn up curator" id="p-up" title="thumbs up (u)">&#x25B2;&#xFE0E;</button>
       </div>
+    </div>
+    <div class="player-side">
+      <button class="np-close" id="p-close" title="close player (esc)" aria-label="close player">&times;</button>
+      <div class="score" id="np-score"></div>
+      <div class="thumbs curator">
+        <button class="btn down" id="p-down" title="thumbs down (d)">&#x25BC;&#xFE0E;</button>
+        <button class="btn up" id="p-up" title="thumbs up (u)">&#x25B2;&#xFE0E;</button>
+      </div>
+      <button class="np-next" id="np-next" title="play the next track (j)" hidden></button>
     </div>
   </aside>
     <div id="deck-card" hidden></div>

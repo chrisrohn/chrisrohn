@@ -7,7 +7,7 @@ import { yearBadge, fillYearSelect, matchLabel, isMatchReason } from "./years.js
 import { titleFor } from "./youtube.js";
 import { visibleItems } from "./feed.js";
 import { rate } from "./rating.js";
-import { play, toggle } from "./player.js";
+import { play, toggle, refreshNow } from "./player.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -30,6 +30,7 @@ export function render() {
     const keep = state.rendered; list.innerHTML = ""; state.rendered = 0;
     appendCards(Math.max(PAGE, keep));
   }
+  refreshNow();
   const empty = $("#empty"); empty.hidden = vis.length > 0;
   empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : "No picks yet.";
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters, and
