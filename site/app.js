@@ -9,11 +9,15 @@
   "use strict";
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-  const LS = {
-    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-    del(k) { try { localStorage.removeItem(k); } catch {} },
-  };
+  const store = st => ({
+    get(k, d) { try { const v = st().getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { st().setItem(k, JSON.stringify(v)); } catch {} },
+    del(k) { try { st().removeItem(k); } catch {} },
+    keys() { try { const st0 = st(); return Array.from({ length: st0.length }, (_, i) => st0.key(i)).filter(k => k && k.startsWith("id:")); } catch { return []; } },
+  });
+  const LS = store(() => localStorage);
+  const SS = store(() => sessionStorage);   // the Google access token lives here: per tab, gone when the tab closes
+  const loadAuth = () => { const a = LS.get("id:auth", null); if (!a) return null; const t = SS.get("id:token", null); return { ...a, access_token: t && t.access_token, expires_at: (t && t.expires_at) || 0 }; };
   const YT_API = "https://www.googleapis.com/youtube/v3";
   const SCOPES = "openid email https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/drive.appdata";
   const DRIVE = "https://www.googleapis.com/drive/v3";
@@ -23,7 +27,7 @@
   const state = {
     feed: null,
     rated: LS.get("id:rated", {}),          // {id: {decision, year, videoId, artist, title, playlistItemId, at}} — local mirror of what this browser filed
-    auth: LS.get("id:auth", null),          // {access_token, expires_at, email, name, picture}
+    auth: loadAuth(),                       // {email, name, picture, hash} + {access_token, expires_at} (session only)
     playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL..."} learned from your library
     settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
     deckIndex: 0,    // {skipsInYouTube, audition, auditionSeconds, auditionStart}
@@ -38,16 +42,19 @@
     busy: new Set(),
     sync: LS.get("id:sync", { fileId: null, at: 0 }),   // Drive appDataFolder file that mirrors `rated` across devices
     syncTimer: null,
+    _years: [], dupes: null, dupePage: 1, dupeQT: null, library: null, notOwner: false,
+    signingIn: null, authCb: null, authErrCb: null, keepAliveAt: 0, lastAuthError: null, ready: false,
   };
+  const STALE_AFTER_MS = 36 * 3600e3;      // the build runs daily; older than this and something upstream failed
+  const PENDING_MAX_MS = 10 * 60e3;         // an optimistic rating that never finished (tab closed mid-request)
 
   // ---------- data ----------
   async function load() {
-    const bust = "?t=" + Math.floor(Date.now() / 60000);
-    const feed = await fetch("data/feed.json" + bust).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
+    // same URL every time: GitHub Pages answers 304 from the ETag when nothing changed, and the service worker keeps one copy
+    const feed = await fetch("data/feed.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
     state.feed = feed;
-    // anything the daily build already saw in your playlists no longer needs local bookkeeping
-    const ids = new Set(feed.items.map(i => i.id));
-    for (const id of Object.keys(state.rated)) if (!ids.has(id) && Date.now() - (state.rated[id].at || 0) > 45 * 86400e3) delete state.rated[id];
+    if (isSignedIn() && !state.auth.hash) state.auth.hash = await emailHash(state.auth.email);   // accounts remembered before hashes existed
+    reconcileRated();
     if (isOwner()) {
       for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
       if (feed.youtube && feed.youtube.skipped_playlist_id) state.playlists.__skipped = state.playlists.__skipped || feed.youtube.skipped_playlist_id;
@@ -56,9 +63,10 @@
     fillYears();
     fillSources();
     renderMeta();
+    state.ready = true; $("#settings-btn").disabled = false;
     applyMode();
     render();
-    if (isCurator() && tokenValid()) { pullRatings(); refreshRecent().catch(() => {}); }
+    if (isCurator() && tokenValid()) pullRatings().then(() => refreshRecent()).catch(() => {});
     if (isSignedIn()) ensureTokenClient().catch(() => {});
     document.addEventListener("pointerdown", keepAlive, { capture: true, passive: true });
     document.addEventListener("keydown", keepAlive, { capture: true, passive: true });
@@ -66,15 +74,27 @@
   // another device may have rated things while this tab was in the background (only while the token is valid:
   // a background refresh would need a popup, which browsers block without a tap — the next 👍 refreshes it instead)
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isCurator() && tokenValid() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); });
-  function persist() {
-    LS.set("id:rated", state.rated);
-    LS.set("id:auth", state.auth);
-    LS.set("id:playlists", state.playlists);
-    LS.set("id:filters", state.filters);
-    LS.set("id:settings", state.settings);
-    LS.set("id:quota", state.quota);
-    LS.set("id:sync", state.sync);
+  // Local bookkeeping that has outlived its purpose: ratings the daily build now hides via the playlists, local skips
+  // after a year, undo tombstones after 30 days, and optimistic entries whose request never came back.
+  function reconcileRated() {
+    const now = Date.now(); const ids = new Set(items().map(i => i.id));
+    for (const [id, r] of Object.entries(state.rated)) {
+      const age = now - (r.at || 0);
+      if (r.pending && age > PENDING_MAX_MS) { delete state.rated[id]; continue; }   // it never reached YouTube; let it show again
+      if (r.decision === "undone" && age > 30 * 86400e3) { delete state.rated[id]; continue; }
+      if (r.decision === "down" && r.local && age > 365 * 86400e3) { delete state.rated[id]; continue; }
+      if (!ids.has(id) && r.decision !== "down" && age > 45 * 86400e3) delete state.rated[id];
+    }
   }
+  const written = {};
+  function persist() {
+    const keep = { "id:rated": state.rated, "id:auth": state.auth && { email: state.auth.email, name: state.auth.name, picture: state.auth.picture, hash: state.auth.hash },
+      "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync };
+    for (const [k, v] of Object.entries(keep)) { const j = JSON.stringify(v ?? null); if (written[k] !== j) { written[k] = j; LS.set(k, v ?? null); } }
+    const tok = state.auth && state.auth.access_token ? { access_token: state.auth.access_token, expires_at: state.auth.expires_at } : null;
+    const tj = JSON.stringify(tok); if (written["id:token"] !== tj) { written["id:token"] = tj; tok ? SS.set("id:token", tok) : SS.del("id:token"); }
+  }
+  function clearLocalState() { for (const k of LS.keys()) LS.del(k); for (const k of SS.keys()) SS.del(k); }
 
   // ---------- cross-device memory: ratings mirrored to a hidden per-app file in the signed-in account's Google Drive ----------
   async function drive(method, url, { params = {}, body, raw } = {}) {
@@ -92,40 +112,59 @@
       return r;
     });
   }
+  // Two devices syncing for the first time at once can each create a file: the newest is the one we keep, the others
+  // are folded in and deleted so every device ends up on the same file.
+  async function syncFiles() {
+    const r = await drive("GET", `${DRIVE}/files`, { params: { spaces: "appDataFolder", q: `name='${SYNC_FILE}'`, fields: "files(id,modifiedTime)", orderBy: "modifiedTime desc", pageSize: 10 } });
+    return (await r.json()).files || [];
+  }
   async function syncFileId() {
     if (state.sync.fileId) return state.sync.fileId;
-    const r = await drive("GET", `${DRIVE}/files`, { params: { spaces: "appDataFolder", q: `name='${SYNC_FILE}'`, fields: "files(id,modifiedTime)", pageSize: 5 } });
-    const j = await r.json(); const f = (j.files || [])[0];
+    const f = (await syncFiles())[0];
     if (f) { state.sync.fileId = f.id; persist(); return f.id; }
     return null;
   }
+  async function readSyncFile(id) {
+    const r = await drive("GET", `${DRIVE}/files/${id}`, { params: { alt: "media" } });
+    const data = await r.json().catch(() => null);
+    return data && data.rated ? data.rated : null;
+  }
+  // Newest record per track wins. "seen" (spotted in a playlist, no playlistItemId to undo with) never beats a real
+  // decision; "undone" is a tombstone so an Undo on one device also un-hides the track on the others.
+  const weak = r => !r || r.decision === "seen";
   function mergeRated(remote) {
     let changed = false;
     for (const [id, r] of Object.entries(remote || {})) {
+      if (!r || r.pending) continue;
       const l = state.rated[id];
-      if (!l || (r.at || 0) > (l.at || 0)) { state.rated[id] = { ...r, pending: false }; changed = true; }
+      const newer = !l || (r.at || 0) > (l.at || 0);
+      if ((newer && !(weak(r) && !weak(l))) || (weak(l) && !weak(r))) { state.rated[id] = { ...r, pending: false }; changed = true; }
     }
     return changed;
   }
   async function pullRatings() {
     if (!isCurator() || !tokenValid()) return;
     try {
-      const id = await syncFileId(); if (!id) return;
-      const r = await drive("GET", `${DRIVE}/files/${id}`, { params: { alt: "media" } });
-      const data = await r.json().catch(() => null);
-      if (data && data.rated && mergeRated(data.rated)) { persist(); render(); }
+      const files = state.sync.fileId ? [{ id: state.sync.fileId }] : await syncFiles();
+      if (!files.length) return;
+      let changed = false;
+      for (const f of files) { const remote = await readSyncFile(f.id).catch(() => null); if (remote && mergeRated(remote)) changed = true; }
+      state.sync.fileId = files[0].id;
+      for (const f of files.slice(1)) drive("DELETE", `${DRIVE}/files/${f.id}`).catch(() => {});
+      if (changed) { persist(); render(); schedulePush(); }
       state.sync.at = Date.now(); persist();
     } catch (e) { toast("Rating sync (pull) failed: " + e.message, true); }
   }
   function schedulePush() { clearTimeout(state.syncTimer); state.syncTimer = setTimeout(() => pushRatings().catch(() => {}), 1500); }
   async function pushRatings() {
     if (!isCurator()) return;
-    // prune anything older than 90 days so the file stays small; the daily build hides old saves via the playlists anyway
-    const cutoff = Date.now() - 90 * 86400e3;
-    for (const [id, r] of Object.entries(state.rated)) if ((r.at || 0) < cutoff) delete state.rated[id];
-    const payload = JSON.stringify({ version: 1, account: state.auth.email, updatedAt: new Date().toISOString(), rated: state.rated });
+    reconcileRated();
     try {
       let id = await syncFileId();
+      // never overwrite what another device wrote since we last looked: fold the file in first, then write the union
+      if (id) { const remote = await readSyncFile(id).catch(() => null); if (remote && mergeRated(remote)) render(); }
+      const shared = Object.fromEntries(Object.entries(state.rated).filter(([, r]) => !r.pending));
+      const payload = JSON.stringify({ version: 2, account: state.auth.email, updatedAt: new Date().toISOString(), rated: shared });
       if (id) {
         await drive("PATCH", `${DRIVE_UPLOAD}/files/${id}`, { params: { uploadType: "media" }, body: payload, raw: true });
       } else {
@@ -145,13 +184,14 @@
   const quotaText = () => { const u = state.quota.day === ptDay() ? state.quota.units : 0; return `~${u.toLocaleString()} of 10,000 YouTube API units used today (${Math.floor((10000 - u) / 50)} more saves) · resets midnight Pacific`; };
   const items = () => (state.feed && state.feed.items) || [];
   const byId = id => items().find(i => i.id === id);
-  const decisionFor = id => state.rated[id] || null;
-  // best guess at the year; null when nothing anywhere says when this came out (the card then asks you to pick)
+  const decisionFor = id => { const r = state.rated[id]; return r && r.decision !== "undone" ? r : null; };
+  // The build already weighed every date it could find (catalogues, store dates, the YouTube album year); when it says
+  // "unknown" the only date left is the day a blog or channel mentioned the track, and that is not a release year.
+  // null here makes the card show "year?" and 👍 ask you to pick. Picks carry their playlist year in _year.
   const yearGuess = it => {
     if (Number.isFinite(it.year)) return it.year;
-    const d = it.release_date || (it.youtube && it.youtube.year);
-    const y = d ? parseInt(String(d).slice(0, 4), 10) : NaN;
-    return Number.isFinite(y) ? y : null;
+    if (it._pick) { const y = parseInt(String(it._year || it.release_date || ""), 10); return Number.isFinite(y) ? y : null; }
+    return null;
   };
   const yearOf = it => yearGuess(it) ?? new Date().getFullYear();
   function fillYearSelect(ysel, it) {
@@ -161,14 +201,28 @@
   }
   const YEAR_SOURCE = { musicbrainz: "verified: MusicBrainz's earliest release of this exact recording (identified via ListenBrainz)", "musicbrainz-search": "verified: earliest MusicBrainz release matching artist + title", "musicbrainz-isrc": "verified: earliest MusicBrainz release sharing this track's ISRC", discogs: "verified: Discogs master (original issue) year", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "the release date the source itself stated", isrc: "from the ISRC registration year only", youtube: "from the YouTube album only", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — pick the year yourself" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // feed links come from blog RSS, the one input nobody vets: only http(s) may become an href
+  const safeUrl = u => { const v = Array.isArray(u) ? u[0] : u; return typeof v === "string" && /^https?:\/\/\S+$/i.test(v.trim()) ? v.trim() : null; };
+  const isMatchReason = r => /^(you play |similar to |.* is in your playlists$)/.test(r);
+  function matchLabel(it) {
+    if (it.match_kind === "direct") return it.matched_artist === it.artist ? "you play them" : "you play " + it.matched_artist;
+    if (it.match_kind === "saved") return it.matched_artist === it.artist ? "in your playlists" : it.matched_artist + " is in your playlists";
+    if (it.match_kind === "similar") return it.reasons.find(r => r.startsWith("similar to ")) || "similar artist";
+    return "";
+  }
   const sameName = (a, b) => String(a || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "") === String(b || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
   // ---------- auth (Google Identity Services, token flow) ----------
   const tokenValid = () => !!(state.auth && state.auth.access_token && state.auth.expires_at > Date.now() + 30e3);
-  const curators = () => ((state.feed && state.feed.google && state.feed.google.curators) || []).map(e => e.toLowerCase());
+  // feed.json names the curator accounts as SHA-256 of the lower-cased address (older feeds carried the address itself)
+  async function emailHash(email) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(email || "").trim().toLowerCase()));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  const curators = () => { const g = (state.feed && state.feed.google) || {}; return [...(g.curator_hashes || []), ...(g.curators || []).map(e => e.toLowerCase())]; };
   // identity = a remembered Google account. Access tokens only live an hour; they are re-requested silently when needed.
   const isSignedIn = () => !!(state.auth && state.auth.email);
-  const isOwner = () => isSignedIn() && curators().includes(state.auth.email.toLowerCase());
+  const isOwner = () => isSignedIn() && (curators().includes(state.auth.hash) || curators().includes(state.auth.email.toLowerCase()));
   const guestsAllowed = () => !!(state.feed && state.feed.google && state.feed.google.guests);
   // "curator" = anyone allowed to rate: the owner, or a guest when guests are enabled. Guests file into their own library.
   const isCurator = () => isOwner() || (isSignedIn() && guestsAllowed());
@@ -190,8 +244,8 @@
       $("#signin").textContent = "Sign in with Google";
     }
     const cid = state.feed && state.feed.google && state.feed.google.client_id;
-    $("#signin").disabled = !cid;
-    $("#signin").title = cid ? "" : "Google client ID not configured yet (see SETUP.md)";
+    $("#signin").disabled = !state.ready || !cid;
+    $("#signin").title = !state.ready ? "loading the feed…" : cid ? "" : "Google client ID not configured yet (see SETUP.md)";
   }
   function ensureGis() {
     return new Promise((resolve, reject) => {
@@ -235,9 +289,9 @@
         state.lastAuthError = null;
         try {
           const me = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + resp.access_token } }).then(r => r.json());
-          if (me && me.email) Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture });
+          if (me && me.email) Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture, hash: await emailHash(me.email) });
         } catch {}
-        if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
+        if (prevEmail && prevEmail !== state.auth.email) forgetAccount();   // a different Google account: none of the old state applies
         persist(); applyMode(); render();
         if (silent) { if (isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); return done(true); }
         if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); pullRatings(); }   // year playlists are pinned: no library listing needed
@@ -267,8 +321,14 @@
   // Sign-out only forgets this device. It deliberately does NOT revoke the Google grant: revoking kills the tokens on
   // your other devices too (and can even race a fresh sign-in on this one). Disconnecting the site for good is a
   // Google-account action: https://myaccount.google.com/permissions
+  // Everything that belongs to the signed-in account, so the next account never inherits hidden tracks or a Drive
+  // file it cannot open.
+  function forgetAccount() {
+    state.rated = {}; state.playlists = {}; state.sync = { fileId: null, at: 0 }; state.library = null; state.notOwner = false; state.lastAuthError = null;
+    clearTimeout(state.syncTimer);
+  }
   function signOut() {
-    state.auth = null; state.playlists = {}; persist(); applyMode(); render(); toast("Signed out on this device");
+    state.auth = null; forgetAccount(); persist(); applyMode(); render(); toast("Signed out on this device");
   }
   // A valid token for the next few minutes, refreshing silently when it is about to lapse. Call it first thing in a
   // click handler so the (auto-closing) Google popup is still allowed by the browser.
@@ -516,16 +576,24 @@
   }
 
   // Hide things rated from another device since the last daily build: read the newest entries of the current-year + skipped playlists.
+  // Hide things filed from another device since the last daily build. playlistItems come back in playlist order and
+  // new saves are appended, so the whole playlist is paged (1 quota unit per 50 tracks) — the first page alone would
+  // only ever show the oldest saves of the year.
   async function refreshRecent() {
+    if (!isCurator() || !tokenValid()) return;
     const y = String(new Date().getFullYear());
     const ids = [knownYear(y) || state.playlists[y], state.playlists.__skipped].filter(Boolean);
     const seen = new Set();
     for (const pid of ids) {
-      const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50 } }).catch(() => ({}));
-      for (const it of j.items || []) seen.add(it.snippet.resourceId && it.snippet.resourceId.videoId);
+      let pageToken, pages = 0;
+      do {
+        const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50, pageToken } }).catch(() => ({}));
+        for (const it of j.items || []) seen.add(it.snippet.resourceId && it.snippet.resourceId.videoId);
+        pageToken = j.nextPageToken;
+      } while (pageToken && ++pages < 40);
     }
     let changed = false;
-    for (const it of items()) if (it.youtube && seen.has(it.youtube.videoId) && !state.rated[it.id]) { state.rated[it.id] = { decision: "seen", at: Date.now() }; changed = true; }
+    for (const it of items()) if (it.youtube && seen.has(it.youtube.videoId) && !decisionFor(it.id)) { state.rated[it.id] = { decision: "seen", at: Date.now() }; changed = true; }
     if (changed) { persist(); render(); }
   }
 
@@ -582,10 +650,11 @@
     } finally { state.busy.delete(id); render(); }
   }
   async function undo(id) {
-    const r = state.rated[id]; if (!r) return;
+    const r = state.rated[id]; if (!r || r.decision === "undone") return;
     try {
       if (r.playlistItemId) await removePlaylistItem(r.playlistItemId);
-      delete state.rated[id]; persist(); render(); schedulePush(); toast("Undone");
+      state.rated[id] = { decision: "undone", at: Date.now() };   // a tombstone: other devices un-hide it too
+      persist(); render(); schedulePush(); toast("Undone");
     } catch (e) { toast("Undo failed: " + e.message, true); }
   }
 
@@ -594,6 +663,9 @@
     const f = state.feed;
     const when = f.generated_at ? new Date(f.generated_at) : null;
     $("#meta").textContent = `${f.count} candidates · ${f.new_today} new today · built ${when ? relTime(when) : "?"} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar`;
+    const stale = $("#stale"); const age = when ? Date.now() - when.getTime() : 0;
+    stale.hidden = !(when && age > STALE_AFTER_MS);
+    if (!stale.hidden) stale.textContent = `This feed is ${Math.round(age / 86400e3)} days old — the daily build has not run since ${when.toLocaleDateString()}. Check the Discover workflow on GitHub.`;
     $("#lfm").href = "https://www.last.fm/user/" + (f.lastfm_user || "tt_discotheque");
     document.title = `${f.site_name || "Chris Rohn's New Music"} · ${f.new_today} new`;
   }
@@ -675,9 +747,11 @@
     empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : "No picks yet.";
     // the pills show exactly what each tab would list right now: unrated tracks under the current filters, and
     // the station's recent picks plus everything you've thumbed up from this account
-    $("#count-feed").textContent = state.view === "feed" ? vis.length : visibleItems("feed").length;
-    $("#count-picks").textContent = state.view === "picks" ? vis.length : visibleItems("picks").length;
+    const other = visibleItems(state.view === "feed" ? "picks" : "feed").length;
+    $("#count-feed").textContent = state.view === "feed" ? vis.length : other;
+    $("#count-picks").textContent = state.view === "picks" ? vis.length : other;
     $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
+    $$(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.view === state.view)));
     $("#filters").classList.toggle("picks", state.view === "picks");
   }
 
@@ -701,16 +775,14 @@
     const yb = $(".yearbadge", el); const conf = it.year_confidence || "low"; yb.classList.add(conf); yb.title = (YEAR_SOURCE[it.year_source] || "") + ((it.year_evidence || []).length ? "\n" + it.year_evidence.join("\n") : "");
     yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`) : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
     if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
-    const why = [];
-    if (it.match_kind === "direct") why.push(it.matched_artist === it.artist ? "you play them" : "you play " + it.matched_artist);
-    else if (it.match_kind === "similar") why.push(it.reasons.find(r => r.startsWith("similar to ")) || "similar artist");
-    for (const r of it.reasons || []) if (!r.startsWith("you play") && !r.startsWith("similar to")) why.push(r);
+    const why = [matchLabel(it)].filter(Boolean);
+    for (const r of it.reasons || []) if (!isMatchReason(r)) why.push(r);
     $(".dwhy", el).textContent = why.join(" · ");
     $(".dtags", el).innerHTML = (it.tags || []).slice(0, 4).map(t => `<span class="tag">${esc(t)}</span>`).join("");
     $(".dsources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}">${esc(n || k)}</span>`; }).join("");
     const links = [];
     if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
-    for (const [k, u] of Object.entries(it.links || {})) links.push(`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(k)}</a>`);
+    for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
     $(".dlinks", el).innerHTML = links.join(" · ");
     const ysel = $(".year", el); fillYearSelect(ysel, it);
     $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
@@ -733,7 +805,7 @@
     if (it.first_seen && it.first_seen === state.feed.generated_at?.slice(0, 10) && !it._pick) el.classList.add("new");
     $(".artist", el).textContent = it.artist;
     const m = $(".match", el);
-    if (it.match_kind) { m.textContent = it.match_kind === "direct" ? "you play " + (it.matched_artist === it.artist ? "them" : it.matched_artist) : "similar to " + (it.reasons.find(r => r.startsWith("similar to ")) || "").slice(11); m.classList.add(it.match_kind); } else m.remove();
+    if (it.match_kind) { m.textContent = matchLabel(it); m.classList.add(it.match_kind); } else m.remove();
     $(".title", el).textContent = it.display_title || it.title;
     $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
     $(".date", el).textContent = it.release_date || "";
@@ -746,14 +818,14 @@
       yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`) : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
       if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
     }
-    $(".reasons", el).textContent = (it.reasons || []).filter(r => !r.startsWith("similar to") && !r.startsWith("you play")).join(" · ");
+    $(".reasons", el).textContent = (it.reasons || []).filter(r => !isMatchReason(r)).join(" · ");
     $(".tags", el).innerHTML = (it.tags || []).slice(0, 6).map(t => `<span class="tag">${esc(t)}</span>`).join("");
     $(".sources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}" title="${esc(s)}">${esc(n || k)}</span>`; }).join("");
     const links = [];
     if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YouTube Music</a>`);
     if (yt.playlistId) links.push(`<a href="https://music.youtube.com/playlist?list=${esc(yt.playlistId)}" target="_blank" rel="noopener">full release</a>`);
     if (!yt.videoId) links.push(`<a href="https://music.youtube.com/search?q=${encodeURIComponent(it.artist + " " + it.title)}" target="_blank" rel="noopener">search YT Music</a>`);
-    for (const [k, u] of Object.entries(it.links || {})) links.push(`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(k)}</a>`);
+    for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
     links.push(`<a href="https://www.last.fm/music/${encodeURIComponent(it.artist)}" target="_blank" rel="noopener">last.fm</a>`);
     $(".links", el).innerHTML = links.join(" · ");
     $(".score", el).textContent = it.score ? it.score.toFixed(1) : "";
@@ -801,7 +873,11 @@
           if (e.data === YT.PlayerState.PLAYING) startAudition();
           if (e.data === YT.PlayerState.PAUSED) clearAudition(false);
         },
-        onError: () => { toast("Can't embed this one – opening YouTube Music", true); const it = current(); if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank"); },
+        onError: () => {
+          const it = current(); const url = it?.youtube?.videoId ? "https://music.youtube.com/watch?v=" + it.youtube.videoId : null;
+          toast("Can't embed this one", true, url ? { label: "Open in YT Music", fn: () => window.open(url, "_blank", "noopener") } : undefined);
+          if ($("#autoplay").checked) nextTrack();   // keep the queue moving; a popup here would be blocked anyway
+        },
       },
     });
   };
@@ -853,7 +929,7 @@
   // ---------- misc ----------
   let toastTimer;
   function toast(msg, err = false, action) {
-    let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
+    let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); t.setAttribute("aria-live", "polite"); document.body.appendChild(t); }
     t.textContent = msg; t.classList.toggle("err", err); t.style.display = "";
     if (action) { const b = document.createElement("button"); b.className = "btn ghost"; b.textContent = action.label; b.addEventListener("click", () => { t.style.display = "none"; action.fn(); }); t.appendChild(b); }
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; }, err ? 7000 : (action ? 8000 : 2600));
@@ -869,7 +945,7 @@
     $$(".tab").forEach(b => b.addEventListener("click", () => { state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b)); render(); }));
     const f = state.filters;
     $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-playable").checked = f.onlyPlayable; $("#only-known").checked = f.onlyKnown;
-    $("#q").addEventListener("input", e => { f.q = e.target.value; persist(); render(); });
+    let qTimer; $("#q").addEventListener("input", e => { f.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(() => { persist(); render(); }, 120); });
     $("#sort").addEventListener("change", e => { f.sort = e.target.value; persist(); render(); });
     $("#only-new").addEventListener("change", e => { f.onlyNew = e.target.checked; persist(); render(); });
     $("#only-playable").addEventListener("change", e => { f.onlyPlayable = e.target.checked; persist(); render(); });
@@ -903,7 +979,7 @@
       const yrs = [...new Set([...Object.keys(state.playlists).filter(k => !k.startsWith("__")), ...(isOwner() ? Object.keys((state.feed.youtube && state.feed.youtube.playlists) || {}) : [])])].sort();
       $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · the Indie Discotheque playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
       $("#s-quota").textContent = quotaText();
-      const acct = $("#s-account"); if (acct && state.lastAuthError) acct.insertAdjacentHTML("beforeend", ` <span class="muted">Last sign-in problem: ${esc(state.lastAuthError.why)} (${relTime(new Date(state.lastAuthError.at))}).</span>`);
+      $("#s-auth-problem").textContent = state.lastAuthError ? `Last sign-in problem: ${state.lastAuthError.why} (${relTime(new Date(state.lastAuthError.at))}).` : "";
       $("#s-sync").textContent = state.sync.at ? `Ratings synced across your devices via Google Drive app data · last sync ${relTime(new Date(state.sync.at))} · ${Object.keys(state.rated).length} rated tracks remembered` : "Ratings not synced yet — sign in to sync across devices (uses a hidden app-data file in your Google Drive).";
       const g = $("#s-guests");
       if (isOwner()) {
@@ -925,17 +1001,19 @@
     $("#s-export").addEventListener("click", exportCsv);
     $("#s-syncnow").addEventListener("click", () => pushRatings().then(() => pullRatings()).then(() => { $("#s-sync").textContent = `Synced just now · ${Object.keys(state.rated).length} rated tracks`; toast("Ratings synced"); }).catch(e => toast(e.message, true)));
     $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast(`Playlists reloaded: ${Object.keys(state.playlists).filter(k => !k.startsWith("__")).length} year playlists found`)).catch(e => toast(e.message, true)));
-    $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters", "id:sync"].forEach(LS.del); location.reload(); } });
+    $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, settings, local rating mirror)? Nothing in YouTube or Drive is touched.")) { clearLocalState(); location.reload(); } });
     document.addEventListener("keydown", e => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;   // Cmd+D bookmarks, Ctrl+A selects: never a thumb
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
-      const id = deckOn() ? (deckItem()?.id || state.currentId) : (state.currentId || state.order[0]);
+      // the card you are on; in list view nothing is "current" until you move to a card, so a stray key can't file the top track
+      const id = deckOn() ? (deckItem()?.id || state.currentId) : state.currentId;
       switch (e.key) {
         case "j": case "ArrowDown": e.preventDefault(); state.currentId ? step(1) : focusCard(state.order[0]); break;
         case "k": case "ArrowUp": e.preventDefault(); step(-1); break;
-        case " ": e.preventDefault(); if (state.playerReady && state.currentId) toggle(); else if (id) play(id); break;
+        case " ": e.preventDefault(); if (state.playerReady && state.currentId) toggle(); else play(id || state.order[0]); break;
         case "u": case "ArrowRight": if (id) rate(id, "up", currentYear(id)); break;
         case "d": case "ArrowLeft": if (id) rate(id, "down", currentYear(id)); break;
-        case "o": { const it = byId(id); if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank"); break; }
+        case "o": { const it = byId(id); if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank", "noopener"); break; }
         case "a": { const cb = $("#audition"); cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); toast(cb.checked ? `Audition mode on (${state.settings.auditionSeconds}s)` : "Audition mode off"); break; }
         case "/": e.preventDefault(); $("#q").focus(); break;
         case "Escape": stopPlayer(); break;
