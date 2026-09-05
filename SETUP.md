@@ -28,7 +28,9 @@ feed; the only thing that ever writes to a playlist is you pressing a thumb whil
 2. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
 3. **Settings → Actions → General → Workflow permissions: Read and write permissions.**
 4. **Settings → Secrets and variables → Actions → New repository secret**: `LASTFM_API_KEY` from
-   https://www.last.fm/api/account/create (instant, free, any app name). That is the only secret.
+   https://www.last.fm/api/account/create (instant, free, any app name). Optional but recommended: `DISCOGS_TOKEN`
+   from a free Discogs account (Settings → Developers → Generate new token) — Discogs master years are the
+   strongest source for original release dates of disco/electronic records.
 5. **Actions → Discover → Run workflow.** First run takes ~10–15 min (profile build + MusicBrainz rate limit).
 
 ## 2. chrisrohn.com DNS (required for the custom domain)
@@ -81,12 +83,25 @@ several devices and want skips shared. The first 👎 then creates an unlisted `
 playlist and shows its ID; paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build
 can read it (unlisted playlists aren't discoverable by title). All 48 year playlists (1979–2026) are pinned by ID in
 `youtube_music.playlists`; when you create a new year's playlist, add its ID there (the build also finds it by title).
-**Release years:** each track's year comes from MusicBrainz (earliest non-compilation release of that recording),
-then Deezer, then the iTunes Search API, then a release date the source itself states (Bandcamp, ListenBrainz, KEXP's
-album date), then the YouTube album. Blog post and upload dates are only sightings, never release dates. If nothing
-anywhere says when a song came out, the card shows "year unknown" with a `year?` dropdown, and 👍 refuses until you
-pick one, so a catalogue track can't slip into this year's playlist by default. Lookups are budgeted per run
-(`resolve.max_year_lookups_per_run`, MusicBrainz allows 1 request/s) and cached, with undated tracks looked up first.
+**Release years (original, not reissue):** the build identifies each track as a *recording* before asking for dates,
+so the answer is consistent instead of depending on how a blog spelled the title:
+
+1. ListenBrainz's MusicBrainz mapper (the same fuzzy matcher that maps your scrobbles) → the recording's MusicBrainz ID.
+2. MusicBrainz → the earliest release of that recording, ignoring compilations, live and DJ-mix releases. A 10th
+   anniversary reissue is just another release of the same recording, so the original year wins.
+3. If MusicBrainz has no mapping: a strict MusicBrainz title search; then Deezer for the track's **ISRC** (the
+   recording's industry code, kept across reissues) and a MusicBrainz lookup by that ISRC; the ISRC's own
+   registration year is kept as a weak hint.
+4. **Discogs** master-release year (masters represent the original issue; strong for disco/electronic). Needs a
+   free Discogs account: Settings → Developers → *Generate new token*, saved as the `DISCOGS_TOKEN` repo secret.
+5. iTunes Search API; then a release date the source itself states (Bandcamp, ListenBrainz, KEXP's album date);
+   then the YouTube album year. Blog post and upload dates are only sightings.
+
+Every year found is kept as evidence (hover the year badge on the site to see it). The earliest year from the most
+trusted tier wins: ✓ = catalogue-verified, plain = a store/source date, ? = weak hint. If nothing anywhere says when
+a song came out the card shows `year?` and 👍 refuses until you pick, so a catalogue track can't slip into this
+year's playlist by default. Lookups are cached and budgeted per run (`resolve.max_year_lookups_per_run`; MusicBrainz
+allows 1 request/s), undated tracks first.
 
 **No duplicates:** every 👍 first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so; a song already thumbed up today under another feed entry is caught too. The daily build

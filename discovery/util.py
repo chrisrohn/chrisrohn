@@ -255,6 +255,7 @@ class Http:
             "api.deezer.com": 0.25,
             "bandcamp.com": 1.0,
             "itunes.apple.com": 3.2,   # ~20 requests/minute
+            "api.discogs.com": 1.1,    # 60 requests/minute with a token
         }
         self._dirty = False
 

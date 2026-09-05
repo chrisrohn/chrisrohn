@@ -36,6 +36,8 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(profile, "ARTIST_CACHE_PATH", tmp_path / "data" / "cache" / "artists.json")
     monkeypatch.setattr(profile, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(resolve, "YT_CACHE", tmp_path / "data" / "cache" / "youtube.json")
+    import discovery.years as years
+    monkeypatch.setattr(years, "YEAR_CACHE", tmp_path / "data" / "cache" / "years.json")
     monkeypatch.setattr(deezer, "ID_CACHE", tmp_path / "data" / "cache" / "deezer_artists.json")
     util.ensure_dirs()
     yield tmp_path
@@ -230,63 +232,87 @@ def test_resolve_pick():
     assert _pick(res[1:], "Jungle", "Keep Moving") is None
 
 
-def test_verify_years_uses_musicbrainz_then_deezer_then_itunes(monkeypatch):
+def test_verify_years_identifier_chain(monkeypatch):
+    """LB mapper → MB recording (high); no mapping → MB search; Deezer ISRC → MB; Discogs; iTunes; stated dates; unknown."""
     from discovery import resolve
 
     today = date.today()
-    mb = {"recordings": [
-        {"title": "Lovers", "artist-credit": [{"name": "Roosevelt"}], "releases": [
-            {"date": "2016-08-19", "release-group": {"first-release-date": "2016-08-19"}},
-            {"date": today.isoformat(), "release-group": {"first-release-date": today.isoformat(), "secondary-types": ["Compilation"]}},
-        ]},
-        {"title": "Lovers (Karaoke)", "artist-credit": [{"name": "Roosevelt"}], "releases": [{"date": "1990-01-01"}]},
-    ]}
+    monkeypatch.setenv("DISCOGS_TOKEN", "tok")
     calls = []
 
     class FakeHttp:
         def get(self, url, **kw):
-            calls.append((url, kw.get("params", {})))
-            p = kw.get("params", {})
-            if "musicbrainz" in url:
-                return mb if "Roosevelt" in p["query"] else {"recordings": []}
+            p = kw.get("params", {}); calls.append((url, p))
+            if "listenbrainz.org/1/metadata/lookup" in url:
+                if p["artist_name"] == "Roosevelt":
+                    return {"artist_credit_name": "Roosevelt", "recording_name": "Lovers", "recording_mbid": "rec-lovers", "metadata": {"release": {"year": 2024}}}
+                if p["artist_name"] == "Tiga":   # the mapper wandered off to another song: must be rejected
+                    return {"artist_credit_name": "Tiga", "recording_name": "Sunglasses at Night", "recording_mbid": "rec-wrong"}
+                return {}
+            if url.endswith("/recording/rec-lovers"):
+                return {"first-release-date": "2016-08-19", "isrcs": ["DEA211600123"], "releases": [
+                    {"date": "2024-01-01", "release-group": {"first-release-date": "2024-01-01", "secondary-types": ["Compilation"]}},
+                    {"date": "2016-08-19", "release-group": {"first-release-date": "2016-08-19"}}]}
+            if url.endswith("/recording/"):   # text search fallback
+                if "Jungle" in p["query"]:
+                    return {"recordings": [{"title": "Keep Moving", "artist-credit": [{"name": "Jungle"}], "releases": [{"date": "2021-05-13", "release-group": {"first-release-date": "2021-05-13"}}]}]}
+                return {"recordings": []}
+            if "/isrc/" in url:
+                return {"recordings": [{"first-release-date": "2009-05-11", "releases": [{"date": "2009-05-11", "release-group": {"first-release-date": "2009-05-11"}}]}]} if url.endswith("CAX240900001") else {"recordings": []}
+            if "deezer.com/search" in url:
+                if "Tiga" in p["q"]:
+                    return {"data": [{"id": 5, "title": "Shoes", "title_short": "Shoes", "artist": {"name": "Tiga"}, "album": {"id": 77}}]}
+                if "RAC" in p["q"]:
+                    return {"data": [{"id": 6, "title": "I Should've Guessed (feat. Speak)", "title_short": "I Should've Guessed", "artist": {"name": "RAC"}, "album": {"id": 78}}]}
+                return {"data": []}
+            if url.endswith("/track/5"):
+                return {"isrc": "CAX240900001", "release_date": "2019-02-02"}   # a 2019 reissue on Deezer; ISRC leads MB to 2009
+            if url.endswith("/track/6"):
+                return {"isrc": "", "release_date": "2014-04-14"}
+            if url.endswith("/album/77"):
+                return {"release_date": "2019-02-02", "record_type": "album"}
+            if url.endswith("/album/78"):
+                return {"release_date": "2014-04-14", "record_type": "album"}
+            if "discogs.com" in url:
+                if p["artist"] == "RAC":
+                    return {"results": [{"title": "RAC - Strangers", "year": "2014", "type": "master"}, {"title": "Someone Else - X", "year": "1980"}]}
+                return {"results": []}
             if "itunes" in url:
                 if "Someone" in p["term"]:
                     return {"results": [{"trackName": "Blog Only", "artistName": "Someone", "releaseDate": "2019-03-01T00:00:00Z"}]}
                 return {"results": []}
-            if "deezer" in url and url.endswith("/search"):
-                if "RAC" in p["q"]:
-                    return {"data": [{"title": "I Should've Guessed (feat. Speak)", "title_short": "I Should've Guessed", "artist": {"name": "RAC"}, "album": {"id": 77}}]}
-                return {"data": []}
-            if "/album/77" in url:
-                return {"release_date": "2014-04-14", "record_type": "album"}
             return {}
 
     items = [
-        Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["listenbrainz"]),
-        Item(artist="RAC", title="I Should've Guessed", featuring=["Speak"], kind="track", sources=["radio:SomaFM poptron"]),
-        Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["bandcamp"]),
-        Item(artist="Someone", title="Blog Only", kind="track", release_date=today, date_kind="sighting", sources=["rss:Pitchfork"], youtube={"videoId": "x", "year": "2019"}),
-        Item(artist="Nobody", title="Nothing", kind="track", sources=["rss:Blog"]),
-        # KEXP states the album's real release date; MusicBrainz knows nothing → that date must win, not "this year"
-        Item(artist="Tiga", title="Shoes", featuring=["Soulwax", "Chilly Gonzales"], kind="track", release="Ciao!", release_date=date(2009, 5, 11), sources=["radio:KEXP"]),
-        Item(artist="Blogger", title="Old Song", kind="track", release_date=today, date_kind="sighting", sources=["rss:Blog"]),
+        Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["listenbrainz"]),                        # LB → MB recording
+        Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["bandcamp"]),                          # no mapping → MB search
+        Item(artist="Tiga", title="Shoes", featuring=["Soulwax"], kind="track", release="Ciao!", sources=["radio:KEXP"]),             # Deezer ISRC → MB
+        Item(artist="RAC", title="I Should've Guessed", featuring=["Speak"], kind="track", sources=["radio:SomaFM poptron"]),         # Deezer + Discogs agree
+        Item(artist="Someone", title="Blog Only", kind="track", release_date=today, date_kind="sighting", sources=["rss:Pitchfork"]),  # only iTunes knows
+        Item(artist="Nobody", title="Nothing", kind="track", sources=["rss:Blog"]),                                                   # nothing anywhere
+        Item(artist="KEXP Act", title="Dated", kind="track", release_date=date(2009, 5, 11), sources=["radio:KEXP"]),                 # only the stated date
+        Item(artist="Blogger", title="Old Song", kind="track", release_date=today, date_kind="sighting", sources=["rss:Blog"]),        # post date is a hint
     ]
-    cfg = _cfg(); cfg["resolve"]["max_year_lookups_per_run"] = 6   # Tiga + Blogger still get a lookup: undated items go first
-    resolve.verify_years(items, cfg, FakeHttp())
-    r, rac, j, s, n, tiga, blog = items
-    assert (tiga.year, tiga.year_source, tiga.year_confidence) == (2009, "release-date", "medium")
-    assert (blog.year, blog.year_source, blog.year_confidence) == (today.year, "feed-date", "low")   # a post date is only a hint
-    lookup_order = [p["query"] for u, p in calls if "musicbrainz" in u]
-    assert lookup_order.index('recording:"Old Song" AND artist:"Blogger"') < lookup_order.index('recording:"Lovers" AND artist:"Roosevelt"')
-    assert (r.year, r.year_source, r.year_confidence, r.original_year) == (2016, "musicbrainz-recording", "high", 2016)
-    assert (rac.year, rac.year_source, rac.year_confidence) == (2014, "deezer", "medium")           # radio play, no date → Deezer knew
-    # the MusicBrainz query used the plain title, not "… feat. Speak"
-    mbq = next(p["query"] for u, p in calls if "musicbrainz" in u and "RAC" in p["query"])
-    assert 'recording:"I Should\'ve Guessed" AND artist:"RAC"' == mbq
-    assert (j.year, j.year_source, j.year_confidence) == (today.year, "release-date", "medium")
-    assert (s.year, s.year_source) == (2019, "itunes")                                              # iTunes beats the blog date
-    assert (n.year, n.year_source, n.year_confidence) == (None, "unknown", "low")                   # never guess "this year"
-    assert r.to_dict()["original_year"] == 2016
+    resolve.verify_years(items, _cfg(), FakeHttp())
+    r, j, tiga, rac, s, n, kexp, blog = items
+    assert (r.year, r.year_source, r.year_confidence, r.original_year) == (2016, "musicbrainz", "high", 2016)   # compilation ignored; today's date = reissue
+    assert "MusicBrainz recording: 2016" in r.year_evidence and "ISRC registration year: 2016" in r.year_evidence
+    assert (j.year, j.year_source, j.year_confidence) == (2021, "musicbrainz-search", "high")
+    assert (tiga.year, tiga.year_source, tiga.year_confidence) == (2009, "musicbrainz-isrc", "high")             # not the 2019 reissue
+    assert (rac.year, rac.year_source, rac.year_confidence) == (2014, "discogs", "high")
+    assert (s.year, s.year_source, s.year_confidence) == (2019, "itunes", "medium")
+    assert (n.year, n.year_source, n.year_confidence) == (None, "unknown", "low")                                   # never guess "this year"
+    assert (kexp.year, kexp.year_source, kexp.year_confidence) == (2009, "release-date", "medium")
+    assert (blog.year, blog.year_source, blog.year_confidence) == (today.year, "feed-date", "low")
+    # the LB query used the plain title, never "… feat. Speak"; undated tracks were looked up before dated ones
+    lb = [p for u, p in calls if "metadata/lookup" in u]
+    assert {"artist_name": "RAC", "recording_name": "I Should've Guessed", "metadata": "true", "inc": "release"} in lb
+    names = [p["artist_name"] for p in lb]
+    assert names.index("Tiga") < names.index("Roosevelt")
+    # second run: everything comes from the cache, no HTTP at all
+    calls.clear(); resolve.verify_years(items, _cfg(), FakeHttp())
+    assert not calls and tiga.year == 2009
+    assert r.to_dict()["year_evidence"][0] == "MusicBrainz recording: 2016"
 
 
 def test_rohn_standard_notation():
