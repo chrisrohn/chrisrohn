@@ -108,10 +108,12 @@ for as long as your Google session lasts. Signing out only forgets that device. 
 Google account entirely use https://myaccount.google.com/permissions.
 
 **No duplicates:** every 👍 first asks YouTube whether that video is already in the target playlist (1 quota unit)
-and skips the add if so; a song already thumbed up today under another feed entry is caught too. The daily build
-scans all year playlists and reports the same video added twice, a second upload of the same song, or one song
-filed under two years; the site warns you on load and ⚙ → Duplicate check lists them with one-tap removal, plus a
-live "scan this year now" for anything added since the last build.
+and skips the add if so. The daily build scans all year playlists for the exact same video appearing twice in a
+year or in two different years — a different upload of the same song is deliberately not counted (full report in
+`site/data/duplicates.json`). The site warns you on load; ⚙ → Duplicate check
+filters by kind, year and name, removes copies one tap at a time or all extra same-video copies in a year at once
+(quota-aware: 50 units per removal), marks the wrong-year copy where the catalogues verified the original year, and
+offers a live "scan this year now" for anything added since the last build.
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free).
 

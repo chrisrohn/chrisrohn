@@ -193,19 +193,18 @@ def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str |
 
 
 def find_duplicates(where: dict[str, list[dict]]) -> list[dict]:
-    """Songs present more than once: the same video added twice, a second upload of the same song, or the same
-    song filed under two different years. Groups are keyed by normalised artist + title (feat./remaster noise
-    stripped), so a remix stays distinct from the original."""
+    """The exact same YouTube video present more than once: twice in one year playlist ("same-video") or in two
+    different year playlists ("cross-year"). Grouped by video id only — a different upload of the same song is
+    deliberately not counted."""
     out: list[dict] = []
-    for k, entries in where.items():
+    for vid, entries in where.items():
         if len(entries) < 2:
             continue
         years = sorted({e["year"] for e in entries}, reverse=True)
-        vids = [e["videoId"] for e in entries if e.get("videoId")]
-        kind = "cross-year" if len(years) > 1 else ("same-video" if len(set(vids)) == 1 else "other-upload")
         first = entries[0]
-        out.append({"key": k, "artist": first["artist"], "title": first["title"], "kind": kind, "years": years, "count": len(entries),
-                    "entries": [{"year": e["year"], "playlistId": e["playlistId"], "videoId": e["videoId"], "position": e["position"]} for e in entries]})
+        out.append({"key": vid, "videoId": vid, "artist": first["artist"], "title": first["title"],
+                    "kind": "same-video" if len(years) == 1 else "cross-year", "years": years, "count": len(entries),
+                    "entries": [{"year": e["year"], "playlistId": e["playlistId"], "videoId": vid, "position": e["position"]} for e in entries]})
     out.sort(key=lambda d: (d["years"][0], d["artist"].lower(), d["title"].lower()), reverse=True)
     return out
 
@@ -225,7 +224,7 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
     meta.update({"years": years, "skipped": skipped, "channel": channel})
     picks_n = int((cfg.get("youtube_music") or {}).get("picks_count", 40))
     current = str(date.today().year)
-    where: dict[str, list[dict]] = {}   # song key → every playlist entry it appears in (across all years)
+    where: dict[str, list[dict]] = {}   # video id → every playlist entry it appears in (across all years)
     for year, pid in sorted(years.items(), reverse=True):
         try:
             pl = yt.get_playlist(pid, limit=None)
@@ -242,8 +241,8 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
             if names:
                 k = item_key(names[0], title)
                 saved[k] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId"), "decision": "up"}
-                where.setdefault(k, []).append({"year": year, "playlistId": pid, "position": pos, "videoId": t.get("videoId"),
-                                                "artist": names[0], "title": title})
+                if t.get("videoId"):
+                    where.setdefault(t["videoId"], []).append({"year": year, "playlistId": pid, "position": pos, "artist": names[0], "title": title})
         if year == current:
             for t in tracks[-picks_n:][::-1]:
                 names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
