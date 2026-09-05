@@ -147,7 +147,7 @@ test("theme toggle: header button, ⚙ select and the t key switch, persist and 
   // the player and the footer sit on the same board as the page, in either scheme
   await expect(page.locator("footer")).toHaveCSS("background-color", "rgb(38, 38, 35)");
   await page.evaluate(() => { document.querySelector("#player").hidden = false; });
-  await expect(page.locator("#player")).toHaveCSS("background-color", "rgb(35, 35, 33)");
+  await expect(page.locator("#player .player-meta")).toHaveCSS("background-color", "rgb(38, 38, 35)");
   await expect(page.locator("#player")).toHaveCSS("color", "rgb(235, 231, 220)");
   // dark is pinned: it survives a reload with no flash of light (theme.js runs in <head>) and a device on light
   await page.reload();
