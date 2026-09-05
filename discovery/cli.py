@@ -8,9 +8,9 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from .util import DATA_DIR, Http, ensure_dirs, load_config, log, read_json, setup_logging
+from .util import DATA_DIR, PROFILE_VERSION, Http, ensure_dirs, load_config, log, read_json, setup_logging
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -36,9 +36,9 @@ def main(argv: list[str] | None = None) -> int:
 
         prof = read_json(DATA_DIR / "profile.json", None)
         stale = True
-        if prof and prof.get("built_at") and "youtube" in prof:  # profiles from older pipeline versions get rebuilt
+        if prof and prof.get("built_at") and prof.get("version") == PROFILE_VERSION:   # older shapes get rebuilt
             built = datetime.fromisoformat(prof["built_at"])
-            stale = datetime.now(timezone.utc) - built > timedelta(days=int(cfg["profile"].get("rebuild_days", 3)))
+            stale = datetime.now(UTC) - built > timedelta(days=int(cfg["profile"].get("rebuild_days", 3)))
         if stale or "--rebuild-profile" in argv:
             build_profile(cfg, Http("profile", ttl_hours=72))
         else:

@@ -1,16 +1,17 @@
 """Assemble the daily feed: run sources → merge → score → resolve → write site/data/feed.json + feed.xml + history."""
 from __future__ import annotations
 
+import hashlib
 import html
-from datetime import date
+from datetime import date, timedelta
 
 from .models import Item
-from .profile import load_profile
-from .resolve import resolve_all, verify_years
-from .years import annotate_duplicate_years
+from .profile import find_duplicates, load_profile
+from .resolve import resolve_all
 from .score import dedupe, score_items
 from .sources import run_sources
-from .util import DATA_DIR, SITE_DATA_DIR, Http, log, read_json, utcnow, write_json
+from .util import DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, read_json, safe_url, utcnow, write_json
+from .years import annotate_duplicate_years, verify_years
 
 FEED_PATH = SITE_DATA_DIR / "feed.json"
 STATE_PATH = DATA_DIR / "state.json"
@@ -28,22 +29,34 @@ def build_feed(cfg: dict) -> dict:
     log.info("%d raw sightings → %d unique items", len(raw), len(items))
 
     rcfg = cfg["ranking"]
+    deadline = Deadline(float((cfg.get("resolve") or {}).get("time_budget_minutes") or 0) or None)
     # drop things already in your year playlists (👍) or the Skipped playlist (👎)
+    saved = profile.get("saved") or {}
+    saved_videos = {v.get("videoId") for v in saved.values() if isinstance(v, dict) and v.get("videoId")}
     if rcfg.get("hide_seen", True):
-        saved = set(profile.get("saved", {}).keys())
         before = len(items)
         items = [i for i in items if i.key not in saved]
         log.info("hid %d already-saved/skipped items", before - len(items))
 
     items = score_items(items, profile, cfg)
     items = [i for i in items if i.score >= float(rcfg.get("min_score", 0))][: int(rcfg.get("max_items", 200)) + 60]
-    resolve_all(items, cfg)
+    resolve_all(items, cfg, deadline)
     # after resolution, drop things with no playable YouTube result unless they are strong matches
     items = [i for i in items if i.youtube or i.match_kind == "direct" or i.editorial]
+    if rcfg.get("hide_seen", True):
+        # resolution can rename a release to its first track (new key) or land on a video that is already filed
+        # under a different spelling: the video id is the exact test, so apply it now that we have one
+        before = len(items)
+        items = [i for i in items if i.key not in saved and not (i.youtube and i.youtube.get("videoId") in saved_videos)]
+        if before - len(items):
+            log.info("hid %d more items whose YouTube video is already in a playlist", before - len(items))
     items = score_items(items, profile, cfg)[: int(rcfg.get("max_items", 200))]
-    verify_years(items, cfg, http)
-    dups = list((profile.get("youtube") or {}).get("duplicates") or [])
-    annotate_duplicate_years(dups, cfg, http)
+    verify_years(items, cfg, http, deadline)
+    # the duplicate report is derived from the profile's raw playlist scan on every build, so a change to what
+    # counts as a duplicate never waits for the next profile rebuild
+    ymeta = profile.get("youtube") or {}
+    dups = find_duplicates(ymeta.get("entries") or []) if ymeta.get("entries") else list(ymeta.get("duplicates") or [])
+    annotate_duplicate_years(dups, cfg, http, deadline)
     dup_kinds: dict[str, int] = {}
     for d in dups:
         dup_kinds[d.get("kind", "?")] = dup_kinds.get(d.get("kind", "?"), 0) + 1
@@ -55,7 +68,8 @@ def build_feed(cfg: dict) -> dict:
     for it in items:
         first_seen.setdefault(it.key, today_s)
         if not it.release_date:
-            it.release_date = date.fromisoformat(first_seen[it.key])
+            # the day we first saw it is a sighting, never a release date: the site must not file by it
+            it.release_date, it.date_kind = date.fromisoformat(first_seen[it.key]), "sighting"
     cutoff_keys = {i.key for i in items}
     # keep first_seen bounded to the last ~60 days of items
     state["first_seen"] = {k: v for k, v in first_seen.items() if k in cutoff_keys or (date.today() - date.fromisoformat(v)).days < 60}
@@ -67,7 +81,9 @@ def build_feed(cfg: dict) -> dict:
         "generated_at": utcnow().isoformat(),
         "station": cfg["station"]["name"],
         "site_name": cfg["station"].get("site_name") or cfg["station"]["name"],
-        "google": {"client_id": gcfg.get("client_id") or "", "curators": [c.lower() for c in (gcfg.get("curators") or [])],
+        # curator accounts are published as SHA-256 of the lower-cased address: enough for the site to recognise the
+        # signed-in account, without printing anyone's email in a public file
+        "google": {"client_id": gcfg.get("client_id") or "", "curator_hashes": [_email_hash(c) for c in (gcfg.get("curators") or [])],
                    "guests": bool(gcfg.get("guests", False)), "guest_playlist_title_pattern": gcfg.get("guest_playlist_title_pattern") or "{year} Picks from chrisrohn.com"},
         "youtube": {
             "playlist_title_pattern": ycfg.get("playlist_title_pattern", "{year} | Indie Discotheque"),
@@ -91,14 +107,43 @@ def build_feed(cfg: dict) -> dict:
         "new_today": sum(1 for i in items if first_seen.get(i.key) == today_s),
         "sources": sorted({s.split(":")[0] for i in items for s in i.sources}),
         "blogs": sorted({s.split(":", 1)[1] for i in items for s in i.sources if s.startswith("rss:")}),
-        "items": [dict(i.to_dict(), first_seen=first_seen.get(i.key)) for i in items],
+        "items": [_public_item(i, first_seen.get(i.key)) for i in items],
     }
     write_json(FEED_PATH, payload, compact=True)
-    write_json(SITE_DATA_DIR / "history" / f"{today_s}.json", {"date": today_s, "ids": [i.key for i in items]}, compact=True)
+    _write_history(today_s, items)
     _write_rss(cfg, payload)
     http.save()
     log.info("feed: %d items (%d new today)", payload["count"], payload["new_today"])
     return payload
+
+
+def _email_hash(email: str) -> str:
+    return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+
+
+_PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb")
+_PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration")
+
+
+def _public_item(it: Item, first_seen: str | None) -> dict:
+    """What feed.json carries per item: everything the site reads, nothing it doesn't (about a third of the bytes)."""
+    d = it.to_dict()
+    for k in _PRIVATE_FIELDS:
+        d.pop(k, None)
+    if d.get("youtube"):
+        d["youtube"] = {k: v for k, v in d["youtube"].items() if k not in _PRIVATE_YT_FIELDS}
+    d["links"] = {k: s for k, u in (d.get("links") or {}).items() if (s := safe_url(u))}
+    d["first_seen"] = first_seen
+    return d
+
+
+def _write_history(today_s: str, items: list[Item], keep_days: int = 90) -> None:
+    hist = SITE_DATA_DIR / "history"
+    write_json(hist / f"{today_s}.json", {"date": today_s, "ids": [i.key for i in items]}, compact=True)
+    cutoff = (date.today() - timedelta(days=keep_days)).isoformat()
+    for f in hist.glob("*.json"):
+        if f.stem < cutoff:
+            f.unlink()
 
 
 def _clean_tags(items: list[Item], profile: dict) -> None:
@@ -114,9 +159,9 @@ def _clean_tags(items: list[Item], profile: dict) -> None:
         cleaned = []
         for t in it.tags:
             tn = t.lower().strip()
-            if tn.startswith("label:") or tn in known or any(w in tn for w in genre_words):
-                if tn not in cleaned and tn not in (it.artist or "").lower():
-                    cleaned.append(tn)
+            genre = tn.startswith("label:") or tn in known or any(w in tn for w in genre_words)
+            if genre and tn not in cleaned and tn not in (it.artist or "").lower():
+                cleaned.append(tn)
         it.tags = cleaned[:6]
 
 

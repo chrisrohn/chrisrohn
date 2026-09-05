@@ -8,8 +8,12 @@ Inputs (all free):
   * Optional frozen Everynoise genre pages (`python -m discovery seed-everynoise`)
 
 Output: data/profile.json
-  {"artists": {norm_name: {"name", "affinity", "kind": "direct"|"similar", "mbid", "via"}},
-   "tags": {tag: weight}, "saved": {item_key: {...}}, "built_at": iso}
+  {"artists": {norm_name: {"name", "affinity", "kind": "direct"|"saved"|"similar", "mbid", "via"}},
+   "tags": {tag: weight}, "saved": {item_key: {...}}, "youtube": {"years", "skipped", "channel", "entries", "checked_at"},
+   "built_at": iso, "version": PROFILE_VERSION}
+
+  kind "direct" = you play them (Last.fm / seeds); "saved" = only known from the year playlists (one save in 1987 is
+  not the same signal as a scrobbled favourite); "similar" = inherited from a direct artist.
 """
 from __future__ import annotations
 
@@ -20,7 +24,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
-from .util import CACHE_DIR, DATA_DIR, Http, log, norm, norm_track, item_key, read_json, utcnow, write_json
+from .util import CACHE_DIR, DATA_DIR, PROFILE_VERSION, Http, item_key, log, norm, read_json, utcnow, write_json
 
 LASTFM_API = "https://ws.audioscrobbler.com/2.0/"
 LB_LABS_SIMILAR = "https://labs.api.listenbrainz.org/similar-artists/json"
@@ -192,10 +196,19 @@ def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str |
     return found, skipped, channel
 
 
-def find_duplicates(where: dict[str, list[dict]]) -> list[dict]:
+def find_duplicates(where: dict[str, list[dict]] | list[dict]) -> list[dict]:
     """The exact same YouTube video present more than once: twice in one year playlist ("same-video") or in two
     different year playlists ("cross-year"). Grouped by video id only — a different upload of the same song is
-    deliberately not counted."""
+    deliberately not counted.
+
+    Accepts either {video id: [entry, ...]} or the flat `youtube.entries` list stored in profile.json, so the daily
+    build can recompute the report from the stored playlist scan instead of trusting a days-old profile."""
+    if isinstance(where, list):
+        grouped: dict[str, list[dict]] = {}
+        for e in where:
+            if e.get("videoId"):
+                grouped.setdefault(e["videoId"], []).append(e)
+        where = grouped
     out: list[dict] = []
     for vid, entries in where.items():
         if len(entries) < 2:
@@ -214,7 +227,7 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
     artists: dict[str, float] = defaultdict(float)
     saved: dict[str, dict] = {}
     picks: list[dict] = []
-    meta: dict = {"years": {}, "skipped": None, "channel": None, "duplicates": [], "checked_at": None}
+    meta: dict = {"years": {}, "skipped": None, "channel": None, "entries": [], "checked_at": None}
     try:
         from ytmusicapi import YTMusic
     except ImportError:
@@ -242,7 +255,7 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
                 k = item_key(names[0], title)
                 saved[k] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId"), "decision": "up"}
                 if t.get("videoId"):
-                    where.setdefault(t["videoId"], []).append({"year": year, "playlistId": pid, "position": pos, "artist": names[0], "title": title})
+                    where.setdefault(t["videoId"], []).append({"year": year, "playlistId": pid, "position": pos, "videoId": t["videoId"], "artist": names[0], "title": title})
         if year == current:
             for t in tracks[-picks_n:][::-1]:
                 names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
@@ -250,10 +263,12 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
                 picks.append({"artist": names[0] if names else "", "title": t.get("title") or "", "videoId": t.get("videoId"),
                               "year": year, "thumbnail": thumbs[-1]["url"] if thumbs else None, "album": (t.get("album") or {}).get("name")})
         log.info("playlist %s: %d tracks", year, len(tracks))
-    meta["duplicates"] = find_duplicates(where)
+    # the raw scan is what the build derives the duplicate report from (so a logic change never waits for a rebuild)
+    meta["entries"] = [e for entries in where.values() for e in entries]
     meta["checked_at"] = utcnow().isoformat()
-    if meta["duplicates"]:
-        log.warning("%d duplicated songs across the year playlists", len(meta["duplicates"]))
+    dups = find_duplicates(where)
+    if dups:
+        log.warning("%d duplicated songs across the year playlists", len(dups))
     if skipped:
         try:
             pl = yt.get_playlist(skipped, limit=None)
@@ -296,7 +311,8 @@ def build_profile(cfg: dict, http: Http) -> dict:
     else:
         log.warning("LASTFM_API_KEY not set — profile will rely on playlists + seeds only")
 
-    # 2. Your YouTube Music year playlists
+    # 2. Your YouTube Music year playlists. Artists Last.fm never saw are kept apart as kind "saved": a library
+    #    entry is a real signal, but not "you play them".
     yt_artists, saved, picks, yt_meta = youtube_playlist_seeds(cfg)
     for name, cnt in yt_artists.items():
         add_direct(name, 0.6 * math.log2(cnt + 1), "ytmusic-playlists")
@@ -315,10 +331,12 @@ def build_profile(cfg: dict, http: Http) -> dict:
     top = max(e["affinity"] for e in direct.values())
     for e in direct.values():
         e["affinity"] = round(e["affinity"] / top, 4)
+        if e["via"] == ["ytmusic-playlists"]:
+            e["kind"] = "saved"
 
     # 4. Tags from Last.fm top tags of the top artists
     tags: dict[str, float] = defaultdict(float)
-    ranked = sorted(direct.values(), key=lambda e: -e["affinity"])
+    ranked = sorted((e for e in direct.values() if e["kind"] == "direct"), key=lambda e: -e["affinity"]) or sorted(direct.values(), key=lambda e: -e["affinity"])
     expand_n = int(pcfg.get("expand_top_n", 100))
     if lastfm.enabled:
         for e in ranked[:expand_n]:
@@ -365,10 +383,12 @@ def build_profile(cfg: dict, http: Http) -> dict:
 
     artists = {**similar, **direct}
     mb_index = {e["mbid"]: n for n, e in artists.items() if e.get("mbid")}
+    n_saved_kind = sum(1 for e in direct.values() if e["kind"] == "saved")
     profile = {
         "built_at": utcnow().isoformat(),
+        "version": PROFILE_VERSION,
         "lastfm_user": user,
-        "counts": {"direct": len(direct), "similar": len(similar), "tags": len(tags), "saved": len(saved)},
+        "counts": {"direct": len(direct) - n_saved_kind, "library": n_saved_kind, "similar": len(similar), "tags": len(tags), "saved": len(saved)},
         "artists": artists,
         "mbid_index": mb_index,
         "tags": tags,

@@ -1,0 +1,30 @@
+[project]
+name = "chrisrohn-new-music"
+version = "1.0.0"
+description = "Chris Rohn's New Music: the daily discovery pipeline behind chrisrohn.com"
+requires-python = ">=3.12"
+dependencies = [
+  "requests>=2.32",
+  "PyYAML>=6.0",
+  "feedparser>=6.0.11",
+  "ytmusicapi>=1.12,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "pip-tools>=7.4"]
+
+[tool.ruff]
+line-length = 200
+target-version = "py312"
+extend-exclude = ["data", "site"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "I"]
+ignore = ["E501", "B007"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E702", "E402", "SIM", "UP031"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

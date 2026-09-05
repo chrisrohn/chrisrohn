@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import html
 import re
-import time
 from datetime import date, timedelta
 
 import feedparser
 
 from ..models import Item
-from ..util import CACHE_DIR, Http, log, norm, parse_artist_title, read_json, write_json
+from ..util import CACHE_DIR, Http, log, parse_artist_title, read_json, struct_time_to_date, write_json
 from . import report
 
 CACHE = CACHE_DIR / "yt_channels.json"
@@ -63,7 +62,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
         for e in parsed.entries:
             vid = e.get("yt_videoid") or (e.get("id") or "").split(":")[-1]
             title = html.unescape(e.get("title") or "").strip()
-            when = date.fromtimestamp(time.mktime(e.published_parsed)) if e.get("published_parsed") else None
+            when = struct_time_to_date(e.published_parsed) if e.get("published_parsed") else None
             if not vid or not title or (when and when < since) or SKIP.search(title):
                 continue
             clean = NOISE.sub("", title).strip()

@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from datetime import date, timedelta
 
 from ..models import Item
-from ..util import Http, log, norm, parse_date, split_artists
+from ..util import Http, norm, parse_date, split_artists
 from . import report
 
 

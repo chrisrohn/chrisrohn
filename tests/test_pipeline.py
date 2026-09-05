@@ -1,8 +1,6 @@
 """Offline tests: exercise parsing, merging, scoring, building and decision handling with canned data."""
 from __future__ import annotations
 
-import json
-import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -157,24 +155,36 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     profile = dict(PROFILE)
     profile["saved"] = dict(PROFILE["saved"])
     profile["saved"][util.item_key("Roosevelt", "Lovers")] = {"artist": "Roosevelt", "title": "Lovers", "decision": "down"}
+    profile["saved"][util.item_key("Parcels", "Lightenup")] = {"artist": "Parcels", "title": "Lightenup", "videoId": "vidSaved", "decision": "up"}
     profile["picks"] = [{"artist": "Jungle", "title": "Back On 74", "videoId": "v1", "year": "2026", "thumbnail": None, "album": None}]
-    profile["youtube"] = {"years": {"2026": "PL2026"}, "skipped": "PLSKIP", "channel": "UC1"}
+    # the raw playlist scan: the build derives the duplicate report from it (same video in 2025 and 2026)
+    entries = [{"year": "2026", "playlistId": "PL2026", "position": 0, "videoId": "dupVid", "artist": "Jungle", "title": "Candle Flame"},
+               {"year": "2025", "playlistId": "PL2025", "position": 3, "videoId": "dupVid", "artist": "Jungle", "title": "Candle Flame"}]
+    profile["youtube"] = {"years": {"2026": "PL2026"}, "skipped": "PLSKIP", "channel": "UC1", "entries": entries, "checked_at": "2026-09-01T00:00:00+00:00"}
     util.write_json(prof.PROFILE_PATH, profile)
     today = date.today()
     fake_items = [
         Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["rss:Pitchfork"], editorial=True),
         Item(artist="Jungle", title="Back On 74", kind="track", release_date=today, sources=["bandcamp"]),   # already in a year playlist
         Item(artist="Roosevelt", title="Lovers", kind="track", release_date=today, sources=["bandcamp"]),    # thumbed down → Skipped playlist
+        Item(artist="Parcels", title="Lighten Up (Radio Mix)", kind="track", sources=["radio:KEXP"], editorial=True),   # different spelling, same video → hidden
+        Item(artist="Parcels", title="Free", kind="track", sources=["radio:KEXP"], editorial=True, links={"kexp": "javascript:alert(1)", "article": ["https://kexp.org/x"]}),   # undated: first_seen fills the date as a sighting
         Item(artist="Someone New", title="Disco Dream", kind="release", release_date=today, sources=["musicbrainz"], tags=["nu disco"]),
         Item(artist="Unknown Metal Band", title="Skull", kind="release", release_date=today, sources=["musicbrainz"], tags=["metal"]),
     ]
     monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake_items))
 
-    def fake_resolve(items, cfg):
+    def fake_resolve(items, cfg, deadline=None):
         for it in items:
             if it.artist == "Jungle":
                 it.youtube = {"videoId": "vid123", "title": it.title, "artists": ["Jungle"], "thumbnail": "https://i/x.jpg"}
+            if it.title.startswith("Lighten Up"):
+                it.youtube = {"videoId": "vidSaved", "title": it.title, "artists": ["Parcels"], "via": "track-search"}
+            if it.title == "Free":
+                it.youtube = {"videoId": "vidFree", "title": it.title, "artists": ["Parcels"]}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
 
     class NoNet:
         def __init__(self, *a, **k): pass
@@ -188,10 +198,18 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert ("Jungle", "Keep Moving") in ids
     assert ("Jungle", "Back On 74") not in ids
     assert ("Roosevelt", "Lovers") not in ids
+    assert not any(t.startswith("Lighten Up") for _, t in ids)          # hidden by video id, whatever the spelling
+    free = next(i for i in payload["items"] if i["title"] == "Free")
+    assert free["release_date"] == today.isoformat() and free["date_kind"] == "sighting"   # never a "release" date
+    assert "artist_mbids" not in free and "via" not in (free["youtube"] or {})               # trimmed for the site
+    assert free["links"] == {"article": "https://kexp.org/x"}                                # only http(s) reaches an href
+    dups = util.read_json(sandbox / "site" / "data" / "duplicates.json", {})
+    assert dups["count"] == 1 and dups["kinds"] == {"cross-year": 1} and payload["youtube"]["duplicates_count"] == 1
     assert ("Unknown Metal Band", "Skull") not in ids
     assert ("Someone New", "Disco Dream") not in ids        # tag-only, no YouTube match → dropped
     assert payload["years"][0] >= 2026 and payload["years"][-1] == 1979
-    assert payload["google"]["client_id"] == "abc.apps.googleusercontent.com" and payload["google"]["curators"] == ["chrisrohn@gmail.com"]
+    assert payload["google"]["client_id"] == "abc.apps.googleusercontent.com"
+    assert payload["google"]["curator_hashes"] == [build._email_hash("ChrisRohn@gmail.com")] and "curators" not in payload["google"]
     assert payload["google"]["guests"] is False and "{year}" in payload["google"]["guest_playlist_title_pattern"]
     pls = payload["youtube"]["playlists"]
     assert pls["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN" and len(pls) == 48   # config ids win over the profile's title matches
@@ -343,8 +361,8 @@ def test_rohn_standard_notation():
 
 
 def test_youtube_channel_feed_and_radio(monkeypatch, sandbox):
-    from discovery.sources import youtube_channels, radio, HEALTH
     import discovery.sources.youtube_channels as yc
+    from discovery.sources import HEALTH, radio, youtube_channels
     monkeypatch.setattr(yc, "CACHE", sandbox / "data" / "cache" / "yt_channels.json")
 
     today = date.today()
@@ -415,6 +433,7 @@ def test_find_duplicates_only_counts_the_exact_same_video():
 
 def test_lb_identify_falls_back_and_records_status(monkeypatch):
     import requests
+
     from discovery import years
 
     class Resp:
@@ -442,7 +461,7 @@ def test_lb_identify_falls_back_and_records_status(monkeypatch):
 
 
 def test_duplicates_get_verified_years_and_their_own_file(monkeypatch):
-    from discovery import build, years
+    from discovery import years
     from discovery.util import item_key, write_json
 
     # one cross-year duplicate already verified for the feed (cache hit, free), one needing a lookup
@@ -455,7 +474,6 @@ def test_duplicates_get_verified_years_and_their_own_file(monkeypatch):
 
     class FakeHttp:
         def get(self, url, **kw):
-            p = kw.get("params", {})
             if "metadata/lookup" in url:
                 return {"artist_credit_name": "Bag Raiders", "recording_name": "Shooting Stars", "recording_mbid": "rec-br"}
             if url.endswith("/recording/rec-br"):
@@ -468,3 +486,44 @@ def test_duplicates_get_verified_years_and_their_own_file(monkeypatch):
     assert (dups[0]["verified_year"], dups[0]["verified_source"]) == (2016, "MusicBrainz recording")
     assert (dups[1]["verified_year"], dups[1]["verified_source"]) == (2008, "MusicBrainz recording")
     assert "verified_year" not in dups[2]                                   # same-video needs no year to clean up
+
+
+def test_dates_caches_and_deadline(monkeypatch):
+    import time
+
+    from discovery import resolve
+
+    assert util.parse_date("2026-09-04T10:00:00+02:00") == date(2026, 9, 4)
+    assert util.parse_date("2026") == date(2026, 1, 1) and util.parse_date("20260905") is None
+    assert util.struct_time_to_date(time.gmtime(1_788_000_000)) == date(2026, 8, 29)   # UTC, not the runner's local time
+    assert util.safe_url(" https://a.b/c ") == "https://a.b/c" and util.safe_url(["https://x.y"]) == "https://x.y"
+    assert util.safe_url("javascript:alert(1)") is None and util.safe_url(None) is None
+
+    d = util.Deadline(None); assert not d.expired and d.remaining_minutes == float("inf")
+    d = util.Deadline(0.0001); time.sleep(0.02); assert d.expired
+
+    today = date(2026, 9, 5)
+    cache = {"fresh": {"seen": "2026-09-01", "yt": {"videoId": "a"}}, "old": {"seen": "2026-01-01", "yt": None}, "legacy": {"videoId": "b"}}
+    kept = resolve.prune_cache(cache, today, 120)
+    assert set(kept) == {"fresh"}                        # untouched legacy rows are stamped on load, not here
+    assert resolve._entry({"videoId": "b"}, "2026-09-05") == {"seen": "2026-09-05", "yt": {"videoId": "b"}}
+    assert resolve._entry(None, "2026-09-05") == {"seen": "2026-09-05", "yt": None}
+
+
+def test_rss_feed_name_is_not_an_artist(monkeypatch):
+    from discovery.sources import rss
+
+    profile = dict(PROFILE, artists={**PROFILE["artists"], "clash": {"name": "The Clash", "affinity": 0.5, "kind": "direct", "mbid": None, "via": []}})
+    xml = """<?xml version="1.0"?><rss><channel><title>Clash</title>
+      <item><title>Clash Meets Quadeca: I Like Keeping Busy</title><link>https://clashmusic.com/a</link></item>
+      <item><title>Jungle – "Keep Moving"</title><link>javascript:alert(1)</link></item>
+    </channel></rss>"""
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            assert kw["headers"]["User-Agent"].startswith("Mozilla/5.0")
+            return xml
+    cfg = _cfg(); cfg["sources"]["rss"]["feeds"] = [{"name": "Clash", "url": "https://clashmusic.com/feed/"}]
+    out = rss.fetch(cfg, profile, FakeHttp())
+    assert [(i.artist, i.title) for i in out] == [("Jungle", "Keep Moving")]
+    assert out[0].links == {}                                                    # a javascript: link never makes it in

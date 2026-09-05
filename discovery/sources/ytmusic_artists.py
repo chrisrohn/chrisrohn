@@ -1,7 +1,8 @@
 """Artist watch on YouTube Music: newest singles/albums of your top profile artists (no key; ytmusicapi).
 
 Replaces Spotify's dead Release Radar. Artist browse IDs are cached; each run checks `top_artists` artists
-(rotating through the list over successive days so big profiles still get full coverage).
+(rotating through the list over successive days so big profiles still get full coverage). Every release from the
+current window is returned on every run: the feed's own first_seen state decides what counts as new.
 """
 from __future__ import annotations
 
@@ -19,7 +20,8 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     scfg = cfg["sources"]["ytmusic_artists"]
     per_run = int(scfg.get("top_artists", 150))
     yt = YTMusic()
-    cache = read_json(CACHE, {"ids": {}, "seen": {}, "cursor": 0})
+    cache = read_json(CACHE, {"ids": {}, "cursor": 0})
+    cache.pop("seen", None)   # older builds hid a release after its first sighting; the feed keeps items for the freshness window
     ranked = [e for e in sorted(profile["artists"].values(), key=lambda e: -e["affinity"]) if e.get("kind") == "direct"]
     ranked = ranked[: int(scfg.get("pool", 600))]
     if not ranked:
@@ -57,9 +59,8 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 if year < this_year - (1 if date.today().month == 1 else 0):
                     continue
                 rb = rel.get("browseId")
-                if not rb or rb in cache["seen"]:
+                if not rb:
                     continue
-                cache["seen"][rb] = date.today().isoformat()
                 thumbs = rel.get("thumbnails") or []
                 out.append(Item(
                     artist=e["name"], title=rel.get("title") or "", kind="release", release=rel.get("title"),
@@ -67,8 +68,5 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                     links={"youtube music": f"https://music.youtube.com/browse/{rb}"},
                     artwork=thumbs[-1]["url"] if thumbs else None,
                 ))
-    # forget seen releases older than a year so the cache doesn't grow forever
-    cutoff = date.today().replace(year=this_year - 1).isoformat()
-    cache["seen"] = {k: v for k, v in cache["seen"].items() if v >= cutoff}
     write_json(CACHE, cache, compact=True)
     return out

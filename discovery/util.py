@@ -1,6 +1,7 @@
 """Shared helpers: HTTP with caching/rate limiting, name normalisation, paths, logging."""
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
 import logging
@@ -9,7 +10,7 @@ import re
 import threading
 import time
 import unicodedata
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,13 @@ USER_AGENT = os.environ.get(
     "DISCOVERY_USER_AGENT",
     "ChrisRohnNewMusic/1.0 (+https://chrisrohn.com; new-music discovery feed)",
 )
+# Blog CMSs and their CDNs (WordPress hosts, Cloudflare bot rules) answer 403/415 to unknown agents but serve RSS to
+# browsers. Catalogue APIs (MusicBrainz, ListenBrainz, Discogs) get the honest USER_AGENT above, as they require.
+BROWSER_USER_AGENT = os.environ.get(
+    "DISCOVERY_BROWSER_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+)
+PROFILE_VERSION = 2   # bump when profile.json's shape or meaning changes; `daily` then rebuilds it regardless of age
 
 
 def setup_logging() -> None:
@@ -68,7 +76,41 @@ def write_json(path: Path, data: Any, *, compact: bool = False) -> None:
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
+
+
+class Deadline:
+    """Wall-clock budget for the slow, rate-limited lookup loops (MusicBrainz is 1 request/s). GitHub Actions kills the
+    job at `timeout-minutes`, so the loops stop themselves first and leave the rest for the next run."""
+
+    def __init__(self, minutes: float | None):
+        self.until = time.monotonic() + minutes * 60 if minutes else None
+
+    @property
+    def expired(self) -> bool:
+        return self.until is not None and time.monotonic() > self.until
+
+    @property
+    def remaining_minutes(self) -> float:
+        return max(0.0, (self.until - time.monotonic()) / 60) if self.until else float("inf")
+
+
+def struct_time_to_date(st) -> date | None:
+    """feedparser's *_parsed fields are UTC struct_times; time.mktime would read them as local time."""
+    try:
+        return datetime.fromtimestamp(calendar.timegm(st), tz=UTC).date()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def safe_url(url: Any) -> str | None:
+    """Only http(s) links may reach the site (they end up in href attributes). Feeds are the one untrusted input."""
+    if isinstance(url, (list, tuple)):
+        url = url[0] if url else None
+    if not isinstance(url, str):
+        return None
+    u = url.strip()
+    return u if re.match(r"^https?://[^\s<>\"']+$", u, re.I) else None
 
 
 def today() -> date:
@@ -81,21 +123,29 @@ def parse_date(value: Any) -> date | None:
         return None
     if isinstance(value, (int, float)):
         try:
-            return datetime.fromtimestamp(float(value), tz=timezone.utc).date()
+            return datetime.fromtimestamp(float(value), tz=UTC).date()
         except (OverflowError, ValueError, OSError):
             return None
     s = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%d %b %Y", "%d %B %Y", "%Y-%m", "%Y"):
-        try:
-            return datetime.strptime(s[:len(datetime.now().strftime(fmt))] if fmt in ("%Y-%m", "%Y") else s, fmt).date()
-        except ValueError:
-            continue
-    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", s)
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)          # 2026-09-04, 2026-09-04T10:00:00Z, ...
     if m:
         try:
             return date(int(m[1]), int(m[2]), int(m[3]))
         except ValueError:
             return None
+    m = re.fullmatch(r"(\d{4})-(\d{2})", s)                # 2026-09  (MusicBrainz partial dates)
+    if m:
+        try:
+            return date(int(m[1]), int(m[2]), 1)
+        except ValueError:
+            return None
+    if re.fullmatch(r"\d{4}", s):                           # 2026
+        return date(int(s), 1, 1)
+    for fmt in ("%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
     try:
         from email.utils import parsedate_to_datetime
 
@@ -215,7 +265,7 @@ def format_credit(artist: str, title: str, featuring: list[str] | None = None, r
 
 
 def item_key(artist: str, title: str) -> str:
-    return hashlib.sha1(f"{norm(artist)}|{norm_track(title)}".encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(f"{norm(artist)}|{norm_track(title)}".encode()).hexdigest()[:16]
 
 
 def parse_artist_title(text: str) -> tuple[str, str] | None:

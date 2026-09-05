@@ -59,6 +59,9 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
             if kind == "direct":
                 s += w["affinity"] * (0.5 + entry["affinity"])
                 reasons.append(f"you play {entry['name']}")
+            elif kind == "saved":
+                s += w.get("saved", 2.0) * (0.5 + entry["affinity"])
+                reasons.append(f"{entry['name']} is in your playlists")
             else:
                 s += w["similar"] * (0.4 + entry["affinity"])
                 via = ", ".join(entry.get("via", [])[:2])
