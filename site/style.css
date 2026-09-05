@@ -181,8 +181,9 @@ main { padding: 20px 20px 160px; max-width: 1200px; margin: 0 auto; }
 
 /* ---------- player: the basement level, poured in ink ---------- */
 .deck.off { display: contents; }   /* list view: the deck contributes no box, only the (fixed) player inside it */
-.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: 356px 1fr; gap: 16px; padding: 12px 20px; background: var(--paper2); color: var(--ink); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); }
-.player-frame { width: 356px; aspect-ratio: 16/9; overflow: hidden; background: #000; border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--accent); }
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: 356px 1fr; gap: 16px; padding: 8px 20px; background: var(--paper2); color: var(--ink); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); }
+/* YouTube's embed minimum is 200px tall: at 16:9 that is 356×200, the smallest the bar's frame can be */
+.player-frame { width: 356px; height: 200px; overflow: hidden; background: #000; border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--accent); }
 .player-frame iframe { width: 100%; height: 100%; }
 .player-meta { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; }
 .now { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
@@ -384,7 +385,7 @@ body.doc .tab { text-decoration: none; }
   .dbody { gap: 7px; }
 
   .player { grid-template-columns: 1fr; gap: 8px; padding: 0 0 max(8px, env(safe-area-inset-bottom)); }
-  .player-frame { width: 100%; border: 0; border-bottom: 2px solid var(--ink); box-shadow: none; }
+  .player-frame { width: 100%; height: auto; aspect-ratio: 16/9; border: 0; border-bottom: 2px solid var(--ink); box-shadow: none; }
   .player-meta { padding: 0 12px; }
   .now { font-size: 13px; }
   .player-controls { gap: 6px; }
@@ -543,8 +544,7 @@ select.year.attention { animation: attention .5s ease 2; }
   .dartist { font-size: 18px; }
   .deck-actions { position: static; padding: 6px 0; background: none; }
   .deck { padding-bottom: calc(var(--player-h, 0px) + 12px); }
-  .player { grid-template-columns: 356px 1fr; padding-top: 6px; padding-bottom: max(6px, env(safe-area-inset-bottom)); }
-  .player-frame { width: 356px; }
+  .player { padding-top: 6px; padding-bottom: max(6px, env(safe-area-inset-bottom)); }
   dialog { max-height: 100dvh; }
 }
 
