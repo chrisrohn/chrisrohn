@@ -11,7 +11,8 @@ asks the catalogues for the earliest date that recording (or its ISRC) was ever 
        the ISRC itself also encodes a registration year (weak hint)                              (free, no key)
     4. Discogs master release year   – masters represent the original issue; needs DISCOGS_TOKEN  (free account)
     5. iTunes Search API             – earliest release date of a matching song                   (free, ~20/min)
-    6. the source's own release date (Bandcamp / ListenBrainz / KEXP album date), then the YouTube album year
+    6. the source's own release date (Bandcamp / ListenBrainz / KEXP album date) or the year the YouTube Music
+       artist page states for the release, then the YouTube album year
 
 Every year found is kept as evidence; the earliest year from the most trusted tier wins. A blog-post or channel
 upload date is never a release date. When nothing anywhere says when a song came out, `year` stays None and the site
@@ -40,10 +41,10 @@ _ISRC_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}(\d{2})\d{5}$")
 
 # evidence tiers: 3 = recording-level catalogue fact, 2 = store/source date, 1 = weak hint
 TRUST = {"musicbrainz": 3, "musicbrainz-search": 3, "musicbrainz-isrc": 3, "discogs": 3,
-         "deezer": 2, "itunes": 2, "release-date": 2, "isrc": 1, "youtube": 1, "feed-date": 0}
+         "deezer": 2, "itunes": 2, "release-date": 2, "ytmusic-year": 2, "isrc": 1, "youtube": 1, "feed-date": 0}
 LABEL = {"musicbrainz": "MusicBrainz recording", "musicbrainz-search": "MusicBrainz search", "musicbrainz-isrc": "MusicBrainz via ISRC",
          "discogs": "Discogs master", "deezer": "Deezer", "itunes": "Apple Music", "release-date": "source release date",
-         "isrc": "ISRC registration year", "youtube": "YouTube album", "feed-date": "blog post date"}
+         "ytmusic-year": "YouTube Music release year", "isrc": "ISRC registration year", "youtube": "YouTube album", "feed-date": "blog post date"}
 
 
 @dataclass
@@ -321,6 +322,8 @@ def decide(found: dict[str, int], it: Item) -> tuple[int | None, str, str, list[
     weak_date = it.release_date is not None and it.date_kind != "release"
     if it.release_date and not weak_date:
         ev.append(Evidence(it.release_date.year, "release-date"))
+    if it.stated_year and not (it.release_date and not weak_date):
+        ev.append(Evidence(it.stated_year, "ytmusic-year"))   # the artist page states the year of the single/album
     yt = year_of((it.youtube or {}).get("year"))
     if yt:
         ev.append(Evidence(yt, "youtube"))

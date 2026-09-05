@@ -560,3 +560,88 @@ def test_cli_parses_commands(monkeypatch):
     assert cli.main([]) == 0 and calls[-1] == "build"                                 # daily is the default
     with pytest.raises(SystemExit):
         cli.main(["--no-such-flag"])
+
+
+def test_resolve_pick_requires_the_title_when_known():
+    from discovery.resolve import _pick
+
+    res = [{"resultType": "song", "title": "Don't Trust the Night", "artists": [{"name": "NINA"}], "videoId": "x"}]
+    assert _pick(res, "Nina", "To See You") is None            # same artist, another song: never "close enough"
+    assert _pick(res, "Nina", None)["videoId"] == "x"          # no title known: the artist alone decides
+    res.append({"resultType": "song", "title": "To See You (feat. Radio Wolf)", "artists": [{"name": "NINA"}], "videoId": "y"})
+    assert _pick(res, "Nina", "To See You")["videoId"] == "y"
+
+
+def test_resolve_plausible_and_title_track():
+    from discovery.resolve import _album_track, plausible, titles_agree
+
+    assert titles_agree("Say", "Say (feat. E.VAX)") and not titles_agree("Say", "Say Goodbye") and not titles_agree("Say", "Essay")
+    assert titles_agree("Nostalgia", "Ocean & the Stars - Nostalgia (Official)", "Ocean & the Stars") and not titles_agree("You", "It's You", "Armand van Helden")
+    single = Item(artist="Nina", title="To See You", kind="release", release="To See You")
+    wrong = {"videoId": "a", "title": "Don't Trust the Night", "artists": ["NINA", "Radio Wolf"], "album": "Jukebox Dream, Vol. 1"}
+    assert not plausible(single, wrong)
+    assert plausible(single, {"videoId": "b", "title": "To See You", "artists": ["NINA"], "album": "To See You"})
+    album = Item(artist="Nina", title="Jukebox Dream, Vol. 1", kind="release", release="Jukebox Dream, Vol. 1")
+    assert plausible(album, wrong)                                   # an album card plays a track off that album
+    assert not plausible(Item(artist="Ratatat", title="Say", kind="track"), {"videoId": "c", "title": "Say", "artists": ["Someone Else"]})
+    tracks = [{"videoId": "1", "title": "BEO"}, {"videoId": "2", "title": "Just Like Fire"}]
+    assert _album_track(tracks, Item(artist="Ratatat", title="Just Like Fire", kind="release", release="Just Like Fire"))["videoId"] == "2"
+    assert _album_track(tracks, Item(artist="Ratatat", title="Magnifique", kind="release", release="Magnifique"))["videoId"] == "1"
+
+
+def test_resolve_all_opens_releases_by_id_and_heals_stale_rows(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import resolve
+
+    class FakeYT:
+        albums = {"MPREb_single": {"title": "To See You", "year": "2026", "artists": [{"name": "NINA"}], "audioPlaylistId": "OLAK_single",
+                                   "thumbnails": [{"url": "https://i/single.jpg"}], "tracks": [{"videoId": "vidSee", "title": "To See You", "artists": [{"name": "NINA"}]}]}}
+        def get_album(self, bid):
+            return self.albums[bid]
+        def search(self, q, filter=None, limit=None):
+            if filter == "songs":
+                return [{"resultType": "song", "title": "Don't Trust the Night", "artists": [{"name": "NINA"}], "videoId": "vidDont"}]
+            return []
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    single = Item(artist="Nina", title="To See You", kind="release", release="To See You", sources=["ytmusic"], links={"youtube music": "https://music.youtube.com/browse/MPREb_single"})
+    other = Item(artist="Nina", title="Jukebox Dream, Vol. 2", kind="release", release="Jukebox Dream, Vol. 2", sources=["ytmusic"])
+    stale = {"videoId": "vidDont", "title": "Don't Trust the Night", "artists": ["NINA"], "album": "Jukebox Dream, Vol. 1", "via": "album"}
+    util.write_json(resolve.YT_CACHE, {single.key: {"seen": "2026-09-01", "yt": stale}, other.key: {"seen": "2026-09-01", "yt": stale}})
+    resolve.resolve_all([single, other], _cfg())
+    assert single.youtube["videoId"] == "vidSee" and single.youtube["year"] == "2026" and single.youtube["via"] == "album-id"
+    assert single.kind == "track" and single.title == "To See You" and single.release == "To See You"
+    assert other.youtube is None                                    # only another song by them exists: no result beats the wrong one
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[single.key]["yt"]["videoId"] == "vidSee" and cache[single.key]["v"] == resolve.CACHE_VERSION
+    assert cache[other.key]["yt"] is None and cache[other.key]["v"] == resolve.CACHE_VERSION
+    # a good cached row is used as is, and still turns the release into a playable track card
+    again = Item(artist="Nina", title="To See You", kind="release", release="To See You", sources=["ytmusic"])
+    resolve.resolve_all([again], _cfg())
+    assert again.youtube["videoId"] == "vidSee" and again.kind == "track"
+
+
+def test_collapse_shared_videos():
+    from discovery.resolve import collapse_shared_videos
+
+    yt = {"videoId": "vidBEO", "title": "BEO", "artists": ["Ratatat"]}
+    album = Item(artist="Ratatat", title="BEO", kind="track", release="Just Like Fire", sources=["ytmusic"], youtube=dict(yt), score=3.0)
+    single = Item(artist="Ratatat", title="BEO", kind="track", release="BEO", sources=["bandcamp"], youtube=dict(yt), score=2.0, release_date=date(2026, 9, 1))
+    other = Item(artist="Ratatat", title="Say", kind="track", youtube={"videoId": "vidSay", "title": "Say"}, score=1.0)
+    out = collapse_shared_videos([album, single, other])
+    assert [i.title for i in out] == ["BEO", "Say"]
+    assert out[0].sources == ["ytmusic", "bandcamp"] and out[0].release_date == date(2026, 9, 1)
+
+
+def test_decide_uses_the_stated_year():
+    from discovery.years import decide
+
+    it = Item(artist="Nina", title="To See You", kind="track", stated_year=2026)
+    year, source, conf, ev = decide({}, it)
+    assert (year, source, conf) == (2026, "ytmusic-year", "medium")
+    it.youtube = {"videoId": "v", "year": "2026"}
+    assert decide({}, it)[2] == "high"                             # the album page agrees
+    assert decide({"musicbrainz": 1998}, it)[:2] == (1998, "musicbrainz")   # a catalogue fact beats a stated year
+    it.release_date, it.date_kind = date(2026, 9, 5), "sighting"
+    assert decide({}, it)[:2] == (2026, "ytmusic-year")             # a sighting date never outranks the stated year

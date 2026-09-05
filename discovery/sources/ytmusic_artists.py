@@ -64,7 +64,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 thumbs = rel.get("thumbnails") or []
                 out.append(Item(
                     artist=e["name"], title=rel.get("title") or "", kind="release", release=rel.get("title"),
-                    release_type=rtype, sources=["ytmusic"], tags=[],
+                    release_type=rtype, sources=["ytmusic"], tags=[], stated_year=year or None,
                     links={"youtube music": f"https://music.youtube.com/browse/{rb}"},
                     artwork=thumbs[-1]["url"] if thumbs else None,
                 ))

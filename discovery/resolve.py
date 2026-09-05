@@ -1,10 +1,15 @@
 """Resolve items to YouTube Music (no key needed for search) so the feed can play them inline.
 
-For releases we look up the release and take the first (or featured) track; for tracks we search directly.
+A release that already carries its YouTube Music browse id (artist watch) is opened directly; other releases are
+searched by title and the matching track is taken (title track first, else the first track); tracks are searched
+directly. A result is only accepted when both the artist and the title agree with the item — landing on *another*
+song by the same artist is worse than no result, because the card would play the wrong thing. Cached rows are
+re-checked against the same rule, so rows written by an older, looser resolver heal themselves.
 Results are cached in data/cache/youtube.json.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from typing import Any
 
@@ -12,25 +17,62 @@ from .models import Item
 from .util import CACHE_DIR, Deadline, log, norm, norm_track, read_json, write_json
 
 YT_CACHE = CACHE_DIR / "youtube.json"
-FLUSH_EVERY = 25   # lookups between cache writes, so a killed job keeps what it already found
+CACHE_VERSION = 2   # rows without it come from the resolver that could land on another song by the same artist
+FLUSH_EVERY = 25    # lookups between cache writes, so a killed job keeps what it already found
 MB_RECORDING = "https://musicbrainz.org/ws/2/recording/"
+_BROWSE_RE = re.compile(r"/browse/(MPREb_[\w-]+)")
+
+
+_QUALIFIER_RE = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]\s*$|\s+[-–—]\s+[^-–—]+$")   # "(Acoustic)", "[Remix]", "- Live at X"
+
+
+def _core(s: str | None) -> str:
+    t = str(s or "")
+    for _ in range(3):
+        u = _QUALIFIER_RE.sub("", t)
+        if u == t:
+            break
+        t = u
+    return norm_track(t)
+
+
+def _uncredit(s: str | None, artist: str | None) -> str:
+    """Drop a leading "Artist - " from a video title ("Ocean & the Stars - Nostalgia (Official)")."""
+    t = str(s or "")
+    if artist:
+        t = re.sub(r"^\s*" + re.escape(artist) + r"\s*[-–—:]\s*", "", t, count=1, flags=re.I)
+    return t
+
+
+def titles_agree(a: str | None, b: str | None, artist: str | None = None) -> bool:
+    """Same song title: equal after suffix/feat. noise, or equal once a bracketed or dashed qualifier (and a leading
+    artist credit) is dropped ("Say" ~ "Say (feat. X)" ~ "Say - Live" ~ "Ratatat - Say"; never "Say Goodbye")."""
+    a, b = _uncredit(a, artist), _uncredit(b, artist)
+    x, y = norm_track(a), norm_track(b)
+    if not x or not y:
+        return False
+    return x == y or _core(a) == _core(b)
+
+
+def artist_agrees(artist: str, names: list[str] | None) -> bool:
+    a = norm(artist)
+    ns = [norm(n) for n in (names or []) if n]
+    return bool(a) and any(a == n or a in n or n in a for n in ns)
 
 
 def _pick(results: list[dict], artist: str, title: str | None) -> dict | None:
-    a = norm(artist)
+    """Best search hit for the item: the artist must match, and so must the title whenever we know one."""
     t = norm_track(title) if title else ""
     best, best_score = None, 0.0
     for r in results:
         if r.get("resultType") not in ("song", "video"):
             continue
-        names = [norm(x.get("name")) for x in (r.get("artists") or []) if x.get("name")]
-        artist_ok = any(a and (a == n or a in n or n in a) for n in names)
-        rt = norm_track(r.get("title"))
-        title_ok = bool(t) and (t == rt or t in rt or rt in t)
+        artist_ok = artist_agrees(artist, [x.get("name") for x in (r.get("artists") or [])])
+        title_ok = bool(t) and titles_agree(title, r.get("title"), artist)
         score = (2.0 if artist_ok else 0.0) + (1.5 if title_ok else 0.0) + (0.3 if r.get("resultType") == "song" else 0.0)
         if score > best_score:
             best, best_score = r, score
-    if best and best_score >= 2.0:
+    if best and best_score >= (3.5 if t else 2.0):
         return best
     return None
 
@@ -50,8 +92,60 @@ def _shape(r: dict, via: str) -> dict[str, Any]:
     }
 
 
+def browse_id(it: Item) -> str | None:
+    """The YouTube Music album/single id an artist-watch item was built from."""
+    m = _BROWSE_RE.search(it.links.get("youtube music") or "")
+    return m.group(1) if m else None
+
+
+def _album_track(tracks: list[dict], it: Item) -> dict:
+    """The track a release card should play: the title track when there is one, else the opener."""
+    want = it.release or it.title
+    return next((t for t in tracks if titles_agree(want, t.get("title"))), tracks[0])
+
+
+def _from_album(detail: dict, it: Item, via: str) -> dict[str, Any] | None:
+    tracks = [t for t in (detail.get("tracks") or []) if t.get("videoId")]
+    if not tracks:
+        return None
+    found = _shape(_album_track(tracks, it), via)
+    found["thumbnail"] = (detail.get("thumbnails") or [{}])[-1].get("url") or found["thumbnail"]
+    found["album"] = detail.get("title")
+    found["year"] = found.get("year") or detail.get("year")
+    found["trackCount"] = len(tracks)
+    found["albumBrowseId"] = detail.get("browseId") or detail.get("audioPlaylistId")
+    found["playlistId"] = detail.get("audioPlaylistId")
+    if not found.get("artists"):
+        found["artists"] = [x.get("name") for x in (detail.get("artists") or []) if x.get("name")]
+    return found
+
+
+def plausible(it: Item, yt: dict | None) -> bool:
+    """Does this YouTube result actually belong to the item (same artist, and the song or the album it names)?"""
+    if not yt or not yt.get("videoId"):
+        return False
+    if yt.get("artists") and not artist_agrees(it.artist, yt.get("artists")):
+        return False
+    if titles_agree(it.title, yt.get("title"), it.artist):
+        return True
+    if it.kind == "release" or it.release:
+        want = it.release or it.title
+        return titles_agree(want, yt.get("album"), it.artist) or titles_agree(want, yt.get("title"), it.artist)
+    return False
+
+
+def promote(it: Item, yt: dict) -> None:
+    """A resolved release becomes a playable track card: the song the video is, on the release it came from."""
+    if it.kind != "release" or not yt.get("title"):
+        return
+    it.release = it.release or it.title
+    it.title = yt["title"]
+    it.kind = "track"
+    it.normalize_credit()
+
+
 def _entry(v: Any, today: str) -> dict:
-    """Cache rows are {"seen": date, "yt": result|None}; rows written before the prune existed are the bare result."""
+    """Cache rows are {"seen": date, "yt": result|None, "v": version}; rows written before the prune existed are the bare result."""
     if isinstance(v, dict) and "yt" in v and "seen" in v:
         return v
     return {"seen": today, "yt": v or None}
@@ -63,6 +157,42 @@ def prune_cache(cache: dict[str, Any], today: date, keep_days: int, seen_key: st
         return cache
     cutoff = (today - timedelta(days=keep_days)).isoformat()
     return {k: v for k, v in cache.items() if (v.get(seen_key) if isinstance(v, dict) else None) and v[seen_key] >= cutoff}
+
+
+def _lookup(yt, it: Item) -> dict[str, Any] | None:
+    """One item's YouTube Music lookup (network). Returns the shaped result or None; never mutates the item."""
+    if it.kind == "track":
+        res = yt.search(f"{it.artist} {it.display_title}", filter="songs", limit=6)
+        hit = _pick(res, it.artist, it.display_title)
+        if not hit:
+            res = yt.search(f"{it.artist} {it.display_title}", filter="videos", limit=4)
+            hit = _pick(res, it.artist, it.display_title)
+        return _shape(hit, "track-search") if hit else None
+    want = it.release or it.title
+    # release with a known browse id (artist watch): open exactly that release
+    bid = browse_id(it)
+    if bid:
+        detail = yt.get_album(bid)
+        names = [x.get("name") for x in (detail.get("artists") or [])]
+        if not names or artist_agrees(it.artist, names):
+            found = _from_album(detail, it, "album-id")
+            if found:
+                return found
+    # otherwise find the release by title (an exact title first, then a title that contains ours), never "any album by them"
+    res = yt.search(f"{it.artist} {want}", filter="albums", limit=5)
+    same_artist = [r for r in res if artist_agrees(it.artist, [x.get("name") for x in (r.get("artists") or [])])]
+    album = next((r for r in same_artist if norm_track(r.get("title")) == norm_track(want)), None) \
+        or next((r for r in same_artist if titles_agree(want, r.get("title"))), None)
+    if album and album.get("browseId"):
+        detail = yt.get_album(album["browseId"])
+        found = _from_album(detail, it, "album")
+        if found:
+            found["year"] = found.get("year") or album.get("year")
+            return found
+    # a single that is only listed as a song: the song must carry the release's name
+    res = yt.search(f"{it.artist} {want}", filter="songs", limit=6)
+    hit = _pick(res, it.artist, want)
+    return _shape(hit, "release-fallback") if hit else None
 
 
 def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) -> None:
@@ -81,7 +211,7 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
     cache: dict[str, Any] = {k: _entry(v, today_s) for k, v in read_json(YT_CACHE, {}).items()}
     deadline = deadline or Deadline(None)
     budget = int(rcfg.get("max_lookups_per_run", 400))
-    looked = 0
+    looked = stale = rejected = 0
     skipped_deadline = 0
 
     def flush() -> None:
@@ -91,11 +221,20 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
         if it.youtube:
             continue
         key = it.key
-        if key in cache:
-            row = cache[key]
-            row["seen"] = today_s
-            it.youtube = row["yt"] or None
-            continue
+        row = cache.get(key)
+        if row is not None:
+            old = row.get("v") != CACHE_VERSION
+            if row["yt"] and not plausible(it, row["yt"]):
+                stale += 1                       # the old resolver landed on another song by the same artist
+                del cache[key]
+            elif row["yt"] is None and old and browse_id(it):
+                del cache[key]                   # a miss from before releases were opened by id
+            else:
+                row["seen"] = today_s
+                it.youtube = row["yt"] or None
+                if it.youtube:
+                    promote(it, it.youtube)
+                continue
         if looked >= budget:
             continue
         if deadline.expired:
@@ -104,66 +243,57 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
         looked += 1
         found: dict | None = None
         try:
-            if it.kind == "track":
-                res = yt.search(f"{it.artist} {it.display_title}", filter="songs", limit=6)
-                hit = _pick(res, it.artist, it.display_title)
-                if not hit:
-                    res = yt.search(f"{it.artist} {it.display_title}", filter="videos", limit=4)
-                    hit = _pick(res, it.artist, it.display_title)
-                if hit:
-                    found = _shape(hit, "track-search")
-            else:
-                # release: find the album, then its first track
-                res = yt.search(f"{it.artist} {it.release or it.title}", filter="albums", limit=5)
-                album = None
-                for r in res:
-                    names = [norm(x.get("name")) for x in (r.get("artists") or [])]
-                    if any(norm(it.artist) == n or norm(it.artist) in n for n in names) and norm_track(r.get("title")) == norm_track(it.release or it.title):
-                        album = r
-                        break
-                if album is None:
-                    for r in res:
-                        names = [norm(x.get("name")) for x in (r.get("artists") or [])]
-                        if any(norm(it.artist) == n for n in names):
-                            album = r
-                            break
-                if album and album.get("browseId"):
-                    detail = yt.get_album(album["browseId"])
-                    tracks = detail.get("tracks") or []
-                    tracks = [t for t in tracks if t.get("videoId")]
-                    if tracks:
-                        first = tracks[0]
-                        found = _shape(first, "album")
-                        found["thumbnail"] = (detail.get("thumbnails") or [{}])[-1].get("url") or found["thumbnail"]
-                        found["album"] = detail.get("title")
-                        found["trackCount"] = len(tracks)
-                        found["albumBrowseId"] = album["browseId"]
-                        found["playlistId"] = detail.get("audioPlaylistId")
-                        # promote release → track so the card shows a playable song
-                        it.title = first.get("title") or it.title
-                        it.kind = "track"
-                        it.normalize_credit()
-                if not found:
-                    res = yt.search(f"{it.artist} {it.release or it.title}", filter="songs", limit=6)
-                    hit = _pick(res, it.artist, None)
-                    if hit:
-                        found = _shape(hit, "release-fallback")
-                        it.title = hit.get("title") or it.title
-                        it.kind = "track"
-                        it.normalize_credit()
+            found = _lookup(yt, it)
         except Exception as exc:  # noqa: BLE001
             log.debug("yt resolve failed for %s – %s: %s", it.artist, it.title, exc)
             found = None
-        cache[key] = {"seen": today_s, "yt": found}
+        if found and not plausible(it, found):
+            log.debug("yt resolve rejected for %s – %s: got %s – %s", it.artist, it.title, found.get("artists"), found.get("title"))
+            rejected += 1
+            found = None
+        cache[key] = {"seen": today_s, "yt": found, "v": CACHE_VERSION}
         it.youtube = found
-        if found and not it.artwork:
-            it.artwork = found.get("thumbnail")
+        if found:
+            promote(it, found)
+            if not it.artwork:
+                it.artwork = found.get("thumbnail")
         if looked % FLUSH_EVERY == 0:
             flush()
     flush()
     if skipped_deadline:
         log.warning("youtube: time budget reached; %d lookups left for the next run", skipped_deadline)
-    log.info("youtube: %d lookups this run, %d cached", looked, len(cache))
+    log.info("youtube: %d lookups this run (%d stale rows redone, %d wrong-song hits rejected), %d cached", looked, stale, rejected, len(cache))
+
+
+def _card_rank(it: Item) -> tuple[bool, bool, float]:
+    yt = it.youtube or {}
+    return (titles_agree(it.title, yt.get("title")), it.kind == "track", it.score)
+
+
+def collapse_shared_videos(items: list[Item]) -> list[Item]:
+    """One card per video: when several items resolved to the same YouTube video they are the same song, so keep the
+    card whose title is the video's title and fold the others (sources, links, dates) into it."""
+    keep: dict[str, Item] = {}
+    out: list[Item] = []
+    for it in items:
+        vid = (it.youtube or {}).get("videoId")
+        if not vid:
+            out.append(it)
+            continue
+        other = keep.get(vid)
+        if other is None:
+            keep[vid] = it
+            out.append(it)
+        elif _card_rank(it) > _card_rank(other):
+            it.merge(other)
+            out[out.index(other)] = it
+            keep[vid] = it
+        else:
+            other.merge(it)
+    folded = len(items) - len(out)
+    if folded:
+        log.info("youtube: folded %d cards that played the same video as another", folded)
+    return out
 
 
 # Year verification moved to discovery/years.py (identifier-based); kept importable from here.
