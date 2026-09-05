@@ -204,14 +204,16 @@ def test_discover_playlists_via_channel():
         def get_user(self, cid):
             return {"playlists": {"params": "p"}}
         def get_user_playlists(self, cid, params):
-            return [{"title": "1999 Indie Discotheque", "playlistId": "PL1999"}, {"title": "Indie Discotheque – Skipped", "playlistId": "PLSKIP"},
+            return [{"title": "2027 Indie Discotheque", "playlistId": "PL2027"}, {"title": "Indie Discotheque – Skipped", "playlistId": "PLSKIP"},
                     {"title": "Random Mix", "playlistId": "PLX"}, {"title": "2026 Indie Discotheque", "playlistId": "PLDUP"}]
 
     cfg = _cfg()
     cfg["youtube_music"]["channel_id"] = ""          # learn the channel from a playlist's author
     years, skipped, channel = discover_playlists(cfg, FakeYT())
     assert channel == "UC1" and skipped == "PLSKIP"
-    assert years["1999"] == "PL1999" and years["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN"  # configured id wins
+    assert years["2027"] == "PL2027"                                        # a new year is found by title
+    assert years["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN"             # configured id wins over the duplicate
+    assert len(years) == 49 and years["1979"] == "PLTW5JZnPjE_r_8aNRMTx9NT75iYguNwae"  # all 48 pinned years survive
 
 
 def test_resolve_pick():
@@ -345,12 +347,13 @@ def test_discover_playlists_tolerant_titles_and_channel_from_author():
         def get_user(self, cid):
             return {"playlists": {"params": "p"}}
         def get_user_playlists(self, cid, params):
-            return [{"title": "Indie Discotheque 1999", "playlistId": "PL1999"}, {"title": "2001 - indie discotheque", "playlistId": "PL2001"},
-                    {"title": "1987 Indie Discotheque", "playlistId": "PL1987"}, {"title": "Indie Discotheque favourites", "playlistId": "PLX"}]
+            return [{"title": "Indie Discotheque 2027", "playlistId": "PL2027"}, {"title": "2028 - indie discotheque", "playlistId": "PL2028"},
+                    {"title": "1978 Indie Discotheque", "playlistId": "PL1978"}, {"title": "Indie Discotheque favourites", "playlistId": "PLX"}]
 
     cfg = _cfg()
     years, skipped, channel = discover_playlists(cfg, FakeYT())
     assert channel == cfg["youtube_music"]["channel_id"] == "UCLyRuumpAkAqDKe3nmFZljw"   # configured id wins
     cfg["youtube_music"]["channel_id"] = ""
     assert discover_playlists(cfg, FakeYT())[2] == "UCxyz"                                   # otherwise learned from the author
-    assert years["1999"] == "PL1999" and years["2001"] == "PL2001" and years["1987"] == "PL1987" and "PLX" not in years.values()
+    assert years["2027"] == "PL2027" and years["2028"] == "PL2028" and years["1978"] == "PL1978" and "PLX" not in years.values()
+    assert years["1999"] == "PLTW5JZnPjE_rgIDfV4vL5g4EZ3SCc-R_d"             # pinned ids are never overridden by title matches
