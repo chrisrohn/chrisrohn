@@ -17,11 +17,57 @@ youtube_music:
   # The channel that OWNS the year playlists (they're collaborative; @indiedisco owns them, chrisrohn's personal
   # channel UCv8zZnVxdrPDhcF_4-eUDCA is a collaborator). The build lists this channel's public playlists.
   channel_id: "UCLyRuumpAkAqDKe3nmFZljw"   # https://music.youtube.com/@indiedisco
-  # Any of your year playlists; the build lists the channel's public playlists to find every other year.
+  # Every '<year> | Indie Discotheque' playlist (collaborative, owned by @indiedisco). Configured IDs always win; the
+  # build still lists the channel's public playlists to pick up any year added later and the Skipped playlist.
   playlists:
     "2026": PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN
     "2025": PLTW5JZnPjE_onNAnNNGWFyek1iTfsdSrS
     "2024": PLTW5JZnPjE_pezZ1Xi92GmMvNM_mMLlvJ
+    "2023": PLTW5JZnPjE_pZX15o6e9G3wMsj1UDZYph
+    "2022": PLTW5JZnPjE_q9FM-Si3tUjgbxlax6jDM2
+    "2021": PLTW5JZnPjE_r-QVi3wDsHGEkh6I3ikYSy
+    "2020": PLTW5JZnPjE_rrHhKVblwnwiDBkYbyebMs
+    "2019": PLTW5JZnPjE_qwqk7hktIKv3HxegQQVToo
+    "2018": PLTW5JZnPjE_qNnWzbbQ2aNzeTc1vMfHuf
+    "2017": PLTW5JZnPjE_qxf5lkzEmWk4q-p9l46p1e
+    "2016": PLTW5JZnPjE_poQsHO3KPZs-qqUvHnVLya
+    "2015": PLTW5JZnPjE_reHcKk9pdZhtqttu8qpKkG
+    "2014": PLTW5JZnPjE_oA8O2JO8_yCmMaWvHiZ2PR
+    "2013": PLTW5JZnPjE_oPQ0TGWl9TSgHnLkS8Gi9-
+    "2012": PLTW5JZnPjE_pbx8O4i2Cg9UOVrgEoudmn
+    "2011": PLTW5JZnPjE_rzpy5UkQcPVVkcdB45MrGS
+    "2010": PLTW5JZnPjE_qIyF0WNNtM2NC70fjVkmgR
+    "2009": PLTW5JZnPjE_r9HE9rtK0Tg8jP3wktJReR
+    "2008": PLTW5JZnPjE_qoUOeK3M8mRS0ZjuybaUZ1
+    "2007": PLTW5JZnPjE_pR8Dys5c5y8NKF0kjzzWC2
+    "2006": PLTW5JZnPjE_qzLC6mywnediWuL7xZzMi3
+    "2005": PLTW5JZnPjE_o6Lgpq24CyBdEV5X3PZP1A
+    "2004": PLTW5JZnPjE_oAgN4dQ0YbbmEEL8Oj778C
+    "2003": PLTW5JZnPjE_rUFoC8edSyf_jST50IVkQH
+    "2002": PLTW5JZnPjE_qOMRqslkyQGoZvndMSpLwp
+    "2001": PLTW5JZnPjE_qbCiyqLjMteOHlslmHWDe8
+    "2000": PLTW5JZnPjE_qZ3aq2s5X1BVOZp1KaVpfG
+    "1999": PLTW5JZnPjE_rgIDfV4vL5g4EZ3SCc-R_d
+    "1998": PLTW5JZnPjE_qvZ0X2-v3rZsp8yZmK6Dp3
+    "1997": PLTW5JZnPjE_qLsSefKKFchh8aK3XLG70-
+    "1996": PLTW5JZnPjE_r-8HhyaBFHJZHdpG1vwXHD
+    "1995": PLTW5JZnPjE_rUDdMvhOTCD28nDechOoHK
+    "1994": PLTW5JZnPjE_o4sRW0vGmH4hVs-Gxx_iRK
+    "1993": PLTW5JZnPjE_p9k7T98H-U6Wr3QmFOLquL
+    "1992": PLTW5JZnPjE_rCzGl4VJFU0IDtmzAmOuIS
+    "1991": PLTW5JZnPjE_pcSgDl7ARqhNehKWQJNsuO
+    "1990": PLTW5JZnPjE_paLPdihPkDekWLa3CVebfY
+    "1989": PLTW5JZnPjE_ryjDqm4OQiIxoyjeDTWlm2
+    "1988": PLTW5JZnPjE_poy2n-KdN4Y07qOHuurBEi
+    "1987": PLTW5JZnPjE_qofD1_8VqXNqpzsOCQcDeW
+    "1986": PLTW5JZnPjE_roOHz_akaBlegxGF7GdWIm
+    "1985": PLTW5JZnPjE_q7fT7F9nxWZg53f-mL3h7-
+    "1984": PLTW5JZnPjE_p82poBfHYtKX_dIouzt2b_
+    "1983": PLTW5JZnPjE_pZZDGMM2YIqZ8OhcwTTES5
+    "1982": PLTW5JZnPjE_qDh7kHm1IP5bxFfkrOb8jJ
+    "1981": PLTW5JZnPjE_oWnypYo4hC1SbK7res5r8W
+    "1980": PLTW5JZnPjE_r847Qt3Se6tyHHzVOm--hy
+    "1979": PLTW5JZnPjE_r_8aNRMTx9NT75iYguNwae
   # 👎 are free: by default they're remembered in the browser only (no YouTube quota). Set skips_in_youtube: true
   # (or flip the switch in ⚙ on the site) to also file them into an unlisted "Skipped" playlist so every device and
   # the daily build see them. Each YouTube write costs 50 of the 10,000 daily quota units.

@@ -79,7 +79,8 @@ browser and expire with the feed. Listening, filtering and playback cost nothing
 **Optional – skips on YouTube too:** switch on **⚙ → Also file 👎 into the Skipped playlist** if you rate from
 several devices and want skips shared. The first 👎 then creates an unlisted `Indie Discotheque – Skipped`
 playlist and shows its ID; paste it into `config.yaml` → `youtube_music.skipped_playlist_id` so the daily build
-can read it (unlisted playlists aren't discoverable by title). Year playlists are public and found automatically.
+can read it (unlisted playlists aren't discoverable by title). All 48 year playlists (1979–2026) are pinned by ID in
+`youtube_music.playlists`; when you create a new year's playlist, add its ID there (the build also finds it by title).
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free).
 
