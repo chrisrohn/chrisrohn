@@ -103,6 +103,10 @@ a song came out the card shows `year?` and 👍 refuses until you pick, so a cat
 year's playlist by default. Lookups are cached and budgeted per run (`resolve.max_year_lookups_per_run`; MusicBrainz
 allows 1 request/s), undated tracks first.
 
+**Sessions:** Google access tokens last an hour; the site renews them silently on your next tap, so you stay signed in
+for as long as your Google session lasts. Signing out only forgets that device. To disconnect the site from your
+Google account entirely use https://myaccount.google.com/permissions.
+
 **No duplicates:** every 👍 first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so; a song already thumbed up today under another feed entry is caught too. The daily build
 scans all year playlists and reports the same video added twice, a second upload of the same song, or one song
