@@ -59,6 +59,9 @@
     applyMode();
     render();
     if (isCurator() && tokenValid()) { pullRatings(); refreshRecent().catch(() => {}); }
+    if (isSignedIn()) ensureTokenClient().catch(() => {});
+    document.addEventListener("pointerdown", keepAlive, { capture: true, passive: true });
+    document.addEventListener("keydown", keepAlive, { capture: true, passive: true });
   }
   // another device may have rated things while this tab was in the background (only while the token is valid:
   // a background refresh would need a popup, which browsers block without a tap — the next 👍 refreshes it instead)
@@ -197,37 +200,69 @@
       s.onload = resolve; s.onerror = () => reject(new Error("could not load Google sign-in")); document.head.appendChild(s);
     });
   }
+  // One token client for the page, created as soon as we know the client id (and preloaded for a remembered account),
+  // so the only thing left in a tap handler is requestAccessToken — browsers block the Google popup if it opens late.
+  async function ensureTokenClient() {
+    const cid = state.feed.google && state.feed.google.client_id;
+    if (!cid) return null;
+    if (state.tokenClient) return state.tokenClient;
+    await ensureGis();
+    if (state.tokenClient) return state.tokenClient;
+    state.tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: cid, scope: SCOPES,
+      callback: resp => state.authCb && state.authCb(resp),
+      error_callback: err => state.authErrCb && state.authErrCb(err),
+    });
+    return state.tokenClient;
+  }
   async function signIn({ silent = false } = {}) {
     const cid = state.feed.google && state.feed.google.client_id;
     if (!cid) { toast("Google client ID not configured yet — see SETUP.md", true); return false; }
-    await ensureGis();
+    const client = await ensureTokenClient();
     if (state.signingIn) return state.signingIn;          // one popup at a time
     state.signingIn = new Promise(resolve => {
-      const done = v => { state.signingIn = null; resolve(v); };
-      state.tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: cid, scope: SCOPES,
-        error_callback: err => { if (!silent) toast("Sign-in " + (err && err.type === "popup_closed" ? "cancelled" : "failed: " + ((err && err.message) || err && err.type || "unknown")), true); done(false); },
-        callback: async resp => {
-          if (resp.error) { if (!silent) toast("Sign-in failed: " + resp.error, true); return done(false); }
-          const prev = state.auth || {}; const prevEmail = prev.email;
-          state.auth = { ...prev, access_token: resp.access_token, expires_at: Date.now() + (Number(resp.expires_in) || 3600) * 1000 };
-          try {
-            const me = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + resp.access_token } }).then(r => r.json());
-            if (me && me.email) Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture });
-          } catch {}
-          if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
-          persist(); applyMode(); render();
-          if (silent) { if (isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); return done(true); }
-          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); pullRatings(); }   // year playlists are pinned: no library listing needed
-          else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); pullRatings(); }
-          else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
-          done(true);
-        },
-      });
+      const done = v => { state.signingIn = null; state.authCb = state.authErrCb = null; resolve(v); };
+      const fail = why => {
+        state.lastAuthError = { why, at: Date.now() }; console.warn("Google sign-in did not complete:", why);
+        if (!silent) toast(/popup_closed/.test(why) ? "Sign-in cancelled" : "Sign-in failed: " + why, true);
+        done(false);
+      };
+      state.authErrCb = err => fail((err && (err.type || err.message)) || "unknown");
+      state.authCb = async resp => {
+        if (resp.error) return fail(resp.error + (resp.error_description ? " — " + resp.error_description : ""));
+        const prev = state.auth || {}; const prevEmail = prev.email;
+        state.auth = { ...prev, access_token: resp.access_token, expires_at: Date.now() + (Number(resp.expires_in) || 3600) * 1000 };
+        state.lastAuthError = null;
+        try {
+          const me = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + resp.access_token } }).then(r => r.json());
+          if (me && me.email) Object.assign(state.auth, { email: me.email, name: me.name, picture: me.picture });
+        } catch {}
+        if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
+        persist(); applyMode(); render();
+        if (silent) { if (isCurator() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); return done(true); }
+        if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); pullRatings(); }   // year playlists are pinned: no library listing needed
+        else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); pullRatings(); }
+        else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
+        done(true);
+      };
       // prompt "" = no consent screen when Google already remembers this grant; the hint skips the account chooser
-      state.tokenClient.requestAccessToken({ prompt: "", hint: state.auth && state.auth.email ? state.auth.email : undefined });
+      client.requestAccessToken({ prompt: "", hint: state.auth && state.auth.email ? state.auth.email : undefined });
     });
     return state.signingIn;
+  }
+  // The refresh could not complete (popup blocked, closed, or consent needed): offer a Sign in button right in the
+  // toast, so the next tap is a fresh user gesture that the browser will let open the Google popup.
+  function needSignIn(msg = "Google sign-in needs a refresh") {
+    toast(msg + (state.lastAuthError ? ` (${state.lastAuthError.why})` : ""), true, { label: "Sign in", fn: () => signIn().catch(e => toast(e.message, true)) });
+  }
+  // Keep the hour-long token alive while you're actively using the site: any tap or key press with less than five
+  // minutes left refreshes it (at most once a minute), so rating never runs into an expired token.
+  function keepAlive() {
+    if (!isSignedIn() || state.signingIn || !(state.feed.google && state.feed.google.client_id)) return;
+    if (state.auth.access_token && state.auth.expires_at > Date.now() + 5 * 60e3) return;
+    if (Date.now() - (state.keepAliveAt || 0) < 60e3) return;
+    state.keepAliveAt = Date.now();
+    signIn({ silent: true }).then(ok => { if (!ok) needSignIn(); });
   }
   // Sign-out only forgets this device. It deliberately does NOT revoke the Google grant: revoking kills the tokens on
   // your other devices too (and can even race a fresh sign-in on this one). Disconnecting the site for good is a
@@ -243,7 +278,7 @@
     return signIn({ silent: true });
   }
   async function withAuth(fn) {
-    if (!(await ensureToken({ minutes: 1 }))) { const ok = isSignedIn() ? false : await signIn(); if (!ok || !tokenValid()) throw new Error("Session expired — tap Sign in"); }
+    if (!(await ensureToken({ minutes: 1 }))) { const ok = isSignedIn() ? false : await signIn(); if (!ok || !tokenValid()) throw new Error("Google sign-in needs a refresh"); }
     return fn(state.auth.access_token);
   }
 
@@ -261,7 +296,7 @@
           // token revoked or expired early: get a fresh one silently and retry once
           state.auth.expires_at = 0; persist();
           if (!_retried && await signIn({ silent: true })) return yt(method, path, { params, body, _retried: true });
-          applyMode(); throw new Error("Google session expired — tap Sign in to continue");
+          applyMode(); throw new Error("Google sign-in needs a refresh — tap the Sign in button in the message");
         }
         if (r.status === 403 && /quota/i.test(msg)) throw new Error(msg + " — daily YouTube API quota reached; try again after midnight Pacific");
         if (r.status === 403 && path.startsWith("/playlistItems") && method === "POST") throw new Error("YouTube refused to add to that playlist for this sign-in. Collaborative playlists can only be edited through the API by the channel that owns them (@indiedisco) — sign out and sign in again choosing that channel, or make the playlist owner account a curator.");
@@ -509,7 +544,7 @@
       return;
     }
     year = year || yearOf(it);
-    if (decision === "up" || skipsInYouTube()) { if (!(await ensureToken())) { toast("Session expired — tap Sign in to continue", true); return; } }
+    if (decision === "up" || skipsInYouTube()) { if (!(await ensureToken())) { needSignIn("Could not refresh your Google sign-in"); return; } }
     state.busy.add(id);
     // optimistic: hide it now, move focus to the next card
     state.rated[id] = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, at: Date.now(), pending: true };
@@ -543,7 +578,7 @@
       toast((decision === "up" ? `👍 ${credit(it)} → ${titleFor(year)}` : `👎 ${credit(it)} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
     } catch (e) {
       delete state.rated[id]; persist(); render();
-      toast(`Could not file ${credit(it)}: ${e.message}`, true);
+      if (/sign-in needs a refresh/i.test(e.message)) needSignIn(`Could not file ${credit(it)}`); else toast(`Could not file ${credit(it)}: ${e.message}`, true);
     } finally { state.busy.delete(id); render(); }
   }
   async function undo(id) {
@@ -868,6 +903,7 @@
       const yrs = [...new Set([...Object.keys(state.playlists).filter(k => !k.startsWith("__")), ...(isOwner() ? Object.keys((state.feed.youtube && state.feed.youtube.playlists) || {}) : [])])].sort();
       $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · station playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
       $("#s-quota").textContent = quotaText();
+      const acct = $("#s-account"); if (acct && state.lastAuthError) acct.insertAdjacentHTML("beforeend", ` <span class="muted">Last sign-in problem: ${esc(state.lastAuthError.why)} (${relTime(new Date(state.lastAuthError.at))}).</span>`);
       $("#s-sync").textContent = state.sync.at ? `Ratings synced across your devices via Google Drive app data · last sync ${relTime(new Date(state.sync.at))} · ${Object.keys(state.rated).length} rated tracks remembered` : "Ratings not synced yet — sign in to sync across devices (uses a hidden app-data file in your Google Drive).";
       const g = $("#s-guests");
       if (isOwner()) {
