@@ -1,0 +1,37 @@
+name: Publish site
+
+# Fast path: a change to the site files alone is live in about a minute. The data build (Discover) is only needed
+# when the pipeline or its config changes, or on the daily schedule — it republishes the site too, after pulling
+# the latest main, so the two never fight.
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "!site/data/**", "!site/feed.xml", ".github/workflows/publish.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-publish
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

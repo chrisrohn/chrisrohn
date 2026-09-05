@@ -31,7 +31,10 @@ feed; the only thing that ever writes to a playlist is you pressing a thumb whil
    https://www.last.fm/api/account/create (instant, free, any app name). Optional but recommended: `DISCOGS_TOKEN`
    from a free Discogs account (Settings → Developers → Generate new token) — Discogs master years are the
    strongest source for original release dates of disco/electronic records.
-5. **Actions → Discover → Run workflow.** First run takes ~10–15 min (profile build + MusicBrainz rate limit).
+5. **Actions → Discover → Run workflow.** Afterwards: merging a change to `site/` publishes in about a minute
+   (the *Publish site* workflow); merging a change to `discovery/` runs the full data build first, 20–30 min.
+   Feed data refreshes on the daily schedule or a manual Discover run.
+6. **Actions → Discover → Run workflow** (first time only). First run takes ~10–15 min (profile build + MusicBrainz rate limit).
 
 ## 2. chrisrohn.com DNS (required for the custom domain)
 
