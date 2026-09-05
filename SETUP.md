@@ -144,8 +144,13 @@ session that the playlist's owner approved in that browser.
   Google Drive (free, no quota), pulled when you open the site or return to the tab and pushed after each thumb.
 - **Audition mode** (`a`, or the checkbox in the player bar): each track starts partway in and the site moves on by
   itself after 30 seconds unless you press a key or click the player. Length and start point are in ⚙.
-- **On a phone**, open chrisrohn.com and choose "Add to Home Screen" / "Install app": it runs full-screen with its
-  own icon. Swipe a card right for 👍, left for 👎 (curator or guest mode only).
+- **On a phone**, tap **Install** in the bar under the header (or ⚙ → *Install as an app*; on iPhone the sheet
+  walks through Share → Add to Home Screen). The installed app runs full-screen from its own icon, opens offline with
+  the last feed, shows the track on the lock screen with play/pause/next, offers **New today**, **Picks** and
+  **Audition** as long-press shortcuts on the icon, and refreshes itself when a new daily build lands while it is
+  open. A new site build shows a *Reload* toast rather than switching under you. Swipe a card right for 👍, left for
+  👎 (curator or guest mode only); **share** on a card opens the system share sheet. Desktop Chrome/Edge/Safari 17
+  install it too (the Install button in the header, or the icon in the address bar).
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list.
 
 ## Sources
@@ -199,6 +204,12 @@ pull request; **Publish site** runs the browser test again before anything reach
 lockfile with `cd discovery && pip-compile --generate-hashes --strip-extras -o requirements.lock requirements.txt`
 (Dependabot opens that pull request weekly). If a daily build fails, the workflow opens a **build-failure** issue and
 the site shows a banner once the feed is more than 36 hours old.
+
+The installable app is `site/manifest.webmanifest` (icons in `site/icons/`, the install-dialog pictures in
+`site/screenshots/`) plus `site/sw.js` (network first with a cached fallback for the shell and the feed, a capped
+cache for artwork, and a waiting worker the page promotes on *Reload*) and `site/src/pwa.js` (install button, how-to
+sheet, shortcuts, foreground refresh). `npm run screenshots` rebuilds the three pictures from `dist/` after a visible
+redesign.
 
 **Time budget:** YouTube resolution and year verification share `resolve.time_budget_minutes` (28 by default, against
 the job's 45-minute limit) and write their caches every 25 lookups, so a slow catalogue day leaves the rest for

@@ -16,6 +16,7 @@ import { rate } from "./rating.js";
 import { play, toggle, nextTrack, prevTrack, holdAudition } from "./player.js";
 import { wireSettings } from "./settings.js";
 import { wireKeys, currentYear } from "./keys.js";
+import { wirePwa, applyLaunchParams } from "./pwa.js";
 
 function wire() {
   $$(".tab").forEach(b => b.addEventListener("click", () => { state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b)); render(); }));
@@ -31,14 +32,14 @@ function wire() {
   $("#signin").addEventListener("click", () => { if (isSignedIn()) signOut(); else signIn().catch(e => toast(e.message, true)); });
   $("#p-next").addEventListener("click", nextTrack); $("#p-prev").addEventListener("click", prevTrack); $("#p-toggle").addEventListener("click", () => { holdAudition(); toggle(); });
   $("#yt").addEventListener("click", holdAudition, true);
-  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});
   $("#deck-up").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "up", deckYear()); });
   $("#deck-down").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "down", deckYear()); });
   $("#deck-play").addEventListener("click", () => { const it = deckItem(); if (!it?.youtube?.videoId) return; if (state.currentId === it.id && state.playerReady) { holdAudition(); toggle(); $("#deck-play").textContent = $("#deck-play").textContent.startsWith("⏸") ? "▶\uFE0E" : "⏸\uFE0E"; } else play(it.id); });
   $("#deck-next").addEventListener("click", () => { state.deckIndex++; render(); const it = deckItem(); if (it?.youtube?.videoId && state.currentId) play(it.id); });
   $("#deck-prev").addEventListener("click", () => { state.deckIndex = Math.max(0, state.deckIndex - 1); render(); });
   $("#layout-toggle").addEventListener("click", () => { state.settings.deck = !deckOn(); persist(); render(); });
-  $("#deck-filters").addEventListener("click", () => document.body.classList.toggle("filters-open"));
+  const toggleFilters = () => { const open = document.body.classList.toggle("filters-open"); $("#filters-more").textContent = open ? "hide filters ▴" : "filters ▾"; $("#filters-more").setAttribute("aria-expanded", String(open)); };
+  $("#deck-filters").addEventListener("click", toggleFilters); $("#filters-more").addEventListener("click", toggleFilters);
   // keep the pinned deck buttons above the player bar whatever its height
   const playerEl = $("#player");
   const setPlayerH = () => document.documentElement.style.setProperty("--player-h", playerEl.hidden ? "0px" : playerEl.getBoundingClientRect().height + "px");
@@ -48,6 +49,8 @@ function wire() {
   $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
   wireSettings();
   wireKeys();
+  wirePwa();
+  applyLaunchParams();   // after the controls are wired: ?view=picks, ?new=1, ?audition=1 from the app shortcuts
   // another device may have rated things while this tab was in the background (only while the token is valid:
   // a background refresh would need a popup, which browsers block without a tap — the next 👍 refreshes it instead)
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isCurator() && tokenValid() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); });

@@ -1,7 +1,7 @@
 // @ts-check
 /* Cards (list view, paged as you scroll) and the one-card deck (phones). */
 import { state, items, byId, decisionFor, PAGE } from "./state.js";
-import { $, $$, esc, safeUrl, sameName } from "./dom.js";
+import { $, $$, esc, safeUrl, sameName, canShare, shareTrack } from "./dom.js";
 import { isCurator } from "./auth.js";
 import { yearBadge, fillYearSelect, matchLabel, isMatchReason } from "./years.js";
 import { titleFor } from "./youtube.js";
@@ -73,7 +73,7 @@ export function renderDeck(vis) {
   const el = $("#deck-tpl").content.firstElementChild.cloneNode(true);
   el.dataset.id = it.id;
   const yt = /** @type {Partial<import("./types").YouTubeMatch>} */ (it.youtube || {});
-  const img = $("img", el); if (it.artwork || yt.thumbnail) img.src = it.artwork || yt.thumbnail; else img.remove();
+  const img = $("img", el); if (it.artwork || yt.thumbnail) { img.src = it.artwork || yt.thumbnail; dropIfDead(img); } else img.remove();
   if (!yt.videoId) $(".dplay", el).remove();
   $(".dartist", el).textContent = it.artist;
   $(".dtitle", el).textContent = it.display_title || it.title;
@@ -89,6 +89,7 @@ export function renderDeck(vis) {
   if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
   $(".dlinks", el).innerHTML = links.join(" · ");
+  addShare($(".dlinks", el), it);
   fillYearSelect($(".year", el), it);
   $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
   attachSwipe(el, it, 110);
@@ -106,7 +107,7 @@ function card(it, tpl) {
   el.dataset.id = it.id;
   const yt = /** @type {Partial<import("./types").YouTubeMatch>} */ (it.youtube || {});
   const art = $(".art", el); const img = $("img", art);
-  if (it.artwork || yt.thumbnail) img.src = it.artwork || yt.thumbnail; else img.remove();
+  if (it.artwork || yt.thumbnail) { img.src = it.artwork || yt.thumbnail; dropIfDead(img); } else img.remove();
   if (!yt.videoId) art.classList.add("unplayable");
   if (it.first_seen && it.first_seen === state.feed?.generated_at?.slice(0, 10) && !it._pick) el.classList.add("new");
   $(".artist", el).textContent = it.artist;
@@ -128,6 +129,7 @@ function card(it, tpl) {
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
   links.push(`<a href="https://www.last.fm/music/${encodeURIComponent(it.artist)}" target="_blank" rel="noopener">last.fm</a>`);
   $(".links", el).innerHTML = links.join(" · ");
+  addShare($(".links", el), it);
   $(".score", el).textContent = it.score ? it.score.toFixed(1) : "";
   const ysel = $(".year", el);
   if (it._pick) { ysel.remove(); $(".thumbs", el).remove(); const st = document.createElement("div"); st.className = "status"; st.textContent = it._year ? `in ${titleFor(it._year)}` : ""; $(".side", el).appendChild(st); }
@@ -141,6 +143,16 @@ function card(it, tpl) {
   if (!it._pick) attachSwipe(el, it);
   el.addEventListener("focus", () => { state.currentId = it.id; $$(".card.current").forEach(c => c.classList.remove("current")); el.classList.add("current"); });
   return el;
+}
+/** Artwork URLs come from many CDNs and some die: show the plain tile rather than a broken-image glyph. @param {HTMLImageElement} img */
+function dropIfDead(img) { img.addEventListener("error", () => img.remove(), { once: true }); }
+/** A "share" control at the end of the links, only where the browser has a share sheet. @param {HTMLElement} host @param {FeedItem} it */
+function addShare(host, it) {
+  if (!canShare()) return;
+  const b = document.createElement("button"); b.type = "button"; b.className = "share"; b.textContent = "share"; b.title = "share this track";
+  b.addEventListener("click", e => { e.stopPropagation(); shareTrack(it); });
+  if (host.childNodes.length) host.append(" · ");
+  host.appendChild(b);
 }
 /** @param {HTMLElement} el @param {FeedItem} it @param {number} [threshold] */
 function attachSwipe(el, it, threshold = 90) {

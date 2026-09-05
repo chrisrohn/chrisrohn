@@ -17,6 +17,19 @@ export function relTime(d) { const m = Math.round((Date.now() - d.getTime()) / 6
 /** @param {number} a @param {number} b */
 export const range = (a, b) => { const r = []; for (let y = a; y >= b; y--) r.push(y); return r; };
 
+/** The system share sheet, where there is one (phones, Safari, Chromium on Windows/ChromeOS); otherwise copy the link. */
+export const canShare = () => typeof navigator.share === "function";
+/** @param {import("./types").FeedItem} it */
+export async function shareTrack(it) {
+  const title = `${it.artist} - ${it.display_title || it.title}`;
+  const url = it.youtube && it.youtube.videoId ? "https://music.youtube.com/watch?v=" + it.youtube.videoId : (safeUrl(Object.values(it.links || {})[0]) || location.origin);
+  try { await navigator.share({ title, text: `${title} · via Chris Rohn's New Music`, url }); }
+  catch (e) {
+    if (/** @type {Error} */ (e).name === "AbortError") return;
+    try { await navigator.clipboard.writeText(url); toast("Link copied"); } catch { toast("Could not share this one", true); }
+  }
+}
+
 /** @type {any} */
 let toastTimer;
 /** @param {string} msg @param {boolean} [err] @param {{label: string, fn: () => void}} [action] */

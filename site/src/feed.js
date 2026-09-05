@@ -1,7 +1,7 @@
 // @ts-check
 /* The feed: loading feed.json, the filter bar, and which items are visible in each view. */
 import { state, persist, items, byId, decisionFor, reconcileRated, STALE_AFTER_MS } from "./state.js";
-import { $, $$, esc, relTime, range } from "./dom.js";
+import { $, $$, esc, relTime, range, toast } from "./dom.js";
 import { isSignedIn, isOwner, isCurator, tokenValid, emailHash, applyMode, ensureTokenClient, keepAlive } from "./auth.js";
 import { pullRatings } from "./sync.js";
 import { refreshRecent } from "./youtube.js";
@@ -9,11 +9,14 @@ import { render } from "./render.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
-export async function load() {
-  // same URL every time: GitHub Pages answers 304 from the ETag when nothing changed, and the service worker keeps one copy
-  const feed = await fetch("data/feed.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
-  state.feed = feed;
-  if (isSignedIn() && state.auth && !state.auth.hash) state.auth.hash = await emailHash(state.auth.email);   // accounts remembered before hashes existed
+const REFRESH_AFTER_MS = 30 * 60e3;   // an app left open: look for a newer daily build when it comes back to the foreground
+let loadedAt = 0;
+
+// same URL every time: GitHub Pages answers 304 from the ETag when nothing changed, and the service worker keeps one copy
+const fetchFeed = () => fetch("data/feed.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
+/** @param {import("./types").Feed} feed */
+function absorb(feed) {
+  state.feed = feed; loadedAt = Date.now();
   reconcileRated();
   if (isOwner()) {
     for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
@@ -23,6 +26,12 @@ export async function load() {
   fillYears();
   fillSources();
   renderMeta();
+}
+
+export async function load() {
+  const feed = await fetchFeed();
+  if (isSignedIn() && state.auth && !state.auth.hash) state.auth.hash = await emailHash(state.auth.email);   // accounts remembered before hashes existed
+  absorb(feed);
   state.ready = true; $("#settings-btn").disabled = false;
   applyMode();
   render();
@@ -31,6 +40,22 @@ export async function load() {
   document.addEventListener("pointerdown", keepAlive, { capture: true, passive: true });
   document.addEventListener("keydown", keepAlive, { capture: true, passive: true });
 }
+/** A newer build than the one on screen? Swap it in without losing the place in the deck. Resolves true if it changed. */
+export async function refreshFeed(force = false) {
+  if (!state.ready || (!force && Date.now() - loadedAt < REFRESH_AFTER_MS)) return false;
+  loadedAt = Date.now();
+  const feed = await fetchFeed();
+  if (feed.generated_at === state.feed?.generated_at) return false;
+  const keep = deckOnId();
+  absorb(feed);
+  render();
+  if (keep) { const i = state.order.indexOf(keep); if (i >= 0) { state.deckIndex = i; render(); } }
+  toast(`Feed updated · ${feed.new_today} new today`);
+  return true;
+}
+/** The track showing in the deck, so a refresh can stay on it. */
+function deckOnId() { const el = $("#deck-card .dcard"); return el ? /** @type {HTMLElement} */ (el).dataset.id : null; }
+
 export function renderMeta() {
   const f = /** @type {import("./types").Feed} */ (state.feed);
   const when = f.generated_at ? new Date(f.generated_at) : null;
