@@ -19,6 +19,7 @@ class Item:
     release: str | None = None       # album/EP name when known
     release_type: str | None = None  # Album / EP / Single
     release_date: date | None = None
+    date_kind: str = "release"       # "release" = the source states the release date; "sighting" = post/upload/airplay date
     tags: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     links: dict[str, str] = field(default_factory=dict)   # {"bandcamp": url, "musicbrainz": url, ...}
@@ -91,8 +92,10 @@ class Item:
         self.blurb = self.blurb or other.blurb
         self.editorial = self.editorial or other.editorial
         self.listen_count = max(self.listen_count, other.listen_count)
-        if other.release_date and (not self.release_date or other.release_date > self.release_date):
-            self.release_date = other.release_date
+        # a real release date always beats a blog-post / upload sighting date; among equals keep the newest
+        if other.release_date and (not self.release_date or (other.date_kind == "release" and self.date_kind != "release")
+                                   or (other.date_kind == self.date_kind and other.release_date > self.release_date)):
+            self.release_date, self.date_kind = other.release_date, other.date_kind
         for f in other.featuring:
             if f.lower() not in {x.lower() for x in self.featuring}:
                 self.featuring.append(f)

@@ -141,12 +141,19 @@
   const items = () => (state.feed && state.feed.items) || [];
   const byId = id => items().find(i => i.id === id);
   const decisionFor = id => state.rated[id] || null;
-  const yearOf = it => {
+  // best guess at the year; null when nothing anywhere says when this came out (the card then asks you to pick)
+  const yearGuess = it => {
     if (Number.isFinite(it.year)) return it.year;
     const d = it.release_date || (it.youtube && it.youtube.year);
     const y = d ? parseInt(String(d).slice(0, 4), 10) : NaN;
-    return Number.isFinite(y) ? y : new Date().getFullYear();
+    return Number.isFinite(y) ? y : null;
   };
+  const yearOf = it => yearGuess(it) ?? new Date().getFullYear();
+  function fillYearSelect(ysel, it) {
+    const g = yearGuess(it);
+    ysel.innerHTML = (g == null ? `<option value="">year?</option>` : "") + state._years.map(y => `<option value="${y}">${y}</option>`).join("");
+    ysel.value = g == null ? "" : String(g); ysel.classList.toggle("unknown", g == null);
+  }
   const YEAR_SOURCE = { "musicbrainz-recording": "verified on MusicBrainz (earliest release of this recording)", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "from the release date reported by the source", youtube: "from the YouTube album", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — pick the year yourself" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const sameName = (a, b) => String(a || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "") === String(b || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
@@ -422,6 +429,13 @@
     const it = byId(id); if (!it) return;
     const vid = it.youtube && it.youtube.videoId;
     if (!vid) { toast("No YouTube match for this one — open it via the search link instead", true); return; }
+    if (decision === "up" && !year && yearGuess(it) == null) {
+      // nothing says when this came out — never guess "this year" on your behalf
+      const sel = $(`.card[data-id="${CSS.escape(id)}"] .year, .dcard[data-id="${CSS.escape(id)}"] .year`);
+      if (sel) { sel.focus(); sel.classList.add("attention"); setTimeout(() => sel.classList.remove("attention"), 1500); }
+      toast(`Release year unknown for ${credit(it)} — pick the year playlist first (the YT Music link may show it)`, true);
+      return;
+    }
     year = year || yearOf(it);
     state.busy.add(id);
     // optimistic: hide it now, move focus to the next card
@@ -576,7 +590,7 @@
     $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
     $(".date", el).textContent = it.release_date || "";
     const yb = $(".yearbadge", el); const conf = it.year_confidence || "low"; yb.classList.add(conf); yb.title = YEAR_SOURCE[it.year_source] || "";
-    yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? "year unknown" : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+    yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`) : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
     if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
     const why = [];
     if (it.match_kind === "direct") why.push(it.matched_artist === it.artist ? "you play them" : "you play " + it.matched_artist);
@@ -589,7 +603,7 @@
     if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
     for (const [k, u] of Object.entries(it.links || {})) links.push(`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(k)}</a>`);
     $(".dlinks", el).innerHTML = links.join(" · ");
-    const ysel = $(".year", el); ysel.innerHTML = state._years.map(y => `<option value="${y}">${y}</option>`).join(""); ysel.value = yearOf(it);
+    const ysel = $(".year", el); fillYearSelect(ysel, it);
     $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
     attachSwipe(el, it, 110);
     if (state.currentId === it.id) el.classList.add("current");
@@ -620,7 +634,7 @@
       const conf = it.year_confidence || "low";
       yb.classList.add(conf);
       yb.title = YEAR_SOURCE[it.year_source] || "";
-      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? "year unknown" : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
+      yb.textContent = it.original_year ? `reissue? originally ${it.original_year}` : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`) : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
       if (Number.isFinite(it.year) && it.year < new Date().getFullYear() - 1 && it.year_source !== "unknown") yb.textContent += " · catalog";
     }
     $(".reasons", el).textContent = (it.reasons || []).filter(r => !r.startsWith("similar to") && !r.startsWith("you play")).join(" · ");
@@ -637,7 +651,7 @@
     const ysel = $(".year", el);
     if (it._pick) { ysel.remove(); $(".thumbs", el).remove(); const st = document.createElement("div"); st.className = "status"; st.textContent = it._year ? `in ${titleFor(it._year)}` : ""; $(".side", el).appendChild(st); }
     else {
-      ysel.innerHTML = state._years.map(y => `<option value="${y}">${y}</option>`).join(""); ysel.value = yearOf(it);
+      fillYearSelect(ysel, it);
       $(".btn.up", el).addEventListener("click", e => { e.stopPropagation(); rate(it.id, "up", +ysel.value); });
       $(".btn.down", el).addEventListener("click", e => { e.stopPropagation(); rate(it.id, "down", +ysel.value); });
     }
@@ -740,7 +754,7 @@
     const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `new-music-approvals-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   }
-  function currentYear(id = state.currentId) { const el = id && $(`.card[data-id="${CSS.escape(id)}"] .year, .dcard[data-id="${CSS.escape(id)}"] .year`); return el ? +el.value : undefined; }
+  function currentYear(id = state.currentId) { const el = id && $(`.card[data-id="${CSS.escape(id)}"] .year, .dcard[data-id="${CSS.escape(id)}"] .year`); return el && el.value ? +el.value : undefined; }
 
   function wire() {
     $$(".tab").forEach(b => b.addEventListener("click", () => { state.view = b.dataset.view; $$(".tab").forEach(x => x.classList.toggle("active", x === b)); render(); }));

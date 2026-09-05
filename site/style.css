@@ -274,3 +274,8 @@ body.guest .mode { color: var(--accent2); border-color: rgba(71,224,255,.4); }
 .dupe .x { background: none; border: 0; color: var(--down); cursor: pointer; font-size: 13px; padding: 0 2px; }
 .dupe .x:disabled { opacity: .4; }
 .btn.small { padding: 3px 9px; font-size: 12px; }
+
+/* unknown release year: the select shows a "year?" placeholder until you pick */
+select.year.unknown { border-color: var(--warn, #e0b341); color: var(--warn, #e0b341); }
+select.year.attention { animation: attention .5s ease 2; }
+@keyframes attention { 50% { transform: scale(1.08); box-shadow: 0 0 0 3px rgba(224,179,65,.45); } }

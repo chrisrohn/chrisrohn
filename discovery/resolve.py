@@ -241,8 +241,6 @@ def verify_years(items: list[Item], cfg: dict, http) -> None:
     → source release date (medium; but a blog post date or first-sighting date is not a release date)
     → YouTube album year (medium) → unknown (low; dropdown defaults to this year, badge says so).
     """
-    from datetime import date
-
     from .util import format_title
 
     rcfg = cfg.get("resolve") or {}
@@ -250,11 +248,14 @@ def verify_years(items: list[Item], cfg: dict, http) -> None:
     fallback_budget = int(rcfg.get("max_fallback_year_lookups_per_run", 150))
     cache: dict = read_json(YEAR_CACHE, {})
     looked = fallbacks = 0
-    for it in items:
+    # Spend the lookup budget where it matters: tracks with no stated release date first (they would otherwise
+    # default to "this year"), then everything else by score. The cache persists, so later runs fill the gaps.
+    order = sorted(items, key=lambda i: (0 if (i.release_date is None or i.date_kind != "release") else 1, -i.score))
+    for it in order:
         # the recording title MusicBrainz/Deezer/iTunes know: base title + remix suffix, never the "feat." part
         lookup_title = format_title(it.title, None, it.remixer, it.remix_kind)
         feed_year = it.release_date.year if it.release_date else None
-        weak_date = it.release_date is not None and all(s.startswith(("rss", "radio", "listenbrainz:LB", "youtube:")) for s in it.sources)
+        weak_date = it.release_date is not None and it.date_kind != "release"
         key = it.key
         entry = cache.get(key)
         if entry is None and it.kind == "track" and looked < budget:
@@ -283,7 +284,8 @@ def verify_years(items: list[Item], cfg: dict, http) -> None:
         elif feed_year and weak_date and any(s.startswith("rss") for s in it.sources):
             it.year, it.year_source, it.year_confidence = feed_year, "feed-date", "low"
         else:
-            it.year, it.year_source, it.year_confidence = date.today().year, "unknown", "low"
+            # genuinely unknown: leave year empty so the site asks for the year instead of silently filing under this year
+            it.year, it.year_source, it.year_confidence = None, "unknown", "low"
         # reissue detection: the verified year is well before the date the source reported
         if feed_year and not weak_date and it.year and it.year < feed_year - 1:
             it.original_year = it.year
