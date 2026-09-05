@@ -4,6 +4,7 @@ import { state, byId } from "./state.js";
 import { $, $$, esc, sameName, toast } from "./dom.js";
 import { visibleItems } from "./feed.js";
 import { renderDeck, deckOn, deckItem, focusCard } from "./render.js";
+import { matchLabel } from "./years.js";
 
 window.onYouTubeIframeAPIReady = () => {
   state.player = new YT.Player("yt", {
@@ -60,13 +61,42 @@ export function play(id) {
   const el = $(`.card[data-id="${CSS.escape(id)}"], .dcard[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
   reflectPlaying(true);
   $("#player").hidden = false;
-  $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release && !sameName(it.release, it.title) ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
+  renderNow(it);
   ensureApi(); wireMediaSession(); announce(it);
   clearAudition(); state.auditionArmed = null;
   if (state.playerReady) state.player.loadVideoById(vid); else state.pendingVideo = vid;
 }
 /** The play/pause buttons show the pause icon while something plays (an SVG pair switched by class). @param {boolean} on */
 export function reflectPlaying(on) { $$("#deck-play, #p-toggle").forEach(b => b.classList.toggle("playing", on)); }
+/** @param {string} id */
+const lookup = id => byId(id) || visibleItems().find(x => x.id === id);
+/** The next playable id in list order from index `i` in the given direction, or null at the end. @param {number} i @param {number} delta */
+function playableFrom(i, delta) {
+  for (let j = i + delta; j >= 0 && j < state.order.length; j += delta) { const id = state.order[j]; if (lookup(id)?.youtube?.videoId) return id; }
+  return null;
+}
+/** What "next" would play: the following card in the deck, or the next playable row of the list. */
+function upNext() {
+  if (!state.currentId) return null;
+  if (deckOn()) return visibleItems()[state.deckIndex + 1] || null;
+  const id = playableFrom(state.order.indexOf(state.currentId), 1); return id ? lookup(id) || null : null;
+}
+/** The bar's now-playing panel: the card's own facts (rank, match, release, tags, sources, score) and what comes next.
+ * @param {import("./types").FeedItem} it */
+function renderNow(it) {
+  const n = state.order.indexOf(it.id);
+  $("#np-eyebrow").innerHTML = "now playing" + (n >= 0 ? ` <span class="muted">· No. ${String(n + 1).padStart(2, "0")} / ${state.order.length}</span>` : "");
+  const ml = it.match_kind ? matchLabel(it) : "";
+  const rel = it.release && !sameName(it.release, it.title) ? ` <span class="muted">· ${esc(it.release)}</span>` : "";
+  $("#now").innerHTML = `<b class="np-artist">${esc(it.artist)}${ml ? ` <span class="match ${esc(it.match_kind || "")}">${esc(ml)}</span>` : ""}</b><span class="np-sep"> - </span><span class="np-title">${esc(it.display_title || it.title)}${rel}</span>`;
+  $("#np-spec").textContent = [it.release_type, it.release_date, (it.tags || []).slice(0, 4).join(", ")].filter(Boolean).join(" · ");
+  $("#np-sources").innerHTML = (it.sources || []).map(s => { const [k, name] = s.split(":"); return `<span class="src ${esc(k)}" title="${esc(s)}">${esc(name || k)}</span>`; }).join("");
+  $("#np-score").textContent = it.score ? it.score.toFixed(1) : "";
+  const nx = upNext(); const b = $("#np-next"); b.hidden = !nx;
+  if (nx) b.innerHTML = `<b>${esc(nx.artist)}</b><span>${esc(nx.display_title || nx.title)}</span>`;
+}
+/** After a re-render (a rating, a filter) the rank and the up-next line follow the new order. */
+export function refreshNow() { const it = state.currentId ? current() : null; if (it && !$("#player").hidden) renderNow(it); }
 export function stopPlayer() { clearAudition(); if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; setPlaybackState("none"); reflectPlaying(false); }
 
 export const auditionOn = () => !!state.settings.audition;
@@ -93,8 +123,8 @@ export function holdAudition() { if (state.auditionTimer) { clearAudition(); toa
 /** @param {number} delta */
 export function step(delta) {
   if (deckOn()) { const vis = visibleItems(); state.deckIndex = Math.max(0, Math.min(vis.length - 1, state.deckIndex + delta)); renderDeck(vis); const it = deckItem(); if (it?.youtube?.videoId && state.currentId) play(it.id); return; }
-  const i = state.currentId ? state.order.indexOf(state.currentId) : -1; let j = i < 0 ? 0 : i + delta;
-  while (j >= 0 && j < state.order.length) { const id = state.order[j]; const it = byId(id) || visibleItems().find(x => x.id === id); if (it?.youtube?.videoId) { play(id); focusCard(id); return; } j += delta; }
+  const i = state.currentId ? state.order.indexOf(state.currentId) : -1;
+  const id = playableFrom(i < 0 ? -delta : i, delta); if (id) { play(id); focusCard(id); }
 }
 export const nextTrack = () => step(1);
 export const prevTrack = () => step(-1);
