@@ -10,7 +10,7 @@ GitHub Actions (daily 06:15 ET)                        chrisrohn.com (GitHub Pag
 │ profile: Last.fm tt_discotheque      │               │ anyone: listen, filter by source, Picks│
 │   + your public YT year playlists    │   feed.json   │                                       │
 │   + Last.fm & ListenBrainz similar   │ ────────────▶ │ you (Sign in with Google):            │
-│ sources: ListenBrainz fresh releases │               │   👍 → "<year> Indie Discotheque"      │
+│ sources: ListenBrainz fresh releases │               │   👍 → "<year> | Indie Discotheque"      │
 │   MusicBrainz tags · Bandcamp new    │               │   👎 → unlisted "Skipped" playlist     │
 │   Deezer artist releases · blog RSS  │               │   (YouTube Data API, from your browser)│
 │ score → resolve on YouTube Music     │               └───────────────────────────────────────┘
@@ -87,7 +87,7 @@ chrisrohn.com is public: anyone can browse, filter by source, play tracks and se
 your current-year playlist). Nothing on the public side can write anywhere.
 
 **Curator mode** appears when the signed-in Google account is in `google.curators`: thumbs file into the
-`<year> Indie Discotheque` playlists. **Guests** are off by default: other Google accounts can sign in but get a listen-only site. Flip
+`<year> | Indie Discotheque` playlists. **Guests** are off by default: other Google accounts can sign in but get a listen-only site. Flip
 `google.guests: true` (your ⚙ panel links straight to the line) and they can rate too, with their 👍 going into
 `<year> Picks from chrisrohn.com` playlists in *their own* library, never yours. Everyone who signs in
 shares the project's daily YouTube API quota. Nothing about the site can touch a playlist except through a Google

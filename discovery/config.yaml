@@ -12,7 +12,7 @@ station:
 # The site signs you in with Google and writes to these playlists from your browser. The daily build reads them
 # (they're public) to seed your taste profile and to hide anything already saved or skipped.
 youtube_music:
-  playlist_title_pattern: "{year} Indie Discotheque"
+  playlist_title_pattern: "{year} | Indie Discotheque"
   first_year: 1979
   # Your YouTube channel id (UC…): open your channel on youtube.com → About → Share → Copy channel ID. Optional but
   # recommended; without it the build tries to learn it from one of the playlists below.
