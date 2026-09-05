@@ -180,8 +180,9 @@ main { padding: 20px 20px 160px; max-width: 1200px; margin: 0 auto; }
 .more-sentinel { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 14px; border-top: 1px solid var(--rule); }
 
 /* ---------- player: the basement level, poured in ink ---------- */
-.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: 220px 1fr; gap: 16px; padding: 12px 20px; background: var(--paper2); color: var(--ink); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); }
-.player-frame { width: 220px; aspect-ratio: 16/9; overflow: hidden; background: #000; border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--accent); }
+.deck.off { display: contents; }   /* list view: the deck contributes no box, only the (fixed) player inside it */
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: 356px 1fr; gap: 16px; padding: 12px 20px; background: var(--paper2); color: var(--ink); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); }
+.player-frame { width: 356px; aspect-ratio: 16/9; overflow: hidden; background: #000; border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--accent); }
 .player-frame iframe { width: 100%; height: 100%; }
 .player-meta { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; }
 .now { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
@@ -382,8 +383,9 @@ body.doc .tab { text-decoration: none; }
   .dlinks { order: -1; flex: 1 1 100%; justify-content: flex-start; }
   .dbody { gap: 7px; }
 
-  .player { grid-template-columns: 64px 1fr; gap: 10px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); }
-  .player-frame { width: 64px; align-self: center; box-shadow: 2px 2px 0 var(--accent); }
+  .player { grid-template-columns: 1fr; gap: 8px; padding: 0 0 max(8px, env(safe-area-inset-bottom)); }
+  .player-frame { width: 100%; border: 0; border-bottom: 2px solid var(--ink); box-shadow: none; }
+  .player-meta { padding: 0 12px; }
   .now { font-size: 13px; }
   .player-controls { gap: 6px; }
   .player-controls .btn { padding: 4px 9px; font-size: 12px; box-shadow: 2px 2px 0 var(--accent); }
@@ -401,7 +403,7 @@ body.doc .tab { text-decoration: none; }
   #p-prev, #p-toggle, #p-next { grid-column: span 2; min-height: 40px; }
   .player .chk { grid-column: span 3; justify-content: center; }
   .audition-bar { grid-column: 1 / -1; }
-  .player-frame { align-self: start; margin-top: 2px; }
+  .now::before { display: inline; }
 
   .dart { height: min(32svh, 92vw); }
   .dbody { padding: 12px 14px 12px; gap: 5px; }
@@ -419,11 +421,34 @@ body.doc .tab { text-decoration: none; }
 @media (max-width: 760px) {
   body.deck-mode { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
   body.deck-mode main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
-  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; padding-bottom: calc(var(--player-h, 0px) + var(--actions-h, 96px) + 4px); }
+  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; padding-bottom: calc(var(--actions-h, 96px) + 4px); }
+  body.deck-mode .deck-actions { bottom: 0; }
+  body.deck-mode .toast { bottom: calc(var(--actions-h, 96px) + 20px); }
   body.deck-mode #deck-card { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
   body.deck-mode .dcard { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
   body.deck-mode .dart { flex: 1 1 0; height: auto; min-height: 30vw; max-height: none; aspect-ratio: auto; }
   body.deck-mode .dbody { flex: none; }
+}
+
+/* phone deck: the YouTube player is the card's picture. It sits in flow above the card at full width and 16:9
+   (YouTube's own title, logo and controls, above its 200px minimum), with a slim row for the track and the two
+   toggles; the card's own artwork and the transport buttons step aside, since play/pause sits between Skip and
+   Keep and back/later are the top row. */
+@media (max-width: 760px) {
+  body.deck-mode .player { position: static; z-index: auto; display: flex; flex-direction: column; gap: 0; padding: 0; background: var(--card); border: 2px solid var(--ink); border-bottom: 0; box-shadow: 6px 6px 0 var(--accent); margin-bottom: 0; }
+  body.deck-mode .player-frame { border: 0; border-bottom: 2px solid var(--ink); }
+  body.deck-mode .player-meta { padding: 8px 12px 10px; gap: 8px; }
+  body.deck-mode .now { font-size: 12px; }
+  body.deck-mode .now::before { display: none; }
+  body.deck-mode #p-prev, body.deck-mode #p-toggle, body.deck-mode #p-next { display: none; }
+  body.deck-mode .player-controls { grid-template-columns: 1fr 1fr; }
+  body.deck-mode .player .chk { grid-column: span 1; min-height: 36px; }
+  body.deck-mode .audition-bar { grid-column: 1 / -1; }
+  /* the card the video belongs to: no second picture, no seam */
+  body.deck-mode #player:not([hidden]) ~ #deck-card .dcard.current .dart { display: none; }
+  body.deck-mode #player:not([hidden]) ~ #deck-card .dcard.current { border-top: 0; }
+  body.deck-mode #player:not([hidden]) ~ #deck-card { margin-top: -12px; }   /* undo the deck's gap: panel and card are one block */
+  body.deck-mode #player:not([hidden]) ~ #deck-card .dcard:not(.current) { margin-top: 12px; }
 }
 
 /* duplicate report (settings) */
@@ -518,8 +543,8 @@ select.year.attention { animation: attention .5s ease 2; }
   .dartist { font-size: 18px; }
   .deck-actions { position: static; padding: 6px 0; background: none; }
   .deck { padding-bottom: calc(var(--player-h, 0px) + 12px); }
-  .player { grid-template-columns: 64px 1fr; padding-top: 6px; padding-bottom: max(6px, env(safe-area-inset-bottom)); }
-  .player-frame { width: 64px; }
+  .player { grid-template-columns: 356px 1fr; padding-top: 6px; padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+  .player-frame { width: 356px; }
   dialog { max-height: 100dvh; }
 }
 

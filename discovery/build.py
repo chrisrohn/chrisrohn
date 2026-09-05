@@ -30,7 +30,7 @@ def build_feed(cfg: dict) -> dict:
 
     rcfg = cfg["ranking"]
     deadline = Deadline(float((cfg.get("resolve") or {}).get("time_budget_minutes") or 0) or None)
-    # drop things already in your year playlists (👍) or the Skipped playlist (👎)
+    # drop things already in your year playlists (kept) or the Skipped playlist (skipped)
     saved = profile.get("saved") or {}
     saved_videos = {v.get("videoId") for v in saved.values() if isinstance(v, dict) and v.get("videoId")}
     if rcfg.get("hide_seen", True):

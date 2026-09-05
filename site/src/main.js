@@ -2,8 +2,8 @@
 /* Chris Rohn's New Music — client entry point.
  * Reads data/feed.json (built daily by GitHub Actions). Anyone can listen.
  * Sign in with Google (one of the configured curator accounts) to get curator mode:
- *   👍 → added straight to "<year> | Indie Discotheque" (the library playlists) on YouTube Music (YouTube Data API v3, from this browser)
- *   👎 → added to the unlisted "Skipped" playlist so it never comes back
+ *   keep → added straight to "<year> | Indie Discotheque" (the library playlists) on YouTube Music (YouTube Data API v3, from this browser)
+ *   skip → added to the unlisted "Skipped" playlist so it never comes back
  * Nothing is written anywhere until you press a thumb. Undo is available for a few seconds after each one.
  */
 import { state, persist } from "./state.js";
@@ -43,7 +43,9 @@ function wire() {
   // keep the pinned deck buttons above the player bar whatever its height, and the deck card above the buttons
   const playerEl = $("#player"), actionsEl = $("#deck-actions");
   const setPlayerH = () => {
-    document.documentElement.style.setProperty("--player-h", playerEl.hidden ? "0px" : playerEl.getBoundingClientRect().height + "px");
+    // in the phone deck the player sits in the card, not over the page: nothing needs to make room for it
+    const floating = !playerEl.hidden && getComputedStyle(playerEl).position === "fixed";
+    document.documentElement.style.setProperty("--player-h", floating ? playerEl.getBoundingClientRect().height + "px" : "0px");
     document.documentElement.style.setProperty("--actions-h", actionsEl.getBoundingClientRect().height + "px");
   };
   new ResizeObserver(setPlayerH).observe(playerEl); new ResizeObserver(setPlayerH).observe(actionsEl);
@@ -56,7 +58,7 @@ function wire() {
   wirePwa();
   applyLaunchParams();   // after the controls are wired: ?view=picks, ?new=1, ?audition=1 from the app shortcuts
   // another device may have rated things while this tab was in the background (only while the token is valid:
-  // a background refresh would need a popup, which browsers block without a tap — the next 👍 refreshes it instead)
+  // a background refresh would need a popup, which browsers block without a tap — the next Keep refreshes it instead)
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isCurator() && tokenValid() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); });
 }
 

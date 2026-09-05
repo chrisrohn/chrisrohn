@@ -25,7 +25,7 @@ export function render() {
   const lt = $("#layout-toggle"); if (lt) lt.textContent = deckOn() ? "list view" : "card view";
   if (deckOn()) { list.innerHTML = ""; renderDeck(vis); }
   else {
-    $("#deck").hidden = true;
+    showDeck(false);
     // keep as many cards as were already on screen (a rating re-renders the list and must not jump back to the top)
     const keep = state.rendered; list.innerHTML = ""; state.rendered = 0;
     appendCards(Math.max(PAGE, keep));
@@ -61,11 +61,15 @@ export function ensureRendered(id) {
   if (i >= 0 && i >= state.rendered && !deckOn()) appendCards(Math.ceil((i + 1) / PAGE) * PAGE);
 }
 
+/** The deck's own parts come and go; the player inside it stays (an iframe moved in the DOM would reload and stop
+ * the music), so the section itself is never hidden, only emptied of layout (.off). @param {boolean} on */
+function showDeck(on) { $("#deck").classList.toggle("off", !on); $$("#deck-top, #deck-card, #deck-actions").forEach(el => { el.hidden = !on; }); }
+
 /** @param {FeedItem[]} vis */
 export function renderDeck(vis) {
-  const deck = $("#deck"); const host = $("#deck-card");
-  if (!vis.length) { deck.hidden = true; host.innerHTML = ""; return; }
-  deck.hidden = false;
+  const host = $("#deck-card");
+  if (!vis.length) { showDeck(false); host.innerHTML = ""; return; }
+  showDeck(true);
   state.deckIndex = Math.max(0, Math.min(state.deckIndex, vis.length - 1));
   const it = vis[state.deckIndex];
   $("#deck-count").textContent = `${state.deckIndex + 1} / ${vis.length}`;

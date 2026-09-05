@@ -7,7 +7,7 @@ import { renderDeck, deckOn, deckItem, focusCard } from "./render.js";
 
 window.onYouTubeIframeAPIReady = () => {
   state.player = new YT.Player("yt", {
-    width: "220", height: "124", videoId: state.pendingVideo || undefined,
+    width: "356", height: "200", videoId: state.pendingVideo || undefined,
     playerVars: { autoplay: 1, rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
     events: {
       onReady: () => { state.playerReady = true; if (state.pendingVideo) { state.player.loadVideoById(state.pendingVideo); state.pendingVideo = null; } },

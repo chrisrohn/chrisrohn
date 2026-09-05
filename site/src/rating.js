@@ -1,5 +1,5 @@
 // @ts-check
-/* 👍 / 👎 / Undo. Optimistic: the card disappears at once; YouTube and the Drive mirror follow. */
+/* Keep / skip / Undo. Optimistic: the card disappears at once; YouTube and the Drive mirror follow. */
 import { state, persist, byId, skipsInYouTube, quotaLeft } from "./state.js";
 import { $, toast } from "./dom.js";
 import { isCurator, ensureToken, needSignIn } from "./auth.js";
@@ -9,6 +9,8 @@ import { titleFor, skippedTitle, playlistFor, skippedPlaylist, addToPlaylist, re
 import { render, deckOn, deckItem, focusCard } from "./render.js";
 import { play, stopPlayer } from "./player.js";
 import { credit } from "./feed.js";
+
+const UP = "\u25B2\uFE0E", DN = "\u25BC\uFE0E";   // the same text-presentation triangles as the buttons
 
 /** @param {string} id @param {"up" | "down"} decision @param {number | undefined} [year] */
 export async function rate(id, decision, year) {
@@ -37,7 +39,7 @@ export async function rate(id, decision, year) {
   if (decision === "down" && !skipsInYouTube()) {
     // free: no YouTube quota. Synced across your devices through the Drive app-data file.
     state.rated[id] = { ...state.rated[id], pending: false, local: true }; persist(); state.busy.delete(id); render(); schedulePush();
-    toast(`👎 ${credit(it)}`, false, { label: "Undo", fn: () => undo(id) });
+    toast(`${DN} ${credit(it)}`, false, { label: "Undo", fn: () => undo(id) });
     return;
   }
   try {
@@ -56,7 +58,7 @@ export async function rate(id, decision, year) {
     state.rated[id] = { ...state.rated[id], playlistItemId: itemId, playlistId: pid, pending: false };
     persist(); schedulePush();
     const left = Math.floor(quotaLeft() / 50);
-    toast((decision === "up" ? `👍 ${credit(it)} → ${titleFor(year)}` : `👎 ${credit(it)} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
+    toast((decision === "up" ? `${UP} ${credit(it)} → ${titleFor(year)}` : `${DN} ${credit(it)} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
   } catch (e) {
     delete state.rated[id]; persist(); render();
     const msg = /** @type {Error} */ (e).message;
