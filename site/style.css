@@ -402,6 +402,18 @@ body.doc .tab { text-decoration: none; }
   .btn.big.play { font-size: 18px; padding: 12px 18px; }
 }
 
+/* phone deck: the card runs from the header to the pinned Skip/Keep bar, a fixed distance every time; the artwork
+   takes up whatever the text leaves, so short cards show more picture and long ones scroll rather than squeeze */
+@media (max-width: 760px) {
+  body.deck-mode { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+  body.deck-mode main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; padding-bottom: calc(var(--player-h, 0px) + var(--actions-h, 96px) + 4px); }
+  body.deck-mode #deck-card { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  body.deck-mode .dcard { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  body.deck-mode .dart { flex: 1 1 0; height: auto; min-height: 30vw; max-height: none; aspect-ratio: auto; }
+  body.deck-mode .dbody { flex: none; }
+}
+
 /* duplicate report (settings) */
 .dupes { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .dupe { border: 1px solid var(--rule); border-left: 4px solid var(--ink); padding: 8px 10px; font-size: 12px; }
