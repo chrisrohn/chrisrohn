@@ -63,7 +63,8 @@ def build_feed(cfg: dict) -> dict:
         "youtube": {
             "playlist_title_pattern": ycfg.get("playlist_title_pattern", "{year} Indie Discotheque"),
             "skipped_playlist_title": ycfg.get("skipped_playlist_title", "Skipped"),
-            "playlists": (profile.get("youtube") or {}).get("years") or {},
+            # config ids are authoritative; anything the profile discovered by title only fills gaps
+            "playlists": {**((profile.get("youtube") or {}).get("years") or {}), **{str(y): p for y, p in (ycfg.get("playlists") or {}).items()}},
             "skipped_playlist_id": (profile.get("youtube") or {}).get("skipped") or ycfg.get("skipped_playlist_id") or "",
             "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
             "channel_id": (profile.get("youtube") or {}).get("channel") or ycfg.get("channel_id") or "",

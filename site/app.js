@@ -291,6 +291,11 @@
     // the daily build knows the station's year playlists by id (from the @indiedisco channel) — always use those
     const k = knownYear(year);
     if (k) { state.playlists[year] = k; persist(); return k; }
+    if (isOwner()) {
+      // Curators never create playlists: every Indie Discotheque year is pinned by id in discovery/config.yaml.
+      toast(`No pinned playlist id for ${year}. Add it to youtube_music.playlists in config.yaml and run Discover.`, true);
+      throw new Error("no pinned playlist for " + year);
+    }
     if (!state.playlists[year] || !state.playlists.__loaded_at) await loadLibraryPlaylists();
     if (!state.playlists[year]) {
       const ok = confirm(`No playlist called “${titleFor(year)}” exists in this YouTube account (${state.auth.email}).\n\nCreate it now? (Cancel if it should already exist — then check the title spelling or the signed-in channel.)`);

@@ -190,7 +190,9 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert payload["years"][0] >= 2026 and payload["years"][-1] == 1979
     assert payload["google"]["client_id"] == "abc.apps.googleusercontent.com" and payload["google"]["curators"] == ["chrisrohn@gmail.com"]
     assert payload["google"]["guests"] is False and "{year}" in payload["google"]["guest_playlist_title_pattern"]
-    assert payload["youtube"]["playlists"] == {"2026": "PL2026"} and payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
+    pls = payload["youtube"]["playlists"]
+    assert pls["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN" and len(pls) == 48   # config ids win over the profile's title matches
+    assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
     assert payload["picks"][0]["artist"] == "Jungle"
     assert (sandbox / "site" / "feed.xml").read_text().count("<item>") == len(payload["items"])
 
