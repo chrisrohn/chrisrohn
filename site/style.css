@@ -464,8 +464,11 @@ body.doc .tab { text-decoration: none; }
    takes up whatever the text leaves, so short cards show more picture and long ones scroll rather than squeeze */
 @media (max-width: 760px) {
   body.deck-mode { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
-  body.deck-mode main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
-  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; padding-bottom: calc(var(--actions-h, 96px) + 4px); }
+  /* both carry margin: 0 auto, and an auto cross-axis margin in a column flexbox stops the item stretching: without
+     an explicit width each card would be as wide as its own text (a short title narrows it, a long link row pushes
+     it past the screen). Full width, still capped by their max-widths. */
+  body.deck-mode main { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; width: 100%; }
+  body.deck-mode .deck { flex: 1 1 auto; min-height: 0; width: 100%; padding-bottom: calc(var(--actions-h, 96px) + 4px); }
   body.deck-mode .deck-actions { bottom: 0; }
   body.deck-mode .toast { bottom: calc(var(--actions-h, 96px) + 20px); }
   body.deck-mode #deck-card { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
