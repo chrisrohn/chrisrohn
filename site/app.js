@@ -526,9 +526,9 @@
   const credit = i => i.display || `${i.artist} - ${i.display_title || i.title}`;
   function pickAsItem(p, i) { return { id: "pick" + i, artist: p.artist, title: p.title, release: p.album, sources: [], tags: [], reasons: [], score: 0, youtube: p.videoId ? { videoId: p.videoId, thumbnail: p.thumbnail } : null, artwork: p.thumbnail, release_date: p.year ? String(p.year) : null, _pick: true, _year: p.year }; }
 
-  function visibleItems() {
+  function visibleItems(view = state.view) {
     const f = state.filters; const q = f.q.trim().toLowerCase();
-    if (state.view === "picks") {
+    if (view === "picks") {
       const picks = (state.feed.picks || []).map(pickAsItem);
       const mine = Object.entries(state.rated).filter(([, r]) => r.decision === "up").sort((a, b) => b[1].at - a[1].at).map(([id, r]) => byId(id) || { id, artist: r.artist, title: r.title, sources: [], tags: [], reasons: [], score: 0, youtube: { videoId: r.videoId }, release_date: String(r.year), _pick: true, _year: r.year });
       const seen = new Set(); const all = [];
@@ -567,8 +567,11 @@
     list.appendChild(frag); }
     const empty = $("#empty"); empty.hidden = vis.length > 0;
     empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.") : "No picks yet.";
-    $("#count-feed").textContent = items().filter(i => !decisionFor(i.id)).length;
-    $("#count-picks").textContent = (state.feed.picks || []).length;
+    // the pills show exactly what each tab would list right now: unrated tracks under the current filters, and
+    // the station's recent picks plus everything you've thumbed up from this account
+    $("#count-feed").textContent = state.view === "feed" ? vis.length : visibleItems("feed").length;
+    $("#count-picks").textContent = state.view === "picks" ? vis.length : visibleItems("picks").length;
+    $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
     $("#filters").classList.toggle("picks", state.view === "picks");
   }
 
