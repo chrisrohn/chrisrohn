@@ -65,6 +65,7 @@ def build_feed(cfg: dict) -> dict:
             "playlists": (profile.get("youtube") or {}).get("years") or {},
             "skipped_playlist_id": (profile.get("youtube") or {}).get("skipped") or ycfg.get("skipped_playlist_id") or "",
             "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
+            "channel_id": (profile.get("youtube") or {}).get("channel") or ycfg.get("channel_id") or "",
         },
         "picks": profile.get("picks") or [],
         "feed_health": _feed_health(),

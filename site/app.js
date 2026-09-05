@@ -132,7 +132,7 @@
           } catch {}
           if (prevEmail && prevEmail !== state.auth.email) { state.playlists = {}; state.rated = {}; }
           persist(); applyMode(); render();
-          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); refreshRecent().catch(() => {}); }
+          if (isOwner()) { toast(`Curator mode on — ${state.auth.email}`); loadLibraryPlaylists().then(() => refreshRecent()).catch(() => {}); }
           else if (isCurator()) { toast(`Signed in as a guest. 👍 files into “${titleFor("<year>")}” in your own YouTube library.`); refreshRecent().catch(() => {}); }
           else toast(`Signed in as ${state.auth.email || "?"}. Guest rating is off, so it's listen-only.`);
           resolve(true);
@@ -161,7 +161,9 @@
       if (!r.ok) {
         const msg = (j.error && j.error.message) || r.statusText;
         if (r.status === 401) { state.auth.expires_at = 0; persist(); applyMode(); }
-        throw new Error(msg + (r.status === 403 && /quota/i.test(msg) ? " — daily YouTube API quota reached; try again after midnight Pacific" : ""));
+        if (r.status === 403 && /quota/i.test(msg)) throw new Error(msg + " — daily YouTube API quota reached; try again after midnight Pacific");
+        if (r.status === 403 && path.startsWith("/playlistItems") && method === "POST") throw new Error("YouTube refused to add to that playlist for this sign-in. Collaborative playlists can only be edited through the API by the channel that owns them (@indiedisco) — sign out and sign in again choosing that channel, or make the playlist owner account a curator.");
+        throw new Error(msg);
       }
       return j;
     });
@@ -173,26 +175,55 @@
   const skippedTitle = () => (state.feed.youtube && state.feed.youtube.skipped_playlist_title) || "Skipped";
   const titleRegex = () => new RegExp("^" + pattern().split("{year}").map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(\\d{4})") + "$", "i");
 
+  const normTitle = s => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  // "2024 Indie Discotheque", "Indie Discotheque 2024", "2024 - indie discotheque" all count
+  function yearFromTitle(t) {
+    const words = normTitle(pattern().replace("{year}", " ")).trim();
+    const n = normTitle(t);
+    if (!words || !n.includes(words)) return null;
+    const m = /\b(19[5-9]\d|20\d\d)\b/.exec(n);
+    return m ? m[1] : null;
+  }
   async function loadLibraryPlaylists() {
-    const rx = titleRegex();
-    let pageToken; let n = 0;
+    let pageToken; let n = 0; const all = [];
     do {
-      const j = await yt("GET", "/playlists", { params: { part: "snippet", mine: "true", maxResults: 50, pageToken } });
+      const j = await yt("GET", "/playlists", { params: { part: "snippet,contentDetails", mine: "true", maxResults: 50, pageToken } });
       for (const p of j.items || []) {
         const t = (p.snippet.title || "").trim();
-        const m = rx.exec(t);
-        if (m) state.playlists[m[1]] = p.id;
-        else if (t.toLowerCase() === skippedTitle().toLowerCase()) state.playlists.__skipped = p.id;
+        all.push({ id: p.id, title: t, count: (p.contentDetails || {}).itemCount || 0, published: p.snippet.publishedAt, desc: p.snippet.description || "" });
+        const y = yearFromTitle(t);
+        if (y) { if (!state.playlists[y]) state.playlists[y] = p.id; }
+        else if (normTitle(t) === normTitle(skippedTitle())) state.playlists.__skipped = p.id;
         n++;
       }
       pageToken = j.nextPageToken;
     } while (pageToken && n < 500);
     state.playlists.__loaded_at = Date.now();
+    state.library = all;
     persist();
+    checkOwnership();
+    return all;
   }
+  // The station playlists are collaborative: they belong to @indiedisco and are edited by collaborators. YouTube's
+  // "mine=true" listing only shows playlists this channel OWNS, so not finding them there is expected — we file into
+  // the ids the daily build discovered and let YouTube tell us if this sign-in may not edit them.
+  function checkOwnership() {
+    if (!isOwner() || !state.library) return;
+    const known = Object.values((state.feed.youtube && state.feed.youtube.playlists) || {});
+    if (!known.length) return;
+    const mine = new Set(state.library.map(p => p.id));
+    state.notOwner = known.every(id => !mine.has(id));
+  }
+  const knownYear = year => isOwner() ? (((state.feed.youtube && state.feed.youtube.playlists) || {})[String(year)] || null) : null;
   async function playlistFor(year) {
+    year = String(year);
+    // the daily build knows the station's year playlists by id (from the @indiedisco channel) — always use those
+    const k = knownYear(year);
+    if (k) { state.playlists[year] = k; persist(); return k; }
     if (!state.playlists[year] || !state.playlists.__loaded_at) await loadLibraryPlaylists();
     if (!state.playlists[year]) {
+      const ok = confirm(`No playlist called “${titleFor(year)}” exists in this YouTube account (${state.auth.email}).\n\nCreate it now? (Cancel if it should already exist — then check the title spelling or the signed-in channel.)`);
+      if (!ok) throw new Error("no playlist for " + year);
       const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: titleFor(year), description: "Filed from chrisrohn.com" }, status: { privacyStatus: "public" } } });
       state.playlists[year] = j.id; persist(); toast(`Created playlist “${titleFor(year)}”`);
     }
@@ -576,7 +607,8 @@
     $("#p-up").addEventListener("click", () => state.currentId && rate(state.currentId, "up", currentYear()));
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
     $("#settings-btn").addEventListener("click", () => {
-      $("#s-playlists").textContent = Object.entries(state.playlists).filter(([k]) => !k.startsWith("__")).length + " year playlists known" + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : " · no skipped playlist yet");
+      const yrs = [...new Set([...Object.keys(state.playlists).filter(k => !k.startsWith("__")), ...(isOwner() ? Object.keys((state.feed.youtube && state.feed.youtube.playlists) || {}) : [])])].sort();
+      $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · station playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
       $("#s-quota").textContent = quotaText();
       const g = $("#s-guests");
       if (isOwner()) {
@@ -591,7 +623,7 @@
     });
     $("#s-skips").addEventListener("change", e => { state.settings.skipsInYouTube = e.target.checked; persist(); });
     $("#s-export").addEventListener("click", exportCsv);
-    $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast("Playlists reloaded")).catch(e => toast(e.message, true)));
+    $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast(`Playlists reloaded: ${Object.keys(state.playlists).filter(k => !k.startsWith("__")).length} year playlists found`)).catch(e => toast(e.message, true)));
     $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, local rating mirror)? Nothing in YouTube is touched.")) { ["id:rated", "id:auth", "id:playlists", "id:filters"].forEach(LS.del); location.reload(); } });
     document.addEventListener("keydown", e => {
       if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;

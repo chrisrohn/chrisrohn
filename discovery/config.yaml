@@ -12,9 +12,12 @@ station:
 # The site signs you in with Google and writes to these playlists from your browser. The daily build reads them
 # (they're public) to seed your taste profile and to hide anything already saved or skipped.
 youtube_music:
-  playlist_title_pattern: "{year} Indie Discotheque"
+  playlist_title_pattern: "{year} | Indie Discotheque"
   first_year: 1979
-  # Any one of your year playlists; the build uses it to find your channel and then every other year playlist.
+  # The channel that OWNS the year playlists (they're collaborative; @indiedisco owns them, chrisrohn's personal
+  # channel UCv8zZnVxdrPDhcF_4-eUDCA is a collaborator). The build lists this channel's public playlists.
+  channel_id: "UCLyRuumpAkAqDKe3nmFZljw"   # https://music.youtube.com/@indiedisco
+  # Any of your year playlists; the build lists the channel's public playlists to find every other year.
   playlists:
     "2026": PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN
     "2025": PLTW5JZnPjE_onNAnNNGWFyek1iTfsdSrS
