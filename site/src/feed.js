@@ -39,6 +39,7 @@ export function renderMeta() {
   stale.hidden = !(when && age > STALE_AFTER_MS);
   if (!stale.hidden && when) stale.textContent = `This feed is ${Math.round(age / 86400e3)} days old — the daily build has not run since ${when.toLocaleDateString()}. Check the Discover workflow on GitHub.`;
   $("#lfm").href = "https://www.last.fm/user/" + (f.lastfm_user || "tt_discotheque");
+  const rev = $("#tb-rev"); if (rev && when) rev.textContent = when.toISOString().slice(0, 10);   // title block: revision = build date
   document.title = `${f.site_name || "Chris Rohn's New Music"} · ${f.new_today} new`;
 }
 function fillYears() { const f = state.feed; state._years = (f?.years && f.years.length) ? f.years : range(new Date().getFullYear(), 1979); }

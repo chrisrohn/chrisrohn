@@ -32,7 +32,7 @@ export function play(id) {
   state.currentId = id; const it = current(); const vid = it?.youtube?.videoId; if (!it || !vid) return;
   $$(".card.current, .dcard.current").forEach(c => c.classList.remove("current"));
   const el = $(`.card[data-id="${CSS.escape(id)}"], .dcard[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
-  const dp = $("#deck-play"); if (dp) dp.textContent = "⏸";
+  const dp = $("#deck-play"); if (dp) dp.textContent = "⏸\uFE0E";
   $("#player").hidden = false;
   $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release && !sameName(it.release, it.title) ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
   ensureApi();
