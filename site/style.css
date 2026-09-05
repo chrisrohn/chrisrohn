@@ -181,15 +181,19 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 
 /* ---------- player: the title block along the bottom edge of the sheet ---------- */
 .deck.off { display: contents; }   /* list view: the deck contributes no box, only the (fixed) player inside it */
-/* A band across the whole sheet, and on it one boxed block centred on the feed's column: video | now playing | verdict.
-   YouTube's embed rules fix the video at 200px tall or more, unobscured and on screen while it plays; at 16:9 that is
-   356×200, so the block is exactly that tall and the two other zones fill it rather than float beside it. The
-   columns add up to the feed's 1160px (356 + 4px of frame border, 650, 150) so the block lines up with the cards. */
-.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: minmax(20px, 1fr) 360px minmax(0, 650px) 150px minmax(20px, 1fr); align-items: stretch; background: var(--paper2); color: var(--ink); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); }
+/* One framed block pinned above the bottom edge, centred on the feed's column and drawn like the list above it
+   (2px ink border, 8px ink offset shadow): video | now playing | verdict. YouTube's embed rules fix the video at
+   200px tall or more, unobscured and on screen while it plays; at 16:9 that is 356×200, so the block is exactly that
+   tall and the two other zones fill it rather than float beside it. The columns add up to the feed's 1160px
+   (356 + 4px of frame border, 650, 150) so the block lines up with the cards. The fixed strip itself is invisible
+   and lets clicks through; only the three zones catch them. Each zone carries the border and shadow: the parts of a
+   shadow that fall under the next zone are painted over, so the three read as one continuous frame. */
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: minmax(20px, 1fr) 360px minmax(0, 650px) 150px minmax(20px, 1fr); align-items: stretch; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); color: var(--ink); pointer-events: none; }
+.player > * { pointer-events: auto; }
 /* content-box: the iframe inside is the full 356×200 (YouTube's minimum), the borders sit outside it */
-.player-frame { grid-column: 2; box-sizing: content-box; width: 356px; height: 200px; overflow: hidden; background: #000; border: 0 solid var(--ink); border-width: 0 2px; }
+.player-frame { grid-column: 2; box-sizing: content-box; width: 356px; height: 200px; overflow: hidden; background: #000; border: 2px solid var(--ink); box-shadow: 8px 8px 0 var(--ink); }
 .player-frame iframe { width: 100%; height: 100%; display: block; }
-.player-meta { grid-column: 3; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 12px 18px 12px 20px; background: var(--card); }
+.player-meta { grid-column: 3; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 12px 18px 12px 20px; background: var(--card); border: 2px solid var(--ink); border-width: 2px 0; box-shadow: 8px 8px 0 var(--ink); }
 .np-eyebrow { font: 700 10px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-eyebrow .muted { color: var(--muted); font-weight: 400; }
 .now { min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -203,8 +207,8 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 .np-sources:empty { display: none; }
 .player-meta .player-controls { margin-top: auto; }
 /* the verdict column: score above, the thumbs, and what plays next; the close tab sits in the corner */
-.player-side { grid-column: 4; position: relative; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 28px 16px 12px 14px; background: var(--card); border: 0 solid var(--ink); border-width: 0 2px; text-align: right; }
-.np-close { position: absolute; top: 0; right: 0; width: 26px; height: 24px; border: 0; padding: 0; background: var(--ink); color: var(--on-ink); font: 700 15px/1 var(--mono); cursor: pointer; }
+.player-side { grid-column: 4; position: relative; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 28px 16px 12px 14px; background: var(--card); border: 2px solid var(--ink); box-shadow: 8px 8px 0 var(--ink); text-align: right; }
+.np-close { position: absolute; top: -2px; right: -2px; width: 26px; height: 24px; border: 0; padding: 0; background: var(--ink); color: var(--on-ink); font: 700 15px/1 var(--mono); cursor: pointer; }
 .np-close:hover { background: var(--accent); color: #fff; }
 .player-side .thumbs .btn { padding: 7px 14px; }
 .np-next { max-width: 100%; border: 0; background: none; padding: 0; text-align: right; cursor: pointer; font: 11px/1.35 var(--mono); color: var(--muted); }
@@ -322,7 +326,7 @@ body.doc .tab { text-decoration: none; }
 .card.swiping { transition: none; }
 .card.swipe-up { box-shadow: inset 6px 0 0 var(--up); background: color-mix(in srgb, var(--up) 12%, var(--card)); }
 .card.swipe-down { box-shadow: inset 6px 0 0 var(--down); background: color-mix(in srgb, var(--down) 12%, var(--card)); }
-@media (display-mode: standalone) { .top { padding-top: max(12px, env(safe-area-inset-top)); } .player { padding-bottom: env(safe-area-inset-bottom, 0px); } }
+@media (display-mode: standalone) { .top { padding-top: max(12px, env(safe-area-inset-top)); } }
 @media (display-mode: standalone) and (max-width: 760px) { .player { padding-bottom: max(12px, env(safe-area-inset-bottom)); } }
 
 /* ---------- deck mode (one card at a time; default on phones) ---------- */
@@ -413,10 +417,10 @@ body.doc .tab { text-decoration: none; }
   .dlinks { order: -1; flex: 1 1 100%; justify-content: flex-start; }
   .dbody { gap: 7px; }
 
-  .player { grid-template-columns: 1fr; gap: 8px; padding: 0 0 max(8px, env(safe-area-inset-bottom)); }
+  .player { grid-template-columns: 1fr; gap: 8px; padding: 0 0 max(8px, env(safe-area-inset-bottom)); background: var(--paper2); border-top: 4px solid var(--ink); box-shadow: 0 -4px 0 var(--accent); pointer-events: auto; }
   .player-frame, .player-meta { grid-column: auto; }
   .player-frame { box-sizing: border-box; width: 100%; height: auto; aspect-ratio: 16/9; border: 0; border-bottom: 2px solid var(--ink); box-shadow: none; }
-  .player-meta { padding: 0 12px; background: transparent; justify-content: center; }
+  .player-meta { padding: 0 12px; background: transparent; border: 0; box-shadow: none; justify-content: center; }
   .player-side, .np-eyebrow, .np-spec, .np-sources, .np-artist .match { display: none; }
   .np-artist, .np-sep, .np-title { display: inline; font: inherit; text-transform: none; letter-spacing: 0; }
   .np-artist { font-weight: 700; }
