@@ -1,4 +1,4 @@
-# Indie Discotheque discovery feed — setup
+# Chris Rohn's New Music — setup
 
 Everything here is free. Total setup is about 20 minutes, most of it DNS propagation.
 
@@ -20,7 +20,8 @@ GitHub Actions (daily 06:15 ET)                        chrisrohn.com (GitHub Pag
 ```
 
 No database, no server, no GitHub tokens: your YouTube playlists *are* the state. The daily job only builds the
-feed; the only thing that ever writes to a playlist is you pressing a thumb while signed in.
+feed; the only thing that ever writes to a playlist is you pressing a thumb while signed in. ("Indie Discotheque" below
+always means the YouTube Music library playlists, `<year> | Indie Discotheque`, that the picks are filed into.)
 
 ## 1. GitHub (required)
 
@@ -55,7 +56,7 @@ Then **Settings → Pages → Custom domain: `chrisrohn.com`** → Save → tick
 One free Google Cloud OAuth client, created in the browser with a **personal** Google account. Everything after
 that is a normal "Sign in with Google" button on the site.
 
-1. https://console.cloud.google.com/projectcreate → name it `indie-discotheque` → Create.
+1. https://console.cloud.google.com/projectcreate → name it `chrisrohn-new-music` (any name works) → Create.
 2. https://console.cloud.google.com/apis/library/youtube.googleapis.com → **Enable** (YouTube Data API v3), and
    https://console.cloud.google.com/apis/library/drive.googleapis.com → **Enable** (Google Drive API — used only for a
    hidden app-data file that keeps your thumbs in sync across devices; the site never sees your real Drive files).

@@ -1,4 +1,4 @@
-"""Build the Indie Discotheque taste profile.
+"""Build the taste profile for Chris Rohn's New Music.
 
 Inputs (all free):
   * Last.fm  – user.getTopArtists for `tt_discotheque` over several periods, artist.getSimilar, artist.getTopTags
@@ -147,13 +147,13 @@ def _loose_year_match(title: str, pattern: str):
 
 
 def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str | None]:
-    """Find every '<year> Indie Discotheque' playlist (+ the Skipped playlist) on your channel.
+    """Find every '<year> | Indie Discotheque' library playlist (+ the Skipped playlist) on your channel.
 
     Uses one configured playlist to learn the channel id, then lists the channel's public playlists.
     Returns ({year: playlistId}, skipped_playlist_id, channel_id).
     """
     ycfg = cfg.get("youtube_music") or {}
-    pattern = ycfg.get("playlist_title_pattern", "{year} Indie Discotheque")
+    pattern = ycfg.get("playlist_title_pattern", "{year} | Indie Discotheque")
     rx = re.compile("^" + re.escape(pattern).replace(re.escape("{year}"), r"(\d{4})") + "$", re.I)
     found: dict[str, str] = {str(y): pid for y, pid in (ycfg.get("playlists") or {}).items()}
     skipped = ycfg.get("skipped_playlist_id") or None

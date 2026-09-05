@@ -27,7 +27,7 @@ CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 
 USER_AGENT = os.environ.get(
     "DISCOVERY_USER_AGENT",
-    "IndieDiscothequeDiscovery/1.0 (+https://chrisrohn.com; music discovery feed)",
+    "ChrisRohnNewMusic/1.0 (+https://chrisrohn.com; new-music discovery feed)",
 )
 
 

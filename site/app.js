@@ -1,7 +1,7 @@
 /* Chris Rohn's New Music — client.
  * Reads data/feed.json (built daily by GitHub Actions). Anyone can listen.
  * Sign in with Google (one of the configured curator accounts) to get curator mode:
- *   👍 → added straight to "<year> Indie Discotheque" in YOUR YouTube library (YouTube Data API v3, from this browser)
+ *   👍 → added straight to "<year> | Indie Discotheque" (the library playlists) on YouTube Music (YouTube Data API v3, from this browser)
  *   👎 → added to the unlisted "Skipped" playlist so it never comes back
  * Nothing is written anywhere until you press a thumb. Undo is available for a few seconds after each one.
  */
@@ -178,7 +178,7 @@
     document.body.classList.toggle("curator", on);
     document.body.classList.toggle("guest", on && !isOwner());
     noticeDupes();
-    const badge = $(".mode"); if (badge) { badge.textContent = role(); badge.title = isOwner() ? "Curator: thumbs file into the Indie Discotheque year playlists" : `Guest: thumbs file into your own “${titleFor("<year>")}” playlists`; }
+    const badge = $(".mode"); if (badge) { badge.textContent = role(); badge.title = isOwner() ? "Curator: thumbs file into the Indie Discotheque year playlists on YouTube Music" : `Guest: thumbs file into your own “${titleFor("<year>")}” playlists`; }
     const who = $("#who");
     if (state.auth && state.auth.email) {
       who.hidden = false;
@@ -306,7 +306,7 @@
     });
   }
   const pattern = () => isOwner()
-    ? ((state.feed.youtube && state.feed.youtube.playlist_title_pattern) || "{year} Indie Discotheque")
+    ? ((state.feed.youtube && state.feed.youtube.playlist_title_pattern) || "{year} | Indie Discotheque")
     : ((state.feed.google && state.feed.google.guest_playlist_title_pattern) || "{year} Picks from chrisrohn.com");
   const titleFor = year => pattern().replace("{year}", year);
   const skippedTitle = () => (state.feed.youtube && state.feed.youtube.skipped_playlist_title) || "Skipped";
@@ -341,7 +341,7 @@
     checkOwnership();
     return all;
   }
-  // The station playlists are collaborative: they belong to @indiedisco and are edited by collaborators. YouTube's
+  // The Indie Discotheque playlists are collaborative: they belong to @indiedisco and are edited by collaborators. YouTube's
   // "mine=true" listing only shows playlists this channel OWNS, so not finding them there is expected — we file into
   // the ids the daily build discovered and let YouTube tell us if this sign-in may not edit them.
   function checkOwnership() {
@@ -354,7 +354,7 @@
   const knownYear = year => isOwner() ? (((state.feed.youtube && state.feed.youtube.playlists) || {})[String(year)] || null) : null;
   async function playlistFor(year) {
     year = String(year);
-    // the daily build knows the station's year playlists by id (from the @indiedisco channel) — always use those
+    // the daily build knows the library's year playlists by id (from the @indiedisco channel) — always use those
     const k = knownYear(year);
     if (k) { state.playlists[year] = k; persist(); return k; }
     if (isOwner()) {
@@ -901,7 +901,7 @@
     $("#p-down").addEventListener("click", () => state.currentId && rate(state.currentId, "down", currentYear()));
     $("#settings-btn").addEventListener("click", () => {
       const yrs = [...new Set([...Object.keys(state.playlists).filter(k => !k.startsWith("__")), ...(isOwner() ? Object.keys((state.feed.youtube && state.feed.youtube.playlists) || {}) : [])])].sort();
-      $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · station playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
+      $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · the Indie Discotheque playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
       $("#s-quota").textContent = quotaText();
       const acct = $("#s-account"); if (acct && state.lastAuthError) acct.insertAdjacentHTML("beforeend", ` <span class="muted">Last sign-in problem: ${esc(state.lastAuthError.why)} (${relTime(new Date(state.lastAuthError.at))}).</span>`);
       $("#s-sync").textContent = state.sync.at ? `Ratings synced across your devices via Google Drive app data · last sync ${relTime(new Date(state.sync.at))} · ${Object.keys(state.rated).length} rated tracks remembered` : "Ratings not synced yet — sign in to sync across devices (uses a hidden app-data file in your Google Drive).";

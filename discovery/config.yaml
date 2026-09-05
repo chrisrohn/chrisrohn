@@ -1,14 +1,14 @@
-# Indie Discotheque discovery feed — configuration.
+# Chris Rohn's New Music — configuration.
 # Everything here is free to use. Secrets (API keys, auth) live in GitHub Actions secrets, never here.
 
 station:
-  name: Indie Discotheque          # the radio station / playlist naming
+  name: Indie Discotheque          # the YouTube Music library the picks are filed into (playlist naming)
   site_name: "Chris Rohn's New Music"   # what the public feed calls itself
   domain: chrisrohn.com
   lastfm_user: tt_discotheque
   timezone: America/New_York
 
-# Your YouTube Music year playlists ("2026 Indie Discotheque", "2025 Indie Discotheque", ... back to 1979).
+# The Indie Discotheque library on YouTube Music: one playlist per year ("2026 | Indie Discotheque" ... back to 1979).
 # The site signs you in with Google and writes to these playlists from your browser. The daily build reads them
 # (they're public) to seed your taste profile and to hide anything already saved or skipped.
 youtube_music:

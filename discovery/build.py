@@ -70,7 +70,7 @@ def build_feed(cfg: dict) -> dict:
         "google": {"client_id": gcfg.get("client_id") or "", "curators": [c.lower() for c in (gcfg.get("curators") or [])],
                    "guests": bool(gcfg.get("guests", False)), "guest_playlist_title_pattern": gcfg.get("guest_playlist_title_pattern") or "{year} Picks from chrisrohn.com"},
         "youtube": {
-            "playlist_title_pattern": ycfg.get("playlist_title_pattern", "{year} Indie Discotheque"),
+            "playlist_title_pattern": ycfg.get("playlist_title_pattern", "{year} | Indie Discotheque"),
             "skipped_playlist_title": ycfg.get("skipped_playlist_title", "Skipped"),
             # config ids are authoritative; anything the profile discovered by title only fills gaps
             "playlists": {**((profile.get("youtube") or {}).get("years") or {}), **{str(y): p for y, p in (ycfg.get("playlists") or {}).items()}},
@@ -140,7 +140,7 @@ def _write_rss(cfg: dict, payload: dict) -> None:
         '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>',
         f"<title>{esc(cfg['station'].get('site_name') or payload['station'])}</title>",
         f"<link>https://{domain}/</link>",
-        f"<description>Daily new-music discovery feed for the {esc(payload['station'])} radio station</description>",
+        f"<description>Daily new-music discovery feed: candidates for the {esc(payload['station'])} playlists on YouTube Music</description>",
         f'<atom:link href="https://{domain}/feed.xml" rel="self" type="application/rss+xml"/>',
     ]
     for it in payload["items"][:100]:
