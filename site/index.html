@@ -100,9 +100,9 @@
     <div class="player-meta">
       <div class="now" id="now"></div>
       <div class="player-controls">
-        <button class="btn" id="p-prev" title="previous (k)">&#x23EE;&#xFE0E;</button>
-        <button class="btn" id="p-toggle" title="play/pause (space)">&#x23EF;&#xFE0E;</button>
-        <button class="btn" id="p-next" title="next (j)">&#x23ED;&#xFE0E;</button>
+        <button class="btn" id="p-prev" title="previous (k)" aria-label="previous"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h3v16H4zM20 4 8 12l12 8z"/></svg></button>
+        <button class="btn" id="p-toggle" title="play/pause (space)" aria-label="play / pause"><svg class="ic ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5 20 12 6 20.5z"/></svg><svg class="ic ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h5v16H5zM14 4h5v16h-5z"/></svg></button>
+        <button class="btn" id="p-next" title="next (j)" aria-label="next"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4h3v16h-3zM4 4l12 8-12 8z"/></svg></button>
         <label class="chk"><input type="checkbox" id="autoplay" checked> autoplay <span class="full">next</span></label>
         <label class="chk" title="Start each track partway in and move on automatically after a few seconds. Any key or click on the player cancels the timer for that track."><input type="checkbox" id="audition"> audition <span id="audition-label">30s</span></label>
         <span id="audition-bar" class="audition-bar" hidden><i></i></span>
@@ -114,7 +114,7 @@
     <div id="deck-card" hidden></div>
     <div class="deck-actions" id="deck-actions" hidden>
       <button class="btn down big curator" id="deck-down" title="thumbs down">&#x25BC;&#xFE0E; skip</button>
-      <button class="btn big play" id="deck-play" title="play / pause">&#x25B6;&#xFE0E;</button>
+      <button class="btn big play" id="deck-play" title="play / pause" aria-label="play / pause"><svg class="ic ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5 20 12 6 20.5z"/></svg><svg class="ic ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h5v16H5zM14 4h5v16h-5z"/></svg></button>
       <button class="btn up big curator" id="deck-up" title="thumbs up">&#x25B2;&#xFE0E; keep</button>
     </div>
   </section>

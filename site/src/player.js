@@ -13,9 +13,9 @@ window.onYouTubeIframeAPIReady = () => {
       onReady: () => { state.playerReady = true; if (state.pendingVideo) { state.player.loadVideoById(state.pendingVideo); state.pendingVideo = null; } },
       onStateChange: (/** @type {any} */ e) => {
         if (e.data === YT.PlayerState.ENDED && $("#autoplay").checked) { clearAudition(); nextTrack(); }
-        if (e.data === YT.PlayerState.PLAYING) { startAudition(); setPlaybackState("playing"); }
-        if (e.data === YT.PlayerState.PAUSED) { clearAudition(false); setPlaybackState("paused"); }
-        if (e.data === YT.PlayerState.ENDED) setPlaybackState("none");
+        if (e.data === YT.PlayerState.PLAYING) { startAudition(); setPlaybackState("playing"); reflectPlaying(true); }
+        if (e.data === YT.PlayerState.PAUSED) { clearAudition(false); setPlaybackState("paused"); reflectPlaying(false); }
+        if (e.data === YT.PlayerState.ENDED) { setPlaybackState("none"); reflectPlaying(false); }
       },
       onError: () => {
         const it = current(); const url = it?.youtube?.videoId ? "https://music.youtube.com/watch?v=" + it.youtube.videoId : null;
@@ -58,14 +58,16 @@ export function play(id) {
   state.currentId = id; const it = current(); const vid = it?.youtube?.videoId; if (!it || !vid) return;
   $$(".card.current, .dcard.current").forEach(c => c.classList.remove("current"));
   const el = $(`.card[data-id="${CSS.escape(id)}"], .dcard[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
-  const dp = $("#deck-play"); if (dp) dp.textContent = "⏸\uFE0E";
+  reflectPlaying(true);
   $("#player").hidden = false;
   $("#now").innerHTML = `<b>${esc(it.artist)}</b> - ${esc(it.display_title || it.title)} ${it.release && !sameName(it.release, it.title) ? `<span class="muted">· ${esc(it.release)}</span>` : ""}`;
   ensureApi(); wireMediaSession(); announce(it);
   clearAudition(); state.auditionArmed = null;
   if (state.playerReady) state.player.loadVideoById(vid); else state.pendingVideo = vid;
 }
-export function stopPlayer() { clearAudition(); if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; setPlaybackState("none"); }
+/** The play/pause buttons show the pause icon while something plays (an SVG pair switched by class). @param {boolean} on */
+export function reflectPlaying(on) { $$("#deck-play, #p-toggle").forEach(b => b.classList.toggle("playing", on)); }
+export function stopPlayer() { clearAudition(); if (state.playerReady) state.player.stopVideo(); $("#player").hidden = true; state.currentId = null; setPlaybackState("none"); reflectPlaying(false); }
 
 export const auditionOn = () => !!state.settings.audition;
 export function clearAudition(hide = true) {
