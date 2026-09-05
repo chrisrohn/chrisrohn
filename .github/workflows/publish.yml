@@ -39,7 +39,7 @@ jobs:
       - run: npm run check          # lint, type check, then build dist/
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
       - id: deployment

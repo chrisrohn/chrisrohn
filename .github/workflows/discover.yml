@@ -100,7 +100,7 @@ jobs:
             if (open.length) await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
             else await github.rest.issues.create({ ...context.repo, title, body, labels: ["build-failure"] });
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
