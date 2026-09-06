@@ -39,7 +39,8 @@ html { transition: background-color .2s; }
 body, .top, .filters, .card, .dcard, .player, footer, dialog, .prose { transition: background-color .2s, color .2s, border-color .2s; }
 
 * { box-sizing: border-box; }
-html { background: var(--paper); }
+/* no background on <html>: the body's paper and grid then propagate to the whole canvas, past the footer and into
+   the overscroll, instead of stopping where the content ends */
 body {
   margin: 0; color: var(--ink); font: 15px/1.45 var(--sans);
   background-color: var(--paper);
