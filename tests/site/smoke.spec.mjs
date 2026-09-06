@@ -506,3 +506,30 @@ test("Cleanup: tracks that will not stream here list their streamable counterpar
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("a lapsed sign-in refreshes itself after the first tap, and the tap still counts", async ({ browser }) => {
+  // a remembered curator with no token: the first interaction quietly asks Google for a new one, which opens a popup;
+  // that must happen after the tap has done its work, or the popup swallows the tap (the tab never opened)
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  // a stand-in for accounts.google.com/gsi/client: the token client opens a popup on request, then reports it closed
+  let popups = 0; ctx.on("page", () => popups++);
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: `
+    window.google = { accounts: { oauth2: { initTokenClient(cfg) { return { requestAccessToken() {
+      const w = window.open("about:blank", "gis", "width=500,height=600");
+      setTimeout(() => { try { if (w) w.close(); } catch {} cfg.error_callback && cfg.error_callback({ type: "popup_closed" }); }, 300);
+    } }; } } } };` }));
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("#count-catalog")).not.toHaveText("…", { timeout: 15_000 });
+  await page.waitForFunction(() => !!(window.google && window.google.accounts));   // the sign-in script is in: the refresh will fire on this tap
+  await page.click(".tab[data-view=cleanup]");
+  await expect(page.locator("#cleanup")).toBeVisible();
+  await expect.poll(() => popups).toBe(1);
+  await expect(page.locator(".toast")).toContainText("sign-in needs a refresh");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

@@ -55,8 +55,12 @@ export async function load() {
   if (isCurator() || state.view === "catalog") loadCatalog().catch(() => {});
   if (isCurator() && tokenValid()) pullRatings().then(() => refreshRecent()).catch(() => {});
   if (isSignedIn()) ensureTokenClient().catch(() => {});
-  document.addEventListener("pointerdown", keepAlive, { capture: true, passive: true });
-  document.addEventListener("keydown", keepAlive, { capture: true, passive: true });
+  // after the tap or key has done its work, never on pointerdown: the silent refresh opens a Google popup, and a
+  // popup opened mid-click swallows the click (the tab you tapped would not open). A timeout after the event still
+  // sits inside the browser's user-activation window, so the popup is allowed.
+  const later = () => setTimeout(keepAlive, 0);
+  document.addEventListener("click", later, { capture: true, passive: true });
+  document.addEventListener("keyup", later, { capture: true, passive: true });
 }
 /** A newer build than the one on screen? Swap it in without losing the place in the deck. Resolves true if it changed. */
 export async function refreshFeed(force = false) {
