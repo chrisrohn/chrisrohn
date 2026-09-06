@@ -165,6 +165,8 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 /* the video would not embed here (YouTube error 101/150): the card stays, marked, and autoplay steps over it */
 .card.noembed .art, .dcard.noembed .dart { border-style: dashed; opacity: .8; }
 .card.noembed .art::after, .dcard.noembed .dart::after { content: "no embed"; position: absolute; left: 0; right: 0; bottom: 0; font: 700 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; text-align: center; padding: 3px 0; background: var(--ink); color: var(--on-ink); }
+.find-year { color: var(--accent); font-weight: 700; }
+.find-year:disabled { color: var(--muted); cursor: default; text-decoration: none; }
 .linkish { font: inherit; color: var(--blue); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; letter-spacing: inherit; text-transform: inherit; }
 .linkish:hover { color: var(--accent); }
 .shortlist-note { border-top: 2px solid var(--ink); }

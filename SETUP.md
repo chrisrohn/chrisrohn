@@ -113,6 +113,12 @@ allows 1 request/s), undated tracks first.
 for as long as your Google session lasts. Signing out only forgets that device. To disconnect the site from your
 Google account entirely use https://myaccount.google.com/permissions.
 
+**Audio, not video:** YouTube Music lists most songs twice, as the audio-only track and as the official video. The
+resolver prefers the audio track, swaps a video hit for its audio counterpart (the watch playlist pairs the two), and
+prefers an original issue over a deluxe, remastered or live edition. Older cached hits are re-checked a batch a run
+(`resolve.audio_heals_per_run`). The album a song names is opened once for the year YouTube Music states and its
+playlist, which is what the "full release" link and the year fallback come from.
+
 **No duplicates:** every Keep first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so. The daily build scans all year playlists for the exact same video appearing twice in a
 year or in two different years — a different upload of the same song is deliberately not counted (full report in
@@ -171,8 +177,13 @@ session that the playlist's owner approved in that browser.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
-  playlist already holds is hidden; the rest is resolved on YouTube Music and given a verified release year in daily
-  batches on the feed's caches, so the tab fills in over a couple of weeks and then keeps pace with your listening.
+  playlist already holds is hidden; the rest is resolved on YouTube Music and given a verified release year by the
+  **Catalog** workflow (its own daily job, five hours after Discover, with a full 45 minutes), so the tab fills in
+  over a couple of weeks and then keeps pace with your listening. A track is published only once its year lookup
+  has run: the year select says how many are still "being dated". The catalog's chain is the fast one (ListenBrainz,
+  MusicBrainz, Deezer, then the year YouTube Music states for the album; no Discogs or iTunes), and a card that still
+  has no year offers **find year** — a one-tap MusicBrainz lookup from the browser that fills the year select — and
+  a Discogs search link.
   The year select shows every playlist year with how many tracks it holds and how many candidates wait, so the
   thin years are easy to work through; each Keep files into the verified year (or asks when none was found). Plays,
   loved, your keeps and skips all rank it; the shortlist, search, source chips and the phone deck work as in the

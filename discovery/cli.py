@@ -69,9 +69,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             log.info("profile is fresh (built %s)", read_json(DATA_DIR / "profile.json", {}).get("built_at"))
         build_feed(cfg)
-        # the catalog takes what is left of the job: the feed comes first, the job dies at its timeout
-        left = float((cfg.get("catalog") or {}).get("job_budget_minutes", 40)) - (time.monotonic() - t0) / 60
-        build_catalog(cfg, deadline_minutes=max(0.0, left))
+        if (cfg.get("catalog") or {}).get("in_daily", False):
+            # the catalog takes what is left of the job: the feed comes first, the job dies at its timeout
+            left = float((cfg.get("catalog") or {}).get("job_budget_minutes", 40)) - (time.monotonic() - t0) / 60
+            build_catalog(cfg, deadline_minutes=max(0.0, left))
         return 0
     if cmd == "seed-everynoise":
         from .profile import scrape_everynoise

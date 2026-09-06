@@ -127,7 +127,7 @@ def _email_hash(email: str) -> str:
 
 
 _PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb", "stated_year")
-_PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration")
+_PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration", "videoFrom", "albumType")
 
 
 def _public_item(it: Item, first_seen: str | None) -> dict:

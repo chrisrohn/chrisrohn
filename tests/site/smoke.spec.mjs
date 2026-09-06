@@ -350,3 +350,33 @@ test("the Catalog tab: earlier years with a year select, or a note until the fir
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("find year: an undated catalog card asks MusicBrainz and fills its year select", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const base = feed.items.find(i => i.youtube && i.youtube.videoId);
+  const item = { ...base, id: "cat-undated", artist: "Chromeo", title: "Night By Night", display_title: "Night By Night", display: "Chromeo - Night By Night", year: null, year_source: "unknown", year_confidence: "low", year_evidence: [], release_date: null, sources: ["lastfm:top tracks"], plays: 120, loved: false, score: 5, reasons: ["120 plays"] };
+  const cat = { generated_at: feed.generated_at, candidates: 1, count: 1, undated: 1, pending: 3, sources: ["lastfm:top tracks"], years: { 2010: { playlist: 5, candidates: 0 } }, items: [item] };
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); localStorage.setItem("id:filters", JSON.stringify({ onlyPlayable: false })); }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  await page.route("**/data/catalog.json", r => r.fulfill({ json: cat }));
+  await page.route("https://musicbrainz.org/ws/2/recording*", r => r.fulfill({ json: { recordings: [
+    { title: "Night By Night", "artist-credit": [{ name: "Chromeo" }], releases: [
+      { title: "Business Casual", date: "2010-09-14", "release-group": { "primary-type": "Album", "first-release-date": "2010-09-14" } },
+      { title: "Night By Night (Remixes)", date: "2010-06-01", "release-group": { "primary-type": "Single", "secondary-types": ["Remix"], "first-release-date": "2010-06-01" } },
+      { title: "Now That's What I Call Indie", date: "2011-01-01", "release-group": { "primary-type": "Album", "secondary-types": ["Compilation"], "first-release-date": "2011-01-01" } }] },
+    { title: "Night By Night", "artist-credit": [{ name: "Somebody Else" }], releases: [{ title: "Other", date: "1999-01-01", "release-group": { "first-release-date": "1999-01-01" } }] },
+  ] } }));
+  const errors = await open(page, "/?view=catalog");
+  const card = page.locator('.card[data-id="cat-undated"]');
+  await expect(card).toBeVisible();
+  await expect(card.locator(".yearbadge")).toHaveText("year unknown");
+  await expect(card.locator("a", { hasText: "discogs" })).toHaveAttribute("href", /discogs\.com\/search/);
+  await expect(page.locator("#cat-year option").first()).toContainText("3 more being dated");
+  await card.locator(".find-year").click();
+  await expect(card.locator(".year")).toHaveValue("2010");          // the album, not the remix single, not the compilation, not the other artist
+  await expect(card.locator(".yearbadge")).toHaveText("2010 · MusicBrainz");
+  await expect(card.locator(".find-year")).toHaveText("2010 (1 release)");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

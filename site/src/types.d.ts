@@ -9,7 +9,7 @@ export interface FeedItem {
   _pick?: boolean; _year?: string | number | null; _skipped?: boolean;
   plays?: number; loved?: boolean;   // catalog items: Last.fm play count, loved track
 }
-export interface Catalog { generated_at: string; candidates: number; count: number; undated: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; items: FeedItem[] }
+export interface Catalog { generated_at: string; candidates: number; count: number; undated: number; pending?: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; items: FeedItem[] }
 export interface LearnedRow { n: number; k: number; rate: number; adj: number }
 export interface LearnedSummary { outcomes: number; kept: number; skipped: number; keep_rate: number; since?: string | null; sources: Record<string, LearnedRow>; tags: Record<string, LearnedRow> }
 export interface Feed {

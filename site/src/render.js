@@ -11,6 +11,7 @@ import { visibleItems, searchFor, credit } from "./feed.js";
 import { rate, undo } from "./rating.js";
 import { play, toggle, refreshNow } from "./player.js";
 import { personal, scoreOf } from "./rank.js";
+import { addYearFinder, discogsSearch } from "./yearfind.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -125,7 +126,9 @@ export function renderDeck(vis) {
   const links = [];
   if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
+  if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
   $(".dlinks", el).innerHTML = links.join("");
+  if (it.year == null && !it._pick && isCurator()) addYearFinder(el, it);
   addShare($(".dlinks", el), it);
   fillYearSelect($(".year", el), it);
   $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
@@ -171,7 +174,9 @@ function card(it, tpl) {
   if (!yt.videoId) links.push(`<a href="https://music.youtube.com/search?q=${encodeURIComponent(it.artist + " " + it.title)}" target="_blank" rel="noopener">search YT Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
   links.push(`<a href="https://www.last.fm/music/${encodeURIComponent(it.artist)}" target="_blank" rel="noopener">last.fm</a>`);
+  if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
   $(".links", el).innerHTML = links.join("");
+  if (it.year == null && !it._pick && !it._skipped && isCurator()) addYearFinder(el, it);
   if (!it._pick) addPermalink($(".links", el), it);
   addShare($(".links", el), it);
   const ysel = $(".year", el);
