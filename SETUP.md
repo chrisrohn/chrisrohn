@@ -128,6 +128,13 @@ extra same-video copies in a year at once (quota-aware: 50 units per removal, an
 today's quota allows), marks the wrong-year copy where the catalogues verified the original year, and offers a live
 "scan this year now" for anything added since the last build. What you clean is remembered with your ratings in the
 Drive mirror, so it stays cleaned on every device; the next build drops it from the report.
+
+**Not streamable here:** the same playlist scan sees which tracks YouTube Music greys out in the region the
+playlists are listened to in (`youtube_music.region`, US) — label rights, a withdrawn upload, a region lock — and
+the build searches for another upload of the same song that streams there, the audio track first, a batch a run
+(`resolve.counterparts_per_run`, cached). They are the *not streamable here* kind on the Cleanup tab: a **swap**
+adds the counterpart and removes the dead copy (100 units), *swap all in a year* does it in bulk within the day's
+quota, and a track with no other upload can be removed or searched by hand. The report is `site/data/unavailable.json`.
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free).
 

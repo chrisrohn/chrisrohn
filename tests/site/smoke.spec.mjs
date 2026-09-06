@@ -417,3 +417,34 @@ test("the Cleanup tab: the duplicate report, filters, and the bulk button once a
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("Cleanup: tracks that will not stream here list their streamable counterpart and a swap", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const rows = [
+    { year: "2021", playlistId: "PL2021", videoId: "dead1", position: 3, artist: "Jungle", title: "Keep Moving", alt: { videoId: "live1", title: "Keep Moving", album: "Loving In Stereo", videoType: "MUSIC_VIDEO_TYPE_ATV" }, pending: false },
+    { year: "2016", playlistId: "PL2016", videoId: "dead2", position: 9, artist: "Roosevelt", title: "Lovers", alt: null, pending: false },
+    { year: "2016", playlistId: "PL2016", videoId: "dead3", position: 1, artist: "Nobody", title: "Nothing", alt: null, pending: true },
+  ];
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 3, unavailable_with_alt: 1, unavailable_pending: 1 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/unavailable.json", r => r.fulfill({ json: { count: 3, with_counterpart: 1, pending: 1, rows } }));
+  const errors = await open(page);
+  await page.click(".tab[data-view=cleanup]");
+  await expect(page.locator("#cl-summary")).toContainText("3 not streamable here (1 with a streamable counterpart, 1 still being searched)");
+  await expect(page.locator("#count-cleanup")).toHaveText(String((feed.youtube.duplicates_count || 0) + 3));
+  await page.selectOption("#cl-dupe-kind", "unavailable");
+  await expect(page.locator("#cl-dupes .dupe.unav")).toHaveCount(3);
+  const first = page.locator('#cl-dupes .dupe[data-key="unav:PL2021:dead1"]');
+  await expect(first.locator(".chip.ok")).toContainText("Keep Moving · audio");
+  await expect(first.locator("button[data-swap]")).toHaveText("swap (100 units)");
+  await expect(page.locator('#cl-dupes .dupe[data-key="unav:PL2016:dead2"]')).toContainText("no other upload found");
+  await expect(page.locator('#cl-dupes .dupe[data-key="unav:PL2016:dead2"] button[data-drop]')).toBeVisible();
+  await expect(page.locator('#cl-dupes .dupe[data-key="unav:PL2016:dead3"]')).toContainText("search pending");
+  await expect(page.locator("#cl-dupe-bulk")).toBeHidden();
+  await page.selectOption("#cl-dupe-yr", "2021");
+  await expect(page.locator("#cl-dupe-bulk")).toHaveText("swap all 1 in 2021 for streamable uploads…");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

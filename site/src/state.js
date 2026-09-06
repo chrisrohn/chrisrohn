@@ -65,7 +65,7 @@ export const state = {
   busy: new Set(),
   sync: LS.get("id:sync", { fileId: null, at: 0 }),   // Drive appDataFolder file that mirrors `rated` across devices
   syncTimer: null,
-  _years: [], dupes: null, dupePage: 1, dupeQT: null, library: null, notOwner: false,
+  _years: [], dupes: null, unavailable: null, dupePage: 1, dupeQT: null, library: null, notOwner: false,
   signingIn: null, authCb: null, authErrCb: null, keepAliveAt: 0, lastAuthError: null, ready: false,
 };
 

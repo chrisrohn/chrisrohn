@@ -29,6 +29,17 @@ MB_RECORDING = "https://musicbrainz.org/ws/2/recording/"
 _BROWSE_RE = re.compile(r"/browse/(MPREb_[\w-]+)")
 
 
+def ytmusic(cfg: dict | None = None):
+    """The unauthenticated YouTube Music client, pinned to the region the playlists are listened to in (config
+    `youtube_music.region`, default US): availability and search results are judged there, not wherever the job runs."""
+    from ytmusicapi import YTMusic
+    region = str(((cfg or {}).get("youtube_music") or {}).get("region") or "US")
+    try:
+        return YTMusic(location=region)
+    except TypeError:          # an older ytmusicapi without the location parameter
+        return YTMusic()
+
+
 _QUALIFIER_RE = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]\s*$|\s+[-–—]\s+[^-–—]+$")   # "(Acoustic)", "[Remix]", "- Live at X"
 
 
@@ -267,11 +278,10 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
     if not rcfg.get("youtube_music", True):
         return
     try:
-        from ytmusicapi import YTMusic
+        yt = ytmusic(cfg)
     except ImportError:
         log.warning("ytmusicapi not installed; skipping YouTube resolution")
         return
-    yt = YTMusic()
     today = date.today()
     today_s = today.isoformat()
     keep_days = int(rcfg.get("cache_keep_days", 120))

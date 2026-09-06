@@ -950,3 +950,51 @@ def test_years_pending_marker_and_fast_chain(monkeypatch, sandbox):
     assert second.year is None and second.year_source == "pending"                             # over budget: not looked up yet, not "unknown"
     cache = util.read_json(years.YEAR_CACHE, {})
     assert cache[first.key]["chain"] == "fast" and second.key not in cache
+
+
+def test_unavailable_playlist_tracks_get_a_streamable_counterpart(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import unavailable
+
+    monkeypatch.setattr(unavailable, "CACHE", sandbox / "data" / "cache" / "counterparts.json")
+    monkeypatch.setattr(unavailable, "REPORT", sandbox / "site" / "data" / "unavailable.json")
+    searches = []
+
+    class FakeYT:
+        def __init__(self, **kw): pass
+        def search(self, q, filter=None, limit=None):
+            searches.append((q, filter))
+            if "Jungle" in q and filter == "songs":
+                return [{"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "deadJ", "videoType": "MUSIC_VIDEO_TYPE_OMV"},
+                        {"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "liveJ", "videoType": "MUSIC_VIDEO_TYPE_ATV", "album": {"name": "Loving In Stereo", "id": "MPREb_x"}}]
+            if "Roosevelt" in q and filter == "videos":
+                return [{"resultType": "video", "title": "Roosevelt - Lovers (Official Video)", "artists": [{"name": "Roosevelt"}], "videoId": "vidR", "videoType": "MUSIC_VIDEO_TYPE_OMV"}]
+            return []
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": videoId + "-atv", "videoType": "MUSIC_VIDEO_TYPE_ATV"}}]} if videoId == "vidR" else {"tracks": []}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    entries = [
+        {"year": "2021", "playlistId": "PL2021", "position": 3, "videoId": "deadJ", "artist": "Jungle", "title": "Keep Moving", "avail": False},
+        {"year": "2016", "playlistId": "PL2016", "position": 9, "videoId": "deadR", "artist": "Roosevelt", "title": "Lovers", "avail": False},
+        {"year": "2016", "playlistId": "PL2016", "position": 1, "videoId": "deadN", "artist": "Nobody", "title": "Nothing", "avail": False},
+        {"year": "2016", "playlistId": "PL2016", "position": 2, "videoId": "okay", "artist": "Fine", "title": "Fine", "avail": True},
+    ]
+    profile = {"youtube": {"entries": entries, "checked_at": "2026-09-06T00:00:00+00:00"}}
+    cfg = _cfg(); cfg["resolve"]["counterparts_per_run"] = 2
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert report["count"] == 3 and set(rows) == {"deadJ", "deadR", "deadN"} and "okay" not in rows
+    assert rows["deadJ"]["alt"]["videoId"] == "liveJ" and rows["deadJ"]["alt"]["videoType"] == "MUSIC_VIDEO_TYPE_ATV"   # never the dead id, audio first
+    assert rows["deadR"]["alt"]["videoId"] == "vidR-atv"                                                              # a video hit, swapped for its audio side
+    assert rows["deadN"]["pending"] is True and rows["deadN"]["alt"] is None                                          # over budget: waits, is not "no counterpart"
+    assert report["with_counterpart"] == 2 and report["audio"] == 2 and report["pending"] == 1
+    assert [r["year"] for r in report["rows"]] == ["2021", "2016", "2016"]
+    # the next run reuses the cache for the two looked up and gets to the third
+    cfg["resolve"]["counterparts_per_run"] = 5
+    n = len(searches)
+    report = unavailable.build_report(profile, cfg)
+    assert report["pending"] == 0 and {r["videoId"]: r["alt"] for r in report["rows"]}["deadN"] is None
+    assert all("Nobody" in q for q, _ in searches[n:])
+    assert util.read_json(sandbox / "site" / "data" / "unavailable.json", {})["count"] == 3

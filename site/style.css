@@ -541,6 +541,7 @@ body.doc .tab { text-decoration: none; }
 .dupe .x:disabled { opacity: .4; }
 .dupe .chip.wrong, .chip.wrong { border-color: var(--down); color: var(--down); }
 .dupe .verified { color: var(--up); }
+.dupe .chip.ok { border-color: var(--up); color: var(--up); } .dupe .chip.ok a { color: var(--up); }
 .dupe-filters { flex-wrap: wrap; gap: 8px; align-items: center; }
 .dupe-filters input[type=search] { flex: 1 1 160px; min-width: 120px; }
 

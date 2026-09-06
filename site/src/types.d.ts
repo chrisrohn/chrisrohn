@@ -16,7 +16,8 @@ export interface Feed {
   generated_at: string; station: string; site_name?: string; count: number; new_today: number; years?: number[];
   google?: { client_id?: string; curator_hashes?: string[]; curators?: string[]; guests?: boolean; guest_playlist_title_pattern?: string };
   youtube?: { playlist_title_pattern?: string; skipped_playlist_title?: string; playlists?: Record<string, string>; skipped_playlist_id?: string; skips_in_youtube?: boolean;
-    duplicates_count?: number; duplicates_kinds?: Record<string, number>; duplicates_checked_at?: string | null };
+    duplicates_count?: number; duplicates_kinds?: Record<string, number>; duplicates_checked_at?: string | null;
+    unavailable_count?: number; unavailable_with_alt?: number; unavailable_pending?: number };
   picks?: Array<{ artist: string; title: string; videoId?: string | null; year?: string; thumbnail?: string | null; album?: string | null }>;
   learned?: LearnedSummary;
   feed_health?: Record<string, { ok: boolean; entries: number; kept: number; error?: string | null }>;
@@ -28,6 +29,7 @@ export interface Rated {
   sources?: string[]; tags?: string[];   // what the card carried when it was rated: the personal ranking and the stats learn from these
 }
 export interface Auth { email?: string; name?: string; picture?: string; hash?: string; access_token?: string; expires_at: number }
+export interface Unavailable { year: string; playlistId: string; videoId: string; position?: number; artist: string; title: string; pending?: boolean; alt: { videoId: string; title?: string; album?: string | null; thumbnail?: string | null; videoType?: string } | null }
 export interface DupeEntry { year: string; playlistId: string; videoId: string; position: number }
 export interface Dupe { key: string; videoId: string; artist: string; title: string; kind: string; years: string[]; count: number; entries: DupeEntry[]; verified_year?: number; verified_source?: string }
 
@@ -41,6 +43,6 @@ export interface State {
   catalog: Catalog | null; catalogState: "idle" | "loading" | "ready" | "missing" | "failed"; index: Map<string, FeedItem>;
   player: any; playerReady: boolean; pendingVideo: string | null; tokenClient: any; busy: Set<string>;
   sync: { fileId: string | null; at: number }; syncTimer: any; _years: number[]; dupes: Dupe[] | null; dupePage: number; dupeQT: any;
-  library: any[] | null; notOwner: boolean; signingIn: Promise<boolean> | null; authCb: any; authErrCb: any; keepAliveAt: number;
+  unavailable: Unavailable[] | null; library: any[] | null; notOwner: boolean; signingIn: Promise<boolean> | null; authCb: any; authErrCb: any; keepAliveAt: number;
   lastAuthError: { why: string; at: number } | null; ready: boolean;
 }

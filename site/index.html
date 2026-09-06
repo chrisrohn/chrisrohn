@@ -144,12 +144,12 @@
     <div class="cl-head">
       <h2 id="cl-title">Cleanup</h2>
       <p class="muted" id="cl-summary"></p>
-      <p class="muted">Every Keep first checks the target playlist, so the same video is never added twice by the site. The daily build scans all year playlists for the exact same video appearing twice in a year (an extra copy: remove it, one stays) or in two different years (a filing question: the verified year marks the wrong copy). Each removal costs 50 YouTube API units, so this is a job for a few minutes a day; what you clean is remembered on every device you sign into.</p>
+      <p class="muted">Every Keep first checks the target playlist, so the same video is never added twice by the site. The daily build scans all year playlists for the exact same video appearing twice in a year (an extra copy: remove it, one stays) or in two different years (a filing question: the verified year marks the wrong copy). It also notes every track YouTube Music greys out in the US (label rights, a withdrawn upload, a region lock) and looks for another upload of the same song that streams here, the audio track first: <b>not streamable here</b> in the kind menu, where a swap adds the counterpart and removes the dead copy. A removal costs 50 YouTube API units and a swap 100, so this is a job for a few minutes a day; what you clean is remembered on every device you sign into.</p>
       <p class="muted" id="cl-quota"></p>
       <p class="muted" id="cl-dupe-kinds"></p>
     </div>
     <div class="row dupe-filters">
-      <select id="cl-dupe-kind" aria-label="kind"><option value="">all kinds</option><option value="same-video">same video twice in a year</option><option value="cross-year">same video in two years</option></select>
+      <select id="cl-dupe-kind" aria-label="kind"><option value="">all duplicates</option><option value="same-video">same video twice in a year</option><option value="cross-year">same video in two years</option><option value="unavailable">not streamable here</option></select>
       <select id="cl-dupe-yr" aria-label="year"><option value="">all years</option></select>
       <input id="cl-dupe-q" type="search" placeholder="filter artist / title" autocomplete="off" aria-label="filter artist or title">
       <button class="btn ghost small" id="cl-dupe-bulk" type="button" hidden>remove all extra copies…</button>

@@ -12,7 +12,7 @@ import { rate, undo } from "./rating.js";
 import { play, toggle, refreshNow } from "./player.js";
 import { personal, scoreOf } from "./rank.js";
 import { addYearFinder, discogsSearch } from "./yearfind.js";
-import { renderDupes, openDupes, dupesLoaded } from "./dupes.js";
+import { renderDupes, openCleanup } from "./dupes.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -50,7 +50,7 @@ export function render() {
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
   const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
   const counts = { feed: full("feed"), picks: visibleItems("picks").length, skipped: isCurator() ? visibleItems("skipped").length : 0, catalog: state.catalog ? full("catalog") : 0,
-    cleanup: dupesLoaded() ? openDupes() : (state.feed?.youtube?.duplicates_count || 0) };
+    cleanup: openCleanup() };
   state.shortlistHidden = hidden;
   for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = k === "catalog" && !state.catalog ? "…" : String(n); }
   $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
