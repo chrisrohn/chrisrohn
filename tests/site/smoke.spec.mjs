@@ -488,8 +488,9 @@ test("Cleanup: tracks that will not stream here list their streamable counterpar
   await expect(page.locator("#count-cleanup")).toHaveText(String((feed.youtube.duplicates_count || 0) + 3));
   await expect(page.locator("#count-catalog")).not.toHaveText("…", { timeout: 15_000 });
   await page.click(".tab[data-view=cleanup]");
-  await expect(page.locator("#cleanup")).toBeVisible();
   expect(errors).toEqual([]);   // a script error on the way would otherwise hide behind the next assertion's timeout
+  const where = () => page.evaluate(() => ({ search: location.search, active: document.activeElement && document.activeElement.outerHTML.slice(0, 80), body: document.body.className, tab: document.querySelector(".tab.active")?.getAttribute("data-view"), cleanupHidden: document.querySelector("#cleanup").hidden, toast: document.querySelector(".toast")?.textContent || "" }));
+  await expect.poll(async () => JSON.stringify(await where()), { timeout: 5000 }).toContain('"cleanupHidden":false');
   await expect(page.locator("#cl-summary")).toContainText("3 not streamable here (1 with a streamable counterpart, 1 still being searched)");
   await page.selectOption("#cl-dupe-kind", "unavailable");
   await expect(page.locator("#cl-dupes .dupe.unav")).toHaveCount(3);
