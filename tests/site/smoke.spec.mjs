@@ -320,9 +320,12 @@ test("the Catalog tab: earlier years with a year select, or a note until the fir
   const ctx = await browser.newContext({ serviceWorkers: "block" });
   const page = await ctx.newPage();
   // before the daily job has ever built one, the tab explains itself instead of failing
+  // before the first Catalog build there is no catalog.json: the tab says so (the served site may well have one by now)
+  await page.route("**/data/catalog.json", r => r.fulfill({ status: 404, body: "" }));
   let errors = await open(page);
   await page.click(".tab[data-view=catalog]");
   await expect(page.locator("#empty")).toContainText("No catalog yet");
+  await page.unroute("**/data/catalog.json");
   expect(errors).toEqual([]);
   // with a catalog: cards, Last.fm source chips, and the year select narrows the list
   const cat = await catalogFixture();

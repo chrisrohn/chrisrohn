@@ -17,6 +17,8 @@ let loadedAt = 0;
 const fetchFeed = () => fetch("data/feed.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
 /** @param {import("./types").Feed} feed */
 function absorb(feed) {
+  // one card per id whatever the build wrote: a second item with the same id would share the first one's card element
+  const seen = new Set(); feed.items = (feed.items || []).filter(i => !seen.has(i.id) && seen.add(i.id));
   state.feed = feed; loadedAt = Date.now();
   hays.clear(); memo.clear(); invalidateRank(); reindex();
   reconcileRated();

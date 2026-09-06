@@ -998,3 +998,37 @@ def test_unavailable_playlist_tracks_get_a_streamable_counterpart(monkeypatch, s
     assert report["pending"] == 0 and {r["videoId"]: r["alt"] for r in report["rows"]}["deadN"] is None
     assert all("Nobody" in q for q, _ in searches[n:])
     assert util.read_json(sandbox / "site" / "data" / "unavailable.json", {})["count"] == 3
+
+
+def test_build_merges_a_release_renamed_to_an_existing_track(monkeypatch, sandbox):
+    import discovery.build as build
+    from discovery import profile as prof
+    from discovery.resolve import promote
+
+    util.write_json(prof.PROFILE_PATH, PROFILE)
+    today = date.today()
+    fake = [Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["listenbrainz"], tags=["nu disco"]),
+            Item(artist="Jungle", title="Loving In Stereo", kind="release", release="Loving In Stereo", release_date=today, sources=["bandcamp"])]
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake))
+
+    def fake_resolve(items, cfg, deadline=None):
+        for it in items:
+            if it.kind == "release":
+                it.youtube = {"videoId": "vidAlbumCut", "title": "Keep Moving", "artists": ["Jungle"]}
+                promote(it, it.youtube)        # the release becomes the track its video is: same key as the first item
+            else:
+                it.youtube = {"videoId": "vidSingle", "title": "Keep Moving", "artists": ["Jungle"]}
+    monkeypatch.setattr(build, "resolve_all", fake_resolve)
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
+    monkeypatch.setattr(build, "unavailable_report", lambda profile, cfg, deadline=None: {"count": 0, "with_counterpart": 0, "pending": 0})
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    monkeypatch.setattr(build, "Http", NoNet)
+    payload = build.build_feed(_cfg())
+    ids = [i["id"] for i in payload["items"]]
+    assert len(ids) == len(set(ids)) == 1                                              # one card, not two with the same id
+    it = payload["items"][0]
+    assert sorted(it["sources"]) == ["bandcamp", "listenbrainz"] and it["youtube"]["videoId"] == "vidSingle"   # the stronger item keeps its video
