@@ -7,7 +7,7 @@ name: Publish site
 on:
   push:
     branches: [main]
-    paths: ["site/**", "!site/data/**", "!site/feed.xml", "build.mjs", "package.json", "package-lock.json", ".github/workflows/publish.yml"]
+    paths: ["site/**", "!site/data/**", "!site/feed.xml", "build.mjs", "package.json", "package-lock.json", "playwright.config.mjs", "tests/site/**", ".github/workflows/publish.yml"]   # the smoke test gates this deploy, so a test fix re-runs it
   workflow_dispatch:
 
 concurrency:

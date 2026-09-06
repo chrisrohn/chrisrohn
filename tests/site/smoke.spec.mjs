@@ -335,7 +335,9 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   await expect(page.locator("#s-build")).toHaveText(/build [0-9a-f]{6,}/);
   await expect(page.locator("#s-update-btn")).toBeVisible();
   await page.keyboard.press("Escape");
-  // offline: the controlled page reloads from the cache with the feed intact
+  // offline: the controlled page reloads from the cache with the feed intact. "ready" resolves while the worker is
+  // still activating; only once it has claimed this page (controller set) does a navigation go through it
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), { timeout: 15_000 }).toBeTruthy();
   await ctx.setOffline(true);
   await page.reload();
   await expect(page.locator("#meta")).toContainText("candidates", { timeout: 15_000 });
@@ -481,9 +483,14 @@ test("Cleanup: tracks that will not stream here list their streamable counterpar
   await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 3, unavailable_with_alt: 1, unavailable_pending: 1 }); await r.fulfill({ json: j }); });
   await page.route("**/data/unavailable.json", r => r.fulfill({ json: { count: 3, with_counterpart: 1, pending: 1, rows } }));
   const errors = await open(page);
-  await page.click(".tab[data-view=cleanup]");
-  await expect(page.locator("#cl-summary")).toContainText("3 not streamable here (1 with a streamable counterpart, 1 still being searched)");
+  // the pills prove the feed (with its counts) and the catalog are both in before the tab is clicked: under
+  // Playwright's request interception a report fetched while the catalog is still streaming can stall
   await expect(page.locator("#count-cleanup")).toHaveText(String((feed.youtube.duplicates_count || 0) + 3));
+  await expect(page.locator("#count-catalog")).not.toHaveText("…", { timeout: 15_000 });
+  await page.click(".tab[data-view=cleanup]");
+  await expect(page.locator("#cleanup")).toBeVisible();
+  expect(errors).toEqual([]);   // a script error on the way would otherwise hide behind the next assertion's timeout
+  await expect(page.locator("#cl-summary")).toContainText("3 not streamable here (1 with a streamable counterpart, 1 still being searched)");
   await page.selectOption("#cl-dupe-kind", "unavailable");
   await expect(page.locator("#cl-dupes .dupe.unav")).toHaveCount(3);
   const first = page.locator('#cl-dupes .dupe[data-key="unav:PL2021:dead1"]');
