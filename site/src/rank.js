@@ -15,8 +15,7 @@ import { state, items, decisionFor } from "./state.js";
 export const PERSONAL_WEIGHT = 1.0;
 const GRACE_DAYS = 3, PASS_WEIGHT = 0.35, PRIOR = 8, MIN_EXPOSURES = 3, CAP = 1.5;
 
-/** @param {string | null | undefined} s */
-const norm = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+import { norm } from "./dom.js";
 /** @param {{sources?: string[], tags?: string[], artist?: string}} o */
 function features(o) {
   const sources = (o.sources || []).filter(Boolean);
@@ -42,7 +41,9 @@ function outcomes() {
   }
   const today = state.feed?.generated_at ? new Date(state.feed.generated_at) : new Date();
   const cutoff = new Date(today.getTime() - GRACE_DAYS * 86400e3).toISOString().slice(0, 10);
-  for (const it of items()) if (!decisionFor(it.id) && it.first_seen && it.first_seen <= cutoff) out.push({ verdict: "pass", sources: it.sources || [], tags: it.tags || [], artist: it.artist });
+  // only what was on screen can have been passed over: the feed is in build order, the shortlist is its top
+  const shown = Math.max(Number(state.settings.shortlistSize) || 60, 80);
+  for (const it of items().slice(0, shown)) if (!decisionFor(it.id) && it.first_seen && it.first_seen <= cutoff) out.push({ verdict: "pass", sources: it.sources || [], tags: it.tags || [], artist: it.artist });
   return out;
 }
 

@@ -5,6 +5,7 @@ station:
   name: Indie Discotheque          # the YouTube Music library the picks are filed into (playlist naming)
   site_name: "Chris Rohn's New Music"   # what the public feed calls itself
   domain: chrisrohn.com
+  repo: chrisrohn/chrisrohn        # the GitHub repository (the site pushes data/ratings.json here when ⚙ has a token)
   lastfm_user: tt_discotheque
   timezone: America/New_York
 
@@ -99,6 +100,9 @@ profile:
   lastfm_top_artists_limit: 1000   # 200 per request; cheap. Rank-decayed weight, so the tail mostly adds "you play them" matches.
   # How many top artists get expanded into similar artists (Last.fm + ListenBrainz).
   expand_top_n: 120
+  # How many top artists contribute their Last.fm tags to the genre table (cached; wider = more tags match)
+  tags_top_n: 400
+  tag_floor: 0.01               # tags below this share of the strongest tag are dropped from the table
   similar_per_artist: 12
   similar_weight: 0.35          # affinity inherited by similar artists (× source artist affinity)
   # Genre/tag weights are learned from Last.fm top tags of your top artists, then boosted by these:
@@ -175,8 +179,10 @@ sources:
     enabled: true
     tags: [indie-pop, indietronica, nu-disco, synth-pop, electropop, indie-dance, alternative-dance, dance-punk, chillwave, dream-pop, art-pop, disco, indie-electronic, italo-disco]
     per_tag: 60
+    slices: [new, top]       # Discover slices per tag: "new" arrivals (source "bandcamp"), "top" sellers (editorial, "bandcamp:top")
   deezer:
     enabled: true
+    days: 45                 # look back for your artists' albums and the editorial feeds (default 45; else listenbrainz_fresh.days)
     top_artists: 500         # check newest albums of your top N artists
     related_per_artist: 0    # set >0 to also pull related artists' newest releases (slower)
     editorial_genres:        # Deezer editorial "new releases" feeds by genre id
@@ -192,6 +198,7 @@ sources:
   # Label / curator / session channels on YouTube. Free RSS per channel; wrong handles show up in ⚙ feed health.
   youtube_channels:
     enabled: true
+    days: 30                 # uploads older than this are ignored (default 30; else listenbrainz_fresh.days)
     channels:
       - { name: "Toy Tonics", channel: "@toytonics" }
       - { name: "Razor-N-Tape", channel: "@RazorNTape" }
@@ -215,11 +222,42 @@ sources:
   # What tastemaker radio is actually playing (profile-matched, or recently released for KEXP).
   radio:
     enabled: true
+    days: 14                 # a KEXP play counts as "recent" when its release date is within this (default 14; else listenbrainz_fresh.days)
     kexp: true
+    pages: 12                # KEXP plays are paged back (200 a page) from the newest to the last run's airdate cursor; at most this many pages
     somafm: [poptron, indiepop]   # channel ids from somafm.com URLs, e.g. somafm.com/poptron
+  # NTS Radio: the tracklists of the newest episodes of the shows below (aliases from nts.live/shows/<alias>);
+  # only plays by profile artists are kept, as sightings dated by the broadcast.
+  nts:
+    enabled: true
+    days: 14                 # episodes older than this are skipped (default 14; else listenbrainz_fresh.days)
+    episodes_per_show: 2
+    shows: [balearic-breakfast, charlie-bones, the-do-you-show, moxie, bullion]
+  # Music subreddits: "Artist - Song [genre] (year)" link posts to YouTube / Bandcamp / SoundCloud / Spotify.
+  reddit:
+    enabled: true
+    days: 7                  # posts older than this are skipped (default 7; else listenbrainz_fresh.days)
+    min_score: 5
+    subreddits: [indieheads, listentothis, futurefunkairlines, nudisco]
+  # Apple Music storefront charts (RSS marketing tools JSON): kept when the artist is in the profile or a genre matches.
+  apple_music:
+    enabled: true
+    days: 30                 # albums released before this are skipped (default 30; else listenbrainz_fresh.days)
+    storefront: us
+    limit: 100
+    feeds: [most-recent, most-played]
+    genres: [Alternative, Dance, Electronic, Pop, Indie Pop]
+  # New release groups of your top artists by MusicBrainz artist id (1 req/s: `top_artists` a run, rotating through `pool`).
+  musicbrainz_artists:
+    enabled: true
+    days: 60                 # first-release-date window (default 60; else listenbrainz_fresh.days)
+    top_artists: 150
+    pool: 600
+    limit: 25                # release groups per artist query
   # Labels you trust: every release they put out in the window, via MusicBrainz.
   musicbrainz_labels:
     enabled: true
+    days: 60                 # release-date window (default 60; else listenbrainz_fresh.days)
     labels:
       - Toy Tonics
       - Razor-N-Tape
@@ -247,6 +285,8 @@ sources:
       - Colemine Records
   rss:
     enabled: true
+    days: 21                 # posts older than this (+4 days of slack) are skipped (default 21; else listenbrainz_fresh.days)
+    # Feeds are fetched 6 at a time with conditional GETs (ETag / Last-Modified kept in data/cache/feed_etags.json).
     # Headlines shaped like `Artist – "Song"` become playable cards; other posts are kept only if they mention a
     # profile artist. Dead or noisy feeds show up in ⚙ → feed health on the site; prune freely.
     feeds:
@@ -299,12 +339,20 @@ sources:
   spotify:
     # Optional. Requires a Premium account + a dev-mode app since Feb 2026. Off by default.
     enabled: false
+    days: 30                 # albums released before this are skipped (default 30; else listenbrainz_fresh.days)
     top_artists: 100
 
 # ---------- Ranking ----------
 ranking:
-  max_items: 1000
+  max_items: 400           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
   min_score: 0.6
+  # One act must not own the day: past this many tracks by the same artist (or on the same label) each further one
+  # loses `repeat_penalty` from its score, so it drops down the list. And the top `learn.shown_rank` always holds
+  # `explore_slots` tracks by artists the profile does not know, so newcomers get seen at all.
+  max_per_artist: 3
+  max_per_label: 6
+  repeat_penalty: 2.0
+  explore_slots: 8
   weights:
     affinity: 4.0          # direct artist match (Last.fm / seeds: you play them)
     saved: 2.0             # artist only known from the year playlists (in your library, never scrobbled)
@@ -316,6 +364,9 @@ ranking:
     listens: 0.4           # log10(listen_count) from ListenBrainz
     playable: 0.3          # a YouTube match exists (it can be played and filed)
     learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
+    explore: 1.0           # the exploration bonus for sources / tags / artists with little history (learn.explore)
+    label: 1.0             # a release on one of the labels under sources.musicbrainz_labels.labels
+    novelty: 0.5           # an artist the profile does not know, vouched for by an editorial feed or two sources
   freshness_days: 60       # a release this many days old has spent its freshness bonus (the sources look back ~90 days)
   undated_freshness: 0.2   # share of the freshness weight for an item nobody dates; below anything released this month
   # Hide anything already in your year playlists, saved or skipped from the site.
@@ -325,12 +376,18 @@ ranking:
 # No API quota involved: what each day's feed showed (site/data/history/) is compared with what reached the year
 # playlists (kept) or the Skipped playlist (skipped, only when skips are filed on YouTube). Sources, blogs, tags and
 # artists get a keep rate against the overall rate, added to the score as a bounded log2 ratio.
+# Skips reach the build two ways: the Skipped playlist (when skips_in_youtube is on) and data/ratings.json, which the
+# site pushes from the browser when a GitHub token is set in ⚙ (every keep and skip, no YouTube quota).
 learn:
   grace_days: 3          # a track shown more recently than this may simply not have been listened to yet
   pass_weight: 0.35      # shown for grace_days and never filed anywhere: a weak "no" (a filed skip counts as 1.0)
+  shown_rank: 80         # a "pass" only counts for tracks that ranked this high (the shortlist is what gets seen)
+  half_life_days: 21     # an outcome this old counts half; last season's taste does not outweigh this month's
   prior: 8               # pseudo-observations at the overall keep rate before a source / tag / artist moves the score
   min_exposures: 3       # fewer sightings than this: no opinion yet
   max_adjust: 1.5        # the log2 ratio is clamped to ±this, so one lucky blog can't dominate
+  explore: 0.4           # UCB exploration: explore · sqrt(ln N / (n + 1)) per feature, so the unfamiliar gets a look
+  explore_max: 0.6       # … capped here, so a complete unknown never outranks a proven favourite on novelty alone
 
 # ---------- The catalog: infill for earlier years (discovery/catalog.py) ----------
 # Runs after the feed in the daily job and publishes site/data/catalog.json for the Catalog tab. Candidates are your

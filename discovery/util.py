@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import unicodedata
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,9 @@ BROWSER_USER_AGENT = os.environ.get(
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
 )
 PROFILE_VERSION = 2   # bump when profile.json's shape or meaning changes; `daily` then rebuilds it regardless of age
+ETAG_VERSION = 1          # data/cache/feed_etags.json: url -> {etag, last_modified, body, at}
+ETAG_BODY_MAX = 400_000   # bytes of feed text kept per URL for the 304 path
+ETAG_KEEP_DAYS = 45       # validators for a feed nobody has fetched this long are dropped
 
 
 def setup_logging() -> None:
@@ -73,6 +77,84 @@ def write_json(path: Path, data: Any, *, compact: bool = False) -> None:
         else:
             json.dump(data, fh, ensure_ascii=False, indent=1, sort_keys=False)
     tmp.replace(path)
+
+
+def read_versioned(path: Path, version: int, default: Any, migrate: Callable[[dict, int], Any] | None = None) -> Any:
+    """A JSON map stamped with a schema version ("v"), like resolve.CACHE_VERSION does per row.
+
+    The stamp is stripped from what is returned. A file written before stamps existed counts as version 1, so an
+    existing cache survives the first run of the code that started stamping it. When the version differs, `migrate`
+    (old map, old version) → new map may rescue the content; otherwise the file is discarded and `default` returned."""
+    data = read_json(path, None)
+    if not isinstance(data, dict):
+        return default
+    found = data.pop("v", 1)
+    if found == version:
+        return data
+    if migrate is not None:
+        try:
+            migrated = migrate(data, found)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("cache %s: migration from v%s failed (%s); starting over", path.name, found, exc)
+            migrated = None
+        if migrated is not None:
+            log.info("cache %s: migrated v%s → v%s", path.name, found, version)
+            return migrated
+    log.info("cache %s: version %s, want %s; starting over", path.name, found, version)
+    return default
+
+
+def write_versioned(path: Path, version: int, data: dict) -> None:
+    write_json(path, {"v": version, **data}, compact=True)
+
+
+NEGATIVE_CACHE_DAYS = 30   # a lookup that found nothing is asked again after this long (new artists appear on catalogues)
+
+
+def miss_row(when: date | None = None) -> dict:
+    """The cached shape of a lookup that found nothing: {"miss": "<date>"}; `miss_expired` says when to retry."""
+    return {"miss": (when or date.today()).isoformat()}
+
+
+def miss_expired(row: Any, days: int = NEGATIVE_CACHE_DAYS, now: date | None = None) -> bool:
+    """True for a miss row older than `days` (or one whose date cannot be read): look the name up again."""
+    if not isinstance(row, dict) or "miss" not in row:
+        return False
+    when = parse_date(row.get("miss"))
+    return when is None or (now or date.today()) - when > timedelta(days=days)
+
+
+def source_days(cfg: dict, key: str, default: int = 10) -> int:
+    """Look-back window for a source: its own `days`, else `sources.listenbrainz_fresh.days`, else `default`."""
+    sources = cfg.get("sources") or {}
+    own = (sources.get(key) or {}).get("days")
+    if own:
+        return int(own)
+    shared = (sources.get("listenbrainz_fresh") or {}).get("days")
+    return int(shared) if shared else int(default)
+
+
+def parse_retry_after(value: Any, fallback: float) -> float:
+    """Seconds to wait from a Retry-After header: an integer count or an HTTP-date (RFC 9110 §10.2.3); `fallback`
+    when the header is missing or unreadable. Never raises."""
+    if value is None:
+        return fallback
+    s = str(value).strip()
+    if not s:
+        return fallback
+    try:
+        return max(0.0, float(s))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        when = parsedate_to_datetime(s)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        return max(0.0, (when - utcnow()).total_seconds())
+    except Exception:  # noqa: BLE001
+        return fallback
 
 
 def utcnow() -> datetime:
@@ -317,15 +399,29 @@ class Http:
             "api.discogs.com": 1.1,    # 60 requests/minute with a token
         }
         self._dirty = False
+        # conditional GETs (feeds): url -> {"etag", "last_modified", "body", "at"}, loaded on first use
+        self.etag_path = CACHE_DIR / "feed_etags.json"
+        self._etags: dict[str, dict] | None = None
+        self._etags_dirty = False
 
     def _throttle(self, host: str) -> None:
+        """Reserve the next slot for `host` under the lock, then sleep *outside* it, so concurrent fetchers of other
+        hosts are never held up by one host's rate limit."""
         interval = self.min_interval.get(host, 0.1)
         with self._lock:
-            last = self._last_call.get(host, 0.0)
-            wait = interval - (time.monotonic() - last)
-            if wait > 0:
-                time.sleep(wait)
-            self._last_call[host] = time.monotonic()
+            now = time.monotonic()
+            slot = max(now, self._last_call.get(host, 0.0) + interval)
+            self._last_call[host] = slot
+        wait = slot - now
+        if wait > 0:
+            time.sleep(wait)
+
+    def _etag_store(self) -> dict[str, dict]:
+        with self._lock:
+            if self._etags is None:
+                data = read_versioned(self.etag_path, ETAG_VERSION, {})
+                self._etags = data if isinstance(data, dict) else {}
+            return self._etags
 
     def _cache_key(self, method: str, url: str, params: Any, body: Any) -> str:
         raw = json.dumps([method, url, params, body], sort_keys=True, default=str)
@@ -333,12 +429,26 @@ class Http:
 
     def request(self, method: str, url: str, *, params: dict | None = None, json_body: Any = None,
                 headers: dict | None = None, cache: bool = True, retries: int = 3, timeout: int = 30,
-                as_json: bool = True) -> Any:
+                as_json: bool = True, conditional: bool = False) -> Any:
+        """`conditional=True` (text GETs of feeds): send If-None-Match / If-Modified-Since from the stored validators
+        for this URL and, on 304 Not Modified, return the body stored with them (data/cache/feed_etags.json, bodies
+        capped at ETAG_BODY_MAX so the file stays small)."""
         key = self._cache_key(method, url, params, json_body)
         if cache and key in self.cache:
             entry = self.cache[key]
             if utcnow() - datetime.fromisoformat(entry["at"]) < self.ttl:
                 return entry["data"]
+        prior: dict | None = None
+        if conditional and not as_json and method.upper() == "GET":
+            prior = self._etag_store().get(url)
+            if prior and prior.get("body") is not None:
+                headers = dict(headers or {})
+                if prior.get("etag"):
+                    headers.setdefault("If-None-Match", prior["etag"])
+                if prior.get("last_modified"):
+                    headers.setdefault("If-Modified-Since", prior["last_modified"])
+            else:
+                prior = None
         host = requests.utils.urlparse(url).hostname or ""
         backoff = 2.0
         for attempt in range(retries + 1):
@@ -353,18 +463,35 @@ class Http:
                 backoff *= 2
                 continue
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < retries:
-                retry_after = float(resp.headers.get("Retry-After", backoff))
+                retry_after = parse_retry_after(resp.headers.get("Retry-After"), backoff)
                 log.warning("%s %s -> %s; retrying in %.1fs", method, url, resp.status_code, retry_after)
                 time.sleep(min(retry_after, 30))
                 backoff *= 2
                 continue
+            if resp.status_code == 304 and prior is not None:
+                log.debug("GET %s: not modified", url)
+                return prior["body"]
             resp.raise_for_status()
             data = resp.json() if as_json else resp.text
+            if conditional and not as_json and method.upper() == "GET":
+                self._remember_validators(url, resp, data)
             if cache:
-                self.cache[key] = {"at": utcnow().isoformat(), "data": data}
-                self._dirty = True
+                with self._lock:
+                    self.cache[key] = {"at": utcnow().isoformat(), "data": data}
+                    self._dirty = True
             return data
         raise RuntimeError("unreachable")
+
+    def _remember_validators(self, url: str, resp: Any, body: str) -> None:
+        etag, last_modified = resp.headers.get("ETag"), resp.headers.get("Last-Modified")
+        store = self._etag_store()
+        with self._lock:
+            if (etag or last_modified) and isinstance(body, str) and len(body.encode("utf-8", "ignore")) <= ETAG_BODY_MAX:
+                store[url] = {"etag": etag, "last_modified": last_modified, "body": body, "at": utcnow().isoformat()}
+                self._etags_dirty = True
+            elif url in store:            # the feed dropped its validators or outgrew the cap: stop asking
+                del store[url]
+                self._etags_dirty = True
 
     def get(self, url: str, **kw: Any) -> Any:
         return self.request("GET", url, **kw)
@@ -373,9 +500,15 @@ class Http:
         return self.request("POST", url, **kw)
 
     def save(self) -> None:
-        if not self._dirty:
-            return
-        cutoff = utcnow() - self.ttl
-        self.cache = {k: v for k, v in self.cache.items() if datetime.fromisoformat(v["at"]) > cutoff}
-        write_json(self.cache_path, self.cache, compact=True)
-        self._dirty = False
+        with self._lock:
+            if self._etags_dirty and self._etags is not None:
+                cutoff = (utcnow() - timedelta(days=ETAG_KEEP_DAYS)).isoformat()
+                self._etags = {u: e for u, e in self._etags.items() if (e.get("at") or "") >= cutoff}
+                write_versioned(self.etag_path, ETAG_VERSION, self._etags)
+                self._etags_dirty = False
+            if not self._dirty:
+                return
+            cutoff_dt = utcnow() - self.ttl
+            self.cache = {k: v for k, v in self.cache.items() if datetime.fromisoformat(v["at"]) > cutoff_dt}
+            write_json(self.cache_path, self.cache, compact=True)
+            self._dirty = False

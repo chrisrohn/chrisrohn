@@ -23,6 +23,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # one Pages deployment at a time across Discover, Catalog and Publish (the workflow-level group above only
+    # collapses repeated site pushes into the newest one)
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -2,17 +2,19 @@
 /* Cards (list view, paged as you scroll) and the one-card deck (phones).
  * Cards are keyed by id and reused between renders: a thumb, a filter or a keystroke moves the elements that are
  * still visible and builds only the new ones, instead of rebuilding every card on screen. */
-import { state, items, byId, decisionFor, badVideo, PAGE } from "./state.js";
-import { $, $$, esc, safeUrl, sameName, canShare, shareTrack, copyText } from "./dom.js";
-import { isCurator } from "./auth.js";
+import { state, items, byId, decisionFor, badVideo, persist, PAGE } from "./state.js";
+import { $, $$, esc, safeUrl, sameName, canShare, shareTrack, copyText, permalink, buzz, announce } from "./dom.js";
+import { isCurator, isSignedIn } from "./auth.js";
 import { yearBadge, fillYearSelect, matchLabel, isMatchReason } from "./years.js";
 import { titleFor } from "./youtube.js";
-import { visibleItems, searchFor, credit } from "./feed.js";
-import { rate, undo } from "./rating.js";
+import { visibleItems, searchFor, credit, parseQuery, termText, dropTerm } from "./feed.js";
+import { rate, undo, restoreAll } from "./rating.js";
 import { play, toggle, refreshNow } from "./player.js";
 import { personal, scoreOf } from "./rank.js";
 import { addYearFinder, discogsSearch } from "./yearfind.js";
 import { renderDupes, openCleanup } from "./dupes.js";
+import { syncUrl } from "./url.js";
+import { openArtist } from "./artist.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -42,10 +44,11 @@ export function render() {
   refreshNow();
   const cleanup = state.view === "cleanup"; $("#cleanup").hidden = !cleanup; if (cleanup) renderDupes(false);
   const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup;
-  empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.")
+  empty.replaceChildren(state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.")
     : state.view === "skipped" ? "Nothing skipped from this feed."
-    : state.view === "catalog" ? ({ idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog. Reload to try again." }[state.catalogState] || "Nothing here with these filters.")
-    : "No picks yet.";
+    : state.view === "catalog" ? ({ idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog." }[state.catalogState] || "Nothing here with these filters.")
+    : "No picks yet.");
+  if (state.view === "catalog" && state.catalogState === "failed") { const b = document.createElement("button"); b.type = "button"; b.className = "btn ghost small"; b.textContent = "Retry"; b.addEventListener("click", () => import("./feed.js").then(m => m.loadCatalog(true))); empty.append(" ", b); }
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters (the
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
   const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
@@ -54,16 +57,40 @@ export function render() {
   state.shortlistHidden = hidden;
   for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = k === "catalog" && !state.catalog ? "…" : String(n); }
   $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
-  $$(".tab").forEach(t => { const on = t.dataset.view === state.view; t.classList.toggle("active", on); if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current"); });
+  $$(".tab").forEach(t => { const on = t.dataset.view === state.view; t.classList.toggle("active", on); t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; });
   $("#filters").classList.toggle("picks", state.view === "picks" || state.view === "skipped");
   $("#filters").classList.toggle("cleanup", cleanup);
   $("#filters").classList.toggle("catalog", state.view === "catalog");
+  renderChips();
+  renderIntro();
+  syncUrl();
+  const name = { feed: "candidates", catalog: "catalog tracks", picks: "picks", skipped: "skipped tracks", cleanup: "cleanup items" }[state.view] || "items";
+  announce(cleanup ? `Cleanup: ${counts.cleanup} to review` : `${vis.length}${state.shortlistHidden && (state.view === "feed" || state.view === "catalog") ? ` of ${vis.length + state.shortlistHidden}` : ""} ${name} shown`);
+}
+/** The active search terms as chips, each with its own ✕, so two tags combine and any one can go. */
+function renderChips() {
+  const box = $("#chips"); if (!box) return;
+  const terms = state.view === "cleanup" ? [] : parseQuery(state.filters.q.trim());
+  box.hidden = !terms.length;
+  box.replaceChildren(...terms.map(t => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "chip qchip" + (t.not ? " not" : "");
+    b.innerHTML = `${t.field ? `<span class="muted">${esc(t.field)}:</span>` : ""}${t.not ? "−" : ""}${esc(t.value)} <span class="x" aria-hidden="true">✕</span>`;
+    b.title = `remove “${termText(t.field, t.value)}” from the search`; b.setAttribute("aria-label", b.title);
+    b.addEventListener("click", () => dropTerm(t));
+    return b;
+  }), ...(terms.length > 1 ? [(() => { const c = document.createElement("button"); c.type = "button"; c.className = "linkish"; c.textContent = "clear all"; c.addEventListener("click", () => searchFor("", { add: false })); return c; })()] : []));
+}
+/** A one-time card for a first visit: what this is, how to listen, what signing in adds. */
+function renderIntro() {
+  const el = $("#intro"); if (!el) return;
+  el.hidden = !!state.settings.introDismissed || isSignedIn() || state.view !== "feed" || !state.feed;
 }
 /** Render up to `count` cards of the current list; a sentinel at the end pulls in the next page. @param {number} count */
 function appendCards(count) {
   const list = $("#list"); const tpl = $("#card-tpl");
   const to = Math.min(count, lastVis.length);
   const els = [];
+  if (state.view === "skipped" && lastVis.length > 1 && isCurator()) els.push(restoreNote());
   for (let i = 0; i < to; i++) {
     const it = lastVis[i]; const key = `${state.view}|${it.id}`;
     let el = cards.get(key); if (!el) { el = card(it, tpl); cards.set(key, el); }
@@ -88,7 +115,16 @@ function showAllNote() {
   $("#show-all", s).addEventListener("click", showAll);
   return s;
 }
-export function showAll() { state.filters.shortlist = false; $("#shortlist").checked = false; render(); }
+/** The Skipped tab's head: restore everything listed (or just today's) in one go. */
+function restoreNote() {
+  const s = document.createElement("div"); s.className = "more-sentinel restore-note";
+  const today = Date.now() - 86400e3; const recent = lastVis.filter(i => (state.rated[i.id]?.at || 0) > today);
+  s.innerHTML = `${lastVis.length} skipped · <button type="button" class="linkish" id="restore-all">restore all</button>${recent.length && recent.length < lastVis.length ? ` · <button type="button" class="linkish" id="restore-today">restore the last 24 h (${recent.length})</button>` : ""}`;
+  $("#restore-all", s).addEventListener("click", () => restoreAll(lastVis.map(i => i.id)));
+  const rt = $("#restore-today", s); if (rt) rt.addEventListener("click", () => restoreAll(recent.map(i => i.id)));
+  return s;
+}
+export function showAll() { state.filters.shortlist = false; $("#shortlist").checked = false; persist(); render(); }
 /** Make sure the card for `id` exists in the list (it may sit beyond the rendered page). @param {string} id */
 export function ensureRendered(id) {
   const i = state.order.indexOf(id);
@@ -116,7 +152,8 @@ export function renderDeck(vis) {
   const img = $("img", el); if (it.artwork || yt.thumbnail) { img.src = it.artwork || yt.thumbnail; dropIfDead(img); } else img.remove();
   if (!yt.videoId) $(".dplay", el).remove();
   if (badVideo(yt.videoId)) el.classList.add("noembed");
-  $(".dartist", el).textContent = it.artist;
+  const da = $(".dartist", el); da.textContent = it.artist; da.title = `everything by ${it.artist}`;
+  da.addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); openArtist(it.artist); });
   $(".dtitle", el).textContent = it.display_title || it.title;
   $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
   $(".date", el).textContent = it.release_date || "";
@@ -133,20 +170,21 @@ export function renderDeck(vis) {
   if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
   $(".dlinks", el).innerHTML = links.join("");
   if (it.year == null && !it._pick && isCurator()) addYearFinder(el, it);
+  if (!it._pick) addPermalink($(".dlinks", el), it);
   addShare($(".dlinks", el), it);
   fillYearSelect($(".year", el), it);
-  $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
+  $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.playingId === it.id && state.playerReady) toggle(); else play(it.id); } });
   attachSwipe(el, it, 110);
-  if (state.currentId === it.id) el.classList.add("current");
+  if (state.playingId === it.id) el.classList.add("current");
   host.replaceChildren(el);
-  $("#deck-play").classList.toggle("playing", state.currentId === it.id && state.playerReady && state.player.getPlayerState && state.player.getPlayerState() === 1);
+  $("#deck-play").classList.toggle("playing", state.playingId === it.id && state.playerReady && state.player.getPlayerState && state.player.getPlayerState() === 1);
   $("#deck-play").disabled = !yt.videoId;
 }
 export const deckItem = () => { const id = $("#deck-card .dcard")?.dataset.id; return id ? byId(id) : null; };
 export function deckYear() { const s = $("#deck-card .year"); return s && s.value ? +s.value : undefined; }
 
-/** A tag chip that filters the list when pressed. @param {string} t */
-function tagButton(t) { const b = document.createElement("button"); b.type = "button"; b.className = "tag"; b.textContent = t; b.title = `only “${t}”`; b.addEventListener("click", e => { e.stopPropagation(); searchFor(t); }); return b; }
+/** A tag chip that adds itself to the search when pressed (so two tags combine). @param {string} t */
+function tagButton(t) { const b = document.createElement("button"); b.type = "button"; b.className = "tag"; b.textContent = t; b.title = `add “${t}” to the search`; b.addEventListener("click", e => { e.stopPropagation(); searchFor(termText("tag", t)); }); return b; }
 
 /** @param {FeedItem} it @param {HTMLTemplateElement} tpl @returns {HTMLElement} */
 function card(it, tpl) {
@@ -159,10 +197,10 @@ function card(it, tpl) {
   if (!yt.videoId) art.classList.add("unplayable");
   if (badVideo(yt.videoId)) { el.classList.add("noembed"); art.title = "YouTube would not embed this video here recently — open it in YT Music"; }
   if (it.first_seen && it.first_seen === state.feed?.generated_at?.slice(0, 10) && !it._pick) el.classList.add("new");
-  const artist = $(".artist", el); artist.textContent = it.artist; artist.title = `everything by ${it.artist} in the feed`;
-  artist.addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); searchFor(it.artist); });
+  const artist = $(".artist", el); artist.textContent = it.artist; artist.title = `everything by ${it.artist} (the artist sheet)`;
+  artist.addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); openArtist(it.artist); });
   const m = $(".match", el);
-  if (it.match_kind) { m.textContent = matchLabel(it); m.classList.add(it.match_kind); } else m.remove();
+  if (it.match_kind) { m.textContent = matchLabel(it); m.classList.add(it.match_kind); m.title = `why: open ${it.matched_artist && it.matched_artist !== it.artist ? it.matched_artist : it.artist}`; m.addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); openArtist(it.match_kind === "similar" ? it.artist : (it.matched_artist || it.artist)); }); } else m.remove();
   $(".title", el).textContent = it.display_title || it.title;
   $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
   $(".date", el).textContent = it.release_date || "";
@@ -227,25 +265,30 @@ function addPermalink(host, it) {
   b.addEventListener("click", e => { e.stopPropagation(); copyText(permalink(it.id)); });
   host.appendChild(b);
 }
-/** @param {string} id */
-export const permalink = id => `${location.origin}${location.pathname}?t=${encodeURIComponent(id)}`;
-/** @param {HTMLElement} el @param {FeedItem} it @param {number} [threshold] */
+export { permalink };
+/** Swipe right to keep, left to skip: pointer events, so a finger, a pen or a trackpad drag all count (a mouse does
+ * not: a drag to select text must not file a track). A short buzz marks the decision on phones. @param {HTMLElement} el @param {FeedItem} it @param {number} [threshold] */
 function attachSwipe(el, it, threshold = 90) {
-  let x0 = 0, y0 = 0, dx = 0, active = false;
-  el.addEventListener("touchstart", e => { if (!isCurator()) return; const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; dx = 0; active = true; el.classList.add("swiping"); }, { passive: true });
-  el.addEventListener("touchmove", e => {
-    if (!active) return; const t = e.touches[0]; dx = t.clientX - x0;
-    if (Math.abs(t.clientY - y0) > 40 && Math.abs(dx) < 30) { active = false; el.style.transform = ""; el.classList.remove("swipe-up", "swipe-down", "swiping"); return; }
+  let x0 = 0, y0 = 0, dx = 0, active = false, id = -1;
+  const reset = () => { active = false; id = -1; el.style.transform = ""; el.classList.remove("swipe-up", "swipe-down", "swiping"); };
+  el.addEventListener("pointerdown", e => {
+    if (!isCurator() || e.pointerType === "mouse" || !e.isPrimary) return;
+    x0 = e.clientX; y0 = e.clientY; dx = 0; active = true; id = e.pointerId; el.classList.add("swiping");
+  });
+  el.addEventListener("pointermove", e => {
+    if (!active || e.pointerId !== id) return; dx = e.clientX - x0;
+    if (Math.abs(e.clientY - y0) > 40 && Math.abs(dx) < 30) { reset(); return; }   // a scroll, not a swipe
+    if (Math.abs(dx) > 12 && !el.hasPointerCapture(id)) { try { el.setPointerCapture(id); } catch { /* ignore */ } }
     el.style.transform = `translateX(${dx}px) rotate(${dx / 40}deg)`;
     el.classList.toggle("swipe-up", dx > 60); el.classList.toggle("swipe-down", dx < -60);
-  }, { passive: true });
-  const end = () => {
-    if (!active) return; active = false; el.classList.remove("swiping");
+  });
+  const end = (/** @type {PointerEvent} */ e) => {
+    if (!active || e.pointerId !== id) return; active = false; el.classList.remove("swiping");
     const ysel = $(".year", el); const year = ysel && ysel.value ? +ysel.value : undefined;
-    if (dx > threshold) rate(it.id, "up", year); else if (dx < -threshold) rate(it.id, "down", year);
-    el.style.transform = ""; el.classList.remove("swipe-up", "swipe-down");
+    if (dx > threshold) { buzz(); rate(it.id, "up", year); } else if (dx < -threshold) { buzz(); rate(it.id, "down", year); }
+    reset();
   };
-  el.addEventListener("touchend", end); el.addEventListener("touchcancel", end);
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
 }
 /** @param {string} id */
 export function focusCard(id) { ensureRendered(id); const el = $(`.card[data-id="${CSS.escape(id)}"]`); if (el) { el.focus({ preventScroll: false }); el.scrollIntoView({ block: "center", behavior: "smooth" }); } }

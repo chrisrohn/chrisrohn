@@ -24,7 +24,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
-from .util import CACHE_DIR, DATA_DIR, PROFILE_VERSION, Http, item_key, log, norm, read_json, utcnow, write_json
+from .util import CACHE_DIR, DATA_DIR, PROFILE_VERSION, Http, item_key, log, norm, read_json, read_versioned, utcnow, write_json, write_versioned
 
 LASTFM_API = "https://ws.audioscrobbler.com/2.0/"
 LB_LABS_SIMILAR = "https://labs.api.listenbrainz.org/similar-artists/json"
@@ -35,6 +35,7 @@ LB_SIMILAR_ALGORITHM = os.environ.get(
 MB_API = "https://musicbrainz.org/ws/2"
 
 ARTIST_CACHE_PATH = CACHE_DIR / "artists.json"
+ARTIST_CACHE_VERSION = 1   # bump when the keying (norm) or row shape changes: the file is then rebuilt, not misread
 PROFILE_PATH = DATA_DIR / "profile.json"
 
 
@@ -116,7 +117,7 @@ class ArtistIds:
 
     def __init__(self, http: Http):
         self.http = http
-        self.cache: dict[str, Any] = read_json(ARTIST_CACHE_PATH, {})
+        self.cache: dict[str, Any] = read_versioned(ARTIST_CACHE_PATH, ARTIST_CACHE_VERSION, {})
         self.dirty = False
 
     def mbid(self, name: str, hint: str | None = None) -> str | None:
@@ -146,7 +147,7 @@ class ArtistIds:
 
     def save(self) -> None:
         if self.dirty:
-            write_json(ARTIST_CACHE_PATH, self.cache, compact=True)
+            write_versioned(ARTIST_CACHE_PATH, ARTIST_CACHE_VERSION, self.cache)
             self.dirty = False
 
 
@@ -366,8 +367,9 @@ def build_profile(cfg: dict, http: Http) -> dict:
     tags: dict[str, float] = defaultdict(float)
     ranked = sorted((e for e in direct.values() if e["kind"] == "direct"), key=lambda e: -e["affinity"]) or sorted(direct.values(), key=lambda e: -e["affinity"])
     expand_n = int(pcfg.get("expand_top_n", 100))
+    tags_n = int(pcfg.get("tags_top_n", expand_n))
     if lastfm.enabled:
-        for e in ranked[:expand_n]:
+        for e in ranked[:max(expand_n, tags_n)]:
             for t in lastfm.top_tags(e["name"])[:8]:
                 try:
                     cnt = int(t.get("count", 0))
@@ -380,7 +382,8 @@ def build_profile(cfg: dict, http: Http) -> dict:
         tags[norm(t)] = tags.get(norm(t), 0.3) * float(b) + 0.2 * float(b)
     if tags:
         mx = max(tags.values())
-        tags = {t: round(v / mx, 4) for t, v in tags.items() if v / mx >= 0.02}
+        floor = float(pcfg.get("tag_floor", 0.02))
+        tags = {t: round(v / mx, 4) for t, v in tags.items() if v / mx >= floor}
     for t, p in (pcfg.get("tag_penalties") or {}).items():
         tags[norm(t)] = float(p)
 

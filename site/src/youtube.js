@@ -10,7 +10,8 @@ export async function yt(method, path, { params = {}, body, _retried = false } =
   return withAuth(async token => {
     const url = new URL(YT_API + path); for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
     const r = await fetch(url, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-    spend(method === "GET" ? 1 : 50);
+    // only a request YouTube answered costs quota: a refused token or a quota error does not, and must not throttle us early
+    if (r.ok) spend(method === "GET" ? 1 : 50);
     if (r.status === 204) return {};
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
@@ -119,11 +120,14 @@ export async function playlistItemsFor(playlistId, videoId) {
   const j = await yt("GET", "/playlistItems", { params: { part: "id", playlistId, videoId, maxResults: 50 } });
   return (j.items || []).map((/** @type {any} */ i) => i.id);
 }
+const RECENT_EVERY_MS = 30 * 60e3;
 // Hide things filed from another device since the last daily build. playlistItems come back in playlist order and
 // new saves are appended, so the whole playlist is paged (1 quota unit per 50 tracks) — the first page alone would
-// only ever show the oldest saves of the year.
-export async function refreshRecent() {
-  if (!isCurator() || !tokenValid()) return;
+// only ever show the oldest saves of the year. Once per half hour per tab: every page load used to spend this again,
+// and the reading is reused by Keep's duplicate guard (rating.js) so most keeps skip their own probe.
+export async function refreshRecent(force = false) {
+  if (!isCurator() || !tokenValid() || !state.online) return;
+  if (!force && Date.now() - state.recentAt < RECENT_EVERY_MS) return;
   const y = String(new Date().getFullYear());
   const ids = [knownYear(y) || state.playlists[y], state.playlists.__skipped].filter(Boolean);
   const seen = new Set();
@@ -135,6 +139,7 @@ export async function refreshRecent() {
       pageToken = j.nextPageToken;
     } while (pageToken && ++pages < 40);
   }
+  state.recentVideos = seen; state.recentAt = Date.now();
   let changed = false;
   for (const it of items()) if (it.youtube && seen.has(it.youtube.videoId) && !decisionFor(it.id)) { state.rated[it.id] = { decision: "seen", at: Date.now() }; changed = true; }
   if (changed) { persist(); render(); }

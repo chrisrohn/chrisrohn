@@ -3,7 +3,9 @@
 config.sources.youtube_channels.channels: list of {name, channel: "UC..." | "@handle", artist_in_title: bool}
   artist_in_title=true  → titles like "Artist - Track (Official Video)" (label / curator channels)
   artist_in_title=false → the channel IS the artist; the video title is the track
-Handles are resolved to channel IDs once (cached in data/cache/yt_channels.json).
+Handles are resolved to channel IDs once (cached in data/cache/yt_channels.json, schema CACHE_VERSION). The feeds are
+fetched concurrently (conditional GETs, see rss.fetch_all) and read in configured order. Health and item sources both
+use the `youtube:<name>` label. Look-back: `sources.youtube_channels.days`, else listenbrainz_fresh.days, else 10.
 """
 from __future__ import annotations
 
@@ -14,10 +16,12 @@ from datetime import date, timedelta
 import feedparser
 
 from ..models import Item
-from ..util import CACHE_DIR, Http, log, parse_artist_title, read_json, struct_time_to_date, write_json
+from ..util import CACHE_DIR, Http, log, parse_artist_title, read_versioned, source_days, struct_time_to_date, write_versioned
 from . import report
+from .rss import MAX_WORKERS, fetch_all
 
 CACHE = CACHE_DIR / "yt_channels.json"
+CACHE_VERSION = 1   # {"@handle": "UC..." | null}
 FEED = "https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
 NOISE = re.compile(r"\s*[\(\[]\s*(official|lyric|music)?\s*(video|audio|visuali[sz]er|lyrics?|live( on kexp| session)?|hq|hd|4k|premiere)\s*[\)\]]\s*$", re.I)
 SKIP = re.compile(r"\b(trailer|teaser|interview|announce|documentary|behind the scenes|mix\b|dj set|full set|podcast|live stream|livestream|playlist)\b", re.I)
@@ -42,20 +46,22 @@ def _channel_id(http: Http, ref: str, cache: dict) -> str | None:
 
 def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     scfg = cfg["sources"]["youtube_channels"]
-    days = int(scfg.get("days") or cfg["sources"].get("listenbrainz_fresh", {}).get("days", 10))
+    days = source_days(cfg, "youtube_channels")
     since = date.today() - timedelta(days=days)
-    cache = read_json(CACHE, {})
+    cache = read_versioned(CACHE, CACHE_VERSION, {})
     out: list[Item] = []
+    wanted: list[tuple[dict, str, str]] = []      # (channel config, name, feed url)
     for ch in scfg.get("channels") or []:
         name = ch.get("name") or ch.get("channel")
         cid = _channel_id(http, str(ch.get("channel", "")), cache)
         if not cid:
-            report(f"yt:{name}", False, error="channel not found")
+            report(f"youtube:{name}", False, error="channel not found")
             continue
-        try:
-            raw = http.get(FEED.format(cid=cid), as_json=False, cache=False)
-        except Exception as exc:  # noqa: BLE001
-            report(f"yt:{name}", False, error=exc)
+        wanted.append((ch, name, FEED.format(cid=cid)))
+    bodies = fetch_all(http, [u for _, _, u in wanted], None, int(scfg.get("workers", MAX_WORKERS)))
+    for (ch, name, _url), raw in zip(wanted, bodies, strict=True):
+        if isinstance(raw, Exception):
+            report(f"youtube:{name}", False, error=raw)
             continue
         parsed = feedparser.parse(raw)
         kept = 0
@@ -86,6 +92,6 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 youtube={"videoId": vid, "title": title, "artists": [artist], "thumbnail": thumb, "via": "channel-feed"},
             ))
             kept += 1
-        report(f"yt:{name}", True, entries=len(parsed.entries), kept=kept)
-    write_json(CACHE, cache, compact=True)
+        report(f"youtube:{name}", True, entries=len(parsed.entries), kept=kept)
+    write_versioned(CACHE, CACHE_VERSION, cache)
     return out

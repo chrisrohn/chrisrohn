@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from ..models import Item
-from ..util import Http, log, norm, parse_date
+from ..util import Http, log, norm, parse_date, source_days
 
 MB = "https://musicbrainz.org/ws/2/release/"
 SKIP = {"compilation", "live", "dj-mix", "remix", "soundtrack"}
@@ -12,7 +12,7 @@ SKIP = {"compilation", "live", "dj-mix", "remix", "soundtrack"}
 
 def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     scfg = cfg["sources"]["musicbrainz_labels"]
-    days = int(scfg.get("days") or cfg["sources"].get("listenbrainz_fresh", {}).get("days", 10))
+    days = source_days(cfg, "musicbrainz_labels")   # own `days`, else listenbrainz_fresh.days, else 10
     start, end = (date.today() - timedelta(days=days)).isoformat(), date.today().isoformat()
     out: list[Item] = []
     seen: set[str] = set()

@@ -16,12 +16,13 @@ from .models import Item
 from .profile import LastFm, load_profile
 from .resolve import collapse_shared_videos, resolve_all
 from .score import dedupe, score_items
-from .util import CACHE_DIR, DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, norm, read_json, safe_url, utcnow, write_json
+from .util import CACHE_DIR, DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, norm, read_json, read_versioned, safe_url, utcnow, write_json, write_versioned
 from .years import verify_years
 
 CATALOG_PATH = SITE_DATA_DIR / "catalog.json"
 STATE_PATH = DATA_DIR / "catalog_state.json"       # the candidate snapshot (refreshed weekly) and first_seen dates
 TAGS_CACHE = CACHE_DIR / "artist_tags.json"        # artist → Last.fm top tags, kept for good (they hardly change)
+TAGS_CACHE_VERSION = 1
 
 DEFAULTS = {
     "enabled": True, "refresh_days": 7, "top_tracks": 3000, "loved_tracks": 2000, "artists_top_n": 150, "per_artist": 8,
@@ -87,7 +88,7 @@ def _items(rows: list[dict]) -> list[Item]:
 
 def _tags(items: list[Item], lastfm: LastFm, budget: int) -> None:
     """Genre tags per artist from Last.fm, cached for good; a bounded number of new artists per run."""
-    cache: dict[str, dict] = read_json(TAGS_CACHE, {})
+    cache: dict[str, dict] = read_versioned(TAGS_CACHE, TAGS_CACHE_VERSION, {})
     looked = 0
     for it in items:
         key = norm(it.artist)
@@ -106,7 +107,7 @@ def _tags(items: list[Item], lastfm: LastFm, budget: int) -> None:
         if row:
             it.tags = list(row.get("tags") or [])
     if looked:
-        write_json(TAGS_CACHE, cache, compact=True)
+        write_versioned(TAGS_CACHE, TAGS_CACHE_VERSION, cache)
     log.info("catalog: tags for %d artists (%d looked up this run)", len(cache), looked)
 
 

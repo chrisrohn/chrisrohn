@@ -4,7 +4,7 @@
  * (?view=picks, ?new=1, ?audition=1) and a feed refresh when a long-open app comes back to the foreground.
  * Lock-screen controls live in player.js (Media Session) and the share sheet in dom.js. */
 import { state, persist } from "./state.js";
-import { $, $$, toast } from "./dom.js";
+import { $, toast } from "./dom.js";
 import { refreshFeed } from "./feed.js";
 
 const DISMISS_MS = 14 * 86400e3;   // hide the header button this long after "not now"; ⚙ always offers it
@@ -21,18 +21,6 @@ const isSafari = () => /Safari/.test(navigator.userAgent) && !/Chrome|CriOS|Edg|
 const isFirefox = () => /Firefox|FxiOS/.test(navigator.userAgent);
 /** The content hash build.mjs put in the bundle's file name. */
 export const build = () => (/** @type {HTMLScriptElement | null} */ ($('script[src*="app."]'))?.getAttribute("src") || "").match(/app\.([0-9a-f]+)\.js/)?.[1] || "dev";
-
-/** Shortcuts and the start_url land here before the feed loads; the URL is cleaned so a reload does not re-apply them. */
-export function applyLaunchParams() {
-  const p = new URLSearchParams(location.search);
-  if (![...p.keys()].length) return;
-  const view = p.get("view"); if (view === "picks" || view === "catalog") { state.view = view; $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === view)); }
-  if (p.get("new") === "1") { state.filters.onlyNew = true; $("#only-new").checked = true; }
-  if (p.get("audition") === "1") { state.settings.audition = true; const cb = $("#audition"); if (cb) cb.checked = true; }
-  if (p.get("t")) state.focusId = p.get("t");   // a card's own link (share, RSS): feed.js opens it once the feed is in
-  if (p.has("view") || p.has("new") || p.has("audition")) persist();
-  history.replaceState(null, "", location.pathname);
-}
 
 export function wirePwa() {
   document.body.classList.toggle("standalone", isStandalone());

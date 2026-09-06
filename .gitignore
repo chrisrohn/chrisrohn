@@ -6,6 +6,8 @@ data/cache/sources.json
 data/cache/profile.json
 data/cache/catalog.json
 data/cache/everynoise.json
+# feed bodies for conditional GETs: big, churns daily; kept between runs by actions/cache
+data/cache/feed_etags.json
 *.tmp
 browser.json
 oauth.json

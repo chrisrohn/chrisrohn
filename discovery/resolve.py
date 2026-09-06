@@ -41,6 +41,46 @@ def ytmusic(cfg: dict | None = None):
 
 
 _QUALIFIER_RE = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]\s*$|\s+[-–—]\s+[^-–—]+$")   # "(Acoustic)", "[Remix]", "- Live at X"
+# Another recording of the same song is not the song: a candidate whose title (qualifier) or album carries one of these
+# and the item does not is refused outright, whatever titles_agree thinks of the core title.
+_STUDIO_MARKERS = re.compile(r"\b(live|acoustic|unplugged|sped[ -]?up|slowed|nightcore|karaoke|instrumental|demos?)\b", re.I)
+# on an album name "live" only counts the way live records are named ("Live at …", "(Live)", "… Live"): "Long Live the Kings" is a studio LP
+_ALBUM_MARKERS = re.compile(
+    r"(?:^|[\(\[]\s*)(live)\b|\b(live)\s*(?:$|[\)\]]|(?:at|in|from|on|@|sessions?|recordings?|version|concert|tour|\d{4})\b)|"
+    r"\b(acoustic|unplugged|sped[ -]?up|slowed|nightcore|karaoke|instrumental|demos)\b", re.I)
+_REMIX_MARKERS = re.compile(r"\b(remix(?:es)?|mix|edit|re-?work|dub|version|bootleg|flip|vip)\b", re.I)
+_MARKER_NOISE = re.compile(r"\b(radio edit|original mix|single version|album version|(?:\d{4} )?remaster(?:ed)?(?: \d{4})?)\b", re.I)   # the studio take under another name
+_QUALIFIER_PART = re.compile(r"[\(\[]([^\)\]]*)[\)\]]|\s[-–—]\s+(.+)$")
+
+
+def _canon(marker: str) -> str:
+    return re.sub(r"[ -]", "", marker.lower()).replace("demos", "demo")
+
+
+def _markers(text: str | None, *, qualifiers_only: bool = False) -> set[str]:
+    """Version markers in a title: anywhere ("Live at KEXP", the item's own title), or with qualifiers_only=True in the
+    bracketed / dashed tail alone ("Song (Live)", "Song - Acoustic"), so "Live Forever" stays a song."""
+    t = _MARKER_NOISE.sub(" ", str(text or ""))
+    if qualifiers_only:
+        t = " ".join(a or b for a, b in _QUALIFIER_PART.findall(t))
+    found = {_canon(m.group(1)) for m in _STUDIO_MARKERS.finditer(t)}
+    if _REMIX_MARKERS.search(t):
+        found.add("remix")
+    return found
+
+
+def _album_markers(album: str | None) -> set[str]:
+    t = _MARKER_NOISE.sub(" ", str(album or ""))
+    return {_canon(next(g for g in m.groups() if g)) for m in _ALBUM_MARKERS.finditer(t)}
+
+
+def version_mismatch(item_title: str | None, cand_title: str | None, cand_album: str | None = None) -> bool:
+    """True when the candidate is a live / acoustic / sped-up / slowed / nightcore / karaoke / instrumental / demo take,
+    or a remix / edit / dub / version, of a song the item wants as recorded (a radio edit or original mix is the
+    record). A remix marker on the candidate counts only against an item that carries no remixer of its own."""
+    have = _markers(item_title)
+    got = _markers(cand_title, qualifiers_only=True) | _album_markers(cand_album)
+    return bool(got - have)
 
 
 def _core(s: str | None) -> str:
@@ -86,11 +126,13 @@ def _pick(results: list[dict], artist: str, title: str | None) -> dict | None:
             continue
         artist_ok = artist_agrees(artist, [x.get("name") for x in (r.get("artists") or [])])
         title_ok = bool(t) and titles_agree(title, r.get("title"), artist)
+        album = r.get("album") or {}
+        album_name = album.get("name") if isinstance(album, dict) else None
+        if version_mismatch(title, r.get("title"), album_name):
+            continue                                                                       # a live / acoustic / karaoke / remix take is another recording
         score = (2.0 if artist_ok else 0.0) + (1.5 if title_ok else 0.0) + (0.3 if r.get("resultType") == "song" else 0.0)
         vt = r.get("videoType")
         score += 0.6 if vt == ATV else (-0.3 if vt == "MUSIC_VIDEO_TYPE_UGC" else 0.0)     # the audio track over the video, both over an upload
-        album = r.get("album") or {}
-        album_name = album.get("name") if isinstance(album, dict) else None
         if album_name and _EDITION_RE.search(album_name) and not _EDITION_RE.search(title or ""):
             score -= 0.2                                                                   # the original issue over a deluxe / remaster / live edition
         if score > best_score:

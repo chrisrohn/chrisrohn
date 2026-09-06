@@ -9,7 +9,7 @@ import os
 from datetime import date, timedelta
 
 from ..models import Item
-from ..util import Http, log, norm, parse_date
+from ..util import Http, log, norm, parse_date, source_days
 
 API = "https://api.spotify.com/v1"
 
@@ -36,7 +36,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     if not token:
         return []
     hdr = {"Authorization": f"Bearer {token}"}
-    days = int(cfg["sources"].get("listenbrainz_fresh", {}).get("days", 10))
+    days = source_days(cfg, "spotify")   # own `days`, else listenbrainz_fresh.days, else 10
     since = date.today() - timedelta(days=days)
     ranked = sorted((e for e in profile["artists"].values() if e.get("kind") == "direct"), key=lambda e: -e["affinity"])
     out: list[Item] = []
