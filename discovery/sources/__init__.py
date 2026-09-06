@@ -26,7 +26,12 @@ SOURCE_MODULES = {
     "radio": "radio",
     "rss": "rss",
     "spotify": "spotify",
+    "apple_music": "apple_music",
+    "musicbrainz_artists": "musicbrainz_artists",
+    "nts": "nts",
+    "reddit": "reddit",
 }
+PER_FEED_HEALTH = {"rss", "youtube_channels", "radio", "nts", "reddit", "apple_music"}   # these report per feed / show / sub
 
 
 def run_sources(cfg: dict, profile: dict, http) -> list[Item]:
@@ -41,7 +46,7 @@ def run_sources(cfg: dict, profile: dict, http) -> list[Item]:
             got = fetch(cfg, profile, http)
             log.info("source %s: %d items", key, len(got))
             items.extend(got)
-            if key not in ("rss", "youtube_channels", "radio"):   # those report per feed
+            if key not in PER_FEED_HEALTH:
                 report(key, True, kept=len(got))
         except Exception as exc:  # noqa: BLE001
             log.exception("source %s failed: %s", key, exc)

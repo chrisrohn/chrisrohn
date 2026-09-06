@@ -3,22 +3,41 @@
   * newest albums of your top-N profile artists  → GET /search/artist, GET /artist/{id}/albums
   * optional: related artists' newest albums      → GET /artist/{id}/related   (Spotify's dead "related artists")
   * editorial new releases by genre               → GET /editorial/{genre_id}/releases
+    (compilations and sped-up / slowed / nightcore / karaoke / tribute / 8-bit knock-offs are skipped)
+
+Artist ids are cached in data/cache/deezer_artists.json (schema ID_CACHE_VERSION): name → id, or {"miss": date} for a
+name Deezer did not know, retried after util.NEGATIVE_CACHE_DAYS. Look-back: `sources.deezer.days`, else
+listenbrainz_fresh.days, else 10.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 from ..models import Item
-from ..util import CACHE_DIR, Http, log, norm, parse_date, read_json, write_json
+from ..util import CACHE_DIR, Http, log, miss_expired, miss_row, norm, parse_date, read_versioned, source_days, write_versioned
 
 API = "https://api.deezer.com"
 ID_CACHE = CACHE_DIR / "deezer_artists.json"
+ID_CACHE_VERSION = 2   # 1: name → id | null (a miss cached for good); 2: misses are {"miss": date}
+KNOCKOFF = re.compile(r"sped.?up|slowed|nightcore|karaoke|tribute|8.?bit", re.I)
+
+
+def _migrate_ids(data: dict, old: int) -> dict | None:
+    """v1 → v2: keep every id, turn a null (a miss cached for good) into a dated miss so it is retried in a month."""
+    if old != 1:
+        return None
+    today = date.today()
+    return {k: (v if v else miss_row(today)) for k, v in data.items()}
 
 
 def _artist_id(http: Http, name: str, cache: dict) -> int | None:
     n = norm(name)
-    if n in cache:
-        return cache[n]
+    row = cache.get(n)
+    if isinstance(row, int) and not isinstance(row, bool):
+        return row
+    if row is not None and not miss_expired(row):
+        return None
     try:
         data = http.get(f"{API}/search/artist", params={"q": name, "limit": 3})
     except Exception as exc:  # noqa: BLE001
@@ -29,7 +48,7 @@ def _artist_id(http: Http, name: str, cache: dict) -> int | None:
         if norm(a.get("name")) == n:
             aid = a.get("id")
             break
-    cache[n] = aid
+    cache[n] = aid if aid else miss_row()
     return aid
 
 
@@ -64,9 +83,9 @@ def _albums(http: Http, aid: int, artist_name: str, since: date, tags: list[str]
 
 def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     scfg = cfg["sources"]["deezer"]
-    days = int(cfg["sources"].get("listenbrainz_fresh", {}).get("days", 10))
+    days = source_days(cfg, "deezer")
     since = date.today() - timedelta(days=days)
-    cache = read_json(ID_CACHE, {})
+    cache = read_versioned(ID_CACHE, ID_CACHE_VERSION, {}, migrate=_migrate_ids)
     out: list[Item] = []
 
     ranked = sorted(
@@ -108,6 +127,8 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
             if not artist:
                 continue
             rt = (al.get("record_type") or "").lower()
+            if rt == "compile" or KNOCKOFF.search(al.get("title") or ""):
+                continue
             out.append(Item(
                 artist=artist,
                 title=al.get("title") or "",
@@ -120,5 +141,5 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 links={"deezer": al.get("link") or f"https://www.deezer.com/album/{al.get('id')}"},
                 artwork=al.get("cover_medium") or al.get("cover"),
             ))
-    write_json(ID_CACHE, cache, compact=True)
+    write_versioned(ID_CACHE, ID_CACHE_VERSION, cache)
     return out

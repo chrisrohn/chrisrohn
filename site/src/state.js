@@ -42,9 +42,11 @@ export const state = {
   rated: LS.get("id:rated", {}),          // local mirror of what this account rated
   auth: loadAuth(),
   playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL...", "__loaded_at": ms}
-  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60 }, LS.get("id:settings", {})),   // deck: null = auto (phones)
+  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60, autoplay: true, shuffle: false, introDismissed: false, ghToken: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
   badVideos: LS.get("id:badvideos", {}),   // videoId → when YouTube refused to embed it here (autoplay steps over these)
+  badVersion: 0,                            // bumps whenever badVideos changes (a count can stay the same while an entry is swapped)
   ratedVersion: 0,                          // bumps whenever `rated` is persisted with a change: the personal ranking recomputes
+  playingId: null, shuffleOrder: [], shuffleFor: "", lastRated: null, shareIn: null,
   deckIndex: 0,
   auditionTimer: null, auditionTick: null, auditionArmed: null,
   quota: LS.get("id:quota", { day: "", units: 0 }),   // YouTube API units spent today by this account's devices (resets midnight Pacific)
@@ -64,9 +66,10 @@ export const state = {
   tokenClient: null,
   busy: new Set(),
   sync: LS.get("id:sync", { fileId: null, at: 0 }),   // Drive appDataFolder file that mirrors `rated` across devices
-  syncTimer: null,
+  syncTimer: null, ghTimer: null, ghAt: 0,
   _years: [], dupes: null, unavailable: null, dupePage: 1, dupeQT: null, library: null, notOwner: false,
   signingIn: null, authCb: null, authErrCb: null, keepAliveAt: 0, lastAuthError: null, ready: false,
+  online: typeof navigator === "undefined" || navigator.onLine !== false, recentAt: 0, recentVideos: new Set(),
 };
 
 /** The feed's items (what is new). @returns {FeedItem[]} */
@@ -84,7 +87,7 @@ export const decisionFor = id => { const r = state.rated[id]; return r && r.deci
 /** YouTube refused to embed this video here recently (error 101/150): the feed keeps it, autoplay steps over it. @param {string | null | undefined} vid */
 export const badVideo = vid => !!(vid && state.badVideos[vid] && Date.now() - state.badVideos[vid] < BAD_VIDEO_MS);
 /** @param {string} vid */
-export function markBadVideo(vid) { for (const [k, at] of Object.entries(state.badVideos)) if (Date.now() - at > BAD_VIDEO_MS) delete state.badVideos[k]; state.badVideos[vid] = Date.now(); persist(); }
+export function markBadVideo(vid) { for (const [k, at] of Object.entries(state.badVideos)) if (Date.now() - at > BAD_VIDEO_MS) delete state.badVideos[k]; state.badVideos[vid] = Date.now(); state.badVersion++; persist(); }
 export const skipsInYouTube = () => state.settings.skipsInYouTube != null ? !!state.settings.skipsInYouTube : !!(state.feed && state.feed.youtube && state.feed.youtube.skips_in_youtube);
 
 // YouTube quota: 10,000 units/day, reset at midnight Pacific. Reads cost 1, writes cost 50. The count is per account
@@ -102,7 +105,7 @@ export function reconcileRated() {
   const now = Date.now(); const ids = new Set(allItems().map(i => i.id));
   for (const [id, r] of Object.entries(state.rated)) {
     const age = now - (r.at || 0);
-    if (r.pending && age > PENDING_MAX_MS) { delete state.rated[id]; continue; }   // it never reached YouTube; let it show again
+    if (r.pending && !r.queued && age > PENDING_MAX_MS) { delete state.rated[id]; continue; }   // it never reached YouTube; let it show again (a queued one waits for the network)
     if (r.decision === "undone" && age > 30 * 86400e3) { delete state.rated[id]; continue; }
     if (r.decision === "down" && r.local && age > 365 * 86400e3) { delete state.rated[id]; continue; }
     if (!ids.has(id) && r.decision !== "down" && age > 45 * 86400e3) delete state.rated[id];

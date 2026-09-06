@@ -15,7 +15,7 @@ const dupCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.d
 const unavCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.unavailable_count) || 0;
 async function loadUnavailable() {
   if (state.unavailable) return state.unavailable;
-  try { const r = await fetch("/data/unavailable.json", { cache: "no-store" }); state.unavailable = r.ok ? (await r.json()).rows || [] : []; }
+  try { const r = await fetch("/data/unavailable.json", { cache: "no-cache" }); state.unavailable = r.ok ? (await r.json()).rows || [] : []; }
   catch { state.unavailable = []; }
   return /** @type {Unavailable[]} */ (state.unavailable);
 }
@@ -39,7 +39,7 @@ export const dupesLoaded = () => state.dupes != null;
 export const openCleanup = () => (dupesLoaded() ? openDupes() : dupCount()) + (state.unavailable ? openUnavailable() : unavCount());
 async function loadDupes() {
   if (state.dupes) return state.dupes;
-  try { const r = await fetch("/data/duplicates.json", { cache: "no-store" }); state.dupes = r.ok ? (await r.json()).duplicates || [] : []; }
+  try { const r = await fetch("/data/duplicates.json", { cache: "no-cache" }); state.dupes = r.ok ? (await r.json()).duplicates || [] : []; }
   catch { state.dupes = []; }
   return /** @type {Dupe[]} */ (state.dupes);
 }

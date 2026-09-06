@@ -40,21 +40,45 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   if (await tag.count()) {
     const t = await tag.innerText();
     await tag.click();
-    await expect(page.locator("#q")).toHaveValue(t.toLowerCase());
+    await expect(page.locator("#q")).toHaveValue(`tag:"${t.toLowerCase()}"`);
     await expect.poll(() => cards.count()).toBeLessThan(total);
-    await page.fill("#q", "");
+    // …as a chip, and the address follows; the chip's ✕ takes the term out again
+    await expect(page.locator("#chips .qchip")).toHaveCount(1);
+    expect(new URL(page.url()).searchParams.get("q")).toBe(`tag:"${t.toLowerCase()}"`);
+    await page.locator("#chips .qchip").click();
+    await expect(page.locator("#q")).toHaveValue("");
     await expect.poll(() => cards.count()).toBeGreaterThan(50);
+    expect(new URL(page.url()).search).toBe(total > 60 ? "?shortlist=0" : "");   // "show all" above is part of the address; the search term is gone
   }
   // the sign-in button and settings unlock once the feed is in (they read feed.json)
   await expect(page.locator("#signin")).toBeEnabled();
   await expect(page.locator("#settings-btn")).toBeEnabled();
-  // search narrows the list (debounced)
+  // search narrows the list (debounced); every word must match; artist: aims at one field; accents are folded
   const first = await cards.first().locator(".artist").innerText();
   const before = await cards.count();
   await page.fill("#q", first.slice(0, Math.min(6, first.length)));
   await expect.poll(() => cards.count()).toBeLessThan(before);
+  await page.fill("#q", `artist:"${first}"`);
+  await expect.poll(() => cards.count()).toBeGreaterThan(0);
+  expect(await cards.locator(".artist").allInnerTexts()).toEqual(expect.arrayContaining([first]));
+  await page.fill("#q", `${first.slice(0, 4)} zzzz-nothing-has-this`);
+  await expect.poll(() => cards.count()).toBe(0);
   await page.fill("#q", "");
   await expect.poll(() => cards.count()).toBeGreaterThan(50);
+  // the artist name opens the artist sheet with everything by them
+  await cards.first().locator(".artist").click();
+  await expect(page.locator("#artist")).toBeVisible();
+  await expect(page.locator("#artist-name")).toHaveText(first);
+  expect(await page.locator("#artist .arow").count()).toBeGreaterThan(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#artist")).toBeHidden();
+  // a first visit shows the intro card; ✕ dismisses it for good
+  await expect(page.locator("#intro")).toBeVisible();
+  await page.click("#intro-x");
+  await expect(page.locator("#intro")).toBeHidden();
+  await page.reload();
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("#intro")).toBeHidden();
   // no thumbs, no Skipped tab for a listener; no fabricated years
   await expect(page.locator("#list .card .btn.up").first()).toBeHidden();
   await expect(page.locator(".tab[data-view=skipped]")).toBeHidden();
@@ -68,7 +92,13 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   await page.keyboard.press("u");
   await page.keyboard.press("j");
   await expect(page.locator(".card.current")).toHaveCount(1);
+  const current = await page.locator(".card.current").getAttribute("data-id");
+  await page.keyboard.press("ArrowRight");   // seek, never a thumb: the card stays
+  await expect(page.locator(`.card[data-id="${current}"]`)).toHaveCount(1);
   await page.keyboard.press("Escape");
+  await page.keyboard.press("j");            // Esc kept the place: j moves on from the same card, not from the top
+  await expect(page.locator(".card.current")).toHaveCount(1);
+  expect(await page.locator(".card.current").getAttribute("data-id")).not.toBe(await page.locator("#list .card").first().getAttribute("data-id"));
   expect(errors).toEqual([]);
 });
 
@@ -119,9 +149,14 @@ test("a rated track feeds the personal ranking and the stats", async ({ page }) 
   // the Skipped tab lists the three local skips and offers to restore them
   await page.click(".tab[data-view=skipped]");
   await expect(page.locator("#list .card")).toHaveCount(3);
+  await expect(page.locator("#restore-all")).toContainText("restore all");
   await expect(page.locator("#list .card .btn.restore").first()).toBeVisible();
   await page.locator("#list .card .btn.restore").first().click();
   await expect(page.locator("#list .card")).toHaveCount(2);
+  // z takes back the last thumb from the keyboard, too (the restore above was not a thumb: nothing to undo)
+  await page.locator("#meta").click();
+  await page.keyboard.press("z");
+  await expect(page.locator(".toast")).toContainText("Nothing to undo");
   // a track from the kept-from blog carries a learned bonus on its score (four keeps: a nudge, not yet a reason line)
   await page.click(".tab[data-view=feed]");
   const next = only(srcs[0]).find(i => !rated[i.id] && i.youtube?.videoId && !(Number.isFinite(i.year) && i.year < new Date().getFullYear() - 1));
@@ -175,6 +210,7 @@ test("phone list view: compact header, folded filters, no broken artwork glyphs"
 
 test("manifest is installable: icons, screenshots and shortcuts all resolve", async ({ page, request }) => {
   await open(page);
+  const feed = await page.evaluate(() => fetch("data/feed.json").then(r => r.json()));
   for (const p of ["/sw.js", "/manifest.webmanifest", "/feed.xml", "/data/duplicates.json", "/privacy.html", "/terms.html"]) {
     const r = await request.get(p); expect(r.ok(), p).toBeTruthy();
   }
@@ -189,9 +225,16 @@ test("manifest is installable: icons, screenshots and shortcuts all resolve", as
   // the shortcut URLs land on the right tab / filter and leave a clean address
   await page.goto("/?view=picks&source=shortcut");
   await expect(page.locator(".tab[data-view=picks]")).toHaveClass(/active/);
-  expect(new URL(page.url()).search).toBe("");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  expect(new URL(page.url()).search).toBe("?view=picks");   // the view is the address (shareable); the shortcut marker is gone
   await page.goto("/?new=1");
   await expect(page.locator("#only-new")).toBeChecked();
+  // the share target: a YouTube link shared from another app opens on its card
+  const shared = feed.items.find(i => i.youtube && i.youtube.videoId && !(Number.isFinite(i.year) && i.year < new Date().getFullYear() - 1));
+  await page.goto(`/?url=${encodeURIComponent("https://music.youtube.com/watch?v=" + shared.youtube.videoId)}&title=x`);
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator(`.card[data-id="${shared.id}"]`)).toHaveClass(/current/);
+  expect(m.share_target.params.url).toBe("url");
 });
 
 test("theme toggle: header button, ⚙ select and the t key switch, persist and follow the device", async ({ browser }) => {
@@ -296,7 +339,11 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   await ctx.setOffline(true);
   await page.reload();
   await expect(page.locator("#meta")).toContainText("candidates", { timeout: 15_000 });
+  await expect(page.locator("#offline")).toBeVisible();
+  // the Cleanup reports are part of the shell now: answered from the cache too
+  expect(await page.evaluate(() => fetch("/data/duplicates.json").then(r => r.ok).catch(() => false))).toBeTruthy();
   await ctx.setOffline(false);
+  await expect(page.locator("#offline")).toBeHidden();
   expect(errors.filter(e => !/Failed to load resource|net::ERR_INTERNET_DISCONNECTED/.test(e))).toEqual([]);
   await ctx.close();
 });

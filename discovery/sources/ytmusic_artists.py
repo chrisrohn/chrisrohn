@@ -3,46 +3,60 @@
 Replaces Spotify's dead Release Radar. Artist browse IDs are cached; each run checks `top_artists` artists
 (rotating through the list over successive days so big profiles still get full coverage). Every release from the
 current window is returned on every run: the feed's own first_seen state decides what counts as new.
+
+The client is the region-pinned one from resolve.ytmusic, so an artist is judged where the playlists are listened
+to. data/cache/ytmusic_artists.json (schema CACHE_VERSION): {"ids": {name: browseId | {"miss": date}}, "cursor": n};
+a miss is retried after util.NEGATIVE_CACHE_DAYS.
 """
 from __future__ import annotations
 
 from datetime import date
 
 from ..models import Item
-from ..util import CACHE_DIR, Http, log, norm, read_json, write_json
+from ..resolve import ytmusic
+from ..util import CACHE_DIR, Http, log, miss_expired, miss_row, norm, read_versioned, write_versioned
 
 CACHE = CACHE_DIR / "ytmusic_artists.json"
+CACHE_VERSION = 2   # 1: ids were browseId | "" (a miss cached for good); 2: misses are {"miss": date}
+
+
+def _migrate(data: dict, old: int) -> dict | None:
+    if old != 1:
+        return None
+    today = date.today()
+    ids = {k: (v if v else miss_row(today)) for k, v in (data.get("ids") or {}).items()}
+    return {"ids": ids, "cursor": int(data.get("cursor") or 0)}
 
 
 def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
-    from ytmusicapi import YTMusic
-
     scfg = cfg["sources"]["ytmusic_artists"]
     per_run = int(scfg.get("top_artists", 150))
-    yt = YTMusic()
-    cache = read_json(CACHE, {"ids": {}, "cursor": 0})
+    yt = ytmusic(cfg)
+    cache = read_versioned(CACHE, CACHE_VERSION, {"ids": {}, "cursor": 0}, migrate=_migrate)
+    cache.setdefault("ids", {})
     cache.pop("seen", None)   # older builds hid a release after its first sighting; the feed keeps items for the freshness window
     ranked = [e for e in sorted(profile["artists"].values(), key=lambda e: -e["affinity"]) if e.get("kind") == "direct"]
     ranked = ranked[: int(scfg.get("pool", 600))]
     if not ranked:
         return []
     start = int(cache.get("cursor", 0)) % len(ranked)
-    batch = (ranked + ranked)[start:start + per_run]
+    batch = (ranked + ranked)[start:start + min(per_run, len(ranked))]   # never the same artist twice in a run
     cache["cursor"] = (start + per_run) % len(ranked)
     this_year = date.today().year
     out: list[Item] = []
     for e in batch:
         n = norm(e["name"])
-        bid = cache["ids"].get(n)
-        if bid is None:
+        row = cache["ids"].get(n)
+        bid = row if isinstance(row, str) and row else None
+        if bid is None and (row is None or miss_expired(row)):
             try:
                 res = yt.search(e["name"], filter="artists", limit=3)
                 hit = next((r for r in res if norm(r.get("artist")) == n), None)
-                bid = hit.get("browseId") if hit else ""
+                bid = (hit.get("browseId") or None) if hit else None
             except Exception as exc:  # noqa: BLE001
                 log.debug("ytmusic artist search %s: %s", e["name"], exc)
-                bid = ""
-            cache["ids"][n] = bid
+                bid = None
+            cache["ids"][n] = bid or miss_row()
         if not bid:
             continue
         try:
@@ -68,5 +82,5 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                     links={"youtube music": f"https://music.youtube.com/browse/{rb}"},
                     artwork=thumbs[-1]["url"] if thumbs else None,
                 ))
-    write_json(CACHE, cache, compact=True)
+    write_versioned(CACHE, CACHE_VERSION, cache)
     return out

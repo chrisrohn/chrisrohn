@@ -390,7 +390,7 @@ def test_youtube_channel_feed_and_radio(monkeypatch, sandbox):
     cfg["sources"]["youtube_channels"]["channels"] = [{"name": "Toy Tonics", "channel": "@toytonics"}]
     got = youtube_channels.fetch(cfg, PROFILE, FakeHttp())
     assert len(got) == 1 and got[0].youtube["videoId"] == "abc123def45" and got[0].artist == "Jungle" and got[0].title == "Keep Moving"
-    assert HEALTH["yt:Toy Tonics"]["kept"] == 1
+    assert HEALTH["youtube:Toy Tonics"]["kept"] == 1
     cfg["sources"]["radio"]["somafm"] = ["indiepop"]
     r = radio.fetch(cfg, PROFILE, FakeHttp())
     names = {(i.artist, i.title) for i in r}
@@ -661,13 +661,16 @@ def test_learn_from_history_moves_scores_without_quota(tmp_path):
     hist.mkdir()
     today = date(2026, 9, 10)
     shown = [
-        {"id": "k1", "v": "vk1", "a": "Jungle", "s": ["rss:Stereogum", "deezer"], "t": ["nu disco"]},
-        {"id": "k2", "v": "vk2", "a": "Roosevelt", "s": ["rss:Stereogum"], "t": ["nu disco"]},
-        {"id": "k3", "v": "vk3", "a": "Parcels", "s": ["rss:Stereogum"], "t": ["nu disco", "indie pop"]},
-        {"id": "s1", "v": "vs1", "a": "Metalhead", "s": ["musicbrainz"], "t": ["metal"]},
-        {"id": "p1", "v": "vp1", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
-        {"id": "p2", "v": "vp2", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
-        {"id": "p3", "v": "vp3", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
+        {"id": "k1", "v": "vk1", "a": "Jungle", "s": ["rss:Stereogum", "deezer"], "t": ["nu disco"], "r": 1},
+        {"id": "k2", "v": "vk2", "a": "Roosevelt", "s": ["rss:Stereogum"], "t": ["nu disco"], "r": 2},
+        {"id": "k3", "v": "vk3", "a": "Parcels", "s": ["rss:Stereogum"], "t": ["nu disco", "indie pop"], "r": 3},
+        {"id": "s1", "v": "vs1", "a": "Metalhead", "s": ["musicbrainz"], "t": ["metal"], "r": 4},
+        {"id": "p1", "v": "vp1", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"], "r": 5},
+        {"id": "p2", "v": "vp2", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"], "r": 6},
+        {"id": "p3", "v": "vp3", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"], "r": 7},
+        # never on screen (ranked past the shortlist) or from before ranks were recorded: neither is a pass
+        {"id": "deep", "v": "vd", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"], "r": 500},
+        {"id": "unranked", "v": "vu", "a": "Nobody", "s": ["musicbrainz"], "t": ["metal"]},
     ]
     util.write_json(hist / "2026-09-01.json", {"date": "2026-09-01", "ids": [r["id"] for r in shown], "items": shown})
     # too recent to judge: inside the grace period, so it must not count as a pass
@@ -677,7 +680,7 @@ def test_learn_from_history_moves_scores_without_quota(tmp_path):
     saved = {"k1": {"videoId": "vk1", "decision": "up"}, "other-key": {"videoId": "vk2", "decision": "up"}, "k3": {"decision": "up"},
              "s1": {"videoId": "vs1", "decision": "down"}}
     profile = {"saved": saved}
-    cfg = {"learn": {"grace_days": 3, "prior": 2, "min_exposures": 2}}
+    cfg = {"learn": {"grace_days": 3, "prior": 2, "min_exposures": 2, "shown_rank": 80, "half_life_days": 0}}
     learned = learn.learn_from_history(profile, cfg, hist, today=today)
     assert learned["outcomes"] == 7 and learned["kept"] == 3 and learned["skipped"] == 1     # k2 matched by video id, k3 by key
     assert learned["sources"]["rss:Stereogum"]["adj"] > 0 > learned["sources"]["musicbrainz"]["adj"]
@@ -736,7 +739,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
     payload = build.build_feed(_cfg())
     hist = util.read_json(sandbox / "site" / "data" / "history" / f"{today.isoformat()}.json", {})
     assert hist["ids"] == [payload["items"][0]["id"]]
-    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"]}
+    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"], "r": 1, "sc": payload["items"][0]["score"], "y": None, "m": "direct"}
     assert payload["learned"]["outcomes"] == 0 and payload["learned"]["sources"] == {}
     rss = (sandbox / "site" / "feed.xml").read_text()
     assert "<pubDate>" in rss and "<lastBuildDate>" in rss and 'media:thumbnail url="https://i/x.jpg"' in rss
@@ -1032,3 +1035,91 @@ def test_build_merges_a_release_renamed_to_an_existing_track(monkeypatch, sandbo
     assert len(ids) == len(set(ids)) == 1                                              # one card, not two with the same id
     it = payload["items"][0]
     assert sorted(it["sources"]) == ["bandcamp", "listenbrainz"] and it["youtube"]["videoId"] == "vidSingle"   # the stronger item keeps its video
+
+
+def test_ratings_file_reaches_the_learner_and_hides_skips(tmp_path):
+    from discovery import learn
+
+    util.write_json(tmp_path / "ratings.json", {"version": 1, "rated": {
+        "skip-me": {"decision": "down", "videoId": "vskip", "artist": "Nobody", "title": "Meh", "at": 1},
+        "keep-me": {"decision": "up", "videoId": "vkeep", "artist": "Jungle", "title": "Yes", "year": 2026, "at": 2},
+        "undone": {"decision": "undone", "at": 3}, "seen": {"decision": "seen", "at": 4}, "junk": "x"}})
+    ratings = learn.load_ratings(tmp_path / "ratings.json")
+    assert set(ratings) == {"skip-me", "keep-me"}
+    saved = {"keep-me": {"decision": "up", "videoId": "vkeep"}}
+    assert learn.merge_ratings(saved, ratings) == 1
+    assert saved["skip-me"]["decision"] == "down" and saved["skip-me"]["via"] == "site" and saved["keep-me"]["decision"] == "up"
+    # the local skip is a real skip for the learner, matched by key or by video
+    rows = {"skip-me": {"id": "skip-me", "v": "vskip", "a": "Nobody", "s": ["deezer"], "t": [], "r": 1, "shown": "2026-09-01"},
+            "other": {"id": "other", "v": "vskip", "a": "Nobody", "s": ["deezer"], "t": [], "r": 2, "shown": "2026-09-01"}}
+    outs = learn.outcomes(rows, saved, shown_rank=80)
+    assert [o["verdict"] for o in outs] == ["skipped", "skipped"]
+    assert learn.load_ratings(tmp_path / "missing.json") == {}
+
+
+def test_learning_decays_and_explores():
+    from discovery import learn
+
+    fresh = [{"id": f"f{i}", "a": "Jungle", "s": ["rss:A"], "t": [], "shown": "2026-09-08", "verdict": "kept"} for i in range(4)]
+    stale = [{"id": f"s{i}", "a": "Jungle", "s": ["rss:A"], "t": [], "shown": "2026-03-01", "verdict": "skipped"} for i in range(4)]
+    today = date(2026, 9, 10)
+    with_decay = learn.learn(fresh + stale, {"learn": {"half_life_days": 21, "prior": 1, "min_exposures": 1}}, today=today)
+    without = learn.learn(fresh + stale, {"learn": {"half_life_days": 0, "prior": 1, "min_exposures": 1}}, today=today)
+    # four keeps this week and four skips in March: with decay the recent keeps win; without, it is a coin toss
+    assert with_decay["sources"]["rss:A"]["rate"] > 0.8 > without["sources"]["rss:A"]["rate"]
+    assert with_decay["sources"]["rss:A"]["n"] == 8 and with_decay["sources"]["rss:A"]["k"] == 4   # the raw counts still say what happened
+    # exploration: a source never shown gets the bonus, a well-known one hardly any, and it never exceeds the cap
+    learned = learn.learn(fresh * 20, {"learn": {"explore": 0.4, "explore_max": 0.6}}, today=today)
+    unknown = learn.exploration(learned, ["rss:NeverSeen"], ["new tag"], "New Act")
+    known = learn.exploration(learned, ["rss:A"], [], "Jungle")
+    assert 0 < known < unknown <= 0.6
+    assert learn.exploration(None, ["rss:A"], [], "x") == 0.0 and learn.exploration(learn.learn([]), ["rss:A"], [], "x") == 0.0
+    # …and reaches the score, with a reason once it is worth one
+    prof = {**PROFILE, "learned": learned}
+    a = Item(artist="Someone New", title="A", kind="track", sources=["rss:NeverSeen"], tags=["new tag"])
+    b = Item(artist="Someone New", title="B", kind="track", sources=["rss:NeverSeen"], tags=["new tag"])
+    cfg = _cfg(); cfg["ranking"]["weights"]["explore"] = 1.0
+    score_items([a], prof, cfg)
+    cfg["ranking"]["weights"]["explore"] = 0.0
+    score_items([b], prof, cfg)
+    assert a.score > b.score and "little history yet" in a.reasons
+
+
+def test_diversify_caps_artists_and_labels_and_keeps_explore_slots():
+    from discovery.score import diversify
+
+    items = [Item(artist="Tonbe", title=f"T{i}", kind="track", sources=["bandcamp"], tags=["label:toy tonics"]) for i in range(6)]
+    items += [Item(artist=f"Other {i}", title="X", kind="track", sources=["bandcamp"]) for i in range(6)]
+    newcomer = Item(artist="Newcomer", title="N", kind="track", sources=["bandcamp"])
+    for n, it in enumerate(items):
+        it.score = 10.0 - n * 0.1
+        it.match_kind = "direct"
+    newcomer.score = 1.0
+    cfg = {"ranking": {"max_per_artist": 2, "max_per_label": 3, "repeat_penalty": 2.0, "explore_slots": 1}, "learn": {"shown_rank": 5}}
+    out = diversify(items + [newcomer], cfg)
+    tonbe = [i for i in out if i.artist == "Tonbe"]
+    assert [i.title for i in tonbe] == ["T0", "T1", "T2", "T3", "T4", "T5"]
+    assert tonbe[0].score == 10.0 and tonbe[1].score == 9.9                       # within the cap: untouched
+    assert tonbe[2].score == pytest.approx(9.8 - 2.0) and "no. 3 by them today" in tonbe[2].reasons
+    assert tonbe[3].score == pytest.approx(9.7 - 4.0)                             # two past the artist cap (label cap of 3 is the same count here)
+    assert [i.artist for i in out[:2]] == ["Tonbe", "Tonbe"] and out[2].artist == "Other 0"
+    # the newcomer is lifted into the top five, just above whatever was fifth
+    top = out[:5]
+    assert newcomer in top and "explore slot" in newcomer.reasons and newcomer.score > 1.0
+    assert diversify([], cfg) == []
+
+
+def test_label_weight_and_tag_cleaning(monkeypatch):
+    from discovery.build import _clean_tags
+
+    cfg = _cfg(); cfg["ranking"]["weights"]["label"] = 1.0
+    cfg["sources"] = {"musicbrainz_labels": {"labels": ["Toy Tonics"]}}
+    on = Item(artist="Someone New", title="A", kind="track", sources=["musicbrainz-label"], tags=["label:Toy Tonics"])
+    off = Item(artist="Someone New", title="B", kind="track", sources=["musicbrainz-label"], tags=["label:Some Other"])
+    score_items([on, off], PROFILE, cfg)
+    assert on.score > off.score and "on Toy Tonics" in on.reasons
+    # "pop" stays on Popcaan; the artist's own name (or one of its words) does not become a genre
+    popcaan = Item(artist="Popcaan", title="X", kind="track", tags=["pop", "news", "popcaan"])
+    hot = Item(artist="Hot Chip", title="Y", kind="track", tags=["hot chip", "electropop", "chip"])
+    _clean_tags([popcaan, hot], PROFILE)
+    assert popcaan.tags == ["pop"] and hot.tags == ["electropop"]

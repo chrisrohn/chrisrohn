@@ -6,9 +6,10 @@
 <meta name="color-scheme" content="light dark">
 <!-- Everything this page may load or talk to. Google sign-in (accounts.google.com/gsi), the YouTube player and
      iframe API (www.youtube.com), and the YouTube Data / Drive / userinfo APIs (www.googleapis.com). Artwork comes
-     from many CDNs, so images are open to any https host. musicbrainz.org is the "find year" lookup on undated cards.
-     If sign-in ever breaks after a Google change, this is the first line to check. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com https://www.youtube.com https://s.ytimg.com; frame-src https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://youtubei.googleapis.com https://musicbrainz.org; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://accounts.google.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none'">
+     from many CDNs, so images are open to any https host. musicbrainz.org is the "find year" lookup on undated cards;
+     api.github.com is the ratings push (⚙ → GitHub token). If sign-in ever breaks after a Google change, this is the
+     first line to check. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com https://www.youtube.com https://s.ytimg.com; frame-src https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://youtubei.googleapis.com https://musicbrainz.org https://api.github.com; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://accounts.google.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none'">
 <title>Chris Rohn's New Music</title>
 <meta name="description" content="Chris Rohn's daily new-music discovery feed, where he finds tracks for the Indie Discotheque playlists on YouTube Music. Listen to what's new in indie pop, nu-disco, indietronica and friends.">
 <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
@@ -43,12 +44,12 @@
       <div class="sub" id="meta">loading feed…</div>
     </div>
   </div>
-  <nav class="tabs" aria-label="views">
-    <button class="tab active" data-view="feed" aria-current="page">Feed <span class="pill" id="count-feed">0</span></button>
-    <button class="tab" data-view="catalog" title="Earlier years: what you have played and loved on Last.fm but never filed, and your artists' and their neighbours' best-known tracks">Catalog <span class="pill" id="count-catalog">…</span></button>
-    <button class="tab" data-view="picks">Picks <span class="pill" id="count-picks">0</span></button>
-    <button class="tab curator" data-view="skipped" title="What you thumbed down from this feed — restore any of them">Skipped <span class="pill" id="count-skipped">0</span></button>
-    <button class="tab curator" data-view="cleanup" title="Duplicated songs in the year playlists, and a live scan of one year — work through them a few at a time">Cleanup <span class="pill" id="count-cleanup">0</span></button>
+  <nav class="tabs" role="tablist" aria-label="views">
+    <button class="tab active" role="tab" aria-selected="true" aria-controls="main" data-view="feed">Feed <span class="pill" id="count-feed">0</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="catalog" title="Earlier years: what you have played and loved on Last.fm but never filed, and your artists' and their neighbours' best-known tracks">Catalog <span class="pill" id="count-catalog">…</span></button>
+    <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="picks">Picks <span class="pill" id="count-picks">0</span></button>
+    <button class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="skipped" title="What you thumbed down from this feed — restore any of them">Skipped <span class="pill" id="count-skipped">0</span></button>
+    <button class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="cleanup" title="Duplicated songs in the year playlists, and a live scan of one year — work through them a few at a time">Cleanup <span class="pill" id="count-cleanup">0</span></button>
   </nav>
   <div class="actions">
     <span id="who" class="who" hidden></span>
@@ -69,8 +70,11 @@
   <button class="btn ghost small" type="button" id="install-bar-x" aria-label="not now" title="not now">✕</button>
 </div>
 
+<div id="offline" class="offline" role="status" hidden>Offline — the last feed is on screen. Play needs the network; keeps and skips are queued and filed when it is back.</div>
+<div id="live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
 <section class="filters" id="filters">
-  <input id="q" type="search" placeholder="search artist / title / tag…" autocomplete="off" aria-label="search artist, title or tag">
+  <input id="q" type="search" placeholder="search artist / title / tag… (tag:x artist:x year:2014 -word)" autocomplete="off" aria-label="search artist, title or tag" title="every word must match, accents ignored; &quot;a phrase&quot;; tag:x artist:x source:x year:2014 aim at one field; -word excludes">
   <button class="btn ghost mobile-only" id="filters-more" type="button" aria-expanded="false" aria-controls="filters">filters ▾</button>
   <div id="sources" class="sources-filter" aria-label="sources"></div>
   <select id="sort" aria-label="sort">
@@ -93,12 +97,20 @@
   <label class="chk feed-only" id="l-recent" title="Hide tracks whose verified release year is older than last year (radio and recommendation sources surface catalog too)"><input type="checkbox" id="only-recent"> new releases only</label>
   <label class="chk" title="Only the top of the list by score (⚙ sets how many). A search or another sort shows everything."><input type="checkbox" id="shortlist" checked> shortlist</label>
   <button class="btn ghost mobile-only" id="layout-toggle" type="button">list view</button>
-  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open · <kbd>t</kbd> theme</span>
+  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <kbd>←</kbd>/<kbd>→</kbd> seek · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · <kbd>z</kbd> undo · swipe → / ← · </span><kbd>s</kbd> shuffle · <kbd>a</kbd> audition · <kbd>o</kbd> open · <kbd>t</kbd> theme</span>
 </section>
+<div id="chips" class="chips" aria-label="active search terms" hidden></div>
 
 <div id="stale" class="stale" role="status" hidden></div>
 
-<main>
+<main id="main">
+  <section id="intro" class="intro" aria-label="about this site" hidden>
+    <button class="np-close" id="intro-x" type="button" title="dismiss" aria-label="dismiss">&times;</button>
+    <h2>A daily new-music feed</h2>
+    <p>Every morning the build reads Last.fm, ListenBrainz, MusicBrainz, Bandcamp, Deezer, radio playlists and a few dozen blogs, scores what it finds against one listener's taste, and lists the best of it here. Press play on any card, or <kbd>space</kbd>, and it plays on through the list.</p>
+    <p class="muted"><b>Sign in with Google</b> and the Keep / Skip buttons appear: Keep files a track into a year playlist in your own YouTube library, Skip hides it for good. Install the site as an app for a full-screen deck with lock-screen controls.</p>
+    <div class="row"><button class="btn primary small" id="intro-signin" type="button">Sign in with Google</button><a class="btn ghost small" href="/privacy.html">how it uses your account</a></div>
+  </section>
   <div id="list" class="list"></div>
   <section id="deck" class="deck off">
     <div class="deck-top" id="deck-top" hidden>
@@ -118,6 +130,7 @@
         <button class="btn" id="p-prev" title="previous (k)" aria-label="previous"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h3v16H4zM20 4 8 12l12 8z"/></svg></button>
         <button class="btn" id="p-toggle" title="play/pause (space)" aria-label="play / pause"><svg class="ic ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5 20 12 6 20.5z"/></svg><svg class="ic ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h5v16H5zM14 4h5v16h-5z"/></svg></button>
         <button class="btn" id="p-next" title="next (j)" aria-label="next"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4h3v16h-3zM4 4l12 8-12 8z"/></svg></button>
+        <button class="btn shuffle" id="p-shuffle" type="button" title="shuffle (s)" aria-label="shuffle" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l4 4-4 4V8h-2.5l-3 4 3 4H17v-3l4 4-4 4v-3h-4l-3.7-5L5.6 18H2v-2h2.6l3-4-3-4H2V6h3.6l3.7 5L13 6h4z"/></svg></button>
         <label class="chk"><input type="checkbox" id="autoplay" checked> autoplay <span class="full">next</span></label>
         <label class="chk" title="Start each track partway in and move on automatically after a few seconds. Any key or click on the player cancels the timer for that track."><input type="checkbox" id="audition"> audition <span id="audition-label">30s</span></label>
         <span id="audition-bar" class="audition-bar" hidden><i></i></span>
@@ -131,6 +144,7 @@
         <button class="btn up" id="p-up" title="thumbs up (u)" aria-label="keep this track">&#x25B2;&#xFE0E;</button>
       </div>
       <button class="np-next" id="np-next" title="play the next track (j)" hidden></button>
+      <div class="np-queue" id="np-queue" aria-label="up next" hidden></div>
     </div>
   </aside>
     <div id="deck-card" hidden></div>
@@ -163,11 +177,12 @@
     </div>
   </section>
   <div id="empty" class="empty" role="status" hidden></div>
+  <div id="feed-failed" class="empty" hidden><button class="btn ghost small" id="feed-retry" type="button">Retry</button></div>
 </main>
 
 <template id="deck-tpl">
   <article class="dcard" tabindex="0">
-    <div class="dart"><img alt="" loading="eager"><span class="dplay">&#x25B6;&#xFE0E;</span><span class="yearbadge"></span></div>
+    <div class="dart"><img alt="" loading="eager" decoding="async" width="544" height="544"><span class="dplay">&#x25B6;&#xFE0E;</span><span class="yearbadge"></span></div>
     <div class="dbody">
       <div class="dartist"></div>
       <div class="dtitle"></div>
@@ -180,10 +195,18 @@
   </article>
 </template>
 
+<dialog id="artist" class="artist-sheet">
+  <form method="dialog" class="settings-form">
+    <h2 id="artist-name">Artist</h2>
+    <div id="artist-body" class="artist-body"></div>
+    <div class="row"><span class="grow"></span><button class="btn primary" value="ok">Done</button></div>
+  </form>
+</dialog>
+
 <dialog id="blogs">
   <form method="dialog" class="settings-form">
-    <h2>Blogs &amp; radio</h2>
-    <p class="muted">Untick a blog to ignore it. Numbers are how many tracks it contributed to today's feed.</p>
+    <h2>Blogs, stations &amp; channels</h2>
+    <p class="muted">Untick a feed to ignore it. Numbers are how many tracks it contributed to today's feed.</p>
     <div id="blogs-body" class="blog-list"></div>
     <div class="row">
       <button class="btn ghost" type="button" id="blogs-all">all</button>
@@ -224,6 +247,11 @@
     <p class="muted curator" id="s-sync"></p>
     <p class="muted" id="s-install"><span id="s-install-text"></span> <button class="btn ghost small" type="button" id="s-install-btn">Install as an app</button> <button class="btn ghost small" type="button" id="s-update-btn" hidden>Check for updates</button> <span class="mono" id="s-build"></span></p>
     <p class="muted" id="s-account">Google sign-in lasts an hour at a time and renews itself the next time you tap a thumb. <b>Sign out</b> only forgets this device; to disconnect the site from your Google account entirely, remove it at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>. <span id="s-auth-problem"></span></p>
+    <div class="curator owner-only" id="s-gh">
+      <label>GitHub token for the ratings file <input id="s-gh-token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_… (fine-grained: Contents read &amp; write, this repo only)"></label>
+      <p class="muted" id="s-gh-status"></p>
+      <div class="row"><button class="btn ghost small" type="button" id="s-gh-push">Push ratings to the build now</button><a class="btn ghost small" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">make a token</a></div>
+    </div>
     <p class="muted curator" id="s-dupes-line"><span id="s-dupes-summary">Duplicate check</span> <button class="btn ghost small" type="button" id="s-cleanup">Open Cleanup</button></p>
     <p class="muted owner" id="s-guests"></p>
     <details><summary class="muted">Blog feed health (tracks kept / posts seen in the last build)</summary><div id="s-feeds" class="feeds"></div></details>
@@ -252,7 +280,7 @@
 
 <template id="card-tpl">
   <article class="card" tabindex="0">
-    <div class="art"><img alt="" loading="lazy"><span class="play">&#x25B6;&#xFE0E;</span></div>
+    <div class="art"><img alt="" loading="lazy" decoding="async" width="96" height="96"><span class="play">&#x25B6;&#xFE0E;</span></div>
     <div class="body">
       <div class="line1">
         <button type="button" class="artist"></button>

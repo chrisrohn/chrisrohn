@@ -1,10 +1,12 @@
 // @ts-check
 /* Cross-device memory: ratings (and the quota count) mirrored to a hidden per-app file in the signed-in account's
- * Google Drive (appDataFolder). Newest record per track wins; "undone" tombstones travel too. */
+ * Google Drive (appDataFolder). Newest record per track wins; "undone" tombstones travel too. The same debounce also
+ * pushes data/ratings.json to the site's repository when a GitHub token is set (github.js), so the build learns. */
 import { state, persist, reconcileRated, ptDay, DRIVE, DRIVE_UPLOAD, SYNC_FILE } from "./state.js";
 import { toast } from "./dom.js";
 import { withAuth, isCurator, tokenValid } from "./auth.js";
 import { render } from "./render.js";
+import { scheduleGhPush } from "./github.js";
 
 /** @typedef {import("./types").Rated} Rated */
 
@@ -51,7 +53,7 @@ const weak = r => !r || r.decision === "seen";
 export function mergeRemote(remote) {
   let changed = false;
   for (const [id, r] of Object.entries((remote && remote.rated) || {})) {
-    if (!r || r.pending) continue;
+    if (!r || r.pending || r.queued) continue;
     const l = state.rated[id];
     const newer = !l || (r.at || 0) > (l.at || 0);
     if ((newer && !(weak(r) && !weak(l))) || (weak(l) && !weak(r))) { state.rated[id] = { ...r, pending: false }; changed = true; }
@@ -65,7 +67,7 @@ export function mergeRemote(remote) {
   return changed;
 }
 export async function pullRatings() {
-  if (!isCurator() || !tokenValid()) return;
+  if (!isCurator() || !tokenValid() || !state.online) return;
   try {
     const files = state.sync.fileId ? [{ id: state.sync.fileId }] : await syncFiles();
     if (!files.length) return;
@@ -77,15 +79,15 @@ export async function pullRatings() {
     state.sync.at = Date.now(); persist();
   } catch (e) { toast("Rating sync (pull) failed: " + /** @type {Error} */ (e).message, true); }
 }
-export function schedulePush() { clearTimeout(state.syncTimer); state.syncTimer = setTimeout(() => pushRatings().catch(() => {}), 1500); }
+export function schedulePush() { clearTimeout(state.syncTimer); state.syncTimer = setTimeout(() => pushRatings().catch(() => {}), 1500); scheduleGhPush(); }
 export async function pushRatings() {
-  if (!isCurator()) return;
+  if (!isCurator() || !state.online) return;
   reconcileRated();
   try {
     let id = await syncFileId();
     // never overwrite what another device wrote since we last looked: fold the file in first, then write the union
     if (id) { const remote = await readSyncFile(id).catch(() => null); if (remote && mergeRemote(remote)) render(); }
-    const shared = Object.fromEntries(Object.entries(state.rated).filter(([, r]) => !r.pending));
+    const shared = Object.fromEntries(Object.entries(state.rated).filter(([, r]) => !r.pending && !r.queued));
     const payload = JSON.stringify({ version: 4, account: state.auth?.email, updatedAt: new Date().toISOString(), rated: shared, quota: state.quota, dupesDone: state.settings.dupesDone || [] });
     if (id) {
       await drive("PATCH", `${DRIVE_UPLOAD}/files/${id}`, { params: { uploadType: "media" }, body: payload, raw: true });

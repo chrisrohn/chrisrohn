@@ -1,10 +1,11 @@
 // @ts-check
-/* Keyboard: j/k move, space plays, u/d rate, o opens, a audition, t theme, / search, Esc stops. */
+/* Keyboard: j/k move, space plays, u/d rate, z undoes the last thumb, ←/→ seek, o opens, a audition, s shuffle,
+ * t theme, / search, Esc closes the player (and keeps your place in the list). */
 import { state, byId } from "./state.js";
 import { $, toast } from "./dom.js";
-import { rate } from "./rating.js";
+import { rate, undoLast } from "./rating.js";
 import { deckOn, deckItem, focusCard } from "./render.js";
-import { play, step, toggle, stopPlayer } from "./player.js";
+import { play, step, toggle, stopPlayer, seek, playerActive, toggleShuffle } from "./player.js";
 import { cycleTheme } from "./theme.js";
 
 /** The year chosen on the card for `id`, if any. @param {string | null} [id] */
@@ -20,14 +21,19 @@ export function wireKeys() {
     switch (e.key) {
       case "j": case "ArrowDown": e.preventDefault(); state.currentId ? step(1) : focusCard(state.order[0]); break;
       case "k": case "ArrowUp": e.preventDefault(); step(-1); break;
-      case " ": e.preventDefault(); if (state.playerReady && state.currentId) toggle(); else play(id || state.order[0]); break;
-      case "u": case "ArrowRight": if (id) rate(id, "up", currentYear(id)); break;
-      case "d": case "ArrowLeft": if (id) rate(id, "down", currentYear(id)); break;
+      case " ": e.preventDefault(); if (playerActive()) toggle(); else play(id || state.order[0]); break;
+      case "u": if (id) rate(id, "up", currentYear(id)); break;
+      case "d": if (id) rate(id, "down", currentYear(id)); break;
+      case "z": undoLast(); break;
+      // arrows seek, as in every other player: a stray press must never file a track
+      case "ArrowRight": if (playerActive()) { e.preventDefault(); seek(10); } break;
+      case "ArrowLeft": if (playerActive()) { e.preventDefault(); seek(-10); } break;
       case "o": { const it = id ? byId(id) : null; if (it?.youtube?.videoId) window.open("https://music.youtube.com/watch?v=" + it.youtube.videoId, "_blank", "noopener"); break; }
       case "a": { const cb = $("#audition"); cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); toast(cb.checked ? `Audition mode on (${state.settings.auditionSeconds}s)` : "Audition mode off"); break; }
+      case "s": toggleShuffle(); break;
       case "t": cycleTheme(); break;
       case "/": e.preventDefault(); $("#q").focus(); break;
-      case "Escape": stopPlayer(); break;
+      case "Escape": if (playerActive()) stopPlayer(); break;
     }
   });
 }
