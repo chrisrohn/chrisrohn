@@ -6,9 +6,9 @@
 <meta name="color-scheme" content="light dark">
 <!-- Everything this page may load or talk to. Google sign-in (accounts.google.com/gsi), the YouTube player and
      iframe API (www.youtube.com), and the YouTube Data / Drive / userinfo APIs (www.googleapis.com). Artwork comes
-     from many CDNs, so images are open to any https host. If sign-in ever breaks after a Google change, this is
-     the first line to check. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com https://www.youtube.com https://s.ytimg.com; frame-src https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://youtubei.googleapis.com; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://accounts.google.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none'">
+     from many CDNs, so images are open to any https host. musicbrainz.org is the "find year" lookup on undated cards.
+     If sign-in ever breaks after a Google change, this is the first line to check. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com https://www.youtube.com https://s.ytimg.com; frame-src https://accounts.google.com https://www.youtube.com https://www.youtube-nocookie.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://oauth2.googleapis.com https://youtubei.googleapis.com https://musicbrainz.org; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https://accounts.google.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none'">
 <title>Chris Rohn's New Music</title>
 <meta name="description" content="Chris Rohn's daily new-music discovery feed, where he finds tracks for the Indie Discotheque playlists on YouTube Music. Listen to what's new in indie pop, nu-disco, indietronica and friends.">
 <link rel="icon" href="/icons/favicon-32.png" sizes="32x32">
@@ -48,6 +48,7 @@
     <button class="tab" data-view="catalog" title="Earlier years: what you have played and loved on Last.fm but never filed, and your artists' and their neighbours' best-known tracks">Catalog <span class="pill" id="count-catalog">…</span></button>
     <button class="tab" data-view="picks">Picks <span class="pill" id="count-picks">0</span></button>
     <button class="tab curator" data-view="skipped" title="What you thumbed down from this feed — restore any of them">Skipped <span class="pill" id="count-skipped">0</span></button>
+    <button class="tab curator" data-view="cleanup" title="Duplicated songs in the year playlists, and a live scan of one year — work through them a few at a time">Cleanup <span class="pill" id="count-cleanup">0</span></button>
   </nav>
   <div class="actions">
     <span id="who" class="who" hidden></span>
@@ -139,6 +140,28 @@
       <button class="btn up big curator" id="deck-up" title="thumbs up">&#x25B2;&#xFE0E; keep</button>
     </div>
   </section>
+  <section id="cleanup" class="cleanup" aria-label="cleanup" hidden>
+    <div class="cl-head">
+      <h2 id="cl-title">Cleanup</h2>
+      <p class="muted" id="cl-summary"></p>
+      <p class="muted">Every Keep first checks the target playlist, so the same video is never added twice by the site. The daily build scans all year playlists for the exact same video appearing twice in a year (an extra copy: remove it, one stays) or in two different years (a filing question: the verified year marks the wrong copy). It also notes every track YouTube Music greys out in the US (label rights, a withdrawn upload, a region lock) and looks for another upload of the same song that streams here, the audio track first: <b>not streamable here</b> in the kind menu, where a swap adds the counterpart and removes the dead copy. A removal costs 50 YouTube API units and a swap 100, so this is a job for a few minutes a day; what you clean is remembered on every device you sign into.</p>
+      <p class="muted" id="cl-quota"></p>
+      <p class="muted" id="cl-dupe-kinds"></p>
+    </div>
+    <div class="row dupe-filters">
+      <select id="cl-dupe-kind" aria-label="kind"><option value="">all duplicates</option><option value="same-video">same video twice in a year</option><option value="cross-year">same video in two years</option><option value="unavailable">not streamable here</option></select>
+      <select id="cl-dupe-yr" aria-label="year"><option value="">all years</option></select>
+      <input id="cl-dupe-q" type="search" placeholder="filter artist / title" autocomplete="off" aria-label="filter artist or title">
+      <button class="btn ghost small" id="cl-dupe-bulk" type="button" hidden>remove all extra copies…</button>
+    </div>
+    <div id="cl-dupes" class="dupes"></div>
+    <div class="cl-live">
+      <h3>Scan a year now</h3>
+      <p class="muted">The report above is from the last build; a live scan reads one playlist as it is right now (1 unit per 50 tracks) and catches today's double-taps.</p>
+      <div class="row"><select id="cl-dupe-year" aria-label="year to scan"></select><button class="btn ghost" type="button" id="cl-dupe-scan">Scan this year now</button><span class="muted" id="cl-dupe-status"></span></div>
+      <div id="cl-dupes-live" class="dupes"></div>
+    </div>
+  </section>
   <div id="empty" class="empty" role="status" hidden></div>
 </main>
 
@@ -201,20 +224,7 @@
     <p class="muted curator" id="s-sync"></p>
     <p class="muted" id="s-install"><span id="s-install-text"></span> <button class="btn ghost small" type="button" id="s-install-btn">Install as an app</button> <button class="btn ghost small" type="button" id="s-update-btn" hidden>Check for updates</button> <span class="mono" id="s-build"></span></p>
     <p class="muted" id="s-account">Google sign-in lasts an hour at a time and renews itself the next time you tap a thumb. <b>Sign out</b> only forgets this device; to disconnect the site from your Google account entirely, remove it at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>. <span id="s-auth-problem"></span></p>
-    <details class="curator" id="s-dupes-details">
-      <summary class="muted" id="s-dupes-summary">Duplicate check</summary>
-      <p class="muted">Every Keep first checks the target playlist, so the same video is never added twice. The daily build also scans all year playlists for the exact same video appearing twice in a year or in two different years (a different upload of the same song is not counted). Where the catalogues know the original year, the copy in the wrong year is marked <span class="chip wrong">2011 ✕</span>. Each removal costs 50 quota units.</p>
-      <p class="muted" id="s-dupe-kinds"></p>
-      <div class="row dupe-filters">
-        <select id="s-dupe-kind"><option value="">all kinds</option><option value="same-video">same video twice in a year</option><option value="cross-year">same video in two years</option></select>
-        <select id="s-dupe-yr"><option value="">all years</option></select>
-        <input id="s-dupe-q" type="search" placeholder="filter artist / title" autocomplete="off">
-        <button class="btn ghost small" id="s-dupe-bulk" type="button" hidden>remove all extra copies…</button>
-      </div>
-      <div id="s-dupes" class="dupes"></div>
-      <div class="row"><select id="s-dupe-year"></select><button class="btn ghost" type="button" id="s-dupe-scan">Scan this year now</button><span class="muted" id="s-dupe-status"></span></div>
-      <div id="s-dupes-live" class="dupes"></div>
-    </details>
+    <p class="muted curator" id="s-dupes-line"><span id="s-dupes-summary">Duplicate check</span> <button class="btn ghost small" type="button" id="s-cleanup">Open Cleanup</button></p>
     <p class="muted owner" id="s-guests"></p>
     <details><summary class="muted">Blog feed health (tracks kept / posts seen in the last build)</summary><div id="s-feeds" class="feeds"></div></details>
     <div class="row">

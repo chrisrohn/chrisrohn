@@ -255,10 +255,10 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
     picks: list[dict] = []
     meta: dict = {"years": {}, "skipped": None, "channel": None, "entries": [], "checked_at": None}
     try:
-        from ytmusicapi import YTMusic
+        from .resolve import ytmusic
+        yt = ytmusic(cfg)
     except ImportError:
         return artists, saved, picks, meta
-    yt = YTMusic()
     years, skipped, channel = discover_playlists(cfg, yt)
     meta.update({"years": years, "skipped": skipped, "channel": channel})
     picks_n = int((cfg.get("youtube_music") or {}).get("picks_count", 40))
@@ -281,14 +281,16 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
                 k = item_key(names[0], title)
                 saved[k] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId"), "decision": "up"}
                 if t.get("videoId"):
-                    where.setdefault(t["videoId"], []).append({"year": year, "playlistId": pid, "position": pos, "videoId": t["videoId"], "artist": names[0], "title": title})
+                    # isAvailable is False for a row YouTube Music greys out in this region: the Cleanup tab swaps those
+                    where.setdefault(t["videoId"], []).append({"year": year, "playlistId": pid, "position": pos, "videoId": t["videoId"], "artist": names[0], "title": title,
+                                                               "avail": bool(t.get("isAvailable", True))})
         if year == current:
             for t in tracks[-picks_n:][::-1]:
                 names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]
                 thumbs = t.get("thumbnails") or []
                 picks.append({"artist": names[0] if names else "", "title": t.get("title") or "", "videoId": t.get("videoId"),
                               "year": year, "thumbnail": thumbs[-1]["url"] if thumbs else None, "album": (t.get("album") or {}).get("name")})
-        log.info("playlist %s: %d tracks", year, len(tracks))
+        log.info("playlist %s: %d tracks (%d not available here)", year, len(tracks), sum(1 for t in tracks if t.get("isAvailable") is False))
     # the raw scan is what the build derives the duplicate report from (so a logic change never waits for a rebuild)
     meta["entries"] = [e for entries in where.values() for e in entries]
     meta["checked_at"] = utcnow().isoformat()

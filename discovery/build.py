@@ -11,6 +11,7 @@ from .profile import find_duplicates, load_profile
 from .resolve import collapse_shared_videos, resolve_all
 from .score import dedupe, score_items
 from .sources import run_sources
+from .unavailable import build_report as unavailable_report
 from .util import DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, read_json, safe_url, utcnow, write_json
 from .years import annotate_duplicate_years, verify_years
 
@@ -65,6 +66,8 @@ def build_feed(cfg: dict) -> dict:
     for d in dups:
         dup_kinds[d.get("kind", "?")] = dup_kinds.get(d.get("kind", "?"), 0) + 1
     checked_at = (profile.get("youtube") or {}).get("checked_at")
+    # tracks the playlists hold that will not stream here, with a counterpart that will (ytmusicapi, no quota)
+    unavailable = unavailable_report(profile, cfg, deadline)
     # the full report lives in its own file (thousands of rows on a big library); feed.json only carries the counts
     write_json(SITE_DATA_DIR / "duplicates.json", {"checked_at": checked_at, "count": len(dups), "kinds": dup_kinds, "duplicates": dups}, compact=True)
 
@@ -101,6 +104,10 @@ def build_feed(cfg: dict) -> dict:
             "duplicates_count": len(dups),
             "duplicates_kinds": dup_kinds,
             "duplicates_checked_at": checked_at,
+            # greyed-out playlist rows and how many have a streamable counterpart; the rows are in data/unavailable.json
+            "unavailable_count": unavailable["count"],
+            "unavailable_with_alt": unavailable["with_counterpart"],
+            "unavailable_pending": unavailable["pending"],
         },
         "picks": profile.get("picks") or [],
         "learned": public_summary(profile["learned"]),
@@ -127,7 +134,7 @@ def _email_hash(email: str) -> str:
 
 
 _PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb", "stated_year")
-_PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration")
+_PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration", "videoFrom", "albumType")
 
 
 def _public_item(it: Item, first_seen: str | None) -> dict:

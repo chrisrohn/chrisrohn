@@ -25,8 +25,8 @@ TAGS_CACHE = CACHE_DIR / "artist_tags.json"        # artist → Last.fm top tags
 
 DEFAULTS = {
     "enabled": True, "refresh_days": 7, "top_tracks": 3000, "loved_tracks": 2000, "artists_top_n": 150, "per_artist": 8,
-    "similar_top_n": 100, "per_similar": 5, "max_items": 2000, "time_budget_minutes": 8, "max_lookups_per_run": 250,
-    "max_year_lookups_per_run": 250, "tag_lookups_per_run": 300, "loved_bonus": 1.5,
+    "similar_top_n": 100, "per_similar": 5, "max_items": 2000, "time_budget_minutes": 35, "max_lookups_per_run": 800,
+    "max_year_lookups_per_run": 800, "tag_lookups_per_run": 300, "loved_bonus": 1.5, "year_chain": "fast",
     "weights": {"affinity": 4.0, "saved": 2.0, "similar": 2.5, "tags": 1.2, "source_count": 0.6, "freshness": 0.0, "editorial": 0.0, "listens": 2.0, "playable": 0.3, "learned": 1.0},
 }
 
@@ -148,7 +148,7 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
     _tags(items, lastfm, int(c["tag_lookups_per_run"]))
     http.save()
     ccfg = {**cfg, "ranking": {**cfg["ranking"], "weights": c["weights"], "freshness_days": 1, "undated_freshness": 0.0},
-            "resolve": {**(cfg.get("resolve") or {}), "max_lookups_per_run": int(c["max_lookups_per_run"]), "max_year_lookups_per_run": int(c["max_year_lookups_per_run"])}}
+            "resolve": {**(cfg.get("resolve") or {}), "max_lookups_per_run": int(c["max_lookups_per_run"]), "max_year_lookups_per_run": int(c["max_year_lookups_per_run"]), "year_chain": c["year_chain"]}}
     items = _score(items, profile, ccfg, float(c["loved_bonus"]))[: int(c["max_items"])]
 
     minutes = float(c["time_budget_minutes"]) if deadline_minutes is None else min(float(c["time_budget_minutes"]), deadline_minutes)
@@ -162,7 +162,9 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
 
     first_year = int((cfg.get("youtube_music") or {}).get("first_year", 1979))
     this_year = date.today().year
-    items = [i for i in items if i.year is None or first_year <= i.year <= this_year]
+    # a track whose year has not been looked up yet waits for a later run: the tab is for reviewing, not for guessing
+    pending = sum(1 for i in items if i.year_source == "pending")
+    items = [i for i in items if i.year_source != "pending" and (i.year is None or first_year <= i.year <= this_year)]
     today_s = date.today().isoformat()
     first_seen: dict[str, str] = state.setdefault("first_seen", {})
     for it in items:
@@ -182,12 +184,13 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
         "candidates": len(state.get("candidates") or []),
         "count": len(items),
         "undated": per_year.get("?", 0),
+        "pending": pending,
         "sources": sorted({s for i in items for s in i.sources}),
         "years": years,
         "items": [_public(i, first_seen.get(i.key)) for i in items],
     }
     write_json(CATALOG_PATH, payload, compact=True)
-    log.info("catalog: %d playable candidates published (%d without a year yet)", len(items), per_year.get("?", 0))
+    log.info("catalog: %d playable candidates published (%d with no year found, %d more waiting for a year lookup)", len(items), per_year.get("?", 0), pending)
     return payload
 
 

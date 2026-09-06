@@ -11,6 +11,8 @@ import { visibleItems, searchFor, credit } from "./feed.js";
 import { rate, undo } from "./rating.js";
 import { play, toggle, refreshNow } from "./player.js";
 import { personal, scoreOf } from "./rank.js";
+import { addYearFinder, discogsSearch } from "./yearfind.js";
+import { renderDupes, openCleanup } from "./dupes.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -38,7 +40,8 @@ export function render() {
     appendCards(Math.max(PAGE, keep));
   }
   refreshNow();
-  const empty = $("#empty"); empty.hidden = vis.length > 0;
+  const cleanup = state.view === "cleanup"; $("#cleanup").hidden = !cleanup; if (cleanup) renderDupes(false);
+  const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup;
   empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.")
     : state.view === "skipped" ? "Nothing skipped from this feed."
     : state.view === "catalog" ? ({ idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog. Reload to try again." }[state.catalogState] || "Nothing here with these filters.")
@@ -46,12 +49,14 @@ export function render() {
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters (the
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
   const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
-  const counts = { feed: full("feed"), picks: visibleItems("picks").length, skipped: isCurator() ? visibleItems("skipped").length : 0, catalog: state.catalog ? full("catalog") : 0 };
+  const counts = { feed: full("feed"), picks: visibleItems("picks").length, skipped: isCurator() ? visibleItems("skipped").length : 0, catalog: state.catalog ? full("catalog") : 0,
+    cleanup: openCleanup() };
   state.shortlistHidden = hidden;
   for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = k === "catalog" && !state.catalog ? "…" : String(n); }
   $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
   $$(".tab").forEach(t => { const on = t.dataset.view === state.view; t.classList.toggle("active", on); if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current"); });
   $("#filters").classList.toggle("picks", state.view === "picks" || state.view === "skipped");
+  $("#filters").classList.toggle("cleanup", cleanup);
   $("#filters").classList.toggle("catalog", state.view === "catalog");
 }
 /** Render up to `count` cards of the current list; a sentinel at the end pulls in the next page. @param {number} count */
@@ -125,7 +130,9 @@ export function renderDeck(vis) {
   const links = [];
   if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
+  if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
   $(".dlinks", el).innerHTML = links.join("");
+  if (it.year == null && !it._pick && isCurator()) addYearFinder(el, it);
   addShare($(".dlinks", el), it);
   fillYearSelect($(".year", el), it);
   $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.currentId === it.id && state.playerReady) toggle(); else play(it.id); } });
@@ -171,7 +178,9 @@ function card(it, tpl) {
   if (!yt.videoId) links.push(`<a href="https://music.youtube.com/search?q=${encodeURIComponent(it.artist + " " + it.title)}" target="_blank" rel="noopener">search YT Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
   links.push(`<a href="https://www.last.fm/music/${encodeURIComponent(it.artist)}" target="_blank" rel="noopener">last.fm</a>`);
+  if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
   $(".links", el).innerHTML = links.join("");
+  if (it.year == null && !it._pick && !it._skipped && isCurator()) addYearFinder(el, it);
   if (!it._pick) addPermalink($(".links", el), it);
   addShare($(".links", el), it);
   const ysel = $(".year", el);

@@ -561,8 +561,10 @@ def test_cli_parses_commands(monkeypatch):
     monkeypatch.setattr(cli, "_profile_stale", lambda cfg: False)
     assert cli.main(["build"]) == 0 and calls == ["build"]
     assert cli.main(["catalog"]) == 0 and calls[-1] == "catalog"
-    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls[-3:] == ["profile", "build", "catalog<40"]   # the catalog gets what is left of the job
-    assert cli.main([]) == 0 and calls[-2:] == ["build", "catalog<40"]                # daily is the default
+    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls[-2:] == ["profile", "build"]   # the catalog is its own workflow …
+    assert cli.main([]) == 0 and calls[-1] == "build"                                 # daily is the default
+    monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}, "catalog": {"in_daily": True}})
+    assert cli.main(["daily"]) == 0 and calls[-2:] == ["build", "catalog<40"]        # … unless asked to ride along, with what is left of the job
     with pytest.raises(SystemExit):
         cli.main(["--no-such-flag"])
 
@@ -811,15 +813,18 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
     monkeypatch.setattr(catalog, "LastFm", FakeLastFm)
 
     def fake_resolve(items, cfg, deadline=None):
-        assert cfg["resolve"]["max_lookups_per_run"] == 250
+        assert cfg["resolve"]["max_lookups_per_run"] == 800
         for it in items:
             if it.title != "Parcels Hit":
                 it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg"}
     monkeypatch.setattr(catalog, "resolve_all", fake_resolve)
 
     def fake_years(items, cfg, http, deadline=None):
+        assert cfg["resolve"]["year_chain"] == "fast"
         for it in items:
             it.year, it.year_source, it.year_confidence = (2016, "musicbrainz-search", "high") if it.artist == "Jungle" else (None, "unknown", "low")
+            if it.title == "Overnight":
+                it.year_source = "pending"       # not looked up yet: held back until a run gets to it
     monkeypatch.setattr(catalog, "verify_years", fake_years)
 
     class NoNet:
@@ -831,16 +836,165 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
     titles = {(i["artist"], i["title"]) for i in payload["items"]}
     assert ("Jungle", "Back On 74") not in titles and ("Roosevelt", "Lovers") not in titles   # a playlist or the Skipped playlist already has them
     assert ("Parcels", "Parcels Hit") not in titles                                           # no YouTube match: nothing to file
-    assert {("Jungle", "Fire"), ("Roosevelt", "Moving On"), ("Jungle", "Jungle Hit"), ("Parcels", "Overnight")} <= titles
+    assert {("Jungle", "Fire"), ("Roosevelt", "Moving On"), ("Jungle", "Jungle Hit")} <= titles
+    assert ("Parcels", "Overnight") not in titles and payload["pending"] == 1
     fire = next(i for i in payload["items"] if i["title"] == "Fire")
     assert fire["plays"] == 120 and fire["loved"] is True and "120 plays" in fire["reasons"] and "loved on Last.fm" in fire["reasons"]
     assert sorted(fire["sources"]) == ["lastfm:loved", "lastfm:top tracks"] and fire["tags"] == ["nu disco"] and fire["links"] == {"last.fm": "https://last.fm/2"}
     assert fire["year"] == 2016 and fire["release_date"] is None and "listen_count" not in fire and "blurb" not in fire
     assert payload["items"][0]["title"] == "Fire"                                             # most played + loved ranks first
     assert payload["years"]["2016"] == {"playlist": 3, "candidates": 2} and payload["years"]["2023"]["playlist"] == 1
-    assert payload["undated"] == 2 and payload["sources"] == ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"]
+    assert payload["undated"] == 1 and payload["sources"] == ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"]
     state = util.read_json(sandbox / "data" / "catalog_state.json", {})
     assert state["fetched_at"] and len(state["candidates"]) == 8 and set(state["first_seen"]) == {i["id"] for i in payload["items"]}
     # a fresh snapshot is reused: Last.fm is not asked again for a week
     catalog.build_catalog(_cfg(), deadline_minutes=5)
     assert calls == ["top"]
+
+
+def test_resolver_prefers_the_audio_track_and_the_original_issue():
+    from discovery.resolve import ATV, _pick, album_year, audio_counterpart, prefer_audio
+
+    res = [
+        {"resultType": "song", "title": "Night By Night", "artists": [{"name": "Chromeo"}], "videoId": "omv", "videoType": "MUSIC_VIDEO_TYPE_OMV", "album": {"name": "Business Casual", "id": "MPREb_bc"}},
+        {"resultType": "song", "title": "Night By Night", "artists": [{"name": "Chromeo"}], "videoId": "atv", "videoType": ATV, "album": {"name": "Business Casual", "id": "MPREb_bc"}},
+        {"resultType": "video", "title": "Night By Night", "artists": [{"name": "Chromeo"}], "videoId": "ugc", "videoType": "MUSIC_VIDEO_TYPE_UGC"},
+    ]
+    assert _pick(res, "Chromeo", "Night By Night")["videoId"] == "atv"
+    deluxe = [
+        {"resultType": "song", "title": "Girlfriend Is Better", "artists": [{"name": "Talking Heads"}], "videoId": "dlx", "videoType": ATV, "album": {"name": "Speaking in Tongues (Deluxe Version)", "id": "MPREb_d"}},
+        {"resultType": "song", "title": "Girlfriend Is Better", "artists": [{"name": "Talking Heads"}], "videoId": "orig", "videoType": ATV, "album": {"name": "Speaking in Tongues", "id": "MPREb_o"}},
+    ]
+    assert _pick(deluxe, "Talking Heads", "Girlfriend Is Better")["videoId"] == "orig"
+    remix = [{"resultType": "song", "title": "Ultraviolence (Crom & Thanh Remix)", "artists": [{"name": "Lana Del Rey"}], "videoId": "rmx", "videoType": ATV, "album": {"name": "Ultraviolence (Remixes)", "id": "x"}}]
+    assert _pick(remix, "Lana Del Rey", "Ultraviolence (Crom & Thanh Remix)")["videoId"] == "rmx"   # a remix card wants the remix album
+
+    class FakeYT:
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            if videoId == "omv":
+                return {"tracks": [{"videoId": "omv", "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": "atv", "videoType": ATV}}]}
+            if videoId == "alone":
+                return {"tracks": [{"videoId": "alone", "videoType": "MUSIC_VIDEO_TYPE_OMV"}]}
+            raise RuntimeError("boom")
+        def get_album(self, bid):
+            return {"year": "2010", "audioPlaylistId": "OLAK_bc", "type": "Album"}
+    yt = FakeYT()
+    assert audio_counterpart(yt, "omv") == "atv" and audio_counterpart(yt, "alone") is None and audio_counterpart(yt, "err") is None
+    found = {"videoId": "omv", "videoType": "MUSIC_VIDEO_TYPE_OMV", "albumBrowseId": "MPREb_bc", "year": None}
+    prefer_audio(yt, found)
+    assert found["videoId"] == "atv" and found["videoType"] == ATV and found["videoFrom"] == "omv"
+    album_year(yt, found)
+    assert found["year"] == "2010" and found["playlistId"] == "OLAK_bc" and found["albumType"] == "Album"
+    keep = {"videoId": "atv", "videoType": ATV}
+    prefer_audio(yt, keep)
+    assert keep["videoId"] == "atv" and "videoFrom" not in keep                     # already the audio track: nothing to do
+
+
+def test_resolve_all_heals_older_hits_for_audio_and_marks_new_rows(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import resolve
+
+    class FakeYT:
+        def search(self, q, filter=None, limit=None):
+            if filter == "songs":
+                return [{"resultType": "song", "title": "Helix", "artists": [{"name": "Justice"}], "videoId": "hOMV", "videoType": "MUSIC_VIDEO_TYPE_OMV", "album": {"name": "Helix", "id": "MPREb_h"}}]
+            return []
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": videoId + "-atv", "videoType": resolve.ATV}}]}
+        def get_album(self, bid):
+            return {"year": "2011", "audioPlaylistId": "OLAK_" + bid}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    new = Item(artist="Justice", title="Helix", kind="track", sources=["lastfm:top tracks"])
+    old = Item(artist="Chromeo", title="Night By Night", kind="track", sources=["lastfm:top tracks"])
+    old_row = {"videoId": "nOMV", "title": "Night By Night", "artists": ["Chromeo"], "album": "Business Casual", "albumBrowseId": "MPREb_bc", "via": "track-search"}
+    util.write_json(resolve.YT_CACHE, {old.key: {"seen": "2026-09-01", "yt": old_row, "v": 2}})
+    resolve.resolve_all([new, old], _cfg())
+    assert new.youtube["videoId"] == "hOMV-atv" and new.youtube["videoType"] == resolve.ATV and new.youtube["year"] == "2011" and new.youtube["playlistId"] == "OLAK_MPREb_h"
+    assert old.youtube["videoId"] == "nOMV-atv" and old.youtube["videoFrom"] == "nOMV" and old.youtube["year"] == "2011"
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[old.key]["v"] == resolve.CACHE_VERSION and cache[old.key]["yt"]["videoId"] == "nOMV-atv"
+    # a second run leaves the healed row alone (no watch-playlist call, so a failing one would not matter)
+    class Quiet(FakeYT):
+        def get_watch_playlist(self, **kw): raise AssertionError("healed rows are not re-checked")
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=Quiet))
+    again = Item(artist="Chromeo", title="Night By Night", kind="track")
+    resolve.resolve_all([again], _cfg())
+    assert again.youtube["videoId"] == "nOMV-atv"
+
+
+def test_years_pending_marker_and_fast_chain(monkeypatch, sandbox):
+    from discovery import years
+
+    calls = []
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            calls.append(url)
+            if "listenbrainz" in url:
+                return {}
+            if url.endswith("/recording/"):
+                return {"recordings": []}
+            if "deezer.com/search" in url:
+                return {"data": []}
+            raise AssertionError("the fast chain must not reach " + url)
+    cfg = _cfg()
+    cfg["resolve"] = {**cfg["resolve"], "max_year_lookups_per_run": 1, "year_chain": "fast"}
+    monkeypatch.setenv("DISCOGS_TOKEN", "tok")
+    first = Item(artist="Chromeo", title="Night By Night", kind="track", score=2.0, youtube={"videoId": "a", "year": "2010"})
+    second = Item(artist="Justice", title="Helix", kind="track", score=1.0)
+    years.verify_years([first, second], cfg, FakeHttp())
+    assert not any("discogs" in u or "itunes" in u for u in calls)
+    assert (first.year, first.year_source, first.year_confidence) == (2010, "youtube", "low")   # nothing in the catalogues: the album year stands in
+    assert second.year is None and second.year_source == "pending"                             # over budget: not looked up yet, not "unknown"
+    cache = util.read_json(years.YEAR_CACHE, {})
+    assert cache[first.key]["chain"] == "fast" and second.key not in cache
+
+
+def test_unavailable_playlist_tracks_get_a_streamable_counterpart(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import unavailable
+
+    monkeypatch.setattr(unavailable, "CACHE", sandbox / "data" / "cache" / "counterparts.json")
+    monkeypatch.setattr(unavailable, "REPORT", sandbox / "site" / "data" / "unavailable.json")
+    searches = []
+
+    class FakeYT:
+        def __init__(self, **kw): pass
+        def search(self, q, filter=None, limit=None):
+            searches.append((q, filter))
+            if "Jungle" in q and filter == "songs":
+                return [{"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "deadJ", "videoType": "MUSIC_VIDEO_TYPE_OMV"},
+                        {"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "liveJ", "videoType": "MUSIC_VIDEO_TYPE_ATV", "album": {"name": "Loving In Stereo", "id": "MPREb_x"}}]
+            if "Roosevelt" in q and filter == "videos":
+                return [{"resultType": "video", "title": "Roosevelt - Lovers (Official Video)", "artists": [{"name": "Roosevelt"}], "videoId": "vidR", "videoType": "MUSIC_VIDEO_TYPE_OMV"}]
+            return []
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": videoId + "-atv", "videoType": "MUSIC_VIDEO_TYPE_ATV"}}]} if videoId == "vidR" else {"tracks": []}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    entries = [
+        {"year": "2021", "playlistId": "PL2021", "position": 3, "videoId": "deadJ", "artist": "Jungle", "title": "Keep Moving", "avail": False},
+        {"year": "2016", "playlistId": "PL2016", "position": 9, "videoId": "deadR", "artist": "Roosevelt", "title": "Lovers", "avail": False},
+        {"year": "2016", "playlistId": "PL2016", "position": 1, "videoId": "deadN", "artist": "Nobody", "title": "Nothing", "avail": False},
+        {"year": "2016", "playlistId": "PL2016", "position": 2, "videoId": "okay", "artist": "Fine", "title": "Fine", "avail": True},
+    ]
+    profile = {"youtube": {"entries": entries, "checked_at": "2026-09-06T00:00:00+00:00"}}
+    cfg = _cfg(); cfg["resolve"]["counterparts_per_run"] = 2
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert report["count"] == 3 and set(rows) == {"deadJ", "deadR", "deadN"} and "okay" not in rows
+    assert rows["deadJ"]["alt"]["videoId"] == "liveJ" and rows["deadJ"]["alt"]["videoType"] == "MUSIC_VIDEO_TYPE_ATV"   # never the dead id, audio first
+    assert rows["deadR"]["alt"]["videoId"] == "vidR-atv"                                                              # a video hit, swapped for its audio side
+    assert rows["deadN"]["pending"] is True and rows["deadN"]["alt"] is None                                          # over budget: waits, is not "no counterpart"
+    assert report["with_counterpart"] == 2 and report["audio"] == 2 and report["pending"] == 1
+    assert [r["year"] for r in report["rows"]] == ["2021", "2016", "2016"]
+    # the next run reuses the cache for the two looked up and gets to the third
+    cfg["resolve"]["counterparts_per_run"] = 5
+    n = len(searches)
+    report = unavailable.build_report(profile, cfg)
+    assert report["pending"] == 0 and {r["videoId"]: r["alt"] for r in report["rows"]}["deadN"] is None
+    assert all("Nobody" in q for q, _ in searches[n:])
+    assert util.read_json(sandbox / "site" / "data" / "unavailable.json", {})["count"] == 3

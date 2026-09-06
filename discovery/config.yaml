@@ -12,6 +12,7 @@ station:
 # The site signs you in with Google and writes to these playlists from your browser. The daily build reads them
 # (they're public) to seed your taste profile and to hide anything already saved or skipped.
 youtube_music:
+  region: US                  # the country the playlists are listened to in: availability and search are judged there
   playlist_title_pattern: "{year} | Indie Discotheque"
   first_year: 1979
   # The channel that OWNS the year playlists (they're collaborative; @indiedisco owns them, chrisrohn's personal
@@ -346,10 +347,12 @@ catalog:
   similar_top_n: 100        # the strongest similar artists (adjacent to what you play) …
   per_similar: 5
   max_items: 2000           # candidates carried into resolution, by score
-  time_budget_minutes: 8    # its own wall-clock share after the feed's …
-  job_budget_minutes: 40    # … but never past this point of the whole daily job (the workflow times out at 45)
-  max_lookups_per_run: 250
-  max_year_lookups_per_run: 250
+  in_daily: false           # true = also run at the end of the daily feed job; the Catalog workflow is its own job
+  time_budget_minutes: 35   # wall clock for the lookups in the Catalog workflow (it times out at 45)
+  job_budget_minutes: 40    # when run inside the daily job: never past this point of that job
+  max_lookups_per_run: 800
+  max_year_lookups_per_run: 800
+  year_chain: fast          # fast = ListenBrainz/MusicBrainz + Deezer, then the YouTube Music album year; full = + Discogs + iTunes
   tag_lookups_per_run: 300  # artists whose Last.fm tags get fetched per run (cached for good afterwards)
   loved_bonus: 1.5
   weights:                  # overrides of ranking.weights for the catalog: plays count for a lot, freshness for nothing
@@ -360,6 +363,9 @@ catalog:
 resolve:
   youtube_music: true
   max_lookups_per_run: 400
+  audio_heals_per_run: 150      # older cached hits re-checked for an audio-only counterpart and their album year, per run
+  counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload per run (Cleanup tab → data/unavailable.json)
+  year_chain: full              # the feed asks every catalogue; the catalog's own setting is under `catalog`
   # Year verification (see discovery/years.py): identify the recording via ListenBrainz's MusicBrainz mapper, take
   # MusicBrainz's earliest release date for it, cross-check with Deezer (ISRC → MusicBrainz), Discogs master year
   # (needs a free DISCOGS_TOKEN secret) and the iTunes Search API. All free, all cached. Each track costs 2–6 requests

@@ -304,6 +304,11 @@ def lookup_track(http, artist: str, title: str, cfg: dict) -> dict:
     if isrcs:
         entry["isrc"] = isrcs[0]
     need_more = not any(TRUST[k] >= 3 for k in entry["found"])
+    # "fast": stop here — Discogs (1 req/s) and iTunes (20 req/min) are the slow end of the chain, and the catalog has
+    # thousands of tracks to get through; the YouTube Music album year covers what this leaves undated
+    if rcfg.get("year_chain", "full") == "fast":
+        entry["chain"] = "fast"
+        return entry
     token = os.environ.get("DISCOGS_TOKEN", "").strip()
     if need_more and token and rcfg.get("discogs", True):
         y = discogs_year(http, artist, title, token)
@@ -387,6 +392,8 @@ def verify_years(items: list[Item], cfg: dict, http, deadline: Deadline | None =
         if entry and entry.get("v") != CACHE_VERSION:   # legacy entry shape: {"mb":..,"dz":..,"it":..}
             found = {k: v for k, v in (("musicbrainz-search", entry.get("mb")), ("deezer", entry.get("dz")), ("itunes", entry.get("it"))) if v}
         year, source, conf, ev = decide(found, it)
+        if entry is None and year is None and it.kind == "track":
+            source = "pending"          # not looked up yet (budget or deadline): the site says so instead of "unknown"
         it.year, it.year_source, it.year_confidence = year, source, conf
         it.year_evidence = [f"{LABEL.get(e.source, e.source)}: {e.year}" for e in ev]
         it.original_year = None

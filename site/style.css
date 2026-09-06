@@ -165,6 +165,8 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 /* the video would not embed here (YouTube error 101/150): the card stays, marked, and autoplay steps over it */
 .card.noembed .art, .dcard.noembed .dart { border-style: dashed; opacity: .8; }
 .card.noembed .art::after, .dcard.noembed .dart::after { content: "no embed"; position: absolute; left: 0; right: 0; bottom: 0; font: 700 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; text-align: center; padding: 3px 0; background: var(--ink); color: var(--on-ink); }
+.find-year { color: var(--accent); font-weight: 700; }
+.find-year:disabled { color: var(--muted); cursor: default; text-decoration: none; }
 .linkish { font: inherit; color: var(--blue); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; letter-spacing: inherit; text-transform: inherit; }
 .linkish:hover { color: var(--accent); }
 .shortlist-note { border-top: 2px solid var(--ink); }
@@ -318,6 +320,14 @@ body.guest .mode { background: var(--blue); }
 .who img { width: 24px; height: 24px; border: 1px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); }
 .who .muted { text-transform: none; letter-spacing: 0; }
 .filters.picks > *:not(#q) { display: none; }
+.filters.cleanup { display: none; }
+/* the Cleanup tab: a sheet of its own, drawn like the list */
+.cleanup { border: 2px solid var(--ink); background: var(--card); box-shadow: 8px 8px 0 var(--ink); padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
+.cleanup h2 { margin: 0; font: 800 22px/1 var(--sans); letter-spacing: -.02em; text-transform: uppercase; padding-bottom: 10px; border-bottom: 3px solid var(--ink); }
+.cleanup h3 { margin: 18px 0 4px; font: 700 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.cleanup p { margin: 0; font-size: 13px; line-height: 1.5; }
+.cl-head { display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 760px) { .cleanup { padding: 14px 12px 16px; box-shadow: 5px 5px 0 var(--ink); } }
 /* the Catalog tab has its own sort and a year select; the feed's date-bound filters make no sense there */
 .filters:not(.catalog) .catalog-only { display: none; }
 .filters.catalog #sort, .filters.catalog .feed-only { display: none; }
@@ -531,6 +541,7 @@ body.doc .tab { text-decoration: none; }
 .dupe .x:disabled { opacity: .4; }
 .dupe .chip.wrong, .chip.wrong { border-color: var(--down); color: var(--down); }
 .dupe .verified { color: var(--up); }
+.dupe .chip.ok { border-color: var(--up); color: var(--up); } .dupe .chip.ok a { color: var(--up); }
 .dupe-filters { flex-wrap: wrap; gap: 8px; align-items: center; }
 .dupe-filters input[type=search] { flex: 1 1 160px; min-width: 120px; }
 

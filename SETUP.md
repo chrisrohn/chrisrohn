@@ -113,13 +113,28 @@ allows 1 request/s), undated tracks first.
 for as long as your Google session lasts. Signing out only forgets that device. To disconnect the site from your
 Google account entirely use https://myaccount.google.com/permissions.
 
+**Audio, not video:** YouTube Music lists most songs twice, as the audio-only track and as the official video. The
+resolver prefers the audio track, swaps a video hit for its audio counterpart (the watch playlist pairs the two), and
+prefers an original issue over a deluxe, remastered or live edition. Older cached hits are re-checked a batch a run
+(`resolve.audio_heals_per_run`). The album a song names is opened once for the year YouTube Music states and its
+playlist, which is what the "full release" link and the year fallback come from.
+
 **No duplicates:** every Keep first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so. The daily build scans all year playlists for the exact same video appearing twice in a
 year or in two different years — a different upload of the same song is deliberately not counted (full report in
-`site/data/duplicates.json`). The site warns you on load; ⚙ → Duplicate check
-filters by kind, year and name, removes copies one tap at a time or all extra same-video copies in a year at once
-(quota-aware: 50 units per removal), marks the wrong-year copy where the catalogues verified the original year, and
-offers a live "scan this year now" for anything added since the last build.
+`site/data/duplicates.json`). The site warns you on load; the **Cleanup** tab
+(curators only; its pill counts what is left) filters by kind, year and name, removes copies one tap at a time or all
+extra same-video copies in a year at once (quota-aware: 50 units per removal, and the tab says how many removals
+today's quota allows), marks the wrong-year copy where the catalogues verified the original year, and offers a live
+"scan this year now" for anything added since the last build. What you clean is remembered with your ratings in the
+Drive mirror, so it stays cleaned on every device; the next build drops it from the report.
+
+**Not streamable here:** the same playlist scan sees which tracks YouTube Music greys out in the region the
+playlists are listened to in (`youtube_music.region`, US) — label rights, a withdrawn upload, a region lock — and
+the build searches for another upload of the same song that streams there, the audio track first, a batch a run
+(`resolve.counterparts_per_run`, cached). They are the *not streamable here* kind on the Cleanup tab: a **swap**
+adds the counterpart and removes the dead copy (100 units), *swap all in a year* does it in bulk within the day's
+quota, and a track with no other upload can be removed or searched by hand. The report is `site/data/unavailable.json`.
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free).
 
@@ -171,8 +186,13 @@ session that the playlist's owner approved in that browser.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
-  playlist already holds is hidden; the rest is resolved on YouTube Music and given a verified release year in daily
-  batches on the feed's caches, so the tab fills in over a couple of weeks and then keeps pace with your listening.
+  playlist already holds is hidden; the rest is resolved on YouTube Music and given a verified release year by the
+  **Catalog** workflow (its own daily job, five hours after Discover, with a full 45 minutes), so the tab fills in
+  over a couple of weeks and then keeps pace with your listening. A track is published only once its year lookup
+  has run: the year select says how many are still "being dated". The catalog's chain is the fast one (ListenBrainz,
+  MusicBrainz, Deezer, then the year YouTube Music states for the album; no Discogs or iTunes), and a card that still
+  has no year offers **find year** — a one-tap MusicBrainz lookup from the browser that fills the year select — and
+  a Discogs search link.
   The year select shows every playlist year with how many tracks it holds and how many candidates wait, so the
   thin years are easy to work through; each Keep files into the verified year (or asks when none was found). Plays,
   loved, your keeps and skips all rank it; the shortlist, search, source chips and the phone deck work as in the
