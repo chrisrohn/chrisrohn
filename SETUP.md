@@ -122,10 +122,12 @@ playlist, which is what the "full release" link and the year fallback come from.
 **No duplicates:** every Keep first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so. The daily build scans all year playlists for the exact same video appearing twice in a
 year or in two different years — a different upload of the same song is deliberately not counted (full report in
-`site/data/duplicates.json`). The site warns you on load; ⚙ → Duplicate check
-filters by kind, year and name, removes copies one tap at a time or all extra same-video copies in a year at once
-(quota-aware: 50 units per removal), marks the wrong-year copy where the catalogues verified the original year, and
-offers a live "scan this year now" for anything added since the last build.
+`site/data/duplicates.json`). The site warns you on load; the **Cleanup** tab
+(curators only; its pill counts what is left) filters by kind, year and name, removes copies one tap at a time or all
+extra same-video copies in a year at once (quota-aware: 50 units per removal, and the tab says how many removals
+today's quota allows), marks the wrong-year copy where the catalogues verified the original year, and offers a live
+"scan this year now" for anything added since the last build. What you clean is remembered with your ratings in the
+Drive mirror, so it stays cleaned on every device; the next build drops it from the report.
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free).
 

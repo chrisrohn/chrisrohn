@@ -380,3 +380,40 @@ test("find year: an undated catalog card asks MusicBrainz and fills its year sel
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("the Cleanup tab: the duplicate report, filters, and the bulk button once a year is chosen", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  test.skip(!feed.youtube.duplicates_count, "the committed feed reports no duplicates");
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = await open(page);
+  const tab = page.locator(".tab[data-view=cleanup]");
+  await expect(tab).toBeVisible();
+  await expect(page.locator("#count-cleanup")).toHaveText(String(feed.youtube.duplicates_count));
+  await tab.click();
+  await expect(page.locator("#cleanup")).toBeVisible();
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  await expect(page.locator("#filters")).toBeHidden();
+  await expect(page.locator("#cl-summary")).toContainText(`${feed.youtube.duplicates_count} duplicated songs`);
+  await expect(page.locator("#cl-quota")).toContainText("removals possible today");
+  await expect.poll(() => page.locator("#cl-dupes .dupe").count()).toBeGreaterThan(10);
+  // a same-video duplicate offers to remove the extra copy; the bulk button waits for a kind and a year
+  await expect(page.locator("#cl-dupe-bulk")).toBeHidden();
+  await page.selectOption("#cl-dupe-kind", "same-video");
+  const year = await page.locator("#cl-dupe-yr option").nth(1).getAttribute("value");
+  await page.selectOption("#cl-dupe-yr", year);
+  await expect(page.locator("#cl-dupe-bulk")).toBeVisible();
+  await expect(page.locator("#cl-dupe-bulk")).toContainText(`extra copies in ${year}`);
+  await expect(page.locator("#cl-dupes .dupe button[data-fix=extra]").first()).toBeVisible();
+  // the filter narrows by title, and Settings points here too
+  await page.fill("#cl-dupe-q", "zzzz-no-such-song");
+  await expect(page.locator("#cl-dupes")).toContainText("nothing matches");
+  await page.click("#settings-btn");
+  await expect(page.locator("#s-dupes-summary")).toContainText("duplicated songs");
+  await page.click("#s-cleanup");
+  await expect(page.locator("#settings")).toBeHidden();
+  await expect(page.locator("#cleanup")).toBeVisible();
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

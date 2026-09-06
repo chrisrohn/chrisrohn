@@ -191,6 +191,7 @@ function listFor(view) {
     for (const it of [...mine, ...picks]) { const k = ((it.youtube && it.youtube.videoId) || it.id); if (seen.has(k)) continue; seen.add(k); all.push({ ...it, _pick: true, _year: it._year || (state.rated[it.id] && state.rated[it.id].year) }); }
     return all.filter(i => !q || hay(i).includes(q));
   }
+  if (view === "cleanup") return [];   // the Cleanup tab is its own section, not a list of cards
   if (view === "skipped") {
     // what this account thumbed down and is still in the feed or the catalog, newest skip first; Undo brings any back
     return allItems().filter(i => decisionFor(i.id)?.decision === "down" && (!q || hay(i).includes(q)))

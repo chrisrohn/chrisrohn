@@ -37,7 +37,7 @@ async function syncFileId() {
   if (f) { state.sync.fileId = f.id; persist(); return f.id; }
   return null;
 }
-/** @param {string} id @returns {Promise<{rated: Record<string, Rated>, quota?: {day: string, units: number}} | null>} */
+/** @param {string} id @returns {Promise<{rated: Record<string, Rated>, quota?: {day: string, units: number}, dupesDone?: string[]} | null>} */
 async function readSyncFile(id) {
   const r = await drive("GET", `${DRIVE}/files/${id}`, { params: { alt: "media" } });
   const data = await r.json().catch(() => null);
@@ -47,7 +47,7 @@ async function readSyncFile(id) {
 // decision; "undone" is a tombstone so an Undo on one device also un-hides the track on the others.
 /** @param {Rated | undefined} r */
 const weak = r => !r || r.decision === "seen";
-/** @param {{rated?: Record<string, Rated>, quota?: {day: string, units: number}} | null} remote */
+/** @param {{rated?: Record<string, Rated>, quota?: {day: string, units: number}, dupesDone?: string[]} | null} remote */
 export function mergeRemote(remote) {
   let changed = false;
   for (const [id, r] of Object.entries((remote && remote.rated) || {})) {
@@ -56,6 +56,9 @@ export function mergeRemote(remote) {
     const newer = !l || (r.at || 0) > (l.at || 0);
     if ((newer && !(weak(r) && !weak(l))) || (weak(l) && !weak(r))) { state.rated[id] = { ...r, pending: false }; changed = true; }
   }
+  // duplicates cleaned on another device stay cleaned here
+  const done = (remote && remote.dupesDone) || [];
+  if (done.length) { const mine = new Set(state.settings.dupesDone || []); const add = done.filter(k => !mine.has(k)); if (add.length) { state.settings.dupesDone = [...(state.settings.dupesDone || []), ...add].slice(-3000); changed = true; } }
   // the quota is per account, not per device: the highest count any device saw today is the truth
   const q = remote && remote.quota;
   if (q && q.day === ptDay() && (state.quota.day !== q.day || q.units > state.quota.units)) { state.quota = { day: q.day, units: q.units }; changed = true; }
@@ -83,7 +86,7 @@ export async function pushRatings() {
     // never overwrite what another device wrote since we last looked: fold the file in first, then write the union
     if (id) { const remote = await readSyncFile(id).catch(() => null); if (remote && mergeRemote(remote)) render(); }
     const shared = Object.fromEntries(Object.entries(state.rated).filter(([, r]) => !r.pending));
-    const payload = JSON.stringify({ version: 3, account: state.auth?.email, updatedAt: new Date().toISOString(), rated: shared, quota: state.quota });
+    const payload = JSON.stringify({ version: 4, account: state.auth?.email, updatedAt: new Date().toISOString(), rated: shared, quota: state.quota, dupesDone: state.settings.dupesDone || [] });
     if (id) {
       await drive("PATCH", `${DRIVE_UPLOAD}/files/${id}`, { params: { uploadType: "media" }, body: payload, raw: true });
     } else {

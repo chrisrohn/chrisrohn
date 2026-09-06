@@ -12,6 +12,7 @@ import { rate, undo } from "./rating.js";
 import { play, toggle, refreshNow } from "./player.js";
 import { personal, scoreOf } from "./rank.js";
 import { addYearFinder, discogsSearch } from "./yearfind.js";
+import { renderDupes, openDupes, dupesLoaded } from "./dupes.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -39,7 +40,8 @@ export function render() {
     appendCards(Math.max(PAGE, keep));
   }
   refreshNow();
-  const empty = $("#empty"); empty.hidden = vis.length > 0;
+  const cleanup = state.view === "cleanup"; $("#cleanup").hidden = !cleanup; if (cleanup) renderDupes(false);
+  const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup;
   empty.textContent = state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.")
     : state.view === "skipped" ? "Nothing skipped from this feed."
     : state.view === "catalog" ? ({ idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog. Reload to try again." }[state.catalogState] || "Nothing here with these filters.")
@@ -47,12 +49,14 @@ export function render() {
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters (the
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
   const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
-  const counts = { feed: full("feed"), picks: visibleItems("picks").length, skipped: isCurator() ? visibleItems("skipped").length : 0, catalog: state.catalog ? full("catalog") : 0 };
+  const counts = { feed: full("feed"), picks: visibleItems("picks").length, skipped: isCurator() ? visibleItems("skipped").length : 0, catalog: state.catalog ? full("catalog") : 0,
+    cleanup: dupesLoaded() ? openDupes() : (state.feed?.youtube?.duplicates_count || 0) };
   state.shortlistHidden = hidden;
   for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = k === "catalog" && !state.catalog ? "…" : String(n); }
   $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
   $$(".tab").forEach(t => { const on = t.dataset.view === state.view; t.classList.toggle("active", on); if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current"); });
   $("#filters").classList.toggle("picks", state.view === "picks" || state.view === "skipped");
+  $("#filters").classList.toggle("cleanup", cleanup);
   $("#filters").classList.toggle("catalog", state.view === "catalog");
 }
 /** Render up to `count` cards of the current list; a sentinel at the end pulls in the next page. @param {number} count */

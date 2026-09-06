@@ -8,6 +8,7 @@ approvals land in the matching `<year> | Indie Discotheque` playlist.
 - Site: [chrisrohn.com](https://chrisrohn.com) · RSS: [chrisrohn.com/feed.xml](https://chrisrohn.com/feed.xml)
 - How it works and how to set it up: [SETUP.md](SETUP.md)
 - Pipeline: [`discovery/`](discovery) · Site: [`site/`](site) · Workflows: [`.github/workflows/`](.github/workflows)
+- A **Cleanup** tab for the duplicated songs the daily build finds across the year playlists, paced by the API quota and remembered across devices
 - Audio-only where YouTube Music has it: the resolver prefers the audio track over the video and the original issue over a deluxe edition
 - Earlier years too: the **Catalog** tab draws on the Last.fm history (most played, loved, your artists' and their neighbours' best-known tracks), hides what the playlists already hold, verifies each track's release year, and lets you fill the thin years one Keep at a time
 - It learns: every keep and skip teaches the site (and, via the playlists, the daily build) which sources, blogs, tags and artists you actually keep, without spending YouTube API quota; the Feed opens on a shortlist of the top 60, ⚙ → *Stats* shows the keep rates, and the *Skipped* tab restores anything thumbed down
