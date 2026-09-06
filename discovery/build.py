@@ -45,6 +45,10 @@ def build_feed(cfg: dict) -> dict:
     items = score_items(items, profile, cfg)
     items = [i for i in items if i.score >= float(rcfg.get("min_score", 0))][: int(rcfg.get("max_items", 200)) + 60]
     resolve_all(items, cfg, deadline)
+    # resolution renames a release to the track its video is (promote), which can give it the key of a track already in
+    # the list; the score order puts the stronger one first, so the merge keeps its video and folds in the other's sources
+    items.sort(key=lambda i: (-i.score, i.artist_norm))
+    items = dedupe(items)
     items = collapse_shared_videos(items)   # several items on one video are one song: one card
     # after resolution, drop things with no playable YouTube result unless they are strong matches
     items = [i for i in items if i.youtube or i.match_kind == "direct" or i.editorial]
