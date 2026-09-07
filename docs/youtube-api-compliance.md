@@ -31,6 +31,14 @@ cleaning duplicates and dead uploads (the **Cleanup** tab) spends 50 units per a
 units cap a day at about 200 playlist edits. The site already paces itself: it shows the running meter in ⚙, refuses
 bulk actions the day's quota cannot cover, and reuses one playlist reading for every Keep in the following half hour.
 
+## The walkthrough PDF (no quota needed)
+
+[youtube-api-walkthrough.pdf](youtube-api-walkthrough.pdf) is the same story as the shot list below, as fifteen
+pages of screenshots with captions and the request log as an appendix. `npm run walkthrough` regenerates it: it
+builds the site, drives it through every step in headless Chromium with the Google APIs answered locally
+(`docs/walkthrough/capture.mjs`, so it spends no quota and runs offline) and lays out the PDF
+(`docs/walkthrough/pdf.py`, needs `pip install reportlab pillow`). Send it when a video is not possible, or with one.
+
 ## Recording the screencast
 
 **Before you start**

@@ -12,5 +12,5 @@ export default [
   { files: ["site/sw.js"], languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: globals.serviceworker } },
   { files: ["site/theme.js"], languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: globals.browser } },   // the pre-paint theme switch, a classic script
   // the browser globals cover code handed to page.evaluate() in the smoke test and the screenshot script
-  { files: ["build.mjs", "screenshots.mjs", "playwright.config.mjs", "tests/site/**/*.mjs"], languageOptions: { ecmaVersion: 2023, sourceType: "module", globals: { ...globals.node, ...globals.browser } } },
+  { files: ["build.mjs", "screenshots.mjs", "playwright.config.mjs", "tests/site/**/*.mjs", "docs/walkthrough/*.mjs"], languageOptions: { ecmaVersion: 2023, sourceType: "module", globals: { ...globals.node, ...globals.browser } } },
 ];

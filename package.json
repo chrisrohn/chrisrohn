@@ -10,7 +10,8 @@
     "check": "npm run lint && npm run typecheck && npm run build",
     "test": "playwright test",
     "serve": "npm run build && python3 -m http.server -d dist 8000",
-    "screenshots": "npm run build && node screenshots.mjs"
+    "screenshots": "npm run build && node screenshots.mjs",
+    "walkthrough": "npm run build && node docs/walkthrough/capture.mjs docs/walkthrough/shots && python3 docs/walkthrough/pdf.py docs/walkthrough/shots docs/youtube-api-walkthrough.pdf"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
