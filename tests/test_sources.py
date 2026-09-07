@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -348,7 +348,8 @@ def test_kexp_pages_back_to_the_last_cursor(sandbox):
     assert http.calls[1][0].endswith("offset=200") and http.calls[1][1].get("params") is None and len(http.calls) == 2
     assert HEALTH["radio:KEXP"] == {"ok": True, "entries": 5, "kept": 3, "error": None}
     song1, song2 = out[0], out[1]
-    assert song1.date_kind == "sighting" and song1.release_date == TODAY and song2.date_kind == "release"
+    an_hour_ago = (util.utcnow() - timedelta(hours=1)).date()   # the airdate's own day, which is yesterday just after midnight UTC
+    assert song1.date_kind == "sighting" and song1.release_date == an_hour_ago and song2.date_kind == "release"
     cursor = util.read_json(radio.kexp_cache_path(), {})
     assert cursor["v"] == radio.KEXP_CACHE_VERSION and cursor["cursor"] == pages[radio.KEXP_PLAYS]["results"][0]["airdate"]
 
@@ -467,7 +468,8 @@ def test_reddit_link_posts(sandbox):
     out = reddit.fetch(cfg, PROFILE, Recorder(route))
     assert [(i.artist, i.title) for i in out] == [("Jungle", "Keep Moving"), ("Roosevelt", "Lovers"), ("Parcels", "Free")]
     j, r, p = out
-    assert j.stated_year == 2026 and j.tags == ["nu-disco", "funk"] and j.youtube is None and j.date_kind == "sighting" and j.release_date == TODAY
+    posted = datetime.fromtimestamp(now - 3600, tz=UTC).date()   # the post's own day, which is yesterday just after midnight UTC
+    assert j.stated_year == 2026 and j.tags == ["nu-disco", "funk"] and j.youtube is None and j.date_kind == "sighting" and j.release_date == posted
     assert j.links == {"youtube": "https://www.youtube.com/watch?v=abc123def45", "reddit": "https://www.reddit.com/r/indieheads/comments/1/x/"}
     assert j.sources == ["reddit:indieheads"] and not j.editorial and "40 points" in j.blurb
     assert r.links["youtube"] == "https://www.youtube.com/watch?v=zzz123def45" and r.stated_year is None and r.tags == ["synthpop"]
