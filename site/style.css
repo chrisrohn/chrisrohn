@@ -183,6 +183,15 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 .stat-bar { display: block; height: 10px; background: var(--card2); border: 1px solid var(--hair); }
 .stat-bar i { display: block; height: 100%; background: var(--accent); }
 .stat-v { color: var(--muted); text-align: right; white-space: nowrap; }
+/* the API activity sheet: one line per request, newest first, coloured by what it did */
+.api-rows { display: flex; flex-direction: column; gap: 4px; max-height: min(52vh, 480px); overflow: auto; border: 1px solid var(--rule); padding: 6px; }
+.api-rows:empty { display: none; }
+.api-row { display: grid; grid-template-columns: 62px 52px minmax(90px, 1fr) minmax(96px, auto); grid-template-areas: "t m p s" "w w w w"; gap: 2px 10px; align-items: baseline; font: 11px/1.35 var(--mono); padding: 5px 8px; border-left: 4px solid var(--ink); background: var(--card2); }
+.api-row.read { border-left-color: var(--muted); } .api-row.write { border-left-color: var(--up); } .api-row.fail { border-left-color: var(--down); }
+.api-t { grid-area: t; color: var(--muted); } .api-m { grid-area: m; font-weight: 700; } .api-p { grid-area: p; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .api-s { grid-area: s; color: var(--muted); text-align: right; white-space: nowrap; }
+.api-w { grid-area: w; font: 12px/1.45 var(--sans); color: var(--ink); }
+.api-row small { display: block; color: var(--muted); font: 11px/1.35 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-row small.err { color: var(--down); white-space: normal; }
 .src { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border: 1px solid var(--hair); border-left: 3px solid var(--ink); color: var(--muted); }
 .src.listenbrainz { border-left-color: #eb743b; } .src.bandcamp { border-left-color: #1da0c3; } .src.musicbrainz { border-left-color: #ba478f; }
 .src.deezer, .src.deezer-editorial, .src.deezer-related { border-left-color: #a238ff; } .src.rss { border-left-color: var(--gold); } .src.spotify { border-left-color: #1db954; }

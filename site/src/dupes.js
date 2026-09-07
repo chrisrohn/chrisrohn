@@ -136,11 +136,12 @@ async function swapOne(btn) {
 }
 /** @param {Unavailable} u @param {boolean} swap @returns {Promise<number>} removed copies */
 async function swapTrack(u, swap) {
+  const who = `${u.artist} - ${u.title}`;
   if (swap && u.alt) {
-    const present = await playlistItemsFor(u.playlistId, u.alt.videoId);
-    if (!present.length) await addToPlaylist(u.playlistId, u.alt.videoId);   // never a second copy of the good one
+    const present = await playlistItemsFor(u.playlistId, u.alt.videoId, { why: `Cleanup: verify “${titleFor(u.year)}” does not already hold the streamable upload`, detail: who });
+    if (!present.length) await addToPlaylist(u.playlistId, u.alt.videoId, { why: `Cleanup: add the upload of this song that streams here to “${titleFor(u.year)}”`, detail: who });   // never a second copy of the good one
   }
-  return removeCopies(u.playlistId, u.videoId, false);
+  return removeCopies(u.playlistId, u.videoId, false, { why: `Cleanup: remove the copy that no longer streams here from “${titleFor(u.year)}”`, detail: who });
 }
 export async function bulkSwap() {
   const f = dupeFilters(); const list = (state.unavailable || []).filter(unavOpen).filter(u => u.alt && u.year === f.year);
@@ -168,7 +169,7 @@ async function fixDupe(btn) {
   if (!confirm(what)) return;
   btn.disabled = true;
   try {
-    const n = await removeCopies(pid || "", vid || "", fix === "extra");
+    const n = await removeCopies(pid || "", vid || "", fix === "extra", { why: fix === "extra" ? `Cleanup: remove the extra copy of a song added twice to “${titleFor(year || "")}” (one copy stays)` : `Cleanup: remove the copy filed in the wrong year from “${titleFor(year || "")}”`, detail: `${d.artist} - ${d.title}` });
     if (fix === "extra") d.entries.forEach(e => markDupeDone(key, e.videoId)); else markDupeDone(key, vid);
     persist();
     toast(n ? `Removed ${n} · ${d.artist} - ${d.title}` : "Nothing to remove — already cleaned up");
@@ -176,11 +177,11 @@ async function fixDupe(btn) {
   } catch (e) { btn.disabled = false; toast("Could not remove: " + /** @type {Error} */ (e).message, true); }
 }
 // delete every playlist item holding this video (keepFirst: leave one copy in place); returns how many went
-/** @param {string} playlistId @param {string} videoId @param {boolean} keepFirst */
-async function removeCopies(playlistId, videoId, keepFirst) {
-  const ids = await playlistItemsFor(playlistId, videoId);
+/** @param {string} playlistId @param {string} videoId @param {boolean} keepFirst @param {{why: string, detail?: string}} ctx */
+async function removeCopies(playlistId, videoId, keepFirst, ctx) {
+  const ids = await playlistItemsFor(playlistId, videoId, { why: `Cleanup: verify which playlist items hold this video before removing any`, detail: ctx.detail });
   const victims = keepFirst ? ids.slice(1) : ids;
-  for (const i of victims) await removePlaylistItem(i);
+  for (const i of victims) await removePlaylistItem(i, ctx);
   return victims.length;
 }
 export async function bulkRemoveExtras() {
@@ -194,7 +195,7 @@ export async function bulkRemoveExtras() {
   let removed = 0, failed = 0;
   for (const [i, d] of todo.entries()) {
     bulk.textContent = `removing… ${i + 1}/${todo.length}`;
-    try { removed += await removeCopies(d.entries[0].playlistId, d.entries[0].videoId, true); d.entries.forEach(e => markDupeDone(d.key, e.videoId)); }
+    try { removed += await removeCopies(d.entries[0].playlistId, d.entries[0].videoId, true, { why: `Cleanup: remove the extra copy of a song added twice to “${titleFor(f.year)}” (one copy stays)`, detail: `${d.artist} - ${d.title}` }); d.entries.forEach(e => markDupeDone(d.key, e.videoId)); }
     catch (e) { failed++; if (/quota/i.test(/** @type {Error} */ (e).message)) break; }
     if (i % 10 === 9) persist();
   }

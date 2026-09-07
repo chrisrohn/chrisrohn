@@ -134,8 +134,11 @@ test("a rated track feeds the personal ranking and the stats", async ({ page }) 
   const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
   const blogs = [...new Set(feed.items.flatMap(i => i.sources || []).filter(s => s.startsWith("rss:")))];
   const only = src => feed.items.filter(i => (i.sources || []).includes(src) && !(i.sources || []).some(s => s !== src && blogs.includes(s)));
-  const srcs = blogs.filter(s => only(s).length >= 4).slice(0, 2);
-  test.skip(srcs.length < 2, "needs two blogs with four or more tracks of their own in the committed feed");
+  // the kept-from blog must also carry three playable, recent tracks beyond the four keeps: a flagged one, a replaced one, and one left for the ranking to score
+  const usable = src => only(src).filter(i => i.youtube?.videoId && !(Number.isFinite(i.year) && i.year < new Date().getFullYear() - 1));
+  const first = blogs.find(s => usable(s).length >= 7);
+  const srcs = [first, ...blogs.filter(s => s !== first && only(s).length >= 4)].slice(0, 2);
+  test.skip(!first || srcs.length < 2, "needs a blog with seven or more playable tracks of its own, and another with four, in the committed feed");
   const rated = {};
   only(srcs[0]).slice(0, 4).forEach((i, n) => { rated[i.id] = { decision: "up", at: Date.now() - n * 1000, videoId: i.youtube?.videoId, artist: i.artist, title: i.title, sources: i.sources, tags: i.tags, year: i.year }; });
   only(srcs[1]).slice(0, 3).forEach((i, n) => { rated[i.id] = { decision: "down", at: Date.now() - n * 1000, local: true, videoId: i.youtube?.videoId, artist: i.artist, title: i.title, sources: i.sources, tags: i.tags }; });
@@ -626,6 +629,70 @@ test("a lapsed sign-in refreshes itself after the first tap, and the tap still c
   await expect(page.locator("#cleanup")).toBeVisible();
   await expect.poll(() => popups).toBe(1);
   await expect(page.locator(".toast")).toContainText("sign-in needs a refresh");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("a Keep verifies the playlist, adds the track, Undo removes it — and the API activity sheet shows each request", async ({ browser }) => {
+  // a signed-in curator with a live token; every Google API answered here, so the whole flow runs without the network
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const year = new Date().getFullYear();
+  const target = feed.items.find(i => i.youtube && i.youtube.videoId && i.year === year);
+  test.skip(!target || !feed.youtube.playlists[String(year)], "the committed feed has no playable track for this year");
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false, shortlistSize: 500 }));
+    localStorage.setItem("id:filters", JSON.stringify({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: false, shortlist: false }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  /** @type {{method: string, path: string, params: Record<string, string>, body: any}[]} */
+  const calls = [];
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); const params = Object.fromEntries(u.searchParams);
+    const body = req.postData() ? (() => { try { return JSON.parse(req.postData() || ""); } catch { return req.postData(); } })() : null;
+    calls.push({ method: req.method(), path: u.pathname, params, body });
+    if (u.pathname.startsWith("/drive/")) return route.fulfill({ json: { files: [] } });                  // no ratings mirror yet
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: [] } });   // the playlist does not hold it
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "POST") return route.fulfill({ json: { id: "PLI-test-1", snippet: body.snippet } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") return route.fulfill({ status: 204, body: "" });
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("body")).toHaveClass(/curator/);
+  // on sign-in the site reads this year's playlist so that Keep never files a second copy
+  await expect.poll(() => calls.filter(c => c.method === "GET" && c.path === "/youtube/v3/playlistItems" && c.params.playlistId === feed.youtube.playlists[String(year)]).length).toBeGreaterThan(0);
+  const card = page.locator(`.card[data-id="${target.id}"]`);
+  await card.scrollIntoViewIfNeeded();
+  await card.locator(".btn.up").click();
+  await expect(page.locator(".toast")).toContainText(`${year} | Indie Discotheque`);
+  const add = calls.find(c => c.method === "POST" && c.path === "/youtube/v3/playlistItems");
+  expect(add.body.snippet.playlistId).toBe(feed.youtube.playlists[String(year)]);
+  expect(add.body.snippet.resourceId.videoId).toBe(target.youtube.videoId);
+  await expect(card).toBeHidden();
+  // Undo takes the item out again: one DELETE by playlist item id
+  await page.locator(".toast .btn", { hasText: "Undo" }).click();
+  await expect.poll(() => calls.filter(c => c.method === "DELETE" && c.path === "/youtube/v3/playlistItems").length).toBe(1);
+  expect(calls.find(c => c.method === "DELETE").params.id).toBe("PLI-test-1");
+  await expect(card).toBeVisible();
+  // the API activity sheet tells the same story in plain words, newest first, with the cost of each request
+  await page.click("#settings-btn"); await page.click("#s-apilog");
+  await expect(page.locator("#apilog")).toBeVisible();
+  await expect(page.locator("#apilog-summary")).toContainText(/2 writes \(50 units each\)/);
+  const rows = page.locator("#apilog .api-row");
+  await expect(rows.first()).toContainText("DELETE");
+  await expect(rows.first()).toContainText("Undo: remove the track the curator just took back");
+  await expect(rows.nth(1)).toContainText("POST");
+  await expect(rows.nth(1)).toContainText(`Keep: add the approved track to “${year} | Indie Discotheque”`);
+  await expect(rows.nth(1)).toContainText(target.artist.slice(0, 12));
+  await expect(rows.nth(1)).toContainText("50u");
+  await expect(page.locator("#apilog .api-row.read").first()).toContainText(`Verify what “${year} | Indie Discotheque” already holds`);
+  await page.click("#apilog-clear");
+  await expect(page.locator("#apilog-summary")).toContainText("No YouTube API requests yet");
   expect(errors).toEqual([]);
   await ctx.close();
 });

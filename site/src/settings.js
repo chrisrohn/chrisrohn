@@ -11,6 +11,7 @@ import { wireTheme } from "./theme.js";
 import { openStats } from "./stats.js";
 import { render } from "./render.js";
 import { pushToGitHub, ghEnabled, ratingsPayload } from "./github.js";
+import { wireApiLog } from "./apilog.js";
 
 function exportCsv() {
   const rows = [["Title", "Artist", "Notation", "Year", "YouTube"], ...Object.values(state.rated).filter(d => d.decision === "up").map(d => [d.title, d.artist, `${d.artist} - ${d.title}`, d.year, d.videoId ? "https://music.youtube.com/watch?v=" + d.videoId : ""])];
@@ -31,7 +32,7 @@ function openSettings() {
   const feed = state.feed; if (!feed) return;
   const yrs = [...new Set([...Object.keys(state.playlists).filter(k => !k.startsWith("__")), ...(isOwner() ? Object.keys((feed.youtube && feed.youtube.playlists) || {}) : [])])].sort();
   $("#s-playlists").textContent = `${yrs.length} year playlists known${yrs.length ? ` (${yrs[0]}–${yrs[yrs.length - 1]})` : ""}` + (state.playlists.__skipped ? ` · skipped playlist: ${state.playlists.__skipped}` : "") + (state.notOwner ? " · the Indie Discotheque playlists are collaborative (owned by @indiedisco); filing uses their known ids" : "");
-  $("#s-quota").textContent = quotaText();
+  $("#s-quota-text").textContent = quotaText();
   $("#s-auth-problem").textContent = state.lastAuthError ? `Last sign-in problem: ${state.lastAuthError.why} (${relTime(new Date(state.lastAuthError.at))}).` : "";
   $("#s-sync").textContent = state.sync.at ? `Ratings synced across your devices via Google Drive app data · last sync ${relTime(new Date(state.sync.at))} · ${Object.keys(state.rated).length} rated tracks remembered` : "Ratings not synced yet — sign in to sync across devices (uses a hidden app-data file in your Google Drive).";
   $("#s-gh-token").value = state.settings.ghToken || "";
@@ -64,6 +65,7 @@ export function wireSettings() {
   $("#s-skips").addEventListener("change", (/** @type {any} */ e) => { state.settings.skipsInYouTube = e.target.checked; persist(); });
   $("#s-export").addEventListener("click", exportCsv);
   $("#s-stats").addEventListener("click", () => { $("#settings").close(); openStats(); });
+  wireApiLog();
   $("#s-shortlist").value = state.settings.shortlistSize || 60;
   $("#s-shortlist").addEventListener("change", (/** @type {any} */ e) => { state.settings.shortlistSize = Math.min(500, Math.max(10, +e.target.value || 60)); e.target.value = state.settings.shortlistSize; persist(); render(); });
   $("#s-syncnow").addEventListener("click", () => pushRatings().then(() => pullRatings()).then(() => refreshRecent(true)).then(() => { $("#s-sync").textContent = `Synced just now · ${Object.keys(state.rated).length} rated tracks`; toast("Ratings synced"); }).catch(e => toast(e.message, true)));
