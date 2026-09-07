@@ -136,7 +136,10 @@ the build searches for another upload of the same song that streams there, the a
 adds the counterpart and removes the dead copy (100 units), *swap all in a year* does it in bulk within the day's
 quota, and a track with no other upload can be removed or searched by hand. The report is `site/data/unavailable.json`.
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
-YouTube API quota extension form in the Cloud console (free).
+YouTube API quota extension form in the Cloud console (free). The reviewers ask for a screencast of the client
+verifying playlist contents and adding or removing tracks: **⚙ → API activity** lists every YouTube Data API request
+the browser makes as it happens (endpoint, result, quota cost, and what it was for), with Copy / Download for the
+reply; [docs/youtube-api-compliance.md](docs/youtube-api-compliance.md) has the shot list and the reply to send.
 
 ## Public vs. curator
 

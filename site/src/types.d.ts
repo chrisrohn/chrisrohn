@@ -55,4 +55,13 @@ export interface State {
   sync: { fileId: string | null; at: number }; syncTimer: any; ghTimer: any; ghAt: number; _years: number[]; dupes: Dupe[] | null; dupePage: number; dupeQT: any;
   unavailable: Unavailable[] | null; library: any[] | null; notOwner: boolean; signingIn: Promise<boolean> | null; authCb: any; authErrCb: any; keepAliveAt: number;
   lastAuthError: { why: string; at: number } | null; ready: boolean; online: boolean; recentAt: number; recentVideos: Set<string>;
+  apiLog: ApiEntry[];
+}
+/** One YouTube Data API request, as the API activity sheet shows it. */
+export interface ApiEntry {
+  at: number; method: string; path: string; params?: Record<string, any>;
+  status: number; ok: boolean; units: number; ms: number;
+  why: string;       // what the site was doing, in plain words ("Keep: verify … does not already hold this video")
+  detail?: string;   // the track or playlist concerned
+  error?: string;
 }

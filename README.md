@@ -8,6 +8,7 @@ approvals land in the matching `<year> | Indie Discotheque` playlist.
 - Site: [chrisrohn.com](https://chrisrohn.com) · RSS: [chrisrohn.com/feed.xml](https://chrisrohn.com/feed.xml)
 - How it works and how to set it up: [SETUP.md](SETUP.md)
 - Pipeline: [`discovery/`](discovery) · Site: [`site/`](site) · Workflows: [`.github/workflows/`](.github/workflows)
+- **⚙ → API activity**: every YouTube Data API request the browser makes, as it happens, with what it was for (verify a playlist's contents, add the approved track, remove one taken back), its result and quota cost, exportable as text or JSON; [docs/youtube-api-compliance.md](docs/youtube-api-compliance.md) turns it into the screencast Google's quota reviewers ask for
 - A **Cleanup** tab for what the daily build finds across the year playlists: duplicated songs, and tracks that no longer stream in the US with the streamable upload to swap in, paced by the API quota and remembered across devices
 - Audio-only where YouTube Music has it: the resolver prefers the audio track over the video and the original issue over a deluxe edition
 - Earlier years too: the **Catalog** tab draws on the Last.fm history (most played, loved, your artists' and their neighbours' best-known tracks), hides what the playlists already hold, verifies each track's release year, and lets you fill the thin years one Keep at a time

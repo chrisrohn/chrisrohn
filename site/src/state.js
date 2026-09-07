@@ -70,6 +70,7 @@ export const state = {
   _years: [], dupes: null, unavailable: null, dupePage: 1, dupeQT: null, library: null, notOwner: false,
   signingIn: null, authCb: null, authErrCb: null, keepAliveAt: 0, lastAuthError: null, ready: false,
   online: typeof navigator === "undefined" || navigator.onLine !== false, recentAt: 0, recentVideos: new Set(),
+  apiLog: LS.get("id:apilog", []),          // every YouTube Data API request this browser made (⚙ → API activity), newest last
 };
 
 /** The feed's items (what is new). @returns {FeedItem[]} */

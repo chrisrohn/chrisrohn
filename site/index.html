@@ -239,12 +239,28 @@
   </form>
 </dialog>
 
+<dialog id="apilog" aria-labelledby="apilog-title">
+  <form method="dialog" class="settings-form">
+    <h2 id="apilog-title">API activity</h2>
+    <p class="muted">Every request this browser makes to the YouTube Data API, as it happens. The site only ever does three things with it: <b>read</b> a playlist to verify what it already holds, <b>add</b> the track you approved with ▲︎ Keep, and <b>remove</b> one you took back (Undo, restore) or that the Cleanup tab found twice. Nothing runs in the background and nothing writes without a tap. Kept on this device only.</p>
+    <p class="muted" id="apilog-summary"></p>
+    <div id="apilog-rows" class="api-rows" aria-live="polite"></div>
+    <div class="row">
+      <button class="btn ghost small" type="button" id="apilog-copy" title="The same rows as plain text">Copy as text</button>
+      <button class="btn ghost small" type="button" id="apilog-download" title="The same rows as JSON">Download JSON</button>
+      <button class="btn ghost small" type="button" id="apilog-clear">Clear</button>
+      <span class="grow"></span>
+      <button class="btn primary" value="ok">Done</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="settings">
   <form method="dialog" class="settings-form">
     <h2>Settings</h2>
     <p class="muted">Signing in uses YouTube API Services; see the <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms</a>. Anyone can listen here. <b>Sign in with Google</b> and the Keep / Skip buttons appear: <b>▲︎ Keep</b> adds the track to a year playlist in <em>your own</em> YouTube library right away (curator: <code>&lt;year&gt; | Indie Discotheque</code>; guests: <code>&lt;year&gt; Picks from chrisrohn.com</code>), with Undo for a few seconds. <b>▼︎ Skip</b> hides it for good. <b>≠ Wrong video</b> is for a card whose YouTube match plays something other than the title it shows: it hides the card without judging the song, costs nothing, and tells the daily build to look for another upload — the card is back the moment one is found. Your ratings are mirrored to a hidden app-data file in your own Google Drive, so every device you sign into stays in step. Nothing else is touched.</p>
     <p class="muted" id="s-playlists"></p>
-    <p class="muted" id="s-quota"></p>
+    <p class="muted" id="s-quota"><span id="s-quota-text"></span> <button class="btn ghost small" type="button" id="s-apilog" title="Every YouTube Data API request this browser made, with what it was for">API activity</button></p>
     <p class="muted curator" id="s-sync"></p>
     <p class="muted" id="s-install"><span id="s-install-text"></span> <button class="btn ghost small" type="button" id="s-install-btn">Install as an app</button> <button class="btn ghost small" type="button" id="s-update-btn" hidden>Check for updates</button> <span class="mono" id="s-build"></span></p>
     <p class="muted" id="s-account">Google sign-in lasts an hour at a time and renews itself the next time you tap a thumb. <b>Sign out</b> only forgets this device; to disconnect the site from your Google account entirely, remove it at <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>. <span id="s-auth-problem"></span></p>

@@ -4,28 +4,39 @@ import { state, persist, spend, items, decisionFor, YT_API } from "./state.js";
 import { toast } from "./dom.js";
 import { withAuth, signIn, applyMode, isOwner, isCurator, tokenValid } from "./auth.js";
 import { render } from "./render.js";
+import { logApi, describe } from "./apilog.js";
 
-/** @param {string} method @param {string} path @param {{params?: Record<string, any>, body?: any, _retried?: boolean}} [opts] @returns {Promise<any>} */
-export async function yt(method, path, { params = {}, body, _retried = false } = {}) {
+/** Every request goes through here and is written to the API activity sheet (⚙ → API activity) with the reason the
+ * caller gives (`why`, `detail`) or the endpoint's own description. Reads cost 1 unit, writes 50.
+ * @param {string} method @param {string} path @param {{params?: Record<string, any>, body?: any, why?: string, detail?: string, _retried?: boolean}} [opts] @returns {Promise<any>} */
+export async function yt(method, path, { params = {}, body, why, detail, _retried = false } = {}) {
   return withAuth(async token => {
     const url = new URL(YT_API + path); for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
-    const r = await fetch(url, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    const t0 = performance.now();
+    const logged = { method, path, params: { ...params, ...(body?.snippet?.playlistId ? { playlistId: body.snippet.playlistId } : {}), ...(body?.snippet?.resourceId?.videoId ? { videoId: body.snippet.resourceId.videoId } : {}) }, why: why || describe(method, path, params), detail };
+    /** @param {Response | null} r @param {string} [error] */
+    const record = (r, error) => logApi({ ...logged, status: r ? r.status : 0, ok: !!r && r.ok, units: r && r.ok ? (method === "GET" ? 1 : 50) : 0, ms: Math.round(performance.now() - t0), error });
+    let r;
+    try { r = await fetch(url, { method, headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined }); }
+    catch (e) { record(null, /** @type {Error} */ (e).message); throw e; }
     // only a request YouTube answered costs quota: a refused token or a quota error does not, and must not throttle us early
     if (r.ok) spend(method === "GET" ? 1 : 50);
-    if (r.status === 204) return {};
+    if (r.status === 204) { record(r); return {}; }
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
       const msg = (j.error && j.error.message) || r.statusText;
+      record(r, msg);
       if (r.status === 401) {
         // token revoked or expired early: get a fresh one silently and retry once
         if (state.auth) state.auth.expires_at = 0; persist();
-        if (!_retried && await signIn({ silent: true })) return yt(method, path, { params, body, _retried: true });
+        if (!_retried && await signIn({ silent: true })) return yt(method, path, { params, body, why, detail, _retried: true });
         applyMode(); throw new Error("Google sign-in needs a refresh — tap the Sign in button in the message");
       }
       if (r.status === 403 && /quota/i.test(msg)) throw new Error(msg + " — daily YouTube API quota reached; try again after midnight Pacific");
       if (r.status === 403 && path.startsWith("/playlistItems") && method === "POST") throw new Error("YouTube refused to add to that playlist for this sign-in. Collaborative playlists can only be edited through the API by the channel that owns them (@indiedisco) — sign out and sign in again choosing that channel, or make the playlist owner account a curator.");
       throw new Error(msg);
     }
+    record(r);
     return j;
   });
 }
@@ -49,7 +60,7 @@ export function yearFromTitle(t) {
 export async function loadLibraryPlaylists() {
   let pageToken; let n = 0; const all = [];
   do {
-    const j = await yt("GET", "/playlists", { params: { part: "snippet,contentDetails", mine: "true", maxResults: 50, pageToken } });
+    const j = await yt("GET", "/playlists", { params: { part: "snippet,contentDetails", mine: "true", maxResults: 50, pageToken }, why: "List the signed-in library's playlists to find the year playlists and the Skipped playlist", detail: pageToken ? "next page" : undefined });
     for (const p of j.items || []) {
       const t = (p.snippet.title || "").trim();
       all.push({ id: p.id, title: t, count: (p.contentDetails || {}).itemCount || 0, published: p.snippet.publishedAt, desc: p.snippet.description || "" });
@@ -93,7 +104,7 @@ export async function playlistFor(year) {
   if (!state.playlists[year]) {
     const ok = confirm(`No playlist called “${titleFor(year)}” exists in this YouTube account (${state.auth?.email}).\n\nCreate it now? (Cancel if it should already exist — then check the title spelling or the signed-in channel.)`);
     if (!ok) throw new Error("no playlist for " + year);
-    const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: titleFor(year), description: "Filed from chrisrohn.com" }, status: { privacyStatus: "public" } } });
+    const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: titleFor(year), description: "Filed from chrisrohn.com" }, status: { privacyStatus: "public" } }, why: `Create the year playlist “${titleFor(year)}” (the signed-in account confirmed it)` });
     state.playlists[year] = j.id; persist(); toast(`Created playlist “${titleFor(year)}”`);
   }
   return state.playlists[year];
@@ -101,23 +112,24 @@ export async function playlistFor(year) {
 export async function skippedPlaylist() {
   if (!state.playlists.__skipped && !state.playlists.__loaded_at) await loadLibraryPlaylists();
   if (!state.playlists.__skipped) {
-    const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: skippedTitle(), description: "Thumbs-down from chrisrohn.com. Keep unlisted; paste the ID into discovery/config.yaml → skipped_playlist_id." }, status: { privacyStatus: "unlisted" } } });
+    const j = await yt("POST", "/playlists", { params: { part: "snippet,status" }, body: { snippet: { title: skippedTitle(), description: "Thumbs-down from chrisrohn.com. Keep unlisted; paste the ID into discovery/config.yaml → skipped_playlist_id." }, status: { privacyStatus: "unlisted" } }, why: `Create the unlisted “${skippedTitle()}” playlist for thumbs-down (first skip filed on YouTube)` });
     state.playlists.__skipped = j.id; persist();
     toast(`Created unlisted “${skippedTitle()}” playlist. Paste its ID into config.yaml → skipped_playlist_id: ${j.id}`);
   }
   return state.playlists.__skipped;
 }
-/** @param {string} playlistId @param {string} videoId @returns {Promise<string>} */
-export async function addToPlaylist(playlistId, videoId) {
-  const j = await yt("POST", "/playlistItems", { params: { part: "snippet" }, body: { snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } } });
+/** The one write a Keep makes. `why`/`detail` name the track and the playlist in the API activity sheet.
+ * @param {string} playlistId @param {string} videoId @param {{why?: string, detail?: string}} [ctx] @returns {Promise<string>} */
+export async function addToPlaylist(playlistId, videoId, ctx = {}) {
+  const j = await yt("POST", "/playlistItems", { params: { part: "snippet" }, body: { snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } }, ...ctx });
   return j.id;
 }
-/** @param {string} playlistItemId */
-export async function removePlaylistItem(playlistItemId) { await yt("DELETE", "/playlistItems", { params: { id: playlistItemId } }); }
+/** @param {string} playlistItemId @param {{why?: string, detail?: string}} [ctx] */
+export async function removePlaylistItem(playlistItemId, ctx = {}) { await yt("DELETE", "/playlistItems", { params: { id: playlistItemId }, ...ctx }); }
 // every playlist item holding this video (1 quota unit) — the duplicate guard and the cleanup tool both use it
-/** @param {string} playlistId @param {string} videoId @returns {Promise<string[]>} */
-export async function playlistItemsFor(playlistId, videoId) {
-  const j = await yt("GET", "/playlistItems", { params: { part: "id", playlistId, videoId, maxResults: 50 } });
+/** @param {string} playlistId @param {string} videoId @param {{why?: string, detail?: string}} [ctx] @returns {Promise<string[]>} */
+export async function playlistItemsFor(playlistId, videoId, ctx = {}) {
+  const j = await yt("GET", "/playlistItems", { params: { part: "id", playlistId, videoId, maxResults: 50 }, ...ctx });
   return (j.items || []).map((/** @type {any} */ i) => i.id);
 }
 const RECENT_EVERY_MS = 30 * 60e3;
@@ -133,8 +145,9 @@ export async function refreshRecent(force = false) {
   const seen = new Set();
   for (const pid of ids) {
     let pageToken, pages = 0;
+    const name = pid === state.playlists.__skipped ? skippedTitle() : titleFor(y);
     do {
-      const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50, pageToken } }).catch(() => ({}));
+      const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50, pageToken }, why: `Verify what “${name}” already holds, so tracks filed from another device are hidden and Keep never adds a second copy`, detail: pages ? `page ${pages + 1}` : undefined }).catch(() => ({}));
       for (const it of j.items || []) seen.add(it.snippet.resourceId && it.snippet.resourceId.videoId);
       pageToken = j.nextPageToken;
     } while (pageToken && ++pages < 40);

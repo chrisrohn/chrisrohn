@@ -67,7 +67,7 @@ export async function rate(id, decision, year) {
       // never file the same video twice. This year's playlist was read a moment ago (refreshRecent), so the 1-unit
       // probe is only spent when that reading is stale or the target is another year
       const fresh = pid === (knownYear(year) || state.playlists[String(year)]) && String(year) === String(new Date().getFullYear()) && Date.now() - state.recentAt < 30 * 60e3;
-      const present = fresh ? (state.recentVideos.has(vid) ? ["known"] : []) : await playlistItemsFor(pid, vid);
+      const present = fresh ? (state.recentVideos.has(vid) ? ["known"] : []) : await playlistItemsFor(pid, vid, { why: `Keep: verify “${titleFor(year)}” does not already hold this video before adding it`, detail: credit(it) });
       if (present.length) {
         state.rated[id] = { ...state.rated[id], pending: false, duplicate: true, playlistId: pid };
         persist(); schedulePush(); state.busy.delete(id);
@@ -75,7 +75,7 @@ export async function rate(id, decision, year) {
         return;
       }
     }
-    const itemId = await addToPlaylist(pid, vid);
+    const itemId = await addToPlaylist(pid, vid, { why: decision === "up" ? `Keep: add the approved track to “${titleFor(year)}”` : `Skip: file the track into the unlisted “${skippedTitle()}” playlist`, detail: credit(it) });
     state.rated[id] = { ...state.rated[id], playlistItemId: itemId, playlistId: pid, pending: false };
     if (decision === "up") state.recentVideos.add(vid);
     persist(); schedulePush();
@@ -91,7 +91,7 @@ export async function rate(id, decision, year) {
 export async function undo(id) {
   const r = state.rated[id]; if (!r || r.decision === "undone") return;
   try {
-    if (r.playlistItemId) await removePlaylistItem(r.playlistItemId);
+    if (r.playlistItemId) await removePlaylistItem(r.playlistItemId, { why: `Undo: remove the track the curator just took back from “${r.decision === "up" ? titleFor(r.year || "") : skippedTitle()}”`, detail: `${r.artist || ""} - ${r.title || ""}` });
     state.rated[id] = { decision: "undone", at: Date.now() };   // a tombstone: other devices un-hide it too
     if (state.lastRated === id) state.lastRated = null;
     persist(); render(); schedulePush(); toast("Undone");
@@ -110,7 +110,7 @@ export async function restoreAll(ids) {
   if (!ids.length) return;
   if (!confirm(`Restore ${ids.length} skipped track${ids.length === 1 ? "" : "s"} to the feed?${filed ? ` ${filed} of them sit in the Skipped playlist on YouTube: ${filed * 50} quota units to take them out.` : ""}`)) return;
   let n = 0;
-  for (const id of ids) { const r = state.rated[id]; if (!r || (r.decision !== "down" && r.decision !== "wrong")) continue; try { if (r.playlistItemId) await removePlaylistItem(r.playlistItemId); state.rated[id] = { decision: "undone", at: Date.now() }; n++; } catch (e) { toast("Could not restore one: " + /** @type {Error} */ (e).message, true); break; } }
+  for (const id of ids) { const r = state.rated[id]; if (!r || (r.decision !== "down" && r.decision !== "wrong")) continue; try { if (r.playlistItemId) await removePlaylistItem(r.playlistItemId, { why: `Restore: remove the track from the “${skippedTitle()}” playlist so it returns to the feed`, detail: `${r.artist || ""} - ${r.title || ""}` }); state.rated[id] = { decision: "undone", at: Date.now() }; n++; } catch (e) { toast("Could not restore one: " + /** @type {Error} */ (e).message, true); break; } }
   persist(); render(); schedulePush(); toast(`Restored ${n}`);
 }
 /** Back online: file what was decided while offline, oldest first. */
