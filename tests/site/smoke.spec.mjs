@@ -68,7 +68,7 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   // the artist name opens the artist sheet with everything by them
   await cards.first().locator(".artist").click();
   await expect(page.locator("#artist")).toBeVisible();
-  await expect(page.locator("#artist-name")).toHaveText(first);
+  await expect(page.locator("#artist-name")).toHaveText(first, { ignoreCase: true });   // the card uppercases the name in CSS; the sheet shows it as written
   expect(await page.locator("#artist .arow").count()).toBeGreaterThan(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("#artist")).toBeHidden();
