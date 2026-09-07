@@ -84,6 +84,11 @@ export function reindex() { state.index = new Map(allItems().map(i => [i.id, i])
 export const byId = id => state.index.get(id);
 /** A rating that still counts: an "undone" record is a tombstone, not a decision. @param {string} id */
 export const decisionFor = id => { const r = state.rated[id]; return r && r.decision !== "undone" ? r : null; };
+/** The rating that keeps this card off the list, if any. A "wrong video" flag is tied to the video it was raised
+ * against: once the build pairs the track with another upload the card is back for a fresh look. @param {FeedItem} it */
+export const hiddenBy = it => { const r = decisionFor(it.id); if (r && r.decision === "wrong" && r.videoId && it.youtube?.videoId && it.youtube.videoId !== r.videoId) return null; return r; };
+/** A decision that costs no quota and never leaves this account's own records: a local skip or a wrong-video flag. @param {import("./types").Rated | null | undefined} r */
+export const isLocalDecision = r => !!r && (r.decision === "wrong" || (r.decision === "down" && !!r.local));
 /** YouTube refused to embed this video here recently (error 101/150): the feed keeps it, autoplay steps over it. @param {string | null | undefined} vid */
 export const badVideo = vid => !!(vid && state.badVideos[vid] && Date.now() - state.badVideos[vid] < BAD_VIDEO_MS);
 /** @param {string} vid */
@@ -100,15 +105,15 @@ export const quotaLeft = () => 10000 - quotaUsed();
 export const quotaText = () => `~${quotaUsed().toLocaleString()} of 10,000 YouTube API units used today by your devices (${Math.floor(quotaLeft() / 50)} more saves) · resets midnight Pacific`;
 
 // Local bookkeeping that has outlived its purpose: ratings the daily build now hides via the playlists, local skips
-// after a year, undo tombstones after 30 days, and optimistic entries whose request never came back.
+// and wrong-video flags after a year, undo tombstones after 30 days, and optimistic entries whose request never came back.
 export function reconcileRated() {
   const now = Date.now(); const ids = new Set(allItems().map(i => i.id));
   for (const [id, r] of Object.entries(state.rated)) {
     const age = now - (r.at || 0);
     if (r.pending && !r.queued && age > PENDING_MAX_MS) { delete state.rated[id]; continue; }   // it never reached YouTube; let it show again (a queued one waits for the network)
     if (r.decision === "undone" && age > 30 * 86400e3) { delete state.rated[id]; continue; }
-    if (r.decision === "down" && r.local && age > 365 * 86400e3) { delete state.rated[id]; continue; }
-    if (!ids.has(id) && r.decision !== "down" && age > 45 * 86400e3) delete state.rated[id];
+    if (isLocalDecision(r) && age > 365 * 86400e3) { delete state.rated[id]; continue; }
+    if (!ids.has(id) && r.decision !== "down" && r.decision !== "wrong" && age > 45 * 86400e3) delete state.rated[id];
   }
 }
 /** @type {Record<string, string>} */

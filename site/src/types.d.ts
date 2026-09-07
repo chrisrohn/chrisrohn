@@ -24,7 +24,9 @@ export interface Feed {
   lastfm_user?: string; repo?: string; profile?: { built_at?: string; counts?: Record<string, number> }; sources?: string[]; blogs?: string[]; items: FeedItem[];
 }
 export interface Rated {
-  decision: "up" | "down" | "seen" | "undone"; at: number; year?: number | string; videoId?: string; artist?: string; title?: string;
+  // "wrong": the card's YouTube match plays something else — the song itself was not judged; hidden while the build
+  // still pairs it with that video, back as soon as the resolver finds another upload
+  decision: "up" | "down" | "wrong" | "seen" | "undone"; at: number; year?: number | string; videoId?: string; artist?: string; title?: string;
   playlistItemId?: string; playlistId?: string; pending?: boolean; local?: boolean; duplicate?: boolean;
   queued?: boolean;   // made offline: filed on YouTube the next time the browser is online
   sources?: string[]; tags?: string[];   // what the card carried when it was rated: the personal ranking and the stats learn from these

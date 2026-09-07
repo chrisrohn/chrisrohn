@@ -9,6 +9,8 @@ Audio first: YouTube Music lists most songs twice, as the audio-only track (vide
 the playlists want) and as the official video (OMV). Search hits prefer the audio track, and a video hit is swapped
 for its audio counterpart through the watch playlist, which pairs the two. The album a song search names is opened
 once for its year and its playlist, so an undated track still has a year to fall back on.
+A video the curator flagged on the site as the wrong one (≠, data/ratings.json) is refused for that track from then
+on: the cached row is redone without it, and the row remembers the refusal ("not") so the flag outlives the rating.
 Results are cached in data/cache/youtube.json.
 """
 from __future__ import annotations
@@ -117,12 +119,15 @@ def artist_agrees(artist: str, names: list[str] | None) -> bool:
     return bool(a) and any(a == n or a in n or n in a for n in ns)
 
 
-def _pick(results: list[dict], artist: str, title: str | None) -> dict | None:
-    """Best search hit for the item: the artist must match, and so must the title whenever we know one."""
+def _pick(results: list[dict], artist: str, title: str | None, avoid: set[str] | None = None) -> dict | None:
+    """Best search hit for the item: the artist must match, and so must the title whenever we know one; an upload
+    the curator flagged as the wrong video (`avoid`) is never it."""
     t = norm_track(title) if title else ""
     best, best_score = None, 0.0
     for r in results:
         if r.get("resultType") not in ("song", "video"):
+            continue
+        if avoid and r.get("videoId") in avoid:
             continue
         artist_ok = artist_agrees(artist, [x.get("name") for x in (r.get("artists") or [])])
         title_ok = bool(t) and titles_agree(title, r.get("title"), artist)
@@ -213,8 +218,8 @@ def _album_track(tracks: list[dict], it: Item) -> dict:
     return next((t for t in tracks if titles_agree(want, t.get("title"))), tracks[0])
 
 
-def _from_album(detail: dict, it: Item, via: str) -> dict[str, Any] | None:
-    tracks = [t for t in (detail.get("tracks") or []) if t.get("videoId")]
+def _from_album(detail: dict, it: Item, via: str, avoid: set[str] | None = None) -> dict[str, Any] | None:
+    tracks = [t for t in (detail.get("tracks") or []) if t.get("videoId") and not (avoid and t["videoId"] in avoid)]
     if not tracks:
         return None
     found = _shape(_album_track(tracks, it), via)
@@ -269,20 +274,21 @@ def prune_cache(cache: dict[str, Any], today: date, keep_days: int, seen_key: st
     return {k: v for k, v in cache.items() if (v.get(seen_key) if isinstance(v, dict) else None) and v[seen_key] >= cutoff}
 
 
-def _lookup(yt, it: Item) -> dict[str, Any] | None:
-    """One item's YouTube Music lookup (network). Returns the shaped result or None; never mutates the item."""
+def _lookup(yt, it: Item, avoid: set[str] | None = None) -> dict[str, Any] | None:
+    """One item's YouTube Music lookup (network). Returns the shaped result or None; never mutates the item.
+    `avoid` holds the uploads the curator flagged as the wrong video for this track: none of them is a result."""
     if it.kind == "track":
         res = yt.search(f"{it.artist} {it.display_title}", filter="songs", limit=6)
-        hit = _pick(res, it.artist, it.display_title)
+        hit = _pick(res, it.artist, it.display_title, avoid)
         if not hit:
             res = yt.search(f"{it.artist} {it.display_title}", filter="videos", limit=4)
-            hit = _pick(res, it.artist, it.display_title)
+            hit = _pick(res, it.artist, it.display_title, avoid)
         if not hit:
             return None
         found = _shape(hit, "track-search")
         prefer_audio(yt, found)
         album_year(yt, found)
-        return found
+        return found if not (avoid and found.get("videoId") in avoid) else None
     want = it.release or it.title
     # release with a known browse id (artist watch): open exactly that release
     bid = browse_id(it)
@@ -290,7 +296,7 @@ def _lookup(yt, it: Item) -> dict[str, Any] | None:
         detail = yt.get_album(bid)
         names = [x.get("name") for x in (detail.get("artists") or [])]
         if not names or artist_agrees(it.artist, names):
-            found = _from_album(detail, it, "album-id")
+            found = _from_album(detail, it, "album-id", avoid)
             if found:
                 return found
     # otherwise find the release by title (an exact title first, then a title that contains ours), never "any album by them"
@@ -300,22 +306,25 @@ def _lookup(yt, it: Item) -> dict[str, Any] | None:
         or next((r for r in same_artist if titles_agree(want, r.get("title"))), None)
     if album and album.get("browseId"):
         detail = yt.get_album(album["browseId"])
-        found = _from_album(detail, it, "album")
+        found = _from_album(detail, it, "album", avoid)
         if found:
             found["year"] = found.get("year") or album.get("year")
             return found
     # a single that is only listed as a song: the song must carry the release's name
     res = yt.search(f"{it.artist} {want}", filter="songs", limit=6)
-    hit = _pick(res, it.artist, want)
+    hit = _pick(res, it.artist, want, avoid)
     if not hit:
         return None
     found = _shape(hit, "release-fallback")
     prefer_audio(yt, found)
     album_year(yt, found)
-    return found
+    return found if not (avoid and found.get("videoId") in avoid) else None
 
 
-def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) -> None:
+def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, avoid: dict[str, set[str]] | None = None) -> None:
+    """Give every item without a video its YouTube Music match, from the cache or a bounded number of lookups.
+    `avoid` maps item keys to the uploads the curator flagged as the wrong video (learn.wrong_videos): a cached row
+    that sits on one is redone without it, and the refusal is kept on the row ("not") for as long as the row lives."""
     rcfg = cfg.get("resolve") or {}
     if not rcfg.get("youtube_music", True):
         return
@@ -331,7 +340,7 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
     deadline = deadline or Deadline(None)
     budget = int(rcfg.get("max_lookups_per_run", 400))
     heal_budget = int(rcfg.get("audio_heals_per_run", 150))   # rows from before the audio preference: re-checked a batch a run
-    looked = stale = rejected = healed = 0
+    looked = stale = rejected = healed = flagged = 0
     skipped_deadline = 0
 
     def flush() -> None:
@@ -342,10 +351,15 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
             continue
         key = it.key
         row = cache.get(key)
+        # what this track must not resolve to: today's flags from the ratings file, and any the row already remembers
+        not_these = set((avoid or {}).get(key) or ()) | set((row or {}).get("not") or ())
         if row is not None:
             old = row.get("v") != CACHE_VERSION
             if row["yt"] and not plausible(it, row["yt"]):
                 stale += 1                       # the old resolver landed on another song by the same artist
+                del cache[key]
+            elif row["yt"] and row["yt"].get("videoId") in not_these:
+                flagged += 1                     # the curator said this video is not the song: look again without it
                 del cache[key]
             elif row["yt"] is None and old and browse_id(it):
                 del cache[key]                   # a miss from before releases were opened by id
@@ -371,7 +385,7 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
         looked += 1
         found: dict | None = None
         try:
-            found = _lookup(yt, it)
+            found = _lookup(yt, it, not_these or None)
         except Exception as exc:  # noqa: BLE001
             log.debug("yt resolve failed for %s – %s: %s", it.artist, it.title, exc)
             found = None
@@ -379,7 +393,7 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
             log.debug("yt resolve rejected for %s – %s: got %s – %s", it.artist, it.title, found.get("artists"), found.get("title"))
             rejected += 1
             found = None
-        cache[key] = {"seen": today_s, "yt": found, "v": CACHE_VERSION}
+        cache[key] = {"seen": today_s, "yt": found, "v": CACHE_VERSION, **({"not": sorted(not_these)} if not_these else {})}
         it.youtube = found
         if found:
             promote(it, found)
@@ -390,7 +404,8 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None) 
     flush()
     if skipped_deadline:
         log.warning("youtube: time budget reached; %d lookups left for the next run", skipped_deadline)
-    log.info("youtube: %d lookups this run (%d stale rows redone, %d wrong-song hits rejected, %d older hits re-checked for audio), %d cached", looked, stale, rejected, healed, len(cache))
+    log.info("youtube: %d lookups this run (%d stale rows redone, %d flagged as the wrong video redone, %d wrong-song hits rejected, %d older hits re-checked for audio), %d cached",
+             looked, stale, flagged, rejected, healed, len(cache))
 
 
 def _card_rank(it: Item) -> tuple[bool, bool, float]:

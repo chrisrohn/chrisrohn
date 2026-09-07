@@ -152,11 +152,17 @@ session that the playlist's owner approved in that browser.
 
 ## Daily use
 
-- Open chrisrohn.com. `j`/`k` move, `space` plays, `u` thumbs up, `d` thumbs down, `o` opens in YouTube Music, `/` searches.
+- Open chrisrohn.com. `j`/`k` move, `space` plays, `u` thumbs up, `d` thumbs down, `x` flags the wrong video, `o` opens in
+  YouTube Music, `/` searches.
 - Change the year dropdown on a card before thumbing up if a reissue/late release should go to another year.
 - **Keep** files the track into the year playlist immediately (an **Undo** button shows for a few seconds). **Skip** hides
   it. Both disappear from the feed at once on every device: ratings are mirrored to a hidden app-data file in your
   Google Drive (free, no quota), pulled when you open the site or return to the tab and pushed after each thumb.
+- **≠ Wrong video** is the third verdict, on every card, in the player and on the phone deck (`x`): the title the card
+  shows is not what the YouTube match plays (a mis-resolved upload). It hides the card without judging the song —
+  free, never filed on YouTube, kept out of the keep rates — and, through the ratings file, tells the daily build to
+  resolve the track again without that upload. The card is back the moment the build pairs it with another one;
+  meanwhile it sits in the **Skipped** tab marked *wrong video*, with **restore**.
 - **Audition mode** (`a`, or the checkbox in the player bar): each track starts partway in and the site moves on by
   itself after 30 seconds unless you press a key or click the player. Length and start point are in ⚙.
 - **On a phone**, tap **Install** in the bar under the header (or ⚙ → *Install as an app*; on iPhone the sheet
@@ -176,8 +182,8 @@ session that the playlist's owner approved in that browser.
   three days later anything that reached a year playlist counts as kept, the Skipped playlist as skipped (only when
   skips are filed on YouTube), the rest as a weak pass — `discovery/learn.py`, tuned under `learn:` in config.yaml
   and weighted by `ranking.weights.learned`. Cards say why: "you keep 71% from KEXP", "you rarely keep hip hop".
-- **Skipped** tab: what you thumbed down from this feed, newest first, with **restore** (an Undo that no longer needs
-  the toast; a skip filed on YouTube costs 50 units to take back). **Stats** (⚙ → *Stats*): keeps and skips by week,
+- **Skipped** tab: what you thumbed down or flagged as the wrong video from this feed, newest first, with **restore**
+  (an Undo that no longer needs the toast; a skip filed on YouTube costs 50 units to take back). **Stats** (⚙ → *Stats*): keeps and skips by week,
   keep rate by source and tag, most-kept artists, and what the build has learned so far.
 - A tag chip or an artist name on a card is a filter (it lands in the search box). The **link** control on a card
   copies its own address (`/?t=<id>`), which opens the site on that card; the RSS items carry the same link.

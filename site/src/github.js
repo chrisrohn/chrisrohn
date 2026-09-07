@@ -1,8 +1,9 @@
 // @ts-check
 /* Ratings back to the build: data/ratings.json in the site's repository, written from this browser through the
  * GitHub contents API with a fine-grained token (Contents: read and write, this one repository) that the curator
- * pastes into ⚙ once. Every keep and skip travels, so tomorrow's build learns from the free local skips too and
- * hides them on every device, without a YouTube quota unit. The token lives in this browser's localStorage and is
+ * pastes into ⚙ once. Every keep, skip and wrong-video flag travels, so tomorrow's build learns from the free local
+ * skips too, hides them on every device, and resolves a flagged track again without the upload that was wrong —
+ * all without a YouTube quota unit. The token lives in this browser's localStorage and is
  * sent to api.github.com only; the file it writes holds ids, titles and decisions, never the account. */
 import { state, persist } from "./state.js";
 import { toast } from "./dom.js";
@@ -18,7 +19,7 @@ export function ratingsPayload() {
   /** @type {Record<string, any>} */
   const rated = {};
   for (const [id, r] of Object.entries(state.rated)) {
-    if (!r || r.pending || r.queued || (r.decision !== "up" && r.decision !== "down")) continue;
+    if (!r || r.pending || r.queued || (r.decision !== "up" && r.decision !== "down" && r.decision !== "wrong")) continue;
     rated[id] = { decision: r.decision, year: r.year ?? null, videoId: r.videoId || null, artist: r.artist || "", title: r.title || "", at: r.at || 0 };
   }
   return { version: 1, updatedAt: new Date().toISOString(), count: Object.keys(rated).length, rated };

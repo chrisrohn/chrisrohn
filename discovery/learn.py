@@ -2,8 +2,9 @@
 
 Everything here is quota-free. The signals are the year playlists (every Keep lands there and the profile build reads
 them without auth), the Skipped playlist when skips are filed on YouTube, the ratings file the site pushes back into
-the repo (data/ratings.json: every keep and skip the curator made, including the free local skips), and the daily
-history files under site/data/history/ (what the feed showed on which day, with each item's sources, tags and rank).
+the repo (data/ratings.json: every keep and skip the curator made, including the free local skips, and every card
+flagged as the wrong video — a pairing the resolver must redo, never a verdict on the song), and the daily history
+files under site/data/history/ (what the feed showed on which day, with each item's sources, tags and rank).
 
 A track shown `grace_days` ago or earlier that sits in a year playlist now (or was thumbed up) was kept; one in the
 Skipped playlist or thumbed down was skipped; anything that reached the screen that long ago and was never filed
@@ -55,22 +56,38 @@ def history_rows(history_dir: Path, *, today: date, grace_days: int, keep_days: 
     return rows
 
 
+DECISIONS = ("up", "down", "wrong")   # keep, skip, and "wrong video": the card's YouTube match played another song
+
+
 def load_ratings(path: Path | None = None) -> dict[str, dict]:
     """The site's ratings file (data/ratings.json), as {item id: {decision, videoId, ...}}; undo tombstones dropped."""
     data = read_json(path or RATINGS_PATH, None) or {}
     rated = data.get("rated") if isinstance(data, dict) else None
     out: dict[str, dict] = {}
     for k, v in (rated or {}).items():
-        if isinstance(v, dict) and v.get("decision") in ("up", "down"):
+        if isinstance(v, dict) and v.get("decision") in DECISIONS:
             out[k] = v
+    return out
+
+
+def wrong_videos(ratings: dict[str, dict]) -> dict[str, set[str]]:
+    """The uploads the curator flagged as the wrong video, per item id: the resolver must not pair the track with
+    them again. A flag judges the pairing, not the song, so it never reaches the saved map or the learner."""
+    out: dict[str, set[str]] = {}
+    for k, r in ratings.items():
+        if r.get("decision") == "wrong" and r.get("videoId"):
+            out.setdefault(k, set()).add(str(r["videoId"]))
     return out
 
 
 def merge_ratings(saved: dict, ratings: dict[str, dict]) -> int:
     """Fold the site's ratings into the profile's saved map: a thumbs-down becomes a `down` row (hidden from the feed,
-    a skip for the learner), a thumbs-up an `up` row until the playlist scan catches up. Returns how many rows changed."""
+    a skip for the learner), a thumbs-up an `up` row until the playlist scan catches up. A wrong-video flag is not a
+    verdict on the song and stays out (see wrong_videos). Returns how many rows changed."""
     n = 0
     for k, r in ratings.items():
+        if r["decision"] == "wrong":
+            continue
         cur = saved.get(k)
         if isinstance(cur, dict) and cur.get("decision", "up") == r["decision"]:
             continue
@@ -79,16 +96,19 @@ def merge_ratings(saved: dict, ratings: dict[str, dict]) -> int:
     return n
 
 
-def outcomes(rows: dict[str, dict], saved: dict, *, shown_rank: int | None = None) -> list[dict]:
+def outcomes(rows: dict[str, dict], saved: dict, *, shown_rank: int | None = None, ignore: set[str] | None = None) -> list[dict]:
     """Attach a verdict to every shown item: kept (1), skipped (0), or pass (0, weighted down by the caller). A pass
     needs the item to have been on screen (rank within `shown_rank`); rows without a rank are from before ranks were
-    recorded and never count as a pass."""
+    recorded and never count as a pass. Items in `ignore` (flagged as the wrong video: the curator never heard the
+    song) get no verdict at all."""
     kept_keys = {k for k, v in saved.items() if isinstance(v, dict) and v.get("decision", "up") == "up"}
     skipped_keys = {k for k, v in saved.items() if isinstance(v, dict) and v.get("decision") == "down"}
     kept_videos = {v.get("videoId") for k, v in saved.items() if k in kept_keys and isinstance(v, dict) and v.get("videoId")}
     skipped_videos = {v.get("videoId") for k, v in saved.items() if k in skipped_keys and isinstance(v, dict) and v.get("videoId")}
     out = []
     for iid, r in rows.items():
+        if ignore and iid in ignore:
+            continue
         vid = r.get("v")
         if iid in kept_keys or (vid and vid in kept_videos):
             verdict = "kept"
@@ -164,7 +184,7 @@ def learn_from_history(profile: dict, cfg: dict, history_dir: Path, *, today: da
     c = {**DEFAULTS, **(cfg.get("learn") or {})}
     today = today or date.today()
     rows = history_rows(history_dir, today=today, grace_days=int(c["grace_days"]), keep_days=int(c["keep_days"]))
-    learned = learn(outcomes(rows, profile.get("saved") or {}, shown_rank=int(c["shown_rank"])), cfg, today=today)
+    learned = learn(outcomes(rows, profile.get("saved") or {}, shown_rank=int(c["shown_rank"]), ignore=set(profile.get("wrong_videos") or {})), cfg, today=today)
     if learned["outcomes"]:
         log.info("learned from %d shown tracks (%d kept, %d skipped): base keep rate %.1f%%", learned["outcomes"], learned["kept"], learned["skipped"], learned["keep_rate"] * 100)
     return learned

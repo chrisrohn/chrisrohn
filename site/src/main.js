@@ -4,7 +4,8 @@
  * Sign in with Google (one of the configured curator accounts) to get curator mode:
  *   keep → added straight to "<year> | Indie Discotheque" (the library playlists) on YouTube Music (YouTube Data API v3, from this browser)
  *   skip → added to the unlisted "Skipped" playlist so it never comes back
- * Nothing is written anywhere until you press a thumb. Undo is available for a few seconds after each one.
+ *   wrong video (≠) → the card's YouTube match plays something else: hidden until the build pairs the track with another upload
+ * Nothing is written anywhere until you press a verdict. Undo is available for a few seconds after each one.
  */
 import { state, persist } from "./state.js";
 import { $, $$, toast } from "./dom.js";
@@ -57,6 +58,7 @@ function wire() {
   $("#p-shuffle").addEventListener("click", toggleShuffle); reflectShuffle();
   $("#deck-up").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "up", deckYear()); });
   $("#deck-down").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "down", deckYear()); });
+  $("#deck-wrong").addEventListener("click", () => { const it = deckItem(); if (it) rate(it.id, "wrong"); });
   $("#deck-play").addEventListener("click", () => { const it = deckItem(); if (!it?.youtube?.videoId) return; if (state.playingId === it.id && state.playerReady) { holdAudition(); toggle(); } else play(it.id); });
   $("#deck-next").addEventListener("click", () => { state.deckIndex++; render(); const it = deckItem(); if (it?.youtube?.videoId && playerActive()) play(it.id); });
   $("#deck-prev").addEventListener("click", () => { state.deckIndex = Math.max(0, state.deckIndex - 1); render(); });
@@ -77,6 +79,7 @@ function wire() {
   // the player's own thumbs judge what plays, whatever card the keyboard has wandered to
   $("#p-up").addEventListener("click", () => state.playingId && rate(state.playingId, "up", currentYear(state.playingId)));
   $("#p-down").addEventListener("click", () => state.playingId && rate(state.playingId, "down", currentYear(state.playingId)));
+  $("#p-wrong").addEventListener("click", () => state.playingId && rate(state.playingId, "wrong"));
   $("#p-close").addEventListener("click", stopPlayer);
   $("#np-next").addEventListener("click", nextTrack);
   $("#intro-x").addEventListener("click", () => { state.settings.introDismissed = true; persist(); render(); });

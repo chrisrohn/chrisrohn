@@ -139,6 +139,12 @@ test("a rated track feeds the personal ranking and the stats", async ({ page }) 
   const rated = {};
   only(srcs[0]).slice(0, 4).forEach((i, n) => { rated[i.id] = { decision: "up", at: Date.now() - n * 1000, videoId: i.youtube?.videoId, artist: i.artist, title: i.title, sources: i.sources, tags: i.tags, year: i.year }; });
   only(srcs[1]).slice(0, 3).forEach((i, n) => { rated[i.id] = { decision: "down", at: Date.now() - n * 1000, local: true, videoId: i.youtube?.videoId, artist: i.artist, title: i.title, sources: i.sources, tags: i.tags }; });
+  // …and flagged one of the kept-from blog's videos as the wrong one (judges the pairing, not the song: no verdict for the learner)
+  const flagged = only(srcs[0]).find(i => !rated[i.id] && i.youtube?.videoId);
+  rated[flagged.id] = { decision: "wrong", at: Date.now() - 9000, local: true, videoId: flagged.youtube.videoId, artist: flagged.artist, title: flagged.title, sources: flagged.sources, tags: flagged.tags };
+  // a flag whose video the build has since replaced is no flag: that card is back on its own
+  const replaced = only(srcs[0]).find(i => !rated[i.id] && i.youtube?.videoId);
+  rated[replaced.id] = { decision: "wrong", at: Date.now() - 9500, local: true, videoId: "old-video-id", artist: replaced.artist, title: replaced.title };
   await page.addInitScript(([r, hash]) => {
     localStorage.setItem("id:rated", JSON.stringify(r));
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
@@ -146,13 +152,15 @@ test("a rated track feeds the personal ranking and the stats", async ({ page }) 
   }, [rated, feed.google.curator_hashes[0]]);
   const errors = await open(page);
   await expect(page.locator("body")).toHaveClass(/curator/);
-  // the Skipped tab lists the three local skips and offers to restore them
+  // the Skipped tab lists the three local skips and the wrong-video flag (not the replaced one) and offers to restore them
   await page.click(".tab[data-view=skipped]");
-  await expect(page.locator("#list .card")).toHaveCount(3);
+  await expect(page.locator("#list .card")).toHaveCount(4);
+  await expect(page.locator(`.card[data-id="${flagged.id}"] .status`)).toHaveText(/≠ wrong video/);
+  await expect(page.locator(`.card[data-id="${replaced.id}"]`)).toHaveCount(0);
   await expect(page.locator("#restore-all")).toContainText("restore all");
   await expect(page.locator("#list .card .btn.restore").first()).toBeVisible();
-  await page.locator("#list .card .btn.restore").first().click();
-  await expect(page.locator("#list .card")).toHaveCount(2);
+  await page.locator("#list .card:not(:has(.status.wrong)) .btn.restore").first().click();
+  await expect(page.locator("#list .card")).toHaveCount(3);
   // z takes back the last thumb from the keyboard, too (the restore above was not a thumb: nothing to undo)
   await page.locator("#meta").click();
   await page.keyboard.press("z");
@@ -164,10 +172,98 @@ test("a rated track feeds the personal ranking and the stats", async ({ page }) 
   const liked = page.locator(`.card[data-id="${next.id}"]`);
   await expect(liked).toBeVisible();
   await expect(liked.locator(".score")).toHaveAttribute("title", /\+ 0\.\d learned from your keeps and skips/);
+  // the third verdict: ≠ on the card hides it as "wrong video" (free, no year needed), z brings it straight back
+  await expect(liked.locator(".btn.wrong")).toBeVisible();
+  await liked.locator(".btn.wrong").click();
+  await expect(liked).toHaveCount(0);
+  await expect(page.locator(".toast")).toContainText("wrong video");
+  await page.locator("#meta").click();
+  await page.keyboard.press("z");
+  await expect(page.locator(`.card[data-id="${next.id}"]`)).toBeVisible();
+  // the x key does the same from the keyboard
+  await page.locator(`.card[data-id="${next.id}"]`).focus();
+  await page.keyboard.press("x");
+  await expect(page.locator(`.card[data-id="${next.id}"]`)).toHaveCount(0);
   await page.click("#settings-btn"); await page.click("#s-stats");
-  await expect(page.locator("#stats-body")).toContainText("4 kept · 2 skipped");
+  await expect(page.locator("#stats-body")).toContainText("4 kept · 2 skipped");   // the flags judge no song: they count nowhere
+  await expect(page.locator("#stats-body")).toContainText("3 cards flagged as the wrong video");
   await expect(page.locator("#stats-body")).toContainText("Keep rate by source");
   expect(errors).toEqual([]);
+});
+
+test("the third verdict: ≠ wrong video hides a card without judging the song, until the build swaps the video", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const playable = feed.items.filter(i => i.youtube && i.youtube.videoId && !(Number.isFinite(i.year) && i.year < new Date().getFullYear() - 1));
+  const [flagged, replaced] = playable;
+  const rated = {
+    // flagged on another device: hidden while the build still pairs the track with that video
+    [flagged.id]: { decision: "wrong", at: Date.now() - 9000, local: true, videoId: flagged.youtube.videoId, artist: flagged.artist, title: flagged.title, sources: flagged.sources, tags: flagged.tags },
+    // flagged, and the build has since resolved the track to another upload: the flag is spent, the card is back
+    [replaced.id]: { decision: "wrong", at: Date.now() - 9500, local: true, videoId: "old-video-id", artist: replaced.artist, title: replaced.title },
+  };
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  await ctx.addInitScript(([r, hash]) => {
+    localStorage.setItem("id:rated", JSON.stringify(r));
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:filters", JSON.stringify({ shortlist: false, onlyRecent: false }));
+  }, [rated, feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = await open(page);
+  await expect(page.locator("body")).toHaveClass(/curator/);
+  await expect(page.locator(`.card[data-id="${replaced.id}"]`)).toBeVisible();
+  await expect(page.locator(`.card[data-id="${flagged.id}"]`)).toHaveCount(0);
+  // every playable card carries the three verdicts; ≠ names what it does
+  const first = page.locator("#list .card").first();
+  await expect(first.locator(".thumbs .btn")).toHaveCount(3);
+  await expect(first.locator(".btn.wrong")).toHaveText("≠");
+  await expect(first.locator(".btn.wrong")).toHaveAttribute("title", /wrong video \(x\)/);
+  // the Skipped tab lists the live flag as "wrong video" (not the spent one) and restores it
+  await page.click(".tab[data-view=skipped]");
+  await expect(page.locator("#list .card")).toHaveCount(1);
+  await expect(page.locator(`.card[data-id="${flagged.id}"] .status`)).toHaveText(/≠ wrong video · \d+ d ago/);
+  await expect(page.locator(`.card[data-id="${flagged.id}"] .status`)).toHaveClass(/wrong/);
+  await page.locator(`.card[data-id="${flagged.id}"] .btn.restore`).click();
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  // ≠ on a card: gone at once, free (no year needed, no sign-in refresh), with Undo in the toast and on z
+  await page.click(".tab[data-view=feed]");
+  const target = page.locator(`.card[data-id="${flagged.id}"]`);
+  await expect(target).toBeVisible();
+  const before = Number(await page.locator("#count-feed").innerText());   // the pill counts the whole list; the page is paged
+  await target.locator(".btn.wrong").click();
+  await expect(target).toHaveCount(0);
+  await expect(page.locator(".toast")).toContainText(`≠ ${flagged.artist}`);
+  await expect(page.locator(".toast")).toContainText("wrong video");
+  await expect(page.locator("#count-feed")).toHaveText(String(before - 1));
+  await page.locator("#meta").click();
+  await page.keyboard.press("z");
+  await expect(target).toBeVisible();
+  await expect(page.locator("#count-feed")).toHaveText(String(before));
+  // the x key does the same for the card the keyboard is on
+  await target.focus();
+  await page.keyboard.press("x");
+  await expect(target).toHaveCount(0);
+  const stored = await page.evaluate(id => JSON.parse(localStorage.getItem("id:rated") || "{}")[id], flagged.id);
+  expect(stored.decision).toBe("wrong"); expect(stored.videoId).toBe(flagged.youtube.videoId); expect(stored.local).toBe(true);
+  // the flags judge no song: the stats count them apart and they teach the ranking nothing
+  await page.click("#settings-btn"); await page.click("#s-stats");
+  await expect(page.locator("#stats-body")).toContainText("0 kept · 0 skipped");
+  await expect(page.locator("#stats-body")).toContainText("2 cards flagged as the wrong video");
+  expect(errors).toEqual([]);
+  await ctx.close();
+  // on the phone deck the same verdict is the ≠ button beside skip and keep
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: "block" });
+  await phone.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now() })); }, [feed.google.curator_hashes[0]]);
+  const pp = await phone.newPage();
+  const perrors = await open(pp);
+  await expect(pp.locator("body")).toHaveClass(/deck-mode/);
+  const deckId = await pp.locator("#deck-card .dcard").getAttribute("data-id");
+  await expect(pp.locator("#deck-wrong")).toBeVisible();
+  for (const sel of ["#deck-wrong", "#deck-down", "#deck-up", "#deck-play"]) { const box = await pp.locator(sel).boundingBox(); expect(box.height, sel).toBeGreaterThanOrEqual(40); expect(box.x + box.width, sel).toBeLessThanOrEqual(390); }
+  await pp.click("#deck-wrong");
+  await expect(pp.locator(".toast")).toContainText("wrong video");
+  await expect(pp.locator("#deck-card .dcard")).not.toHaveAttribute("data-id", deckId);
+  expect(perrors).toEqual([]);
+  await phone.close();
 });
 
 test("phone viewport uses the deck", async ({ browser }) => {

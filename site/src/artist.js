@@ -34,13 +34,13 @@ export function openArtist(name) {
   /** @param {FeedItem} i */
   const row = i => {
     const d = decisionFor(i.id); const yt = /** @type {Partial<import("./types").YouTubeMatch>} */ (i.youtube || {});
-    const status = i._pick ? "kept" : d ? (d.decision === "up" ? "kept" : d.decision === "down" ? "skipped" : "") : "";
+    const status = i._pick ? "kept" : d ? (d.decision === "up" ? "kept" : d.decision === "down" ? "skipped" : d.decision === "wrong" ? "wrong video" : "") : "";
     return `<div class="arow${state.playingId === i.id ? " current" : ""}" data-id="${esc(i.id)}">
       <button type="button" class="btn small aplay" ${yt.videoId ? "" : "disabled"} title="${yt.videoId ? "play" : "no YouTube match"}" aria-label="play ${esc(credit(i))}">▶&#xFE0E;</button>
       <span class="atitle"><b>${esc(i.display_title || i.title)}</b>${i.release && !sameName(i.release, i.title) ? ` <span class="muted">· ${esc(i.release)}</span>` : ""}${i.year ? ` <span class="muted">· ${esc(i.year)}</span>` : ""}</span>
       <span class="aspec">${i.plays != null ? `${i.plays} plays` : (i.sources || []).map(s => s.split(":").slice(-1)[0]).slice(0, 3).join(", ")}</span>
       <span class="ascore">${i.score ? scoreOf(i).toFixed(1) : ""}</span>
-      <span class="astatus ${status}">${status}</span>
+      <span class="astatus ${status.split(" ")[0]}">${status}</span>
     </div>`;
   };
   $("#artist-name").textContent = name;

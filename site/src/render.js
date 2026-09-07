@@ -225,7 +225,10 @@ function card(it, tpl) {
   if (it._pick) { ysel.remove(); $(".thumbs", el).remove(); const st = document.createElement("div"); st.className = "status"; st.textContent = it._year ? `in ${titleFor(it._year)}` : ""; $(".side", el).appendChild(st); }
   else if (it._skipped) {
     ysel.remove(); $(".thumbs", el).remove();
-    const r = decisionFor(it.id); const st = document.createElement("div"); st.className = "status"; st.textContent = r?.at ? `skipped ${Math.max(0, Math.round((Date.now() - r.at) / 86400e3))} d ago${r.local ? "" : " · on YouTube"}` : "skipped";
+    const r = decisionFor(it.id); const wrong = r?.decision === "wrong"; const ago = r?.at ? `${Math.max(0, Math.round((Date.now() - r.at) / 86400e3))} d ago` : "";
+    const st = document.createElement("div"); st.className = "status" + (wrong ? " wrong" : "");
+    st.textContent = wrong ? `≠ wrong video${ago ? ` · ${ago}` : ""}` : r?.at ? `skipped ${ago}${r.local ? "" : " · on YouTube"}` : "skipped";
+    if (wrong) st.title = "The YouTube match played something else. The card stays out until the daily build pairs the track with another upload (the ratings file tells it which one was wrong), or until you restore it.";
     const b = document.createElement("button"); b.type = "button"; b.className = "btn restore"; b.textContent = "restore"; b.title = r?.playlistItemId ? "Take it out of the Skipped playlist (50 quota units) and back into the feed" : "Back into the feed";
     b.addEventListener("click", e => { e.stopPropagation(); undo(it.id); });
     $(".side", el).append(st, b);
@@ -233,6 +236,7 @@ function card(it, tpl) {
     fillYearSelect(ysel, it);
     $(".btn.up", el).addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); rate(it.id, "up", +ysel.value || undefined); });
     $(".btn.down", el).addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); rate(it.id, "down", +ysel.value || undefined); });
+    const wb = $(".btn.wrong", el); if (!yt.videoId) wb.remove(); else wb.addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); rate(it.id, "wrong"); });
   }
   art.addEventListener("click", () => { if (yt.videoId) play(it.id); });
   el.addEventListener("dblclick", () => { if (yt.videoId) play(it.id); });
