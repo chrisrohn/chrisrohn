@@ -141,14 +141,7 @@ function upNext() {
   if (deckOn() && !shuffleOn()) return visibleItems()[state.deckIndex + 1] || null;
   const id = playableFrom(sequence().indexOf(state.playingId), 1); return id ? lookup(id) || null : null;
 }
-/** The next few in the queue, for the panel. @param {number} n */
-export function queue(n = 5) {
-  const out = []; if (!state.playingId) return out;
-  const seq = sequence(); let i = seq.indexOf(state.playingId);
-  while (out.length < n) { const id = playableFrom(i, 1); if (!id) break; const it = lookup(id); if (it) out.push(it); i = seq.indexOf(id); }
-  return out;
-}
-/** The bar's now-playing panel: the card's own facts (rank, match, release, tags, sources, score) and what comes next.
+/** The bar's now-playing panel: the card's own facts (rank, match, release, tags, sources, score) and the one track that comes next.
  * @param {import("./types").FeedItem} it */
 function renderNow(it) {
   const n = state.order.indexOf(it.id);
@@ -161,11 +154,6 @@ function renderNow(it) {
   $("#np-score").textContent = it.score ? scoreOf(it).toFixed(1) : "";
   const nx = upNext(); const b = $("#np-next"); b.hidden = !nx;
   if (nx) b.innerHTML = `<b>${esc(nx.artist)}</b><span>${esc(nx.display_title || nx.title)}</span>`;
-  const q = $("#np-queue"); if (q) {
-    const list = queue(5); q.hidden = !list.length;
-    q.innerHTML = list.map((x, i) => `<button type="button" class="qrow" data-id="${esc(x.id)}" title="play now"><span class="qn">${i + 1}</span><b>${esc(x.artist)}</b><span>${esc(x.display_title || x.title)}</span></button>`).join("");
-    $$(".qrow", q).forEach(r => r.addEventListener("click", () => { const id = r.dataset.id; if (id) { play(id); if (!deckOn()) focusCard(id); } }));
-  }
   reflectShuffle();
 }
 /** After a re-render (a rating, a filter) the rank and the up-next line follow the new order. */

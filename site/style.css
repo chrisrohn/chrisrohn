@@ -229,7 +229,7 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 .np-sources { display: flex; gap: 6px; flex-wrap: wrap; max-height: 20px; overflow: hidden; margin-top: 2px; }
 .np-sources:empty { display: none; }
 .player-meta .player-controls { margin-top: auto; }
-/* the verdict column: score above, the thumbs, and what plays next; the close tab sits in the corner */
+/* the verdict column: score above, the thumbs, and the one up-next line; the close tab sits in the corner */
 .player-side { grid-column: 4; position: relative; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 8px; padding: 28px 16px 12px 14px; background: var(--card); border: 2px solid var(--ink); box-shadow: 8px 8px 0 var(--ink); text-align: right; }
 .np-close { position: absolute; top: -2px; right: -2px; width: 26px; height: 24px; border: 0; padding: 0; background: var(--ink); color: var(--on-ink); font: 700 15px/1 var(--mono); cursor: pointer; }
 .np-close:hover { background: var(--accent); color: #fff; }
@@ -636,7 +636,7 @@ select.year.attention { animation: attention .5s ease 2; }
   #install-btn { display: none !important; }
 }
 
-/* ---------- additions: chips, offline, intro, artist sheet, queue, shuffle, a11y ---------- */
+/* ---------- additions: chips, offline, intro, artist sheet, shuffle, a11y ---------- */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 20px 0; max-width: 1200px; margin: 0 auto; }
 .chips .qchip { font: 11px var(--mono); letter-spacing: .04em; text-transform: none; border: 1px solid var(--ink); background: var(--card); color: var(--ink); cursor: pointer; padding: 3px 8px; }
@@ -668,14 +668,7 @@ body.offline .art, body.offline .dart, body.offline .thumbs, body.offline .deck-
 .dartist { cursor: pointer; }
 .btn.shuffle { padding: 8px 10px; }
 .btn.shuffle.on { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 3px 3px 0 var(--ink); }
-.np-queue { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; margin-top: 4px; }
-.np-queue::before { content: "then"; font: 9px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); text-align: right; }
-.qrow { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; border: 0; background: none; padding: 1px 0; text-align: right; cursor: pointer; font: 10px/1.3 var(--mono); color: var(--muted); }
-.qrow .qn { grid-row: 1 / span 2; color: var(--muted); }
-.qrow b, .qrow span:not(.qn) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qrow b { color: var(--ink); font-weight: 700; }
-.qrow:hover b { color: var(--accent); }
-@media (max-width: 760px) { .np-queue { display: none; } .chips { padding: 8px 12px 0; } .offline { padding: 8px 12px; } .intro { padding: 14px 36px 12px 14px; box-shadow: 5px 5px 0 var(--accent); } }
+@media (max-width: 760px) { .chips { padding: 8px 12px 0; } .offline { padding: 8px 12px; } .intro { padding: 14px 36px 12px 14px; box-shadow: 5px 5px 0 var(--accent); } }
 .restore-note { border-bottom: 1px solid var(--rule); border-top: 0; }
 .src.reddit { border-left-color: #ff4500; } .src.apple { border-left-color: #fc3c44; } .src.nts { border-left-color: var(--blue); }
 body:not(.curator) .owner-only, body.guest .owner-only { display: none !important; }
