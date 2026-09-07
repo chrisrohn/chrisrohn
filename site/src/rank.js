@@ -6,11 +6,11 @@
  * rate against the account's overall keep rate. Tracks that have sat unrated in the feed for a few days count as a
  * weak pass. The bounded log2 ratio is added to the build's score and drives the default sort. The build learns the
  * same thing from the playlists a few days later; here it is immediate, and it knows about local skips. */
-import { state, items, decisionFor } from "./state.js";
+import { state, items, hiddenBy } from "./state.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 /** @typedef {{n: number, k: number, rate: number, adj: number}} Row */
-/** @typedef {{outcomes: number, kept: number, skipped: number, passed: number, keep_rate: number, sources: Record<string, Row>, tags: Record<string, Row>, artists: Record<string, Row>}} Learned */
+/** @typedef {{outcomes: number, kept: number, skipped: number, passed: number, wrong: number, keep_rate: number, sources: Record<string, Row>, tags: Record<string, Row>, artists: Record<string, Row>}} Learned */
 
 export const PERSONAL_WEIGHT = 1.0;
 const GRACE_DAYS = 3, PASS_WEIGHT = 0.35, PRIOR = 8, MIN_EXPOSURES = 3, CAP = 1.5;
@@ -36,14 +36,15 @@ export function invalidateRank() { cache = null; perItem.clear(); }
 function outcomes() {
   const out = [];
   for (const r of Object.values(state.rated)) {
-    if (!r || r.decision === "undone" || r.decision === "seen") continue;
+    // a wrong-video flag judged the pairing, not the song: it teaches nothing about sources, tags or the artist
+    if (!r || r.decision === "undone" || r.decision === "seen" || r.decision === "wrong") continue;
     out.push({ verdict: r.decision === "up" ? "kept" : "skipped", sources: r.sources || [], tags: r.tags || [], artist: r.artist || "" });
   }
   const today = state.feed?.generated_at ? new Date(state.feed.generated_at) : new Date();
   const cutoff = new Date(today.getTime() - GRACE_DAYS * 86400e3).toISOString().slice(0, 10);
   // only what was on screen can have been passed over: the feed is in build order, the shortlist is its top
   const shown = Math.max(Number(state.settings.shortlistSize) || 60, 80);
-  for (const it of items().slice(0, shown)) if (!decisionFor(it.id) && it.first_seen && it.first_seen <= cutoff) out.push({ verdict: "pass", sources: it.sources || [], tags: it.tags || [], artist: it.artist });
+  for (const it of items().slice(0, shown)) if (!hiddenBy(it) && it.first_seen && it.first_seen <= cutoff) out.push({ verdict: "pass", sources: it.sources || [], tags: it.tags || [], artist: it.artist });
   return out;
 }
 
@@ -56,7 +57,8 @@ export function learnLocal() {
   const nAll = outs.reduce((a, o) => a + weight[o.verdict], 0);
   const kAll = outs.filter(o => o.verdict === "kept").length;
   /** @type {Learned} */
-  const learned = { outcomes: outs.length, kept: kAll, skipped: outs.filter(o => o.verdict === "skipped").length, passed: outs.filter(o => o.verdict === "pass").length, keep_rate: 0, sources: {}, tags: {}, artists: {} };
+  const learned = { outcomes: outs.length, kept: kAll, skipped: outs.filter(o => o.verdict === "skipped").length, passed: outs.filter(o => o.verdict === "pass").length,
+    wrong: Object.values(state.rated).filter(r => r && r.decision === "wrong").length, keep_rate: 0, sources: {}, tags: {}, artists: {} };
   if (nAll > 0 && (kAll + learned.skipped) > 0) {
     const base = (kAll + 1) / (nAll + 2); learned.keep_rate = base;
     /** @type {Record<"sources" | "tags" | "artists", Record<string, number[]>>} */
@@ -102,13 +104,13 @@ export function personal(it) {
 /** The build's score plus what this account has taught the site. @param {FeedItem} it */
 export const scoreOf = it => it._pick ? it.score : it.score + PERSONAL_WEIGHT * personal(it).adj;
 
-/** Keeps per ISO week for the stats panel, newest first. @param {number} weeks */
+/** Keeps, skips and wrong-video flags per week for the stats panel, newest first. @param {number} weeks */
 export function keepsByWeek(weeks = 8) {
   const now = Date.now(); const out = [];
   for (let w = 0; w < weeks; w++) {
-    const to = now - w * 7 * 86400e3, from = to - 7 * 86400e3; let kept = 0, skipped = 0;
-    for (const r of Object.values(state.rated)) { if (!r || !r.at || r.at < from || r.at >= to) continue; if (r.decision === "up") kept++; else if (r.decision === "down") skipped++; }
-    out.push({ label: w === 0 ? "this week" : w === 1 ? "last week" : `${w} weeks ago`, kept, skipped });
+    const to = now - w * 7 * 86400e3, from = to - 7 * 86400e3; let kept = 0, skipped = 0, wrong = 0;
+    for (const r of Object.values(state.rated)) { if (!r || !r.at || r.at < from || r.at >= to) continue; if (r.decision === "up") kept++; else if (r.decision === "down") skipped++; else if (r.decision === "wrong") wrong++; }
+    out.push({ label: w === 0 ? "this week" : w === 1 ? "last week" : `${w} weeks ago`, kept, skipped, wrong });
   }
   return out;
 }

@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, timedelta
 
+from .learn import load_ratings, wrong_videos
 from .models import Item
 from .profile import LastFm, load_profile
 from .resolve import collapse_shared_videos, resolve_all
@@ -154,7 +155,8 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
 
     minutes = float(c["time_budget_minutes"]) if deadline_minutes is None else min(float(c["time_budget_minutes"]), deadline_minutes)
     deadline = Deadline(max(0.01, minutes))
-    resolve_all(items, ccfg, deadline)
+    # a card the curator flagged as the wrong video is resolved again without that upload (data/ratings.json)
+    resolve_all(items, ccfg, deadline, avoid=wrong_videos(load_ratings()))
     items = collapse_shared_videos(items)
     items = [i for i in items if i.youtube and i.youtube.get("videoId") not in saved_videos]
     items = _score(items, profile, ccfg, float(c["loved_bonus"]))

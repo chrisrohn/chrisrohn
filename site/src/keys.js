@@ -1,6 +1,6 @@
 // @ts-check
-/* Keyboard: j/k move, space plays, u/d rate, z undoes the last thumb, ←/→ seek, o opens, a audition, s shuffle,
- * t theme, / search, Esc closes the player (and keeps your place in the list). */
+/* Keyboard: j/k move, space plays, u/d rate, x flags the wrong video, z undoes the last verdict, ←/→ seek, o opens,
+ * a audition, s shuffle, t theme, / search, Esc closes the player (and keeps your place in the list). */
 import { state, byId } from "./state.js";
 import { $, toast } from "./dom.js";
 import { rate, undoLast } from "./rating.js";
@@ -24,6 +24,7 @@ export function wireKeys() {
       case " ": e.preventDefault(); if (playerActive()) toggle(); else play(id || state.order[0]); break;
       case "u": if (id) rate(id, "up", currentYear(id)); break;
       case "d": if (id) rate(id, "down", currentYear(id)); break;
+      case "x": if (id) rate(id, "wrong"); break;
       case "z": undoLast(); break;
       // arrows seek, as in every other player: a stray press must never file a track
       case "ArrowRight": if (playerActive()) { e.preventDefault(); seek(10); } break;

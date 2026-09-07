@@ -5,7 +5,7 @@ import hashlib
 import html
 from datetime import date, timedelta
 
-from .learn import learn_from_history, load_ratings, merge_ratings, public_summary
+from .learn import learn_from_history, load_ratings, merge_ratings, public_summary, wrong_videos
 from .models import Item
 from .profile import find_duplicates, load_profile
 from .resolve import collapse_shared_videos, resolve_all
@@ -25,9 +25,12 @@ def build_feed(cfg: dict) -> dict:
     # the site's own ratings (data/ratings.json, pushed from the browser): every skip the curator made, including
     # the free local ones the playlists never see, and keeps the playlist scan has not caught up with yet
     ratings = load_ratings()
+    # cards flagged as the wrong video: the resolver looks for another upload of those tracks (never that one again)
+    profile["wrong_videos"] = wrong_videos(ratings)
     if ratings:
         merged = merge_ratings(profile.setdefault("saved", {}), ratings)
-        log.info("ratings file: %d decisions (%d down), %d new to the profile", len(ratings), sum(1 for r in ratings.values() if r.get("decision") == "down"), merged)
+        log.info("ratings file: %d decisions (%d down, %d wrong video), %d new to the profile", len(ratings), sum(1 for r in ratings.values() if r.get("decision") == "down"),
+                 len(profile["wrong_videos"]), merged)
     # keep rates per source / tag / artist from what earlier feeds showed and what reached the playlists (quota-free)
     profile["learned"] = learn_from_history(profile, cfg, SITE_DATA_DIR / "history")
     state = read_json(STATE_PATH, {"first_seen": {}})
@@ -50,7 +53,7 @@ def build_feed(cfg: dict) -> dict:
 
     items = score_items(items, profile, cfg)
     items = [i for i in items if i.score >= float(rcfg.get("min_score", 0))][: int(rcfg.get("max_items", 200)) + 60]
-    resolve_all(items, cfg, deadline)
+    resolve_all(items, cfg, deadline, avoid=profile["wrong_videos"])
     # resolution renames a release to the track its video is (promote), which can give it the key of a track already in
     # the list; the score order puts the stronger one first, so the merge keeps its video and folds in the other's sources
     items.sort(key=lambda i: (-i.score, i.artist_norm))

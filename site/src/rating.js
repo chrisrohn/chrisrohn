@@ -1,6 +1,9 @@
 // @ts-check
-/* Keep / skip / Undo. Optimistic: the card disappears at once; YouTube, the Drive mirror and the ratings file follow.
- * Offline, a keep is queued and filed the moment the network is back. */
+/* Keep / skip / wrong video / Undo. Optimistic: the card disappears at once; YouTube, the Drive mirror and the ratings
+ * file follow. Offline, a keep is queued and filed the moment the network is back.
+ * "Wrong video" (≠) is the third verdict: the card's YouTube match plays something other than the title it shows. It
+ * judges the pairing, not the song — free, never filed on YouTube, kept out of the keep rates — and tells the build to
+ * resolve the track again without that upload. */
 import { state, persist, byId, skipsInYouTube, quotaLeft } from "./state.js";
 import { $, toast } from "./dom.js";
 import { isCurator, ensureToken, needSignIn } from "./auth.js";
@@ -11,7 +14,7 @@ import { render, deckOn, deckItem, focusCard } from "./render.js";
 import { play, stopPlayer, playerActive, autoplayOn } from "./player.js";
 import { credit } from "./feed.js";
 
-const UP = "▲︎", DN = "▼︎";   // the same text-presentation triangles as the buttons
+const UP = "▲︎", DN = "▼︎", NE = "≠";   // the same glyphs as the buttons
 
 /** Move on from a card that just left the list: focus (and, if it was playing, play) the next one. @param {string} id @param {number} idx @param {boolean} wasPlaying */
 function moveOn(id, idx, wasPlaying) {
@@ -19,13 +22,14 @@ function moveOn(id, idx, wasPlaying) {
   else if (state.view === "feed" || state.view === "catalog") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasPlaying && autoplayOn() && byId(next)?.youtube?.videoId) play(next); } else if (wasPlaying) stopPlayer(); }
 }
 
-/** @param {string} id @param {"up" | "down"} decision @param {number | undefined} [year] */
+/** @typedef {"up" | "down" | "wrong"} Decision */
+/** @param {string} id @param {Decision} decision @param {number | undefined} [year] */
 export async function rate(id, decision, year) {
   if (!isCurator()) return;
   if (state.busy.has(id)) return;
   const it = byId(id); if (!it) return;
   const vid = it.youtube && it.youtube.videoId;
-  if (!vid) { toast("No YouTube match for this one — open it via the search link instead", true); return; }
+  if (!vid) { toast(decision === "wrong" ? "This card has no YouTube match to be wrong" : "No YouTube match for this one — open it via the search link instead", true); return; }
   if (decision === "up" && !year && yearGuess(it) == null) {
     // nothing says when this came out — never guess "this year" on your behalf
     const sel = $(`.card[data-id="${CSS.escape(id)}"] .year, .dcard[data-id="${CSS.escape(id)}"] .year`);
@@ -34,7 +38,7 @@ export async function rate(id, decision, year) {
     return;
   }
   year = year || yearOf(it);
-  const needsYouTube = decision === "up" || skipsInYouTube();
+  const needsYouTube = decision === "up" || (decision === "down" && skipsInYouTube());
   const wasPlaying = state.playingId === id && playerActive(); const idx = state.order.indexOf(id);
   const base = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, sources: it.sources || [], tags: it.tags || [], at: Date.now() };
   if (needsYouTube && !state.online) {
@@ -51,10 +55,10 @@ export async function rate(id, decision, year) {
   persist();
   render();
   moveOn(id, idx, wasPlaying);
-  if (decision === "down" && !skipsInYouTube()) {
+  if (!needsYouTube) {
     // free: no YouTube quota. Synced across your devices through the Drive app-data file (and the ratings file).
     state.rated[id] = { ...state.rated[id], pending: false, local: true }; persist(); state.busy.delete(id); schedulePush();
-    toast(`${DN} ${credit(it)}`, false, { label: "Undo", fn: () => undo(id) });
+    toast(decision === "wrong" ? `${NE} ${credit(it)} — wrong video, hidden until the build finds another upload` : `${DN} ${credit(it)}`, false, { label: "Undo", fn: () => undo(id) });
     return;
   }
   try {
@@ -100,13 +104,13 @@ export function undoLast() {
   const it = byId(id);
   undo(id).then(() => { if (it) { if (deckOn()) { const i = state.order.indexOf(id); if (i >= 0) { state.deckIndex = i; render(); } } else focusCard(id); } });
 }
-/** Restore a batch of skips (the Skipped tab's "restore all"). Local skips are free; skips filed on YouTube cost a removal each. @param {string[]} ids */
+/** Restore a batch of skips and wrong-video flags (the Skipped tab's "restore all"). Local ones are free; skips filed on YouTube cost a removal each. @param {string[]} ids */
 export async function restoreAll(ids) {
   const filed = ids.filter(id => state.rated[id]?.playlistItemId).length;
   if (!ids.length) return;
   if (!confirm(`Restore ${ids.length} skipped track${ids.length === 1 ? "" : "s"} to the feed?${filed ? ` ${filed} of them sit in the Skipped playlist on YouTube: ${filed * 50} quota units to take them out.` : ""}`)) return;
   let n = 0;
-  for (const id of ids) { const r = state.rated[id]; if (!r || r.decision !== "down") continue; try { if (r.playlistItemId) await removePlaylistItem(r.playlistItemId); state.rated[id] = { decision: "undone", at: Date.now() }; n++; } catch (e) { toast("Could not restore one: " + /** @type {Error} */ (e).message, true); break; } }
+  for (const id of ids) { const r = state.rated[id]; if (!r || (r.decision !== "down" && r.decision !== "wrong")) continue; try { if (r.playlistItemId) await removePlaylistItem(r.playlistItemId); state.rated[id] = { decision: "undone", at: Date.now() }; n++; } catch (e) { toast("Could not restore one: " + /** @type {Error} */ (e).message, true); break; } }
   persist(); render(); schedulePush(); toast(`Restored ${n}`);
 }
 /** Back online: file what was decided while offline, oldest first. */
@@ -117,7 +121,7 @@ export async function replayQueued() {
   for (const [id, r] of queued) {
     if (!byId(id)) { state.rated[id] = { ...r, queued: false, pending: false, local: r.decision === "down" }; continue; }   // the track left the feed: keep the decision, nothing to file
     delete state.rated[id];
-    await rate(id, /** @type {"up" | "down"} */ (r.decision), typeof r.year === "number" ? r.year : undefined);
+    await rate(id, /** @type {Decision} */ (r.decision), typeof r.year === "number" ? r.year : undefined);
   }
   persist(); render();
 }

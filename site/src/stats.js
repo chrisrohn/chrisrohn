@@ -21,8 +21,8 @@ export function openStats() {
   const mine = learnLocal(); const weeks = keepsByWeek(8); const maxW = Math.max(1, ...weeks.map(w => w.kept + w.skipped));
   const topArtists = Object.entries(mine.artists).filter(([, r]) => r.k > 1).sort((a, b) => b[1].k - a[1].k || b[1].n - a[1].n).slice(0, 10);
   const acct = isCurator()
-    ? `<p class="muted">${mine.kept} kept · ${mine.skipped} skipped · ${mine.passed} left unrated for a few days${mine.keep_rate ? ` · you keep about ${Math.round(mine.keep_rate * 100)}% of what you judge` : ""}. Every keep and skip remembered by this account counts; the personal ranking on the cards is learned from exactly this.</p>
-       <h3>Keeps and skips by week</h3>${weeks.map(w => bar(w.label, w.kept + w.skipped, maxW, w.kept + w.skipped ? `${w.kept} kept · ${w.skipped} skipped` : "—")).join("")}
+    ? `<p class="muted">${mine.kept} kept · ${mine.skipped} skipped · ${mine.passed} left unrated for a few days${mine.keep_rate ? ` · you keep about ${Math.round(mine.keep_rate * 100)}% of what you judge` : ""}. Every keep and skip remembered by this account counts; the personal ranking on the cards is learned from exactly this.${mine.wrong ? ` ${mine.wrong} card${mine.wrong === 1 ? "" : "s"} flagged as the wrong video (≠) wait for the build to find another upload; they judge the pairing, not the song, so they count nowhere below.` : ""}</p>
+       <h3>Keeps and skips by week</h3>${weeks.map(w => bar(w.label, w.kept + w.skipped, maxW, w.kept + w.skipped + w.wrong ? `${w.kept} kept · ${w.skipped} skipped${w.wrong ? ` · ${w.wrong} wrong video` : ""}` : "—")).join("")}
        <h3>Keep rate by source</h3>${rates(mine.sources)}
        <h3>Keep rate by tag</h3>${rates(mine.tags)}
        ${topArtists.length ? `<h3>Most kept artists</h3>${topArtists.map(([n, r]) => bar(n, r.k, topArtists[0][1].k, `${r.k} of ${r.n}`)).join("")}` : ""}`

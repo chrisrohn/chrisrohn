@@ -177,8 +177,14 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
         Item(artist="Unknown Metal Band", title="Skull", kind="release", release_date=today, sources=["musicbrainz"], tags=["metal"]),
     ]
     monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake_items))
+    # the site flagged Keep Moving's video as the wrong one: the resolver hears about it, the saved map does not
+    from discovery import learn
+    monkeypatch.setattr(learn, "RATINGS_PATH", sandbox / "data" / "ratings.json")
+    util.write_json(learn.RATINGS_PATH, {"version": 1, "rated": {util.item_key("Jungle", "Keep Moving"): {"decision": "wrong", "videoId": "vidOld", "artist": "Jungle", "title": "Keep Moving", "at": 1}}})
+    seen_avoid = {}
 
-    def fake_resolve(items, cfg, deadline=None):
+    def fake_resolve(items, cfg, deadline=None, avoid=None):
+        seen_avoid.update(avoid or {})
         for it in items:
             if it.artist == "Jungle":
                 it.youtube = {"videoId": "vid123", "title": it.title, "artists": ["Jungle"], "thumbnail": "https://i/x.jpg"}
@@ -199,7 +205,8 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     cfg["google"]["client_id"] = "abc.apps.googleusercontent.com"
     payload = build.build_feed(cfg)
     ids = {(i["artist"], i["title"]) for i in payload["items"]}
-    assert ("Jungle", "Keep Moving") in ids
+    assert ("Jungle", "Keep Moving") in ids                                            # flagged, not skipped: still a card
+    assert seen_avoid == {util.item_key("Jungle", "Keep Moving"): {"vidOld"}}         # …resolved without the flagged upload
     assert ("Jungle", "Back On 74") not in ids
     assert ("Roosevelt", "Lovers") not in ids
     assert not any(t.startswith("Lighten Up") for _, t in ids)          # hidden by video id, whatever the spelling
@@ -725,7 +732,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
     fake = [Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["rss:Pitchfork", "bandcamp"], tags=["nu disco"], artwork="https://i/x.jpg")]
     monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake))
 
-    def fake_resolve(items, cfg, deadline=None):
+    def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:
             it.youtube = {"videoId": "vid1", "title": it.title, "artists": ["Jungle"]}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
@@ -815,7 +822,7 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
             return [{"name": "Nu Disco", "count": 100}, {"name": "rare", "count": 3}]
     monkeypatch.setattr(catalog, "LastFm", FakeLastFm)
 
-    def fake_resolve(items, cfg, deadline=None):
+    def fake_resolve(items, cfg, deadline=None, avoid=None):
         assert cfg["resolve"]["max_lookups_per_run"] == 800
         for it in items:
             if it.title != "Parcels Hit":
@@ -1014,7 +1021,7 @@ def test_build_merges_a_release_renamed_to_an_existing_track(monkeypatch, sandbo
             Item(artist="Jungle", title="Loving In Stereo", kind="release", release="Loving In Stereo", release_date=today, sources=["bandcamp"])]
     monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake))
 
-    def fake_resolve(items, cfg, deadline=None):
+    def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:
             if it.kind == "release":
                 it.youtube = {"videoId": "vidAlbumCut", "title": "Keep Moving", "artists": ["Jungle"]}
@@ -1055,6 +1062,68 @@ def test_ratings_file_reaches_the_learner_and_hides_skips(tmp_path):
     outs = learn.outcomes(rows, saved, shown_rank=80)
     assert [o["verdict"] for o in outs] == ["skipped", "skipped"]
     assert learn.load_ratings(tmp_path / "missing.json") == {}
+
+
+def test_wrong_video_flags_bypass_the_saved_map_and_the_learner(tmp_path):
+    from discovery import learn
+
+    util.write_json(tmp_path / "ratings.json", {"version": 1, "rated": {
+        "flag-me": {"decision": "wrong", "videoId": "vbad", "artist": "Jungle", "title": "Keep Moving", "at": 1},
+        "flag-two": {"decision": "wrong", "videoId": "vbad2", "artist": "Roosevelt", "title": "Lovers", "at": 2},
+        "no-video": {"decision": "wrong", "videoId": None, "at": 3},
+        "skip-me": {"decision": "down", "videoId": "vskip", "artist": "Nobody", "title": "Meh", "at": 4}}})
+    ratings = learn.load_ratings(tmp_path / "ratings.json")
+    assert set(ratings) == {"flag-me", "flag-two", "no-video", "skip-me"}
+    # the flags name the uploads the resolver must refuse, per track; a flag without a video says nothing
+    assert learn.wrong_videos(ratings) == {"flag-me": {"vbad"}, "flag-two": {"vbad2"}}
+    # a flag is not a verdict on the song: it never hides the track for good, never counts as a skip
+    saved = {}
+    assert learn.merge_ratings(saved, ratings) == 1
+    assert set(saved) == {"skip-me"}
+    rows = {"flag-me": {"id": "flag-me", "v": "vbad", "a": "Jungle", "s": ["rss:Stereogum"], "t": [], "r": 1, "shown": "2026-09-01"},
+            "other": {"id": "other", "v": "vx", "a": "Jungle", "s": ["rss:Stereogum"], "t": [], "r": 2, "shown": "2026-09-01"}}
+    outs = learn.outcomes(rows, saved, shown_rank=80, ignore=set(learn.wrong_videos(ratings)))
+    assert [(o["id"], o["verdict"]) for o in outs] == [("other", "pass")]
+
+
+def test_resolve_all_redoes_a_flagged_video_and_remembers_the_refusal(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import resolve
+
+    class FakeYT:
+        calls = 0
+        def search(self, q, filter=None, limit=None):
+            FakeYT.calls += 1
+            if filter == "songs":
+                return [{"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "vbad", "videoType": resolve.ATV},
+                        {"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "vgood", "videoType": resolve.ATV}]
+            return []
+        def get_watch_playlist(self, **kw): return {"tracks": []}
+        def get_album(self, bid): return {}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    it = Item(artist="Jungle", title="Keep Moving", kind="track", sources=["rss:Stereogum"])
+    bad = {"videoId": "vbad", "title": "Keep Moving", "artists": ["Jungle"], "via": "track-search", "videoType": resolve.ATV}
+    util.write_json(resolve.YT_CACHE, {it.key: {"seen": "2026-09-01", "yt": bad, "v": resolve.CACHE_VERSION}})
+    # the curator flagged vbad on the site: the cached row is redone, and the next-best upload takes its place
+    resolve.resolve_all([it], _cfg(), avoid={it.key: {"vbad"}})
+    assert it.youtube["videoId"] == "vgood" and FakeYT.calls == 1
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[it.key]["yt"]["videoId"] == "vgood" and cache[it.key]["not"] == ["vbad"]
+    # the refusal lives on the row: a later run without the ratings file still never goes back to vbad
+    again = Item(artist="Jungle", title="Keep Moving", kind="track")
+    resolve.resolve_all([again], _cfg())
+    assert again.youtube["videoId"] == "vgood" and FakeYT.calls == 1
+    # with every upload flagged there is nothing left to play: the row says so and is not retried every day
+    class OnlyBad(FakeYT):
+        def search(self, q, filter=None, limit=None):
+            FakeYT.calls += 1
+            return [{"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "vbad", "videoType": resolve.ATV}] if filter == "songs" else []
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=OnlyBad))
+    resolve.resolve_all([again := Item(artist="Jungle", title="Keep Moving", kind="track")], _cfg(), avoid={again.key: {"vgood"}})
+    assert again.youtube is None and FakeYT.calls == 3   # songs, then videos
+    assert util.read_json(resolve.YT_CACHE, {})[again.key]["not"] == ["vbad", "vgood"]
 
 
 def test_learning_decays_and_explores():

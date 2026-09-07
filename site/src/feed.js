@@ -1,6 +1,6 @@
 // @ts-check
 /* The feed: loading feed.json, the filter bar, the search grammar, and which items are visible in each view. */
-import { state, persist, items, catalogItems, allItems, byId, reindex, decisionFor, reconcileRated, STALE_AFTER_MS } from "./state.js";
+import { state, persist, items, catalogItems, allItems, byId, reindex, hiddenBy, reconcileRated, STALE_AFTER_MS } from "./state.js";
 import { $, $$, esc, relTime, range, toast, norm } from "./dom.js";
 import { isSignedIn, isOwner, isCurator, tokenValid, emailHash, applyMode, ensureTokenClient, keepAlive } from "./auth.js";
 import { pullRatings } from "./sync.js";
@@ -272,14 +272,15 @@ function listFor(view) {
   }
   if (view === "cleanup") return [];   // the Cleanup tab is its own section, not a list of cards
   if (view === "skipped") {
-    // what this account thumbed down and is still in the feed or the catalog, newest skip first; Undo brings any back
-    return allItems().filter(i => decisionFor(i.id)?.decision === "down" && (!terms.length || matches(i, terms)))
+    // what this account thumbed down or flagged as the wrong video and is still in the feed or the catalog, newest
+    // first; Undo brings any back (a flag whose video the build has since replaced is already back on its own)
+    return allItems().filter(i => { const d = hiddenBy(i)?.decision; return (d === "down" || d === "wrong") && (!terms.length || matches(i, terms)); })
       .sort((a, b) => (state.rated[b.id]?.at || 0) - (state.rated[a.id]?.at || 0)).map(i => ({ ...i, _skipped: true }));
   }
   if (view === "catalog") {
     const off = new Set(f.catSourcesOff || []); const y = f.catYear || "";
     const list = catalogItems().filter(i => {
-      if (decisionFor(i.id)) return false;
+      if (hiddenBy(i)) return false;
       if (terms.length && !matches(i, terms)) return false;
       if (off.size && !(i.sources || []).some(s => !off.has(s))) return false;
       if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
@@ -297,7 +298,7 @@ function listFor(view) {
   }
   const today = state.feed?.generated_at?.slice(0, 10); const lastYear = new Date().getFullYear() - 1;
   const list = items().filter(i => {
-    if (decisionFor(i.id)) return false;
+    if (hiddenBy(i)) return false;
     if (terms.length && !matches(i, terms)) return false;
     if (!(i.sources || []).some(sourceOn)) return false;
     if (f.onlyNew && i.first_seen !== today) return false;
