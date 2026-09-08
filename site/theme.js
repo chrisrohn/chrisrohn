@@ -19,14 +19,31 @@
   /** What a toggle does next, spelled out for the tooltip and screen readers. @param {string} pref */
   const describe = pref => `Theme: ${NAME[pref]}${pref === "auto" ? ` (following your device, now ${effective(pref)})` : ""} · switch to ${NAME[next()]}`;
 
+  /* The browser chrome (Android's status bar in an installed app, the toolbar in a tab, iOS's status bar) follows
+   * <meta name="theme-color">. The page ships a media-qualified pair for a no-JS visit, but media on a theme-color
+   * meta is matched against the *device* scheme, so a choice pinned here could never reach it — and Chromium does
+   * not reliably re-read a media-qualified meta when its content changes, which is why the strip above the header
+   * stayed light. So once we are running there is exactly one theme-color meta, media-less and ours: the static
+   * pair goes, and the survivor is re-inserted on every change so every engine, installed PWAs included, picks the
+   * new colour up. iOS reads its status-bar style once at launch; keeping it in step means the next launch of a
+   * pinned-dark app opens with a dark bar instead of a white one.
+   * @param {"light" | "dark"} eff */
+  function chrome(eff) {
+    document.querySelectorAll('meta[name="theme-color"]:not([data-theme-color])').forEach(m => m.remove());
+    let m = document.querySelector('meta[name="theme-color"][data-theme-color]');
+    if (!m) { m = document.createElement("meta"); m.setAttribute("name", "theme-color"); m.setAttribute("data-theme-color", ""); }
+    if (m.getAttribute("content") !== COLORS[eff] || !m.isConnected) {
+      m.remove(); m.setAttribute("content", COLORS[eff]); (document.head || root).appendChild(m);
+    }
+    const ios = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+    if (ios) ios.setAttribute("content", eff === "dark" ? "black-translucent" : "default");
+  }
+
   function apply() {
     const pref = get(), eff = effective(pref);
     if (pref === "auto") delete root.dataset.theme; else root.dataset.theme = pref;
     root.dataset.scheme = eff;   // the scheme actually on screen, for anything that wants to know without a media query
-    document.querySelectorAll('meta[name="theme-color"]').forEach(m => {
-      const own = m.getAttribute("media") && /dark/.test(m.getAttribute("media") || "") ? "dark" : "light";
-      m.setAttribute("content", COLORS[pref === "auto" ? own : eff]);
-    });
+    chrome(eff);
     document.querySelectorAll("[data-theme-toggle]").forEach(b => {
       b.textContent = GLYPH[pref]; b.setAttribute("title", describe(pref)); b.setAttribute("aria-label", describe(pref)); b.dataset.theme = pref;
     });
