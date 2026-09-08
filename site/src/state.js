@@ -66,7 +66,10 @@ export const state = {
   tokenClient: null,
   busy: new Set(),
   sync: LS.get("id:sync", { fileId: null, at: 0 }),   // Drive appDataFolder file that mirrors `rated` across devices
-  syncTimer: null, ghTimer: null, ghAt: 0,
+  syncTimer: null, ghTimer: null, ghRetry: null, ghBusy: null,
+  // the ratings file for the build (github.js): when it last went up, the blob it left there, and whether decisions
+  // are still waiting — all persisted, so a sitting the network cut short is finished on the next visit
+  ...Object.assign({ ghAt: 0, ghDirty: false, ghSha: null }, LS.get("id:gh", {})), ghFails: 0, ghErr: null, ghSaid: null,
   _years: [], dupes: null, unavailable: null, dupePage: 1, dupeQT: null, library: null, notOwner: false,
   signingIn: null, authCb: null, authErrCb: null, keepAliveAt: 0, lastAuthError: null, ready: false,
   online: typeof navigator === "undefined" || navigator.onLine !== false, recentAt: 0, recentVideos: new Set(),
@@ -121,7 +124,8 @@ export function reconcileRated() {
 const written = {};
 export function persist() {
   const keep = { "id:rated": state.rated, "id:auth": state.auth && { email: state.auth.email, name: state.auth.name, picture: state.auth.picture, hash: state.auth.hash },
-    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync, "id:badvideos": state.badVideos };
+    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync, "id:badvideos": state.badVideos,
+    "id:gh": { ghAt: state.ghAt, ghDirty: state.ghDirty, ghSha: state.ghSha } };
   for (const [k, v] of Object.entries(keep)) { const j = JSON.stringify(v ?? null); if (written[k] !== j) { written[k] = j; LS.set(k, v ?? null); if (k === "id:rated") state.ratedVersion++; } }
   const tok = state.auth && state.auth.access_token ? { access_token: state.auth.access_token, expires_at: state.auth.expires_at } : null;
   const tj = JSON.stringify(tok); if (written["id:token"] !== tj) { written["id:token"] = tj; tok ? SS.set("id:token", tok) : SS.del("id:token"); }
@@ -131,5 +135,6 @@ export function clearLocalState() { for (const k of LS.keys()) LS.del(k); for (c
 // file it cannot open.
 export function forgetAccount() {
   state.rated = {}; state.playlists = {}; state.sync = { fileId: null, at: 0 }; state.library = null; state.notOwner = false; state.lastAuthError = null;
-  clearTimeout(state.syncTimer);
+  state.ghDirty = false; state.ghSha = null; state.ghFails = 0; state.ghErr = null; state.ghSaid = null;
+  clearTimeout(state.syncTimer); clearTimeout(state.ghTimer); clearTimeout(state.ghRetry); state.ghTimer = state.ghRetry = null;
 }

@@ -19,7 +19,7 @@ import { wireSettings } from "./settings.js";
 import { wireKeys, currentYear } from "./keys.js";
 import { wirePwa } from "./pwa.js";
 import { applyLaunchParams, wireLayers } from "./url.js";
-import { pushToGitHub, ghEnabled } from "./github.js";
+import { wireGhPush } from "./github.js";
 
 function wire() {
   const tabs = $$(".tab");
@@ -90,12 +90,11 @@ function wire() {
   wireSettings();
   wireKeys();
   wirePwa();
+  wireGhPush();   // the ratings file for the build: a last push when the tab goes away, and the retries after a dropped connection
   applyLaunchParams();   // after the controls are wired: ?view=…, ?q=…, ?t=<id>, ?artist=, the share target and the app shortcuts
   // another device may have rated things while this tab was in the background (only while the token is valid:
   // a background refresh would need a popup, which browsers block without a tap — the next Keep refreshes it instead)
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && isCurator() && tokenValid() && Date.now() - (state.sync.at || 0) > 60e3) pullRatings(); });
-  // the ratings file for the build: a last push when the tab goes away, if a thumb is still waiting
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && ghEnabled() && state.ghTimer) { clearTimeout(state.ghTimer); state.ghTimer = null; pushToGitHub().catch(() => {}); } });
 }
 /** Offline: say so, grey out what needs the network, and file what was queued when it comes back. */
 function wireOffline() {
