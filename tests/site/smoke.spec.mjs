@@ -435,8 +435,10 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   await expect(page.locator("#s-update-btn")).toBeVisible();
   await page.keyboard.press("Escape");
   // offline: the controlled page reloads from the cache with the feed intact. "ready" resolves while the worker is
-  // still activating; only once it has claimed this page (controller set) does a navigation go through it
-  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), { timeout: 15_000 }).toBeTruthy();
+  // still activating, and it claims this page (controller set) from inside its activate step; a navigation handed to
+  // a worker that is still activating can be dropped on a slow runner (net::ERR_ABORTED on the reload), so wait
+  // until it is fully activated as well as controlling the page before pulling the network
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller && navigator.serviceWorker.controller.state === "activated"), { timeout: 15_000 }).toBeTruthy();
   await ctx.setOffline(true);
   await page.reload();
   await expect(page.locator("#meta")).toContainText("candidates", { timeout: 15_000 });
