@@ -90,6 +90,14 @@ google:
   guests: false
   guest_playlist_title_pattern: "{year} Picks from chrisrohn.com"
 
+# ---------- The daily job's clock ----------
+# GitHub Actions kills the Discover job at `timeout-minutes` (45), which loses the whole day: no feed, no commit.
+# `daily` therefore gives itself less than that and hands what is left after the profile build to the feed, which
+# splits it between fetching the sources and resolving them on YouTube Music. Every slow loop keeps a cursor or a
+# cache, so a run cut short is not work lost — it is the next run's starting point.
+job:
+  budget_minutes: 36        # profile + feed; the rest of the 45 is the site build and the data commit
+
 # ---------- Taste profile ----------
 profile:
   # Last.fm periods to blend for artist affinity (weight per period).
@@ -174,6 +182,10 @@ profile:
 
 # ---------- Sources ----------
 sources:
+  # The whole fetching phase, however many sources are enabled. Also capped at half of what the job has left, so
+  # resolution always gets its share. The artist watches below check it inside their own loops.
+  time_budget_minutes: 14
+
   listenbrainz_fresh:
     enabled: true
     days: 90                 # look back (max 90)
@@ -191,7 +203,7 @@ sources:
   deezer:
     enabled: true
     days: 45                 # look back for the editorial feeds (default 45; else listenbrainz_fresh.days); your artists' albums use the backfill window
-    top_artists: 700         # check the newest albums of your top N profile artists (of the kinds below, by affinity)
+    top_artists: 400         # check the newest albums of your top N profile artists (of the kinds below, by affinity)
     kinds: [direct, similar, genre]   # which profile artists count: the acts you play, their associates, the genre acts
     related_per_artist: 0    # set >0 to also pull related artists' newest releases (slower)
     editorial_genres:        # Deezer editorial "new releases" feeds by genre id
@@ -203,7 +215,7 @@ sources:
   # Every release from this year and the backfill window is returned on every run; the feed decides what is fresh.
   ytmusic_artists:
     enabled: true
-    top_artists: 500          # checked per run, rotating through the pool so everyone gets covered every few days
+    top_artists: 250          # checked per run, rotating through the pool so everyone gets covered every few days
     pool: 1500                # the strongest N profile artists of the kinds below, by affinity
     kinds: [direct, similar, genre]
   # Curator / session channels on YouTube (no record labels: the feed follows artists and genres, not imprints).
@@ -256,7 +268,7 @@ sources:
   musicbrainz_artists:
     enabled: true
     days: 60                 # first-release-date window when backfill is off (default 60; else listenbrainz_fresh.days)
-    top_artists: 150
+    top_artists: 120
     pool: 1500
     kinds: [direct, similar, genre]
     limit: 40                # release groups per artist query

@@ -43,11 +43,15 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
         return []
     start = int(cache.get("cursor", 0)) % len(ranked)
     batch = (ranked + ranked)[start:start + min(per_run, len(ranked))]   # never the same artist twice in a run
-    cache["cursor"] = (start + per_run) % len(ranked)
     # this year's releases, and the backfill window's when the feed may look further back
     since_year = date.today().year - backfill_years(cfg)
     out: list[Item] = []
+    done = 0
     for e in batch:
+        if http is not None and getattr(http, "deadline", None) and http.deadline.expired:
+            log.warning("ytmusic artists: time budget spent after %d of %d artists; the rest are next run's", done, len(batch))
+            break
+        done += 1
         n = norm(e["name"])
         row = cache["ids"].get(n)
         bid = row if isinstance(row, str) and row else None
@@ -85,5 +89,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                     links={"youtube music": f"https://music.youtube.com/browse/{rb}"},
                     artwork=thumbs[-1]["url"] if thumbs else None,
                 ))
+    cache["cursor"] = (start + done) % len(ranked)    # only what was actually checked; the rest comes round next run
     write_versioned(CACHE, CACHE_VERSION, cache)
+    log.info("ytmusic artists: %d of %d checked (cursor %d), %d releases", done, len(ranked), start, len(out))
     return out

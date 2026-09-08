@@ -180,7 +180,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
         Item(artist="Roosevelt", title="Earlier Single", kind="track", release_date=date(today.year - 2, 3, 1), sources=["ytmusic"]),
         Item(artist="Roosevelt", title="Ancient Single", kind="track", release_date=date(2009, 3, 1), sources=["ytmusic"]),
     ]
-    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake_items))
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: list(fake_items))
     # the site flagged Keep Moving's video as the wrong one: the resolver hears about it, the saved map does not
     from discovery import learn
     monkeypatch.setattr(learn, "RATINGS_PATH", sandbox / "data" / "ratings.json")
@@ -241,6 +241,42 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
     assert payload["picks"][0]["artist"] == "Jungle"
     assert (sandbox / "site" / "feed.xml").read_text().count("<item>") == len(payload["items"])
+
+
+def test_the_build_splits_its_budget_between_fetching_and_resolving(monkeypatch, sandbox):
+    """The daily job's clock reaches every slow phase: fetching gets at most half, resolution the rest. Without a
+    budget nothing is bounded but the configured resolve window, exactly as before."""
+    import discovery.build as build
+    from discovery import learn
+    from discovery import profile as prof
+
+    util.write_json(prof.PROFILE_PATH, {**PROFILE, "picks": [], "youtube": {}, "counts": {}})
+    monkeypatch.setattr(learn, "RATINGS_PATH", sandbox / "data" / "nope.json")
+    seen = {}
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: seen.update(sources=deadline) or [])
+    monkeypatch.setattr(build, "resolve_all", lambda items, cfg, deadline=None, avoid=None: seen.update(resolve=deadline))
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda d, cfg, http, deadline=None: 0)
+    monkeypatch.setattr(build, "unavailable_report", lambda p, cfg, deadline=None: {"count": 0, "with_counterpart": 0, "pending": 0})
+
+    class NoNet:
+        def __init__(self, *a, **k): self.deadline = None
+        def save(self): pass
+    monkeypatch.setattr(build, "Http", NoNet)
+
+    cfg = _cfg()
+    cfg["sources"]["time_budget_minutes"] = 14      # more than half of the budget below: the job's share wins
+    build.build_feed(cfg, budget_minutes=20)
+    assert 9.5 < seen["sources"].remaining_minutes <= 10                     # half of the 20 the job had left
+    assert 19 < seen["resolve"].remaining_minutes <= 20                      # …and the rest, the configured 28 being more
+
+    cfg["sources"]["time_budget_minutes"] = 3       # a smaller configured budget is respected as it stands
+    build.build_feed(cfg, budget_minutes=20)
+    assert 2.5 < seen["sources"].remaining_minutes <= 3
+
+    build.build_feed(cfg)                                                    # no job budget: only the configured windows
+    assert 2.5 < seen["sources"].remaining_minutes <= 3
+    assert 27 < seen["resolve"].remaining_minutes <= 28
 
 
 def test_discover_playlists_via_channel():
@@ -572,20 +608,23 @@ def test_cli_parses_commands(monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "setup_logging", lambda: None)
     monkeypatch.setattr(cli, "ensure_dirs", lambda: None)
-    monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}})
+    monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}, "job": {"budget_minutes": 36}})
     import discovery.build as build
     import discovery.catalog as catalog
     import discovery.profile as profile
-    monkeypatch.setattr(build, "build_feed", lambda cfg: calls.append("build"))
+    monkeypatch.setattr(build, "build_feed", lambda cfg, budget_minutes=None: calls.append("build" if budget_minutes is None else f"build<{budget_minutes:.0f}"))
     monkeypatch.setattr(profile, "build_profile", lambda cfg, http: calls.append("profile"))
     monkeypatch.setattr(catalog, "build_catalog", lambda cfg, deadline_minutes=None: calls.append("catalog" if deadline_minutes is None else f"catalog<{deadline_minutes:.0f}"))
     monkeypatch.setattr(cli, "_profile_stale", lambda cfg: False)
-    assert cli.main(["build"]) == 0 and calls == ["build"]
+    assert cli.main(["build"]) == 0 and calls == ["build"]                      # `build` alone is unbounded
     assert cli.main(["catalog"]) == 0 and calls[-1] == "catalog"
-    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls[-2:] == ["profile", "build"]   # the catalog is its own workflow …
-    assert cli.main([]) == 0 and calls[-1] == "build"                                 # daily is the default
+    # `daily` hands the feed what is left of the job's budget after the profile build, so the workflow's timeout
+    # never kills the run with the day's data unwritten
+    assert cli.main(["daily", "--rebuild-profile"]) == 0 and calls[-2:] == ["profile", "build<36"]   # the catalog is its own workflow …
+    assert cli.main([]) == 0 and calls[-1] == "build<36"                              # daily is the default
     monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}, "catalog": {"in_daily": True}})
     assert cli.main(["daily"]) == 0 and calls[-2:] == ["build", "catalog<40"]        # … unless asked to ride along, with what is left of the job
+    assert calls[-2] == "build"                                                      # no job budget configured: unbounded, as before
     with pytest.raises(SystemExit):
         cli.main(["--no-such-flag"])
 
@@ -744,7 +783,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
     util.write_json(prof.PROFILE_PATH, PROFILE)
     today = date.today()
     fake = [Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["rss:Pitchfork", "bandcamp"], tags=["nu disco"], artwork="https://i/x.jpg")]
-    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake))
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: list(fake))
 
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:
@@ -1033,7 +1072,7 @@ def test_build_merges_a_release_renamed_to_an_existing_track(monkeypatch, sandbo
     today = date.today()
     fake = [Item(artist="Jungle", title="Keep Moving", kind="track", release_date=today, sources=["listenbrainz"], tags=["nu disco"]),
             Item(artist="Jungle", title="Loving In Stereo", kind="release", release="Loving In Stereo", release_date=today, sources=["bandcamp"])]
-    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake))
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: list(fake))
 
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:

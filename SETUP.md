@@ -304,9 +304,15 @@ redesign. The light/dark switch is `site/theme.js`, a classic script every page 
 it keeps the choice in `localStorage` (`id:theme`), sets `<html data-theme>`, which `style.css` reads through `light-dark()`
 tokens, and wires the header buttons; `site/src/theme.js` hooks ⚙ → *Theme* and the `t` key into it.
 
-**Time budget:** YouTube resolution and year verification share `resolve.time_budget_minutes` (28 by default, against
-the job's 45-minute limit) and write their caches every 25 lookups, so a slow catalogue day leaves the rest for
-tomorrow instead of losing the run. Cache rows nothing has touched for `resolve.cache_keep_days` are dropped.
+**Time budget:** GitHub Actions kills the Discover job at its `timeout-minutes` (45), and a killed job commits
+nothing — no feed, no caches, the whole day lost. So `daily` gives itself `job.budget_minutes` (36) and hands the
+feed whatever the profile build did not use. The feed splits that: fetching the sources gets
+`sources.time_budget_minutes` (14) or half of what is left, whichever is smaller, and YouTube resolution plus year
+verification get the rest, capped at `resolve.time_budget_minutes` (28). Every slow loop honours its share — the
+three artist watches stop mid-batch and leave their rotating cursor exactly where they stopped, the resolver and the
+year lookups write their caches every 25 lookups — so a run cut short is not work lost but the next run's starting
+point, and a slow catalogue day still publishes a feed. Cache rows nothing has touched for `resolve.cache_keep_days`
+are dropped. Run `python -m discovery build` by hand and only the configured windows apply, with no job clock.
 
 ## Why these sources (state of the world, Sept 2026)
 

@@ -47,11 +47,15 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     cache = read_versioned(cache_path(), CACHE_VERSION, {"cursor": 0})
     start_at = int(cache.get("cursor") or 0) % len(ranked)
     batch = (ranked + ranked)[start_at:start_at + min(per_run, len(ranked))]   # never the same artist twice in a run
-    write_versioned(cache_path(), CACHE_VERSION, {"cursor": (start_at + per_run) % len(ranked)})
 
     out: list[Item] = []
     seen: set[str] = set()
+    done = 0
     for e in batch:
+        if getattr(http, "deadline", None) and http.deadline.expired:
+            log.warning("musicbrainz artists: time budget spent after %d of %d artists; the rest are next run's", done, len(batch))
+            break
+        done += 1
         q = f"arid:{e['mbid']} AND firstreleasedate:[{start} TO {end}]"
         try:
             data = http.get(MB_SEARCH, params={"query": q, "fmt": "json", "limit": limit})
@@ -82,5 +86,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                 links={"musicbrainz": f"https://musicbrainz.org/release-group/{rgid}"},
                 artist_mbids=mbids or [e["mbid"]],
             ))
-    log.info("musicbrainz artists: %d of %d checked (cursor %d), %d release groups", len(batch), len(ranked), start_at, len(out))
+    # only what was actually checked moves the cursor, so a run cut short never skips an artist
+    write_versioned(cache_path(), CACHE_VERSION, {"cursor": (start_at + done) % len(ranked)})
+    log.info("musicbrainz artists: %d of %d checked (cursor %d), %d release groups", done, len(ranked), start_at, len(out))
     return out

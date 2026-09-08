@@ -550,6 +550,46 @@ def test_bandcamp_slices(sandbox):
     assert [i.title for i in bandcamp.fetch(cfg, PROFILE, Recorder(route))] == ["B", "C"]
 
 
+def test_the_source_phase_stops_at_its_budget_and_keeps_an_honest_cursor(sandbox, monkeypatch):
+    """A slow catalogue day must not run the daily job into its timeout: whatever a run does not reach keeps its
+    place in the rotation and is simply the next run's work."""
+    from discovery.sources import HEALTH, run_sources
+    from discovery.sources import musicbrainz_artists as mba
+
+    cfg = _cfg(); cfg["sources"]["musicbrainz_artists"]["top_artists"] = 3
+    cfg["sources"]["musicbrainz_artists"]["kinds"] = ["direct", "similar", "genre"]
+    spent = util.Deadline(None); spent.until = time.monotonic() - 1        # a budget that is already gone
+
+    # one artist is checked, then the budget runs out: the cursor moves by one, not by the whole batch
+    asked = []
+
+    def route(url, kw):
+        asked.append(kw["params"]["query"])
+        spent.until = time.monotonic() - 1
+        return {"release-groups": []}
+
+    http = Recorder(route); http.deadline = None
+    mba.fetch(cfg, PROFILE, http)
+    assert len(asked) == 3 and util.read_json(mba.cache_path(), {})["cursor"] == 3   # no budget: the whole batch
+
+    util.write_json(mba.cache_path(), {"v": mba.CACHE_VERSION, "cursor": 0}, compact=True)
+    asked.clear()
+    http2 = Recorder(route); http2.deadline = util.Deadline(60.0)
+    def route2(url, kw):
+        asked.append(kw["params"]["query"])
+        http2.deadline.until = time.monotonic() - 1     # the first lookup spends the budget
+        return {"release-groups": []}
+    http2.route = route2
+    mba.fetch(cfg, PROFILE, http2)
+    assert len(asked) == 1 and util.read_json(mba.cache_path(), {})["cursor"] == 1   # one checked, one step taken
+
+    # run_sources hands the budget to every source and skips the ones it can no longer afford, saying so in health
+    HEALTH.clear()
+    got = run_sources(cfg, PROFILE, Recorder(lambda url, kw: {}), spent)
+    assert got == [] and HEALTH["musicbrainz_artists"]["ok"] is False
+    assert "time budget" in HEALTH["musicbrainz_artists"]["error"]
+
+
 def test_new_sources_are_registered_and_enabled():
     from discovery.sources import PER_FEED_HEALTH, SOURCE_MODULES
 

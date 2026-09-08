@@ -2,7 +2,7 @@
 
   profile           rebuild the taste profile (Last.fm + your playlists + similar artists)
   build             fetch sources, score, resolve, write site/data/feed.json (+ feed.xml, history)
-  daily             profile (if stale or from an older pipeline version) + build + catalog
+  daily             profile (if stale or from an older pipeline version) + build + catalog, inside `job.budget_minutes`
   catalog           the infill catalog for earlier years: Last.fm history → site/data/catalog.json
   seed-everynoise   scrape frozen Everynoise genre pages into data/seeds_everynoise.json
 """
@@ -68,7 +68,13 @@ def main(argv: list[str] | None = None) -> int:
             build_profile(cfg, Http("profile", ttl_hours=72))
         else:
             log.info("profile is fresh (built %s)", read_json(DATA_DIR / "profile.json", {}).get("built_at"))
-        build_feed(cfg)
+        # the workflow kills the job at its timeout, losing the day's data; the build stops itself before that and
+        # leaves the rest to the rotating cursors, so a slow day still publishes a feed
+        budget = float((cfg.get("job") or {}).get("budget_minutes") or 0) or None
+        left = max(2.0, budget - (time.monotonic() - t0) / 60) if budget else None
+        if budget:
+            log.info("job budget: %.0f min, %.1f spent on the profile, %.1f left for the feed", budget, (time.monotonic() - t0) / 60, left)
+        build_feed(cfg, budget_minutes=left)
         if (cfg.get("catalog") or {}).get("in_daily", False):
             # the catalog takes what is left of the job: the feed comes first, the job dies at its timeout
             left = float((cfg.get("catalog") or {}).get("job_budget_minutes", 40)) - (time.monotonic() - t0) / 60
