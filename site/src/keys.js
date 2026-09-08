@@ -1,6 +1,6 @@
 // @ts-check
 /* Keyboard: j/k move, space plays, u/d rate, x flags the wrong video, z undoes the last verdict, ←/→ seek, o opens,
- * a audition, s shuffle, t theme, / search, Esc closes the player (and keeps your place in the list). */
+ * a audition, s shuffle (parked, no-op while SHUFFLE_ENABLED is false), t theme, / search, Esc closes the player (and keeps your place in the list). */
 import { state, byId } from "./state.js";
 import { $, toast } from "./dom.js";
 import { rate, undoLast } from "./rating.js";
