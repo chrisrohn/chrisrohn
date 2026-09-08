@@ -251,6 +251,29 @@ def test_retry_after_is_parsed_robustly(monkeypatch):
     assert waits[0] == 2.0 and 30 >= waits[1] >= 29 and len(waits) == 2   # the backoff for the unreadable header; the date, capped at 30s
 
 
+def test_a_zero_retry_after_never_defeats_the_backoff(monkeypatch):
+    """MusicBrainz answers 503 with Retry-After: 0 when it is over its rate limit. Honouring that literally slept
+    for nothing and burned all three retries inside a second, so the lookup failed instead of waiting it out."""
+    h = util.Http("t")
+    answers = [Resp(503, headers={"Retry-After": "0"}), Resp(503, headers={"Retry-After": "Thu, 01 Jan 2000 00:00:00 GMT"}), Resp(200, '{"ok": 1}')]
+    slept = []
+    monkeypatch.setattr(h.session, "request", lambda *a, **k: answers.pop(0))
+    monkeypatch.setattr(util.time, "sleep", lambda s: slept.append(s))
+    assert h.get("https://mb.test/ws/2/artist/", cache=False) == {"ok": 1}
+    assert [s for s in slept if s >= 1] == [2.0, 4.0]      # the exponential backoff is the floor, never the stated 0
+    # …and a host that refused for rate gets more room between its requests for the rest of the run
+    assert h.min_interval["mb.test"] == 0.22               # 0.1 → 0.15 → 0.22, once per 503
+    for _ in range(20):
+        h._slow_down("musicbrainz.org")
+    assert h.min_interval["musicbrainz.org"] == util.RATE_LIMIT_MAX_INTERVAL   # never further than the cap
+
+    # a 500 is not a rate limit: it backs off but leaves the host's spacing alone
+    h2 = util.Http("t")
+    answers2 = [Resp(500), Resp(200, '{"ok": 1}')]
+    monkeypatch.setattr(h2.session, "request", lambda *a, **k: answers2.pop(0))
+    assert h2.get("https://mb.test/x", cache=False) == {"ok": 1} and "mb.test" not in h2.min_interval
+
+
 def test_throttle_sleeps_outside_the_lock(monkeypatch):
     h = util.Http("t")
     h.min_interval["x.test"] = 0.05

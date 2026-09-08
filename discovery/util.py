@@ -150,9 +150,17 @@ def backfill_since(cfg: dict, now: date | None = None) -> date | None:
     return date((now or date.today()).year - years, 1, 1)
 
 
+# A host that answers 429/503 is rate limiting us: every later request to it is spaced out by this factor, up to
+# RATE_LIMIT_MAX_INTERVAL seconds, for the rest of the run. MusicBrainz allows 1 request/s per IP and a shared
+# runner address can spend that budget on somebody else's job, so backing off for real is the only way through.
+RATE_LIMIT_SLOWDOWN = 1.5
+RATE_LIMIT_MAX_INTERVAL = 3.0
+
+
 def parse_retry_after(value: Any, fallback: float) -> float:
     """Seconds to wait from a Retry-After header: an integer count or an HTTP-date (RFC 9110 §10.2.3); `fallback`
-    when the header is missing or unreadable. Never raises."""
+    when the header is missing or unreadable. A header of "0" (or a date already past) is 0.0: the caller decides
+    what to do with that — `Http.request` never waits less than its own backoff. Never raises."""
     if value is None:
         return fallback
     s = str(value).strip()
@@ -432,6 +440,15 @@ class Http:
         if wait > 0:
             time.sleep(wait)
 
+    def _slow_down(self, host: str) -> None:
+        """Widen the gap between this host's requests for the rest of the run, after it refused one for rate."""
+        with self._lock:
+            now = self.min_interval.get(host, 0.1)
+            if now >= RATE_LIMIT_MAX_INTERVAL:
+                return
+            self.min_interval[host] = wider = min(RATE_LIMIT_MAX_INTERVAL, round(now * RATE_LIMIT_SLOWDOWN, 2))
+        log.info("%s is rate limiting; leaving %.2fs between its requests from now on", host, wider)
+
     def _etag_store(self) -> dict[str, dict]:
         with self._lock:
             if self._etags is None:
@@ -479,9 +496,15 @@ class Http:
                 backoff *= 2
                 continue
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < retries:
-                retry_after = parse_retry_after(resp.headers.get("Retry-After"), backoff)
-                log.warning("%s %s -> %s; retrying in %.1fs", method, url, resp.status_code, retry_after)
-                time.sleep(min(retry_after, 30))
+                # A server asking for 0 seconds (MusicBrainz answers 503 with Retry-After: 0 when it is over its
+                # rate limit, as does any host whose Retry-After date has already passed) is not inviting an
+                # immediate retry: our own exponential backoff is the floor, so the three retries can never burn
+                # themselves in a second and leave the lookup failed.
+                wait = min(max(parse_retry_after(resp.headers.get("Retry-After"), backoff), backoff), 30)
+                if resp.status_code in (429, 503):
+                    self._slow_down(host)
+                log.warning("%s %s -> %s; retrying in %.1fs", method, url, resp.status_code, wait)
+                time.sleep(wait)
                 backoff *= 2
                 continue
             if resp.status_code == 304 and prior is not None:
