@@ -11,7 +11,10 @@ import { scoreOf } from "./rank.js";
 import { openLayer, closeLayer } from "./url.js";
 
 export const autoplayOn = () => state.settings.autoplay !== false;
-export const shuffleOn = () => !!state.settings.shuffle;
+/* Shuffle is parked: the button stays out of the UI and the saved setting is ignored until this flips back on.
+ * Everything else (the permutation, the toggle, the key) is wired and waiting. */
+export const SHUFFLE_ENABLED = false;
+export const shuffleOn = () => SHUFFLE_ENABLED && !!state.settings.shuffle;
 /** Something is in the player (playing or paused). */
 export const playerActive = () => !$("#player").hidden && !!state.playingId;
 
@@ -124,11 +127,12 @@ function sequence() {
   return state.shuffleOrder;
 }
 export function toggleShuffle() {
+  if (!SHUFFLE_ENABLED) return;
   state.settings.shuffle = !shuffleOn(); state.shuffleFor = ""; persist(); reflectShuffle();
   toast(shuffleOn() ? "Shuffle on — next plays a random track from the list" : "Shuffle off — next plays down the list");
   refreshNow();
 }
-export function reflectShuffle() { $$("#p-shuffle").forEach(b => { b.classList.toggle("on", shuffleOn()); b.setAttribute("aria-pressed", String(shuffleOn())); b.title = shuffleOn() ? "shuffle on (s)" : "shuffle off (s)"; }); }
+export function reflectShuffle() { $$("#p-shuffle").forEach(b => { b.hidden = !SHUFFLE_ENABLED; b.classList.toggle("on", shuffleOn()); b.setAttribute("aria-pressed", String(shuffleOn())); b.title = shuffleOn() ? "shuffle on (s)" : "shuffle off (s)"; }); }
 /** The next playable id in sequence from index `i` in the given direction, or null at the end. @param {number} i @param {number} delta */
 function playableFrom(i, delta) {
   const seq = sequence();

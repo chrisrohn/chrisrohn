@@ -97,7 +97,7 @@
   <label class="chk feed-only" id="l-recent" title="Hide tracks whose verified release year is older than last year (radio and recommendation sources surface catalog too)"><input type="checkbox" id="only-recent"> new releases only</label>
   <label class="chk" title="Only the top of the list by score (⚙ sets how many). A search or another sort shows everything."><input type="checkbox" id="shortlist" checked> shortlist</label>
   <button class="btn ghost mobile-only" id="layout-toggle" type="button">list view</button>
-  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <kbd>←</kbd>/<kbd>→</kbd> seek · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · <kbd>x</kbd> wrong video · <kbd>z</kbd> undo · swipe → / ← · </span><kbd>s</kbd> shuffle · <kbd>a</kbd> audition · <kbd>o</kbd> open · <kbd>t</kbd> theme</span>
+  <span class="hint">keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>space</kbd> play · <kbd>←</kbd>/<kbd>→</kbd> seek · <span class="curator"><kbd>u</kbd> up · <kbd>d</kbd> down · <kbd>x</kbd> wrong video · <kbd>z</kbd> undo · swipe → / ← · </span><kbd>a</kbd> audition · <kbd>o</kbd> open · <kbd>t</kbd> theme</span>
 </section>
 <div id="chips" class="chips" aria-label="active search terms" hidden></div>
 
@@ -130,7 +130,7 @@
         <button class="btn" id="p-prev" title="previous (k)" aria-label="previous"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h3v16H4zM20 4 8 12l12 8z"/></svg></button>
         <button class="btn" id="p-toggle" title="play/pause (space)" aria-label="play / pause"><svg class="ic ic-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5 20 12 6 20.5z"/></svg><svg class="ic ic-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h5v16H5zM14 4h5v16h-5z"/></svg></button>
         <button class="btn" id="p-next" title="next (j)" aria-label="next"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4h3v16h-3zM4 4l12 8-12 8z"/></svg></button>
-        <button class="btn shuffle" id="p-shuffle" type="button" title="shuffle (s)" aria-label="shuffle" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l4 4-4 4V8h-2.5l-3 4 3 4H17v-3l4 4-4 4v-3h-4l-3.7-5L5.6 18H2v-2h2.6l3-4-3-4H2V6h3.6l3.7 5L13 6h4z"/></svg></button>
+        <button class="btn shuffle" id="p-shuffle" type="button" title="shuffle (s)" aria-label="shuffle" aria-pressed="false" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3l4 4-4 4V8h-2.5l-3 4 3 4H17v-3l4 4-4 4v-3h-4l-3.7-5L5.6 18H2v-2h2.6l3-4-3-4H2V6h3.6l3.7 5L13 6h4z"/></svg></button>
         <label class="chk"><input type="checkbox" id="autoplay" checked> autoplay <span class="full">next</span></label>
         <label class="chk" title="Start each track partway in and move on automatically after a few seconds. Any key or click on the player cancels the timer for that track."><input type="checkbox" id="audition"> audition <span id="audition-label">30s</span></label>
         <span id="audition-bar" class="audition-bar" hidden><i></i></span>
