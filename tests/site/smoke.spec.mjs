@@ -698,3 +698,64 @@ test("a Keep verifies the playlist, adds the track, Undo removes it — and the 
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("the ratings push survives a dropped connection: quiet retry, no re-upload when the repo already matches", async ({ browser }) => {
+  // the push that feeds the build runs from a phone on a patchy connection: a failed one must say something useful,
+  // keep the decisions, go up by itself when the network returns — and never re-upload 450 KB the repo already has
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  test.skip(!feed.repo, "the committed feed does not name its repository");
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false, ghToken: "github_pat_test" }));
+    localStorage.setItem("id:rated", JSON.stringify({ abc123: { decision: "down", year: 2026, videoId: "v1", artist: "A Band", title: "A Song", at: 1 } }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+
+  const { createHash } = await import("node:crypto");
+  const blobSha = text => { const b = Buffer.from(text, "utf8"); return createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${b.length}\0`), b])).digest("hex"); };
+  let offline = true, stored = null;                       // the repo's copy of data/ratings.json, once a PUT lands
+  const calls = [];
+  await page.route("https://api.github.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url());
+    calls.push({ method: req.method(), path: u.pathname });
+    if (offline) return route.abort("connectionfailed");
+    if (req.method() === "GET") return route.fulfill({ json: stored ? [{ name: "ratings.json", type: "file", sha: blobSha(stored) }] : [] });
+    stored = Buffer.from(JSON.parse(req.postData() || "{}").content, "base64").toString("utf8");
+    return route.fulfill({ json: { content: { path: "data/ratings.json" }, commit: { sha: "deadbeef" } } });
+  });
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("body")).toHaveClass(/curator/);
+
+  // a push with no connection: plain words, the decisions kept, and not one byte of "Failed to fetch"
+  await page.click("#settings-btn");
+  await page.click("#s-gh-push");
+  await expect(page.locator(".toast")).toContainText("no connection to GitHub", { timeout: 20_000 });
+  await expect(page.locator(".toast")).toContainText("when the connection is back");
+  await expect(page.locator(".toast")).not.toContainText("Failed to fetch");
+  await expect(page.locator("#s-gh-status")).toContainText("1 decisions still to reach " + feed.repo);
+  expect(calls.length).toBeGreaterThan(1);                 // it tried more than once before giving up on this round
+
+  // the network returns: the waiting sitting goes up on its own, with no tap
+  offline = false;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(() => stored, { timeout: 20_000 }).not.toBeNull();
+  expect(JSON.parse(stored).rated.abc123.decision).toBe("down");
+  expect(JSON.parse(stored).count).toBe(1);
+  // the file's sha came from the directory listing: the 450 KB file itself is never downloaded to find that out
+  expect(calls.some(c => c.method === "GET" && c.path.endsWith("/contents/data"))).toBe(true);
+  expect(calls.some(c => c.path.endsWith("/contents/data/ratings.json") && c.method === "GET")).toBe(false);
+
+  // nothing rated since: the same decisions are recognised from the sha alone, so there is no second commit
+  const puts = calls.filter(c => c.method === "PUT").length;
+  await page.click("#s-gh-push");
+  await expect(page.locator(".toast")).toContainText("already has these ratings", { timeout: 20_000 });
+  expect(calls.filter(c => c.method === "PUT").length).toBe(puts);
+  await expect(page.locator("#s-gh-status")).toContainText("1 decisions shared");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

@@ -55,7 +55,11 @@ export interface State {
   badVideos: Record<string, number>; badVersion: number; ratedVersion: number; shortlistHidden: number; focusId: string | null; shareIn: { url?: string; text?: string; title?: string; artist?: string } | null;
   catalog: Catalog | null; catalogState: "idle" | "loading" | "ready" | "missing" | "failed"; index: Map<string, FeedItem>;
   player: any; playerReady: boolean; pendingVideo: string | null; tokenClient: any; busy: Set<string>;
-  sync: { fileId: string | null; at: number }; syncTimer: any; ghTimer: any; ghAt: number; _years: number[]; dupes: Dupe[] | null; dupePage: number; dupeQT: any;
+  sync: { fileId: string | null; at: number }; syncTimer: any;
+  ghTimer: any; ghRetry: any; ghBusy: Promise<boolean> | null; ghAt: number; ghDirty: boolean; ghFails: number;
+  ghErr: string | null; ghSaid: { msg: string; at: number } | null;
+  ghSha: { sha: string; updatedAt: string; count: number } | null;   // the blob this browser last committed, so an unchanged sitting is recognised without downloading it
+ _years: number[]; dupes: Dupe[] | null; dupePage: number; dupeQT: any;
   unavailable: Unavailable[] | null; library: any[] | null; notOwner: boolean; signingIn: Promise<boolean> | null; authCb: any; authErrCb: any; keepAliveAt: number;
   lastAuthError: { why: string; at: number } | null; ready: boolean; online: boolean; recentAt: number; recentVideos: Set<string>;
   apiLog: ApiEntry[];

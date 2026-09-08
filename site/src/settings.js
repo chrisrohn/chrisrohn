@@ -10,7 +10,7 @@ import { startAudition, clearAudition, auditionOn } from "./player.js";
 import { wireTheme } from "./theme.js";
 import { openStats } from "./stats.js";
 import { render } from "./render.js";
-import { pushToGitHub, ghEnabled, ratingsPayload } from "./github.js";
+import { pushToGitHub, ghEnabled, ghPending, ghProblem, ratingsPayload } from "./github.js";
 import { wireApiLog } from "./apilog.js";
 
 function exportCsv() {
@@ -24,9 +24,14 @@ function ghLine() {
   if (!isOwner()) { el.textContent = ""; return; }
   if (!repo) { el.textContent = "The build does not name its repository (station.repo in config.yaml), so ratings cannot be pushed."; return; }
   const n = ratingsPayload().count;
-  el.textContent = state.settings.ghToken
-    ? `Token set · ${n} decisions to share · ${state.ghAt ? `last pushed ${relTime(new Date(state.ghAt))}` : "not pushed yet"} · commits to ${repo} as data/ratings.json`
-    : `No token: the build only learns from the year playlists and the Skipped playlist. Paste a fine-grained token (Contents: read and write on ${repo}) and every keep and skip reaches tomorrow's build — free local skips included.`;
+  if (!state.settings.ghToken) {
+    el.textContent = `No token: the build only learns from the year playlists and the Skipped playlist. Paste a fine-grained token (Contents: read and write on ${repo}) and every keep and skip reaches tomorrow's build — free local skips included.`;
+    return;
+  }
+  const last = state.ghAt ? `last pushed ${relTime(new Date(state.ghAt))}` : "not pushed yet";
+  // what is waiting and why, so a push the network is still chewing on never looks like lost work
+  const waiting = ghPending() ? (state.online ? `${n} decisions still to reach ${repo} — retrying by itself${ghProblem() ? ` (${ghProblem()})` : ""}` : `${n} decisions waiting for the network`) : `${n} decisions shared`;
+  el.textContent = `Token set · ${waiting} · ${last} · commits to ${repo} as data/ratings.json`;
 }
 function openSettings() {
   const feed = state.feed; if (!feed) return;
@@ -71,6 +76,6 @@ export function wireSettings() {
   $("#s-syncnow").addEventListener("click", () => pushRatings().then(() => pullRatings()).then(() => refreshRecent(true)).then(() => { $("#s-sync").textContent = `Synced just now · ${Object.keys(state.rated).length} rated tracks`; toast("Ratings synced"); }).catch(e => toast(e.message, true)));
   $("#s-reload").addEventListener("click", () => loadLibraryPlaylists().then(() => toast(`Playlists reloaded: ${Object.keys(state.playlists).filter(k => !k.startsWith("__")).length} year playlists found`)).catch(e => toast(e.message, true)));
   $("#s-gh-token").addEventListener("change", (/** @type {any} */ e) => { const v = String(e.target.value || "").trim(); state.settings.ghToken = v || null; persist(); ghLine(); if (v) toast("GitHub token saved in this browser — ratings will be pushed after each sitting"); });
-  $("#s-gh-push").addEventListener("click", () => { if (!ghEnabled()) { toast("Paste a GitHub token first", true); return; } pushToGitHub({ quiet: false }).then(ghLine); });
+  $("#s-gh-push").addEventListener("click", () => { if (!ghEnabled()) { toast("Paste a GitHub token first", true); return; } toast("Pushing the ratings…"); pushToGitHub({ quiet: false }).then(ghLine); });
   $("#s-clear").addEventListener("click", () => { if (confirm("Clear local state (sign-in, filters, settings, local rating mirror, GitHub token)? Nothing in YouTube, Drive or GitHub is touched.")) { clearLocalState(); location.reload(); } });
 }

@@ -164,6 +164,13 @@ session that the playlist's owner approved in that browser.
 - **Keep** files the track into the year playlist immediately (an **Undo** button shows for a few seconds). **Skip** hides
   it. Both disappear from the feed at once on every device: ratings are mirrored to a hidden app-data file in your
   Google Drive (free, no quota), pulled when you open the site or return to the tab and pushed after each thumb.
+- **The ratings file for the build** (⚙ → *GitHub token*): with a fine-grained token (Contents: read and write, this
+  repository only) pasted once, the site commits `data/ratings.json` after each sitting, so tomorrow's build learns
+  from the free local skips and the wrong-video flags too. It is built for a phone on a patchy connection: the file's
+  git blob sha is worked out in the browser and compared with the repository's, so an unchanged sitting uploads
+  nothing and no copy is ever downloaded; a dropped connection is retried by itself — on the spot, then on a widening
+  delay, and at once when the network or the app comes back — and what is still waiting shows in ⚙ rather than
+  interrupting the rating. Nothing is lost if the tab closes mid-push: it goes up on the next visit.
 - **≠ Wrong video** is the third verdict, on every card, in the player and on the phone deck (`x`): the title the card
   shows is not what the YouTube match plays (a mis-resolved upload). It hides the card without judging the song —
   free, never filed on YouTube, kept out of the keep rates — and, through the ratings file, tells the daily build to
