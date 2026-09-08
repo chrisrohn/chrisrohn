@@ -1,8 +1,10 @@
-"""Artist watch on YouTube Music: newest singles/albums of your top profile artists (no key; ytmusicapi).
+"""Artist watch on YouTube Music: singles/albums of your profile artists (no key; ytmusicapi).
 
-Replaces Spotify's dead Release Radar. Artist browse IDs are cached; each run checks `top_artists` artists
-(rotating through the list over successive days so big profiles still get full coverage). Every release from the
-current window is returned on every run: the feed's own first_seen state decides what counts as new.
+Replaces Spotify's dead Release Radar. The pool is the strongest `pool` artists of the configured `kinds` (the acts
+you play, their associates, the Last.fm genre artists); artist browse IDs are cached; each run checks `top_artists`
+of them, rotating through the pool over successive days so everyone gets covered. Every release from this year and
+the backfill window (`backfill.years`) is returned on every run: the feed decides what is fresh and what fills a gap,
+and its own first_seen state decides what counts as new.
 
 The client is the region-pinned one from resolve.ytmusic, so an artist is judged where the playlists are listened
 to. data/cache/ytmusic_artists.json (schema CACHE_VERSION): {"ids": {name: browseId | {"miss": date}}, "cursor": n};
@@ -13,8 +15,9 @@ from __future__ import annotations
 from datetime import date
 
 from ..models import Item
+from ..profile import ranked_artists
 from ..resolve import ytmusic
-from ..util import CACHE_DIR, Http, log, miss_expired, miss_row, norm, read_versioned, write_versioned
+from ..util import CACHE_DIR, Http, backfill_years, log, miss_expired, miss_row, norm, read_versioned, write_versioned
 
 CACHE = CACHE_DIR / "ytmusic_artists.json"
 CACHE_VERSION = 2   # 1: ids were browseId | "" (a miss cached for good); 2: misses are {"miss": date}
@@ -35,14 +38,14 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     cache = read_versioned(CACHE, CACHE_VERSION, {"ids": {}, "cursor": 0}, migrate=_migrate)
     cache.setdefault("ids", {})
     cache.pop("seen", None)   # older builds hid a release after its first sighting; the feed keeps items for the freshness window
-    ranked = [e for e in sorted(profile["artists"].values(), key=lambda e: -e["affinity"]) if e.get("kind") == "direct"]
-    ranked = ranked[: int(scfg.get("pool", 600))]
+    ranked = ranked_artists(profile, scfg.get("kinds") or ("direct",), int(scfg.get("pool", 600)))
     if not ranked:
         return []
     start = int(cache.get("cursor", 0)) % len(ranked)
     batch = (ranked + ranked)[start:start + min(per_run, len(ranked))]   # never the same artist twice in a run
     cache["cursor"] = (start + per_run) % len(ranked)
-    this_year = date.today().year
+    # this year's releases, and the backfill window's when the feed may look further back
+    since_year = date.today().year - backfill_years(cfg)
     out: list[Item] = []
     for e in batch:
         n = norm(e["name"])
@@ -70,7 +73,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                     year = int(rel.get("year") or 0)
                 except ValueError:
                     year = 0
-                if year < this_year - (1 if date.today().month == 1 else 0):
+                if year < since_year:
                     continue
                 rb = rel.get("browseId")
                 if not rb:

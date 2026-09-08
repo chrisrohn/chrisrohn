@@ -6,6 +6,7 @@ export interface FeedItem {
   tags?: string[]; sources?: string[]; links?: Record<string, string | string[]>; artwork?: string | null; editorial?: boolean;
   year?: number | null; year_source?: string | null; year_confidence?: string | null; year_evidence?: string[]; original_year?: number | null;
   youtube?: YouTubeMatch | null; score: number; reasons?: string[]; matched_artist?: string | null; match_kind?: string | null; first_seen?: string | null;
+  backfill?: boolean;   // an older release the build pulled in because the current timeframe was thin
   _pick?: boolean; _year?: string | number | null; _skipped?: boolean;
   plays?: number; loved?: boolean;   // catalog items: Last.fm play count, loved track
 }
@@ -21,6 +22,8 @@ export interface Feed {
   picks?: Array<{ artist: string; title: string; videoId?: string | null; year?: string; thumbnail?: string | null; album?: string | null }>;
   learned?: LearnedSummary;
   feed_health?: Record<string, { ok: boolean; entries: number; kept: number; error?: string | null }>;
+  recent_since?: number;        // the earliest year "new releases only" still counts as recent (the backfill window)
+  fresh_playable?: number; backfill?: number; backfill_candidates?: number;   // how much of the day came from the current timeframe, and what filled it
   lastfm_user?: string; repo?: string; profile?: { built_at?: string; counts?: Record<string, number> }; sources?: string[]; blogs?: string[]; items: FeedItem[];
 }
 export interface Rated {

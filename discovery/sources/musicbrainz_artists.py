@@ -1,11 +1,13 @@
-"""New release groups of your top artists, by MusicBrainz artist id (free, 1 req/s, honest User-Agent).
+"""Release groups of your profile artists, by MusicBrainz artist id (free, 1 req/s, honest User-Agent).
 
   GET https://musicbrainz.org/ws/2/release-group/?query=arid:<mbid> AND firstreleasedate:[<since> TO <today>]&fmt=json
 
 The MBIDs are the ones the profile already resolved (profile["artists"][name]["mbid"], the same field mbid_index is
-built from). MusicBrainz allows one request a second, so a run checks `top_artists` artists out of the strongest
-`pool`, rotating through it (the cursor lives in data/cache/musicbrainz_artists.json) so every artist comes round
-every few days. Look-back: `sources.musicbrainz_artists.days`, else listenbrainz_fresh.days, else 10.
+built from), for the configured `kinds` (the acts you play, their associates, the genre artists). MusicBrainz allows
+one request a second, so a run checks `top_artists` artists out of the strongest `pool`, rotating through it (the
+cursor lives in data/cache/musicbrainz_artists.json) so every artist comes round every few days. Look-back: the
+backfill window (`backfill.years`, util.backfill_since) when it is on, else `sources.musicbrainz_artists.days`,
+else listenbrainz_fresh.days, else 10.
 """
 from __future__ import annotations
 
@@ -14,7 +16,8 @@ from pathlib import Path
 
 from .. import util
 from ..models import Item
-from ..util import Http, log, norm, parse_date, read_versioned, source_days, write_versioned
+from ..profile import ranked_artists
+from ..util import Http, backfill_since, log, norm, parse_date, read_versioned, source_days, write_versioned
 from .musicbrainz import MB_SEARCH, SKIP_SECONDARY
 
 CACHE_VERSION = 1   # {"cursor": n}
@@ -36,9 +39,9 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     per_run = int(scfg.get("top_artists", 150))
     limit = int(scfg.get("limit", 25))
     days = source_days(cfg, "musicbrainz_artists")
-    start, end = (date.today() - timedelta(days=days)).isoformat(), date.today().isoformat()
-    ranked = [e for e in sorted(profile["artists"].values(), key=lambda e: -e["affinity"]) if e.get("kind") == "direct" and e.get("mbid")]
-    ranked = ranked[: int(scfg.get("pool", 600))]
+    since = min(date.today() - timedelta(days=days), backfill_since(cfg) or date.today())
+    start, end = since.isoformat(), date.today().isoformat()
+    ranked = ranked_artists(profile, scfg.get("kinds") or ("direct",), int(scfg.get("pool", 600)), with_mbid=True)
     if not ranked:
         return []
     cache = read_versioned(cache_path(), CACHE_VERSION, {"cursor": 0})

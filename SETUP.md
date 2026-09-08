@@ -10,9 +10,12 @@ GitHub Actions (daily 06:15 ET)                        chrisrohn.com (GitHub Pag
 │ profile: Last.fm tt_discotheque      │               │ anyone: listen, filter by source, Picks│
 │   + your public YT year playlists    │   feed.json   │                                       │
 │   + Last.fm & ListenBrainz similar   │ ────────────▶ │ you (Sign in with Google):            │
-│ sources: ListenBrainz fresh releases │               │   keep → "<year> | Indie Discotheque" │
-│   MusicBrainz tags · Bandcamp new    │               │   skip → unlisted "Skipped" playlist  │
-│   Deezer artist releases · blog RSS  │               │   (YouTube Data API, from your browser)│
+│   + Last.fm top acts of your genres  │               │   keep → "<year> | Indie Discotheque" │
+│ sources: your artists' new releases  │               │   skip → unlisted "Skipped" playlist  │
+│   (YT Music · Deezer · MusicBrainz)  │               │   (YouTube Data API, from your browser)│
+│   ListenBrainz fresh · MB tags       │               │                                       │
+│   Bandcamp · radio · blog RSS        │               │                                       │
+│   thin day → earlier years fill in   │               │                                       │
 │ score → resolve on YouTube Music     │               └───────────────────────────────────────┘
 │ hides anything already in those      │ ◀── reads your playlists (public + unlisted-by-id) ──┘
 │ playlists                            │
@@ -192,6 +195,13 @@ session that the playlist's owner approved in that browser.
   copies its own address (`/?t=<id>`), which opens the site on that card; the RSS items carry the same link.
 - A video YouTube refuses to embed here (removed, or the owner blocks embedding) is remembered for a month: the card
   stays, marked *no embed*, and autoplay steps over it.
+- **Thin days fill themselves.** The day is built from the current timeframe first: this year's releases, plus
+  anything dated within `ranking.fresh_days`, plus what nobody dates. When that leaves fewer than `backfill.target`
+  playable cards, the best releases the artist watch found in the last `backfill.years` years fill the gap (at most
+  `backfill.max` a day). They carry a *filling in from &lt;year&gt;* note, their year badge says *· filling in*, and
+  each files into its own year playlist, so a quiet week works through the back catalogue of the artists and genres
+  you follow instead of showing you 130 cards. Nothing older than that window is ever pulled into the feed — that is
+  what the Catalog tab below is for.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
@@ -218,15 +228,20 @@ All in `discovery/config.yaml → sources`, each with an `enabled` switch. Per-f
 |---|---|---|
 | `listenbrainz_fresh` | every release MusicBrainz knows from the last N days, filtered by your artists/tags | nothing |
 | `musicbrainz_tags` | recent releases tagged with your genres, from artists you've never heard of | nothing |
-| `musicbrainz_labels` | everything your trusted labels released this window | nothing |
-| `ytmusic_artists` | new singles/albums of your top artists straight from YouTube Music (the old Release Radar) | nothing |
-| `youtube_channels` | label / curator / session channels via YouTube RSS, video IDs included | channel handles |
+| `ytmusic_artists` | singles/albums of your profile artists straight from YouTube Music (the old Release Radar) | nothing |
+| `musicbrainz_artists` | release groups of your profile artists, by MusicBrainz artist id | nothing |
+| `youtube_channels` | curator / session channels via YouTube RSS, video IDs included | channel handles |
 | `bandcamp` | newest releases per Bandcamp tag | nothing |
-| `deezer` | newest albums of your top artists + editorial new releases | nothing |
+| `deezer` | newest albums of your profile artists + editorial new releases | nothing |
 | `radio` | recent KEXP plays (API) and SomaFM channel logs, profile-matched | nothing |
 | `listenbrainz_playlists` | ListenBrainz Weekly Exploration / Weekly Jams (collaborative filtering) | a ListenBrainz username with your Last.fm history imported |
 | `rss` | 40+ blogs and radio shows; `Artist – "Song"` and `Artist shares new single "Song"` headlines become cards, news never does (`discovery/headlines.py`) | nothing |
 | `spotify` | off; Spotify's API is no longer viable | Premium + dev app |
+
+The three artist-watch sources (`ytmusic_artists`, `deezer`, `musicbrainz_artists`) share one pool: the profile
+artists of the `kinds` each lists — `direct` (you play them), `similar` (their neighbours on Last.fm and
+ListenBrainz) and `genre` (the acts Last.fm ranks highest under the genres you play). That pool is what the feed is
+made of; no source watches record labels.
 
 ## Tuning
 
@@ -234,6 +249,17 @@ Everything lives in `discovery/config.yaml`:
 
 - `profile.tag_boosts` / `tag_penalties` — push genres up or down.
 - `profile.seed_artists` — hand-add artists Last.fm under-counts.
+- `profile.expand_top_n` / `similar_per_artist` — how many of your artists get expanded into neighbours, and how
+  many each contributes; `genre_top_tags` / `genre_artists_per_tag` / `genre_weight` — how many genres seed artists
+  from Last.fm's tag charts, how deep, and how much that counts. Together these set how big the pool the artist
+  watch rotates through is (⚙ and the feed's header line both show the counts).
+- `backfill` — how the thin days are filled: `years` how far back the artist watch reaches (0 turns it off),
+  `target` how many playable current cards a day should hold before anything older is used, `max` the most older
+  cards one day may carry, `candidates` how many are carried into YouTube resolution. Older cards say
+  "filling in from &lt;year&gt;" and file into their own year.
+- `ranking.fresh_days` — what counts as the current timeframe (this calendar year always does);
+  `max_unknown_per_source` — how many acts the profile does not know one source family may put in a day before it
+  is pushed down; `unplayable_penalty` — how far a card with no YouTube match falls.
 - `sources.*.tags` — the Bandcamp and MusicBrainz genre lists (this replaces the "Edge of <genre>" playlists).
 - `sources.rss.feeds` — add any blog/radio RSS; headlines like `Artist – "Song"` or `Artist shares "Song"` become
   playable cards. Tour dates, interviews, listicles, obituaries and the rest are dropped by `discovery/headlines.py`
@@ -290,5 +316,9 @@ tomorrow instead of losing the run. Cache rows nothing has touched for `resolve.
 - ListenBrainz fresh releases + MusicBrainz tags are open data with no key and cover every release in MusicBrainz.
 - Bandcamp Discover "new" by tag is where the indie end of your genres actually appears first.
 - Deezer's public catalog endpoints (artist albums, related artists, editorial releases) need no key.
-- Last.fm still serves `user.getTopArtists`, `artist.getSimilar`, `artist.getTopTags` with a free key.
+- Last.fm still serves `user.getTopArtists`, `artist.getSimilar`, `artist.getTopTags` and `tag.getTopArtists` with
+  a free key — the last of these is what puts the acts that define your genres in the profile, so the feed covers
+  the scene and not only the names you already play.
+- Record labels are deliberately not watched: an imprint is a poor proxy for what you keep (the keep rate on the
+  old label watch was well below the feed's), and the artists-and-genres pool covers the same records anyway.
 - ytmusicapi searches YouTube Music with no key and adds to playlists with your own browser session.

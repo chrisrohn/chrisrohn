@@ -98,13 +98,21 @@ profile:
     12month: 1.6
     3month: 2.2
   lastfm_top_artists_limit: 1000   # 200 per request; cheap. Rank-decayed weight, so the tail mostly adds "you play them" matches.
-  # How many top artists get expanded into similar artists (Last.fm + ListenBrainz).
-  expand_top_n: 120
+  # How many top artists get expanded into similar artists (Last.fm + ListenBrainz). The associated artists are
+  # what the artist-watch sources (YouTube Music, Deezer, MusicBrainz) check for releases, so wider = more supply.
+  expand_top_n: 300
   # How many top artists contribute their Last.fm tags to the genre table (cached; wider = more tags match)
   tags_top_n: 400
   tag_floor: 0.01               # tags below this share of the strongest tag are dropped from the table
-  similar_per_artist: 12
+  similar_per_artist: 15
   similar_weight: 0.35          # affinity inherited by similar artists (× source artist affinity)
+  # Last.fm genre artists: the acts Last.fm ranks highest under your strongest genre tags (tag.getTopArtists) join
+  # the profile as kind "genre", a weaker cousin of "similar", so the artist-watch sources cover the scene the tags
+  # describe and not only the acts you already play. Nationality / descriptor tags ("french", "female vocalists")
+  # are skipped; a tag with a penalty never seeds anyone.
+  genre_top_tags: 16            # the strongest tags of the table (after tag_boosts) that seed artists
+  genre_artists_per_tag: 60     # Last.fm's top N artists for each of them (100 a request)
+  genre_weight: 0.25            # affinity of a genre artist = this × the tag's weight × rank decay
   # Genre/tag weights are learned from Last.fm top tags of your top artists, then boosted by these:
   tag_boosts:
     indie pop: 1.5
@@ -178,38 +186,32 @@ sources:
   bandcamp:
     enabled: true
     tags: [indie-pop, indietronica, nu-disco, synth-pop, electropop, indie-dance, alternative-dance, dance-punk, chillwave, dream-pop, art-pop, disco, indie-electronic, italo-disco]
-    per_tag: 60
+    per_tag: 30
     slices: [new, top]       # Discover slices per tag: "new" arrivals (source "bandcamp"), "top" sellers (editorial, "bandcamp:top")
   deezer:
     enabled: true
-    days: 45                 # look back for your artists' albums and the editorial feeds (default 45; else listenbrainz_fresh.days)
-    top_artists: 500         # check newest albums of your top N artists
+    days: 45                 # look back for the editorial feeds (default 45; else listenbrainz_fresh.days); your artists' albums use the backfill window
+    top_artists: 700         # check the newest albums of your top N profile artists (of the kinds below, by affinity)
+    kinds: [direct, similar, genre]   # which profile artists count: the acts you play, their associates, the genre acts
     related_per_artist: 0    # set >0 to also pull related artists' newest releases (slower)
     editorial_genres:        # Deezer editorial "new releases" feeds by genre id
       - 85    # Alternative
       - 106   # Electro
       - 132   # Pop
       - 113   # Dance
-  # New singles/albums from your top artists, straight from YouTube Music (video IDs included; replaces Release Radar).
+  # Singles/albums from your profile artists, straight from YouTube Music (browse ids included; replaces Release Radar).
+  # Every release from this year and the backfill window is returned on every run; the feed decides what is fresh.
   ytmusic_artists:
     enabled: true
     top_artists: 500          # checked per run, rotating through the pool so everyone gets covered every few days
-    pool: 600
-  # Label / curator / session channels on YouTube. Free RSS per channel; wrong handles show up in ⚙ feed health.
+    pool: 1500                # the strongest N profile artists of the kinds below, by affinity
+    kinds: [direct, similar, genre]
+  # Curator / session channels on YouTube (no record labels: the feed follows artists and genres, not imprints).
+  # Free RSS per channel; wrong handles show up in ⚙ feed health.
   youtube_channels:
     enabled: true
     days: 30                 # uploads older than this are ignored (default 30; else listenbrainz_fresh.days)
     channels:
-      - { name: "Toy Tonics", channel: "@toytonics" }
-      - { name: "Razor-N-Tape", channel: "@RazorNTape" }
-      - { name: "Italians Do It Better", channel: "@ItaliansDoItBetter" }
-      - { name: "Kitsuné Musique", channel: "@KitsuneMusique" }
-      # - { name: "Ed Banger Records", channel: "@edbangerrecords" }      # handle not found (2026-09-05): check the @handle
-      - { name: "Roche Musique", channel: "@RocheMusique" }
-      - { name: "Future Classic", channel: "@futureclassic" }
-      # - { name: "Ghostly International", channel: "@ghostly" }           # handle not found (2026-09-05): check the @handle
-      - { name: "Ninja Tune", channel: "@ninjatune" }
-      - { name: "Cascine", channel: "@cascine" }
       - { name: "Majestic Casual", channel: "@majesticcasual" }
       - { name: "Eton Messy", channel: "@EtonMessy" }
 
@@ -232,7 +234,9 @@ sources:
     enabled: true
     days: 14                 # episodes older than this are skipped (default 14; else listenbrainz_fresh.days)
     episodes_per_show: 2
-    shows: [balearic-breakfast, charlie-bones, the-do-you-show, moxie, bullion]
+    # aliases that 404 are dropped rather than retried daily: balearic-breakfast, charlie-bones, the-do-you-show
+    # (2026-09-08). Check the alias in the nts.live/shows/<alias> URL before adding one back.
+    shows: [moxie, bullion]
   # Music subreddits: "Artist - Song [genre] (year)" link posts to YouTube / Bandcamp / SoundCloud / Spotify.
   reddit:
     enabled: true
@@ -245,44 +249,17 @@ sources:
     days: 30                 # albums released before this are skipped (default 30; else listenbrainz_fresh.days)
     storefront: us
     limit: 100
-    feeds: [most-recent, most-played]
+    feeds: [most-played]     # most-recent-albums 404s for the us storefront (2026-09-08); most-played still serves
     genres: [Alternative, Dance, Electronic, Pop, Indie Pop]
-  # New release groups of your top artists by MusicBrainz artist id (1 req/s: `top_artists` a run, rotating through `pool`).
+  # Release groups of your profile artists by MusicBrainz artist id (1 req/s: `top_artists` a run, rotating through
+  # `pool`). The first-release-date window is the backfill window (see `backfill`), else `days`.
   musicbrainz_artists:
     enabled: true
-    days: 60                 # first-release-date window (default 60; else listenbrainz_fresh.days)
+    days: 60                 # first-release-date window when backfill is off (default 60; else listenbrainz_fresh.days)
     top_artists: 150
-    pool: 600
-    limit: 25                # release groups per artist query
-  # Labels you trust: every release they put out in the window, via MusicBrainz.
-  musicbrainz_labels:
-    enabled: true
-    days: 60                 # release-date window (default 60; else listenbrainz_fresh.days)
-    labels:
-      - Toy Tonics
-      - Razor-N-Tape
-      - Italians Do It Better
-      - Kitsuné
-      - Ed Banger Records
-      - Roche Musique
-      - Future Classic
-      - Ghostly International
-      - Cascine
-      - Heavenly Recordings
-      - Lucky Number
-      - Captured Tracks
-      - Mexican Summer
-      - Bella Union
-      - Permanent Vacation
-      - Music For Dreams
-      - Nang
-      - Midnight Riot
-      - Glitterbox Recordings
-      - Athens of the North
-      - Soundway
-      - Mr Bongo
-      - Big Crown Records
-      - Colemine Records
+    pool: 1500
+    kinds: [direct, similar, genre]
+    limit: 40                # release groups per artist query
   rss:
     enabled: true
     days: 21                 # posts older than this (+4 days of slack) are skipped (default 21; else listenbrainz_fresh.days)
@@ -346,17 +323,23 @@ sources:
 ranking:
   max_items: 400           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
   min_score: 0.6
-  # One act must not own the day: past this many tracks by the same artist (or on the same label) each further one
-  # loses `repeat_penalty` from its score, so it drops down the list. And the top `learn.shown_rank` always holds
-  # `explore_slots` tracks by artists the profile does not know, so newcomers get seen at all.
+  # One act must not own the day: past this many tracks by the same artist each further one loses `repeat_penalty`
+  # from its score, so it drops down the list. Nor may one tag crawler: past `max_unknown_per_source` tracks by
+  # artists the profile does not know from the same source family (bandcamp, rss, musicbrainz…) the same penalty
+  # applies, so the day stays anchored on your artists and their associates. And the top `learn.shown_rank` always
+  # holds `explore_slots` tracks by artists the profile does not know, so newcomers get seen at all.
   max_per_artist: 3
-  max_per_label: 6
+  max_unknown_per_source: 30
   repeat_penalty: 2.0
   explore_slots: 8
+  # A card with no YouTube match cannot be played or filed: it loses this much after resolution, so playable cards
+  # come first and an unplayable one only survives the score floor when the match is strong.
+  unplayable_penalty: 1.0
   weights:
     affinity: 4.0          # direct artist match (Last.fm / seeds: you play them)
     saved: 2.0             # artist only known from the year playlists (in your library, never scrobbled)
     similar: 2.5           # similar-artist match
+    genre: 2.0             # a Last.fm genre artist (top of a tag you play; see profile.genre_top_tags)
     tags: 1.2              # summed matched tag weights
     source_count: 0.6      # each additional source that surfaced the same track
     freshness: 1.0         # decays over `freshness_days`
@@ -365,12 +348,25 @@ ranking:
     playable: 0.3          # a YouTube match exists (it can be played and filed)
     learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
     explore: 1.0           # the exploration bonus for sources / tags / artists with little history (learn.explore)
-    label: 1.0             # a release on one of the labels under sources.musicbrainz_labels.labels
     novelty: 0.5           # an artist the profile does not know, vouched for by an editorial feed or two sources
   freshness_days: 60       # a release this many days old has spent its freshness bonus (the sources look back ~90 days)
   undated_freshness: 0.2   # share of the freshness weight for an item nobody dates; below anything released this month
+  # What counts as the current timeframe: a release (or sighting) dated within this many days, plus everything from
+  # this calendar year whatever month it landed in, plus anything nobody dates. Earlier years are backfill (below).
+  fresh_days: 90
   # Hide anything already in your year playlists, saved or skipped from the site.
   hide_seen: true
+
+# ---------- Backfill: when the current timeframe runs thin, look further back ----------
+# The artist-watch sources (YouTube Music, Deezer, MusicBrainz) return releases back to `years` years ago for your
+# artists, their associates and the genre artists. The feed is built from the fresh window first; only when it holds
+# fewer than `target` playable, unrated cards do the best older releases fill the gap, up to `max` a day, marked
+# "filling in from <year>" on the card and filed into their own year. Nothing older than the window is ever pulled.
+backfill:
+  years: 3                 # 0 turns backfill off (the sources fall back to their own `days`)
+  target: 160              # playable current cards the day should hold before anything older is used
+  max: 120                 # the most older cards one day may carry
+  candidates: 600          # the best older candidates carried into resolution (the rest wait for another day)
 
 # ---------- Learning from outcomes (discovery/learn.py) ----------
 # No API quota involved: what each day's feed showed (site/data/history/) is compared with what reached the year
@@ -419,7 +415,7 @@ catalog:
 
 resolve:
   youtube_music: true
-  max_lookups_per_run: 400
+  max_lookups_per_run: 700
   audio_heals_per_run: 150      # older cached hits re-checked for an audio-only counterpart and their album year, per run
   counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload per run (Cleanup tab → data/unavailable.json)
   year_chain: full              # the feed asks every catalogue; the catalog's own setting is under `catalog`

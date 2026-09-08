@@ -1,19 +1,21 @@
 """Build the taste profile for Chris Rohn's New Music.
 
 Inputs (all free):
-  * Last.fm  – user.getTopArtists for `tt_discotheque` over several periods, artist.getSimilar, artist.getTopTags
+  * Last.fm  – user.getTopArtists for `tt_discotheque` over several periods, artist.getSimilar, artist.getTopTags,
+               tag.getTopArtists for the strongest genre tags (the acts that define the genres you play)
   * ListenBrainz labs – similar-artists graph (by MusicBrainz artist id)
   * MusicBrainz – artist MBID lookup (cached forever in data/cache/artists.json)
   * Your public YouTube Music year playlists – artists you already saved (strong positive signal + de-dupe list)
   * Optional frozen Everynoise genre pages (`python -m discovery seed-everynoise`)
 
 Output: data/profile.json
-  {"artists": {norm_name: {"name", "affinity", "kind": "direct"|"saved"|"similar", "mbid", "via"}},
+  {"artists": {norm_name: {"name", "affinity", "kind": "direct"|"saved"|"similar"|"genre", "mbid", "via"}},
    "tags": {tag: weight}, "saved": {item_key: {...}}, "youtube": {"years", "skipped", "channel", "entries", "checked_at"},
    "built_at": iso, "version": PROFILE_VERSION}
 
   kind "direct" = you play them (Last.fm / seeds); "saved" = only known from the year playlists (one save in 1987 is
-  not the same signal as a scrobbled favourite); "similar" = inherited from a direct artist.
+  not the same signal as a scrobbled favourite); "similar" = inherited from a direct artist; "genre" = one of the
+  top artists Last.fm lists under a genre tag you play (`via` names the tags).
 """
 from __future__ import annotations
 
@@ -110,6 +112,58 @@ class LastFm:
     def top_tags(self, artist: str) -> list[dict]:
         data = self.call("artist.gettoptags", artist=artist, autocorrect=1)
         return (data.get("toptags") or {}).get("tag") or []
+
+    def tag_top_artists(self, tag: str, limit: int) -> list[dict]:
+        """The artists Last.fm ranks highest under a tag (tag.getTopArtists, 100 a page), best first."""
+        return self._paged("tag.gettopartists", "topartists", "artist", limit, tag=tag)
+
+
+# Last.fm tags that describe where an act is from or who sings, not what it sounds like: they never seed genre artists
+NOT_A_GENRE = {"french", "german", "canadian", "australian", "british", "american", "swedish", "norwegian", "danish", "japanese", "uk", "usa", "brazilian",
+               "italian", "belgian", "dutch", "irish", "scottish", "finnish", "spanish", "female vocalists", "male vocalists", "female vocalist", "male vocalist",
+               "seen live", "favorites", "favourites", "love", "awesome", "beautiful", "cool", "under 2000 listeners", "all", "albums i own", "singer songwriter"}
+
+
+def genre_tags(tags: dict[str, float], n: int) -> list[tuple[str, float]]:
+    """The strongest genre tags of the table: positive weight, not a nationality or a descriptor, best first."""
+    ranked = sorted(((t, w) for t, w in tags.items() if w > 0 and t and t not in NOT_A_GENRE), key=lambda tw: -tw[1])
+    return ranked[:max(0, int(n))]
+
+
+def genre_artists(lastfm: LastFm, tags: dict[str, float], pcfg: dict, exclude: set[str]) -> dict[str, dict]:
+    """Kind "genre": Last.fm's top artists under the profile's strongest genre tags, weighted by the tag and their
+    rank under it; an act under several tags keeps the best weight and every tag in `via`. Names in `exclude`
+    (the direct and similar artists) are left to those kinds."""
+    n_tags = int(pcfg.get("genre_top_tags", 0) or 0)
+    per = int(pcfg.get("genre_artists_per_tag", 0) or 0)
+    weight = float(pcfg.get("genre_weight", 0.25) or 0)
+    out: dict[str, dict] = {}
+    if not lastfm.enabled or n_tags <= 0 or per <= 0 or weight <= 0:
+        return out
+    for tag, tw in genre_tags(tags, n_tags):
+        arts = lastfm.tag_top_artists(tag, per)
+        for i, a in enumerate(arts):
+            name = a.get("name") or ""
+            n = norm(name)
+            if not n or n in exclude:
+                continue
+            aff = round(weight * float(tw) * (1.0 / math.log2(i + 2)), 4)
+            entry = out.setdefault(n, {"name": name, "affinity": 0.0, "kind": "genre", "mbid": a.get("mbid") or None, "via": []})
+            entry["affinity"] = max(entry["affinity"], aff)
+            entry["mbid"] = entry["mbid"] or a.get("mbid") or None
+            if tag not in entry["via"]:
+                entry["via"].append(tag)
+        log.info("last.fm genre %s: %d artists", tag, len(arts))
+    return out
+
+
+def ranked_artists(profile: dict, kinds: list[str] | tuple[str, ...] | None = None, limit: int | None = None, *, with_mbid: bool = False) -> list[dict]:
+    """The profile's artists of the given kinds (default: the acts you play), strongest affinity first — the pool the
+    artist-watch sources rotate through. `with_mbid` keeps only artists with a MusicBrainz id."""
+    wanted = set(kinds or ("direct",))
+    rows = [e for e in (profile.get("artists") or {}).values() if e.get("kind") in wanted and (not with_mbid or e.get("mbid"))]
+    rows.sort(key=lambda e: (-float(e.get("affinity") or 0), norm(e.get("name"))))
+    return rows[:limit] if limit else rows
 
 
 class ArtistIds:
@@ -412,14 +466,17 @@ def build_profile(cfg: dict, http: Http) -> dict:
                 entry["via"].append(e["name"])
     ids.save()
 
-    artists = {**similar, **direct}
+    # 6. Genre artists: the acts Last.fm ranks highest under the genres you play (the scene, beyond the acts you know)
+    genre = genre_artists(lastfm, tags, pcfg, set(direct) | set(similar))
+
+    artists = {**genre, **similar, **direct}
     mb_index = {e["mbid"]: n for n, e in artists.items() if e.get("mbid")}
     n_saved_kind = sum(1 for e in direct.values() if e["kind"] == "saved")
     profile = {
         "built_at": utcnow().isoformat(),
         "version": PROFILE_VERSION,
         "lastfm_user": user,
-        "counts": {"direct": len(direct) - n_saved_kind, "library": n_saved_kind, "similar": len(similar), "tags": len(tags), "saved": len(saved)},
+        "counts": {"direct": len(direct) - n_saved_kind, "library": n_saved_kind, "similar": len(similar), "genre": len(genre), "tags": len(tags), "saved": len(saved)},
         "artists": artists,
         "mbid_index": mb_index,
         "tags": tags,

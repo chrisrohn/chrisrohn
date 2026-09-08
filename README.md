@@ -1,13 +1,18 @@
 ## Hi there
 
 **[Chris Rohn's New Music](https://chrisrohn.com)** — a daily new-music discovery feed where I find tracks to add to
-the Indie Discotheque library playlists on YouTube Music. Built from Last.fm ([tt_discotheque](https://www.last.fm/user/tt_discotheque)),
-ListenBrainz, MusicBrainz, Bandcamp, Deezer and music blogs. Sign in with Google, keep or skip tracks, and
-approvals land in the matching `<year> | Indie Discotheque` playlist.
+the Indie Discotheque library playlists on YouTube Music. It follows what my Last.fm
+([tt_discotheque](https://www.last.fm/user/tt_discotheque)) history says I listen to: those artists, the artists
+next to them, and the acts that define the genres they sit in — watched for new releases on YouTube Music, Deezer
+and MusicBrainz, and rounded out by ListenBrainz, Bandcamp, radio and music blogs. Sign in with Google, keep or skip
+tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist.
 
 - Site: [chrisrohn.com](https://chrisrohn.com) · RSS: [chrisrohn.com/feed.xml](https://chrisrohn.com/feed.xml)
 - How it works and how to set it up: [SETUP.md](SETUP.md)
 - Pipeline: [`discovery/`](discovery) · Site: [`site/`](site) · Workflows: [`.github/workflows/`](.github/workflows)
+- A quiet day is not a short day: when the current timeframe has too little to show, the feed reaches back through
+  the last few years of those same artists' catalogues, marks each card *filling in from &lt;year&gt;* and files it
+  into its own year
 - **⚙ → API activity**: every YouTube Data API request the browser makes, as it happens, with what it was for (verify a playlist's contents, add the approved track, remove one taken back), its result and quota cost, exportable as text or JSON; [docs/youtube-api-compliance.md](docs/youtube-api-compliance.md) turns it into the screencast Google's quota reviewers ask for
 - A **Cleanup** tab for what the daily build finds across the year playlists: duplicated songs, and tracks that no longer stream in the US with the streamable upload to swap in, paced by the API quota and remembered across devices
 - Audio-only where YouTube Music has it: the resolver prefers the audio track over the video and the original issue over a deluxe edition

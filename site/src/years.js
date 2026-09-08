@@ -30,16 +30,20 @@ export function yearBadge(it) {
     : it.year_source === "pending" ? "year pending"
     : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`)
     : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
-  // in the feed an older year is a warning (radio and recommendations surface catalogue); in the Catalog tab it is the point
-  if (Number.isFinite(it.year) && /** @type {number} */ (it.year) < new Date().getFullYear() - 1 && it.year_source !== "unknown" && it.plays == null) text += " · catalog";
+  // an older year the build pulled in on purpose says so; anything else old in the feed is a warning (radio and
+  // recommendations surface catalogue too), and in the Catalog tab an older year is the point
+  if (it.backfill) text += " · filling in";
+  else if (Number.isFinite(it.year) && /** @type {number} */ (it.year) < new Date().getFullYear() - 1 && it.year_source !== "unknown" && it.plays == null) text += " · catalog";
   return { text, conf, title: (YEAR_SOURCE[it.year_source || ""] || "") + ((it.year_evidence || []).length ? "\n" + (it.year_evidence || []).join("\n") : "") };
 }
 /** @param {string} r */
-export const isMatchReason = r => /^(you play |similar to |.* is in your playlists$)/.test(r);
+export const isMatchReason = r => /^(you play |similar to |a top .* act on Last\.fm$|a top genre act on Last\.fm$|.* is in your playlists$)/.test(r);
 /** @param {FeedItem} it */
 export function matchLabel(it) {
   if (it.match_kind === "direct") return it.matched_artist === it.artist ? "you play them" : "you play " + it.matched_artist;
   if (it.match_kind === "saved") return it.matched_artist === it.artist ? "in your playlists" : it.matched_artist + " is in your playlists";
   if (it.match_kind === "similar") return (it.reasons || []).find(r => r.startsWith("similar to ")) || "similar artist";
+  // a top act of a genre you play, from Last.fm's tag charts: the reason names the tags
+  if (it.match_kind === "genre") return (it.reasons || []).find(r => r.startsWith("a top ")) || "your genres";
   return "";
 }
