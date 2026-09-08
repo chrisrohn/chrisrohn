@@ -423,6 +423,9 @@ class Http:
             "api.discogs.com": 1.1,    # 60 requests/minute with a token
         }
         self._dirty = False
+        # The budget of whatever phase is using this client, set by run_sources. The slow per-artist loops check it
+        # and stop where they are; their rotating cursors mean the rest is simply the next run's work.
+        self.deadline: Deadline | None = None
         # conditional GETs (feeds): url -> {"etag", "last_modified", "body", "at"}, loaded on first use
         self.etag_path = CACHE_DIR / "feed_etags.json"
         self._etags: dict[str, dict] | None = None

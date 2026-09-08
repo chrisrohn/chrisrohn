@@ -4,6 +4,10 @@ The list is built from the current timeframe first (`ranking.fresh_days`): relea
 and undated releases from this year. When that leaves fewer than `backfill.target` playable, unrated cards, the best
 older releases the artist-watch sources found (back to `backfill.years`) fill the gap, up to `backfill.max` a day,
 each marked as backfill and filed into its own year. Nothing that ranks below the score floor is ever used to fill.
+
+The build is bounded: `budget_minutes` (the daily job's, see cli.py) is split between fetching the sources and
+resolving what they found, so the job commits a feed instead of being killed at its timeout. Every slow loop keeps
+a cursor or a cache, so whatever a run does not reach is simply the next run's work.
 """
 from __future__ import annotations
 
@@ -25,7 +29,8 @@ FEED_PATH = SITE_DATA_DIR / "feed.json"
 STATE_PATH = DATA_DIR / "state.json"
 
 
-def build_feed(cfg: dict) -> dict:
+def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
+    job = Deadline(budget_minutes)
     http = Http("sources", ttl_hours=20)
     profile = load_profile()
     # the site's own ratings (data/ratings.json, pushed from the browser): every skip the curator made, including
@@ -42,13 +47,23 @@ def build_feed(cfg: dict) -> dict:
     state = read_json(STATE_PATH, {"first_seen": {}})
     first_seen: dict[str, str] = state.setdefault("first_seen", {})
 
-    raw = [i.normalize_credit() for i in run_sources(cfg, profile, http)]
+    # fetching gets its own budget, and never more than half of what the job has left: resolution is what turns a
+    # sighting into a card that can be played and filed, so it must not be squeezed out by a slow catalogue day
+    src_minutes = float((cfg.get("sources") or {}).get("time_budget_minutes") or 0) or None
+    if budget_minutes is not None:
+        src_minutes = min(src_minutes or budget_minutes, budget_minutes / 2)
+    raw = [i.normalize_credit() for i in run_sources(cfg, profile, http, Deadline(src_minutes))]
     items = dedupe(raw)
     _clean_tags(items, profile)
     log.info("%d raw sightings → %d unique items", len(raw), len(items))
 
     rcfg = cfg["ranking"]
-    deadline = Deadline(float((cfg.get("resolve") or {}).get("time_budget_minutes") or 0) or None)
+    resolve_minutes = float((cfg.get("resolve") or {}).get("time_budget_minutes") or 0) or None
+    if budget_minutes is not None:      # …and what is left of the job's own budget, whichever is less
+        resolve_minutes = min(resolve_minutes or job.remaining_minutes, job.remaining_minutes)
+    log.info("time: %.1f min left of the build's budget; %.1f of it for YouTube and the year lookups",
+             job.remaining_minutes, resolve_minutes or float("inf"))
+    deadline = Deadline(resolve_minutes)
     # drop things already in your year playlists (kept) or the Skipped playlist (skipped)
     saved = profile.get("saved") or {}
     saved_videos = {v.get("videoId") for v in saved.values() if isinstance(v, dict) and v.get("videoId")}

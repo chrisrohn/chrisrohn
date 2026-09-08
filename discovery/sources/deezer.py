@@ -95,7 +95,10 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     ranked = ranked_artists(profile, scfg.get("kinds") or ("direct",), int(scfg.get("top_artists", 150)))
     related_n = int(scfg.get("related_per_artist", 0))
     seen_ids: set[int] = set()
-    for e in ranked:
+    for n, e in enumerate(ranked):
+        if getattr(http, "deadline", None) and http.deadline.expired:
+            log.warning("deezer: time budget spent after %d of %d artists; the editorial feeds still run", n, len(ranked))
+            break
         aid = _artist_id(http, e["name"], cache)
         if not aid or aid in seen_ids:
             continue
