@@ -342,12 +342,16 @@ test("theme toggle: header button, ⚙ select and the t key switch, persist and 
   const errors = await open(page);
   const html = page.locator("html"), btn = page.locator("#theme-btn");
   const bg = c => expect(page.locator("body")).toHaveCSS("background-color", c);   // retries through the .2s fade
-  const themeColor = () => page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')].map(m => m.getAttribute("content")));
+  // theme.js collapses the page's media-qualified pair into the one media-less meta it owns, so a pinned choice
+  // actually reaches the browser chrome (a media-qualified meta is matched against the device, never the pin)
+  const themeColor = () => page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')].map(m => `${m.getAttribute("content")}${m.getAttribute("media") ? " @" + m.getAttribute("media") : ""}`));
+  const iosBar = () => page.getAttribute('meta[name="apple-mobile-web-app-status-bar-style"]', "content");
   // fresh visit: following the device (light here), nothing pinned
   await expect(html).not.toHaveAttribute("data-theme");
   await expect(html).toHaveAttribute("data-scheme", "light");
   await bg("rgb(231, 227, 218)");
-  expect(await themeColor()).toEqual(["#e7e3da", "#1c1c1a"]);
+  expect(await themeColor()).toEqual(["#e7e3da"]);
+  expect(await iosBar()).toBe("default");
   await expect(btn).toHaveAttribute("title", /system.*now light.*switch to light/);
   // system → light → dark, the button says where it is going next, the browser chrome follows
   await btn.click();
@@ -356,7 +360,8 @@ test("theme toggle: header button, ⚙ select and the t key switch, persist and 
   await expect(html).toHaveAttribute("data-theme", "dark");
   await expect(html).toHaveAttribute("data-scheme", "dark");
   await bg("rgb(28, 28, 26)");
-  expect(await themeColor()).toEqual(["#1c1c1a", "#1c1c1a"]);
+  expect(await themeColor()).toEqual(["#1c1c1a"]);
+  expect(await iosBar()).toBe("black-translucent");
   await expect(btn).toHaveAttribute("title", /dark.*switch to system/);
   // the player and the footer sit on the same board as the page, in either scheme
   await expect(page.locator("footer")).toHaveCSS("background-color", "rgb(38, 38, 35)");
@@ -391,9 +396,11 @@ test("theme toggle: header button, ⚙ select and the t key switch, persist and 
   await expect(html).not.toHaveAttribute("data-theme");
   await expect(html).toHaveAttribute("data-scheme", "dark");
   await bg("rgb(28, 28, 26)");
+  expect(await themeColor()).toEqual(["#1c1c1a"]);
   await page.emulateMedia({ colorScheme: "light" });
   await expect(html).toHaveAttribute("data-scheme", "light");
   await bg("rgb(231, 227, 218)");
+  expect(await themeColor()).toEqual(["#e7e3da"]);
   // the legal pages share the switch and the saved choice
   await page.keyboard.press("t"); await page.keyboard.press("t");   // → light → dark
   await page.goto("/privacy.html");
