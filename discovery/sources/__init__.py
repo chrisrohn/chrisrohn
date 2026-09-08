@@ -17,7 +17,6 @@ def report(name: str, ok: bool, entries: int = 0, kept: int = 0, error: str | No
 SOURCE_MODULES = {
     "listenbrainz_fresh": "listenbrainz",
     "musicbrainz_tags": "musicbrainz",
-    "musicbrainz_labels": "labels",
     "bandcamp": "bandcamp",
     "deezer": "deezer",
     "ytmusic_artists": "ytmusic_artists",

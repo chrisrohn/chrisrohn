@@ -1,13 +1,15 @@
 """Deezer public catalog API (free, no key for catalog endpoints).
 
   * newest albums of your top-N profile artists  → GET /search/artist, GET /artist/{id}/albums
+    (the acts you play, their associates and the genre artists — `kinds`; back to the backfill window)
   * optional: related artists' newest albums      → GET /artist/{id}/related   (Spotify's dead "related artists")
   * editorial new releases by genre               → GET /editorial/{genre_id}/releases
     (compilations and sped-up / slowed / nightcore / karaoke / tribute / 8-bit knock-offs are skipped)
 
 Artist ids are cached in data/cache/deezer_artists.json (schema ID_CACHE_VERSION): name → id, or {"miss": date} for a
 name Deezer did not know, retried after util.NEGATIVE_CACHE_DAYS. Look-back: `sources.deezer.days`, else
-listenbrainz_fresh.days, else 10.
+listenbrainz_fresh.days, else 10 — for the editorial feeds; the artists' albums reach back to `backfill.years`
+(util.backfill_since) when that is further.
 """
 from __future__ import annotations
 
@@ -15,7 +17,8 @@ import re
 from datetime import date, timedelta
 
 from ..models import Item
-from ..util import CACHE_DIR, Http, log, miss_expired, miss_row, norm, parse_date, read_versioned, source_days, write_versioned
+from ..profile import ranked_artists
+from ..util import CACHE_DIR, Http, backfill_since, log, miss_expired, miss_row, norm, parse_date, read_versioned, source_days, write_versioned
 
 API = "https://api.deezer.com"
 ID_CACHE = CACHE_DIR / "deezer_artists.json"
@@ -85,13 +88,11 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
     scfg = cfg["sources"]["deezer"]
     days = source_days(cfg, "deezer")
     since = date.today() - timedelta(days=days)
+    artists_since = min(since, backfill_since(cfg) or since)   # the artists' albums may reach back into the backfill window
     cache = read_versioned(ID_CACHE, ID_CACHE_VERSION, {}, migrate=_migrate_ids)
     out: list[Item] = []
 
-    ranked = sorted(
-        (e for e in profile["artists"].values() if e.get("kind") == "direct"),
-        key=lambda e: -e["affinity"],
-    )[: int(scfg.get("top_artists", 150))]
+    ranked = ranked_artists(profile, scfg.get("kinds") or ("direct",), int(scfg.get("top_artists", 150)))
     related_n = int(scfg.get("related_per_artist", 0))
     seen_ids: set[int] = set()
     for e in ranked:
@@ -99,7 +100,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
         if not aid or aid in seen_ids:
             continue
         seen_ids.add(aid)
-        out.extend(_albums(http, aid, e["name"], since, [], "deezer"))
+        out.extend(_albums(http, aid, e["name"], artists_since, [], "deezer"))
         if related_n:
             try:
                 rel = http.get(f"{API}/artist/{aid}/related", params={"limit": related_n})
@@ -111,7 +112,7 @@ def fetch(cfg: dict, profile: dict, http: Http) -> list[Item]:
                     continue
                 seen_ids.add(rid)
                 cache.setdefault(norm(ra.get("name")), rid)
-                out.extend(_albums(http, rid, ra.get("name") or "", since, [], "deezer-related"))
+                out.extend(_albums(http, rid, ra.get("name") or "", artists_since, [], "deezer-related"))
 
     for gid in scfg.get("editorial_genres") or []:
         try:

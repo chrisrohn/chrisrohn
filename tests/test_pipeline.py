@@ -64,6 +64,7 @@ PROFILE = {
         "jungle": {"name": "Jungle", "affinity": 1.0, "kind": "direct", "mbid": "m-jungle", "via": ["lastfm:overall"]},
         "roosevelt": {"name": "Roosevelt", "affinity": 0.7, "kind": "direct", "mbid": None, "via": []},
         "parcels": {"name": "Parcels", "affinity": 0.3, "kind": "similar", "mbid": None, "via": ["Jungle"]},
+        "tops": {"name": "TOPS", "affinity": 0.2, "kind": "genre", "mbid": None, "via": ["indie pop", "dream pop"]},
     },
     "mbid_index": {"m-jungle": "jungle"},
     "tags": {"nu disco": 1.0, "indie pop": 0.8, "metal": -3},
@@ -175,6 +176,9 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
         Item(artist="Parcels", title="Free", kind="track", sources=["radio:KEXP"], editorial=True, links={"kexp": "javascript:alert(1)", "article": ["https://kexp.org/x"]}),   # undated: first_seen fills the date as a sighting
         Item(artist="Someone New", title="Disco Dream", kind="release", release_date=today, sources=["musicbrainz"], tags=["nu disco"]),
         Item(artist="Unknown Metal Band", title="Skull", kind="release", release_date=today, sources=["musicbrainz"], tags=["metal"]),
+        # older than the current timeframe: a candidate only because the day is thin (the artist watch reaches back)
+        Item(artist="Roosevelt", title="Earlier Single", kind="track", release_date=date(today.year - 2, 3, 1), sources=["ytmusic"]),
+        Item(artist="Roosevelt", title="Ancient Single", kind="track", release_date=date(2009, 3, 1), sources=["ytmusic"]),
     ]
     monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http: list(fake_items))
     # the site flagged Keep Moving's video as the wrong one: the resolver hears about it, the saved map does not
@@ -192,6 +196,8 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
                 it.youtube = {"videoId": "vidSaved", "title": it.title, "artists": ["Parcels"], "via": "track-search"}
             if it.title == "Free":
                 it.youtube = {"videoId": "vidFree", "title": it.title, "artists": ["Parcels"]}
+            if it.title.endswith("Single"):
+                it.youtube = {"videoId": "vid" + it.title[:3], "title": it.title, "artists": ["Roosevelt"]}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
     monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
     monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
@@ -218,6 +224,14 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert dups["count"] == 1 and dups["kinds"] == {"cross-year": 1} and payload["youtube"]["duplicates_count"] == 1
     assert ("Unknown Metal Band", "Skull") not in ids
     assert ("Someone New", "Disco Dream") not in ids        # tag-only, no YouTube match → dropped
+    # the day is thin, so the older release fills in — marked as such, and dated by its own year, never today's
+    older = next(i for i in payload["items"] if i["title"] == "Earlier Single")
+    assert older["backfill"] is True and older["release_date"] == date(today.year - 2, 3, 1).isoformat()
+    assert "filling in from %d" % (today.year - 2) in older["reasons"]
+    assert ("Roosevelt", "Ancient Single") not in ids       # older than the backfill window: never pulled in
+    assert payload["backfill"] == 1 and payload["backfill_candidates"] == 1
+    assert payload["recent_since"] == today.year - 3 and payload["fresh_playable"] >= 1
+    assert all(i["backfill"] is False for i in payload["items"] if i["title"] != "Earlier Single")
     assert payload["years"][0] >= 2026 and payload["years"][-1] == 1979
     assert payload["google"]["client_id"] == "abc.apps.googleusercontent.com"
     assert payload["google"]["curator_hashes"] == [build._email_hash("ChrisRohn@gmail.com")] and "curators" not in payload["google"]
@@ -1154,23 +1168,23 @@ def test_learning_decays_and_explores():
     assert a.score > b.score and "little history yet" in a.reasons
 
 
-def test_diversify_caps_artists_and_labels_and_keeps_explore_slots():
+def test_diversify_caps_artists_and_unknown_sources_and_keeps_explore_slots():
     from discovery.score import diversify
 
-    items = [Item(artist="Tonbe", title=f"T{i}", kind="track", sources=["bandcamp"], tags=["label:toy tonics"]) for i in range(6)]
+    items = [Item(artist="Tonbe", title=f"T{i}", kind="track", sources=["bandcamp"]) for i in range(6)]
     items += [Item(artist=f"Other {i}", title="X", kind="track", sources=["bandcamp"]) for i in range(6)]
     newcomer = Item(artist="Newcomer", title="N", kind="track", sources=["bandcamp"])
     for n, it in enumerate(items):
         it.score = 10.0 - n * 0.1
         it.match_kind = "direct"
     newcomer.score = 1.0
-    cfg = {"ranking": {"max_per_artist": 2, "max_per_label": 3, "repeat_penalty": 2.0, "explore_slots": 1}, "learn": {"shown_rank": 5}}
+    cfg = {"ranking": {"max_per_artist": 2, "repeat_penalty": 2.0, "explore_slots": 1}, "learn": {"shown_rank": 5}}
     out = diversify(items + [newcomer], cfg)
     tonbe = [i for i in out if i.artist == "Tonbe"]
     assert [i.title for i in tonbe] == ["T0", "T1", "T2", "T3", "T4", "T5"]
     assert tonbe[0].score == 10.0 and tonbe[1].score == 9.9                       # within the cap: untouched
     assert tonbe[2].score == pytest.approx(9.8 - 2.0) and "no. 3 by them today" in tonbe[2].reasons
-    assert tonbe[3].score == pytest.approx(9.7 - 4.0)                             # two past the artist cap (label cap of 3 is the same count here)
+    assert tonbe[3].score == pytest.approx(9.7 - 4.0)                             # two past the artist cap
     assert [i.artist for i in out[:2]] == ["Tonbe", "Tonbe"] and out[2].artist == "Other 0"
     # the newcomer is lifted into the top five, just above whatever was fifth
     top = out[:5]
@@ -1178,17 +1192,112 @@ def test_diversify_caps_artists_and_labels_and_keeps_explore_slots():
     assert diversify([], cfg) == []
 
 
-def test_label_weight_and_tag_cleaning(monkeypatch):
+def test_diversify_caps_unknown_acts_per_source_family():
+    """A tag crawler must not fill the day with acts the profile has never heard of, however many it emits."""
+    from discovery.score import diversify
+
+    crawled = [Item(artist=f"Unknown {i}", title="X", kind="track", sources=["bandcamp"]) for i in range(6)]
+    known = [Item(artist=f"Known {i}", title="Y", kind="track", sources=["bandcamp"]) for i in range(4)]
+    for it in known:
+        it.match_kind = "direct"
+    for n, it in enumerate(crawled + known):
+        it.score = 10.0 - n * 0.1
+    cfg = {"ranking": {"max_per_artist": 3, "max_unknown_per_source": 2, "repeat_penalty": 2.0}, "learn": {"shown_rank": 5}}
+    out = diversify(crawled + known, cfg)
+    assert [i.artist for i in out[:2]] == ["Unknown 0", "Unknown 1"]               # within the cap: untouched
+    third = next(i for i in out if i.artist == "Unknown 2")
+    assert third.score == pytest.approx(9.8 - 2.0) and "many unknown acts from bandcamp today" in third.reasons
+    assert next(i for i in out if i.artist == "Unknown 5").score == pytest.approx(9.5 - 8.0)
+    assert all(not i.reasons for i in known)                                       # the acts you play are never capped by source
+    assert [i.artist for i in out[2:6]] == [f"Known {i}" for i in range(4)]
+
+
+def test_genre_artists_score_between_similar_and_unknown_and_tags_stay_clean():
     from discovery.build import _clean_tags
 
-    cfg = _cfg(); cfg["ranking"]["weights"]["label"] = 1.0
-    cfg["sources"] = {"musicbrainz_labels": {"labels": ["Toy Tonics"]}}
-    on = Item(artist="Someone New", title="A", kind="track", sources=["musicbrainz-label"], tags=["label:Toy Tonics"])
-    off = Item(artist="Someone New", title="B", kind="track", sources=["musicbrainz-label"], tags=["label:Some Other"])
-    score_items([on, off], PROFILE, cfg)
-    assert on.score > off.score and "on Toy Tonics" in on.reasons
+    cfg = _cfg()
+    similar = Item(artist="Parcels", title="A", kind="track", sources=["ytmusic"])
+    genre = Item(artist="TOPS", title="B", kind="track", sources=["ytmusic"])
+    unknown = Item(artist="Nobody At All", title="C", kind="track", sources=["ytmusic"])
+    score_items([similar, genre, unknown], PROFILE, cfg)
+    assert genre.match_kind == "genre" and "a top indie pop, dream pop act on Last.fm" in genre.reasons
+    assert similar.score > genre.score > unknown.score
     # "pop" stays on Popcaan; the artist's own name (or one of its words) does not become a genre
     popcaan = Item(artist="Popcaan", title="X", kind="track", tags=["pop", "news", "popcaan"])
     hot = Item(artist="Hot Chip", title="Y", kind="track", tags=["hot chip", "electropop", "chip"])
     _clean_tags([popcaan, hot], PROFILE)
     assert popcaan.tags == ["pop"] and hot.tags == ["electropop"]
+
+
+def test_profile_genre_artists_come_from_the_tags_you_play():
+    """The acts Last.fm ranks highest under your strongest genre tags join the profile as kind "genre"."""
+    from discovery.profile import LastFm, genre_artists, genre_tags, ranked_artists
+
+    tags = {"nu disco": 1.0, "indie pop": 0.8, "french": 0.9, "female vocalists": 0.95, "metal": -3.0}
+    assert genre_tags(tags, 5) == [("nu disco", 1.0), ("indie pop", 0.8)]     # nationality, descriptor and penalised tags never seed
+    assert genre_tags(tags, 1) == [("nu disco", 1.0)]
+
+    calls = []
+
+    class FakeLastFm(LastFm):
+        def __init__(self): pass
+        @property
+        def enabled(self): return True
+        def tag_top_artists(self, tag, limit):
+            calls.append((tag, limit))
+            return [{"name": "Tonbe", "mbid": "m-tonbe"}, {"name": "TOPS"}, {"name": "Jungle"}] if tag == "nu disco" else [{"name": "TOPS"}]
+
+    pcfg = {"genre_top_tags": 2, "genre_artists_per_tag": 25, "genre_weight": 0.5}
+    got = genre_artists(FakeLastFm(), tags, pcfg, exclude={"jungle"})
+    assert calls == [("nu disco", 25), ("indie pop", 25)]
+    assert set(got) == {"tonbe", "tops"}                                      # a profile artist stays with its own kind
+    assert got["tonbe"]["kind"] == "genre" and got["tonbe"]["mbid"] == "m-tonbe" and got["tonbe"]["via"] == ["nu disco"]
+    assert got["tops"]["via"] == ["nu disco", "indie pop"]                     # an act under several tags keeps them all
+    assert got["tonbe"]["affinity"] > got["tops"]["affinity"]                  # ranked first under the stronger tag
+    assert genre_artists(FakeLastFm(), tags, {"genre_top_tags": 0}, set()) == {}
+
+    # the pool the artist-watch sources rotate through: the kinds they ask for, strongest first
+    assert [e["name"] for e in ranked_artists(PROFILE, ("direct", "similar", "genre"))] == ["Jungle", "Roosevelt", "Parcels", "TOPS"]
+    assert [e["name"] for e in ranked_artists(PROFILE)] == ["Jungle", "Roosevelt"]
+    assert [e["name"] for e in ranked_artists(PROFILE, ("direct", "similar"), 1)] == ["Jungle"]
+    assert [e["name"] for e in ranked_artists(PROFILE, ("direct", "similar", "genre"), with_mbid=True)] == ["Jungle"]
+
+
+def test_backfill_fills_the_gap_only_when_the_current_timeframe_is_thin():
+    """The feed is this year's; older releases the artist watch found fill in only when there is room, best first."""
+    from discovery.build import fill_from_backfill, is_fresh, split_fresh
+
+    today = date(2026, 9, 8)
+    cfg = {"ranking": {"fresh_days": 90}, "backfill": {"years": 3, "target": 4, "max": 2}}
+    recent = Item(artist="A", title="new", release_date=today - timedelta(days=10))
+    january = Item(artist="B", title="january", release_date=date(2026, 1, 5))
+    undated = Item(artist="C", title="undated")
+    sighted = Item(artist="D", title="seen", release_date=date(2025, 11, 1), date_kind="sighting")
+    old = Item(artist="E", title="2024", release_date=date(2024, 5, 1))
+    older = Item(artist="F", title="2023", stated_year=2023)
+    ancient = Item(artist="G", title="2011", release_date=date(2011, 1, 1))
+    assert is_fresh(recent, cfg, today) and is_fresh(undated, cfg, today) and not is_fresh(old, cfg, today)
+    assert is_fresh(january, cfg, today)          # this year is current whatever month it landed in
+    assert not is_fresh(sighted, cfg, today)      # last year's, seen long ago: not the current timeframe
+    fresh, back = split_fresh([recent, january, undated, sighted, old, older, ancient], cfg, today)
+    assert [i.title for i in fresh] == ["new", "january", "undated"]
+    assert [i.title for i in back] == ["seen", "2024", "2023"] and all(i.backfill for i in back)
+    assert ancient not in fresh and ancient not in back           # older than the window: never pulled in
+
+    # two current cards can be played, the target is four: the two best playable older ones fill in
+    for i, it in enumerate([recent, undated]):
+        it.youtube = {"videoId": f"v{i}"}
+    for i, it in enumerate(back):
+        it.youtube = {"videoId": f"b{i}"}
+    out, counts = fill_from_backfill([recent, undated, *back], cfg)
+    assert [i.title for i in out] == ["new", "undated", "seen", "2024"]
+    assert counts == {"fresh_playable": 2, "older": 3, "used": 2}
+    assert "filling in from 2025" in out[2].reasons and "filling in from 2024" in out[3].reasons
+    # a full day of current tracks leaves no room at all
+    full = [Item(artist=f"X{i}", title=str(i), youtube={"videoId": str(i)}) for i in range(4)]
+    kept, counts = fill_from_backfill(full + back, cfg)
+    assert kept == full and counts["used"] == 0
+    # backfill off: nothing older is even a candidate, and nothing fills in
+    off = {"ranking": {"fresh_days": 90}, "backfill": {"years": 0}}
+    assert split_fresh([recent, old], off, today) == ([recent, old], [])
+    assert fill_from_backfill([recent, *back], off)[0] == [recent]

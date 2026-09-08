@@ -1,4 +1,10 @@
-"""Assemble the daily feed: run sources → merge → score → resolve → write site/data/feed.json + feed.xml + history."""
+"""Assemble the daily feed: run sources → merge → score → resolve → write site/data/feed.json + feed.xml + history.
+
+The list is built from the current timeframe first (`ranking.fresh_days`): releases and sightings dated within it,
+and undated releases from this year. When that leaves fewer than `backfill.target` playable, unrated cards, the best
+older releases the artist-watch sources found (back to `backfill.years`) fill the gap, up to `backfill.max` a day,
+each marked as backfill and filed into its own year. Nothing that ranks below the score floor is ever used to fill.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +18,7 @@ from .resolve import collapse_shared_videos, resolve_all
 from .score import dedupe, diversify, score_items
 from .sources import run_sources
 from .unavailable import build_report as unavailable_report
-from .util import DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, read_json, safe_url, utcnow, write_json
+from .util import DATA_DIR, SITE_DATA_DIR, Deadline, Http, backfill_years, log, read_json, safe_url, utcnow, write_json
 from .years import annotate_duplicate_years, verify_years
 
 FEED_PATH = SITE_DATA_DIR / "feed.json"
@@ -52,15 +58,25 @@ def build_feed(cfg: dict) -> dict:
         log.info("hid %d already-saved/skipped items", before - len(items))
 
     items = score_items(items, profile, cfg)
-    items = [i for i in items if i.score >= float(rcfg.get("min_score", 0))][: int(rcfg.get("max_items", 200)) + 60]
+    floor = float(rcfg.get("min_score", 0))
+    max_items = int(rcfg.get("max_items", 200))
+    today = date.today()
+    # the current timeframe first; the older releases the artist watch found are candidates only to fill a gap
+    fresh, older = split_fresh(items, cfg, today)
+    fresh = [i for i in fresh if i.score >= floor][: max_items + 60]
+    # only the best older candidates are carried into resolution, so the lookup budget is spent where it can pay off
+    older = [i for i in older if i.score >= floor][: int((cfg.get("backfill") or {}).get("candidates", 600) or 0)]
+    items = fresh + older
+    log.info("%d candidates in the current timeframe, %d older ones held in reserve (backfill window %d years)", len(fresh), len(older), backfill_years(cfg))
     resolve_all(items, cfg, deadline, avoid=profile["wrong_videos"])
     # resolution renames a release to the track its video is (promote), which can give it the key of a track already in
     # the list; the score order puts the stronger one first, so the merge keeps its video and folds in the other's sources
     items.sort(key=lambda i: (-i.score, i.artist_norm))
     items = dedupe(items)
     items = collapse_shared_videos(items)   # several items on one video are one song: one card
-    # after resolution, drop things with no playable YouTube result unless they are strong matches
-    items = [i for i in items if i.youtube or i.match_kind == "direct" or i.editorial]
+    # after resolution, drop things with no playable YouTube result unless they are strong fresh matches; an older
+    # release is only ever a card when it can be played
+    items = [i for i in items if i.youtube or (not i.backfill and (i.match_kind == "direct" or i.editorial))]
     if rcfg.get("hide_seen", True):
         # resolution can rename a release to its first track (new key) or land on a video that is already filed
         # under a different spelling: the video id is the exact test, so apply it now that we have one
@@ -69,9 +85,16 @@ def build_feed(cfg: dict) -> dict:
         if before - len(items):
             log.info("hid %d more items whose YouTube video is already in a playlist", before - len(items))
     items = score_items(items, profile, cfg)
+    # a card that cannot be played or filed sits below the playable ones (and below the floor unless the match is strong)
+    penalty = float(rcfg.get("unplayable_penalty", 0) or 0)
+    for it in items:
+        if penalty and not it.youtube:
+            it.score = round(it.score - penalty, 3)
+            it.reasons.append("no YouTube match yet")
+    items, filled = fill_from_backfill(items, cfg)
     items = diversify(items, cfg)
     # the second scoring pass can move an item below the floor (a merge changed its sources, a repeat penalty)
-    items = [i for i in items if i.score >= float(rcfg.get("min_score", 0))][: int(rcfg.get("max_items", 200))]
+    items = [i for i in items if i.score >= floor][:max_items]
     verify_years(items, cfg, http, deadline)
     # the duplicate report is derived from the profile's raw playlist scan on every build, so a change to what
     # counts as a duplicate never waits for the next profile rebuild
@@ -134,6 +157,11 @@ def build_feed(cfg: dict) -> dict:
         "years": _year_range(cfg),
         "count": len(items),
         "new_today": sum(1 for i in items if first_seen.get(i.key) == today_s),
+        # the current timeframe and what filled it: the site's "new releases only" filter hides years before recent_since
+        "recent_since": today.year - (backfill_years(cfg) or 1),
+        "fresh_playable": filled["fresh_playable"],
+        "backfill": sum(1 for i in items if i.backfill),
+        "backfill_candidates": filled["older"],
         "sources": sorted({s.split(":")[0] for i in items for s in i.sources}),
         # the named feeds the site can switch off one by one: blogs by name (as before), stations and channels by
         # their full source label
@@ -151,6 +179,65 @@ def build_feed(cfg: dict) -> dict:
 
 def _email_hash(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+
+
+def release_year(it: Item) -> int | None:
+    """The year a source stated for an item: its release (or sighting) date, else the year it named."""
+    if it.release_date:
+        return it.release_date.year
+    return it.stated_year or it.year
+
+
+def is_fresh(it: Item, cfg: dict, today: date | None = None) -> bool:
+    """The current timeframe: dated (released or sighted) within `ranking.fresh_days`, or from this calendar year at
+    all — a feed of new music counts everything released this year as current, whatever month it landed in. An item
+    with no date and no year is current too: a blog post gets its sighting date later."""
+    today = today or date.today()
+    days = int((cfg.get("ranking") or {}).get("fresh_days", 90) or 90)
+    if it.release_date and (today - it.release_date).days <= days:
+        return True
+    y = release_year(it)
+    return y is None or y >= today.year
+
+
+def split_fresh(items: list[Item], cfg: dict, today: date | None = None) -> tuple[list[Item], list[Item]]:
+    """Partition scored items into the current timeframe and the backfill window (older, back to `backfill.years`,
+    flagged `backfill`); anything older than the window is dropped. With backfill off everything is current, as
+    before. Both halves keep their order."""
+    today = today or date.today()
+    years = backfill_years(cfg)
+    if not years:
+        return list(items), []
+    fresh: list[Item] = []
+    older: list[Item] = []
+    since = today.year - years
+    for it in items:
+        if is_fresh(it, cfg, today):
+            fresh.append(it)
+        elif (release_year(it) or 0) >= since:
+            it.backfill = True
+            older.append(it)
+    return fresh, older
+
+
+def fill_from_backfill(items: list[Item], cfg: dict) -> tuple[list[Item], dict]:
+    """After resolution: keep every current item, then, when fewer than `backfill.target` of them can be played, the
+    best playable older ones up to `backfill.max`, each with a "filling in from <year>" reason. Returns the list
+    (fresh first, then the fill, in score order) and the counts for the log and the payload."""
+    bcfg = cfg.get("backfill") or {}
+    fresh = [i for i in items if not i.backfill]
+    older = [i for i in items if i.backfill and i.youtube]
+    supply = sum(1 for i in fresh if i.youtube)
+    target = int(bcfg.get("target", 0) or 0)
+    cap = int(bcfg.get("max", 0) or 0)
+    take = older[: max(0, min(cap, target - supply))] if backfill_years(cfg) else []
+    for it in take:
+        y = release_year(it)
+        it.reasons.append(f"filling in from {y}" if y else "filling in from an earlier year")
+
+    if older or take:
+        log.info("backfill: %d playable current cards (target %d); %d of %d older playable candidates fill the gap", supply, target, len(take), len(older))
+    return fresh + take, {"fresh_playable": supply, "older": len(older), "used": len(take)}
 
 
 NAMED_FAMILIES = ("rss", "radio", "youtube", "reddit", "bandcamp", "apple")   # source families whose members have names of their own
@@ -196,7 +283,7 @@ def _clean_tags(items: list[Item], profile: dict) -> None:
         cleaned = []
         for t in it.tags:
             tn = t.lower().strip()
-            genre = tn.startswith("label:") or tn in known or any(w in tn for w in genre_words)
+            genre = tn in known or any(w in tn for w in genre_words)
             # a tag that is the artist's own name (or one of its words) is a category, not a genre: "pop" on Popcaan stays
             artist_l = (it.artist or "").lower()
             if genre and tn not in cleaned and tn != artist_l and tn not in artist_l.split():

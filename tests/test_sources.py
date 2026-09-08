@@ -40,7 +40,8 @@ PROFILE = {
     "artists": {
         "jungle": {"name": "Jungle", "affinity": 1.0, "kind": "direct", "mbid": "m-jungle", "via": []},
         "roosevelt": {"name": "Roosevelt", "affinity": 0.7, "kind": "direct", "mbid": "m-roosevelt", "via": []},
-        "parcels": {"name": "Parcels", "affinity": 0.3, "kind": "similar", "mbid": None, "via": ["Jungle"]},
+        "parcels": {"name": "Parcels", "affinity": 0.3, "kind": "similar", "mbid": "m-parcels", "via": ["Jungle"]},
+        "tops": {"name": "TOPS", "affinity": 0.2, "kind": "genre", "mbid": "m-tops", "via": ["indie pop"]},
     },
     "mbid_index": {"m-jungle": "jungle", "m-roosevelt": "roosevelt"},
     "tags": {"nu disco": 1.0, "indie pop": 0.8},
@@ -78,9 +79,13 @@ def test_source_days_falls_back_to_listenbrainz_then_ten():
     assert util.source_days({"sources": {"deezer": {}}}, "deezer") == 10
     assert util.source_days({}, "nothing", 7) == 7
     live = _cfg()
-    for key, want in (("rss", 21), ("deezer", 45), ("radio", 14), ("musicbrainz_labels", 60), ("youtube_channels", 30),
+    for key, want in (("rss", 21), ("deezer", 45), ("radio", 14), ("youtube_channels", 30),
                       ("spotify", 30), ("reddit", 7), ("nts", 14), ("apple_music", 30), ("musicbrainz_artists", 60)):
         assert util.source_days(live, key) == want, key
+    # the backfill window: how far the artist-watch sources reach when the current timeframe runs thin
+    assert util.backfill_years(live) == 3 and util.backfill_since(live, date(2026, 9, 8)) == date(2023, 1, 1)
+    assert util.backfill_years({}) == 0 and util.backfill_since({}) is None
+    assert util.backfill_since({"backfill": {"years": 0}}) is None
 
 
 def test_versioned_cache_helpers(sandbox):
@@ -110,7 +115,7 @@ def test_deezer_negative_cache_migrates_and_expires(sandbox):
             return {"data": []}
         return {"data": [{"title": "New EP", "record_type": "ep", "release_date": TODAY.isoformat(), "id": 5, "link": "https://deezer/5"}]}
 
-    cfg = _cfg(); cfg["sources"]["deezer"]["editorial_genres"] = []
+    cfg = _cfg(); cfg["sources"]["deezer"]["editorial_genres"] = []; cfg["sources"]["deezer"]["kinds"] = ["direct"]
     out = deezer.fetch(cfg, PROFILE, Recorder(route))
     assert [i.title for i in out] == ["New EP"] and searched == []       # the hit survived the migration; the fresh miss is not retried
     stored = util.read_json(deezer.ID_CACHE, {})
@@ -142,10 +147,18 @@ def test_deezer_own_days_window_and_editorial_skips(sandbox):
         return {"data": [{"title": "Older EP", "record_type": "ep", "release_date": old, "id": 9}]}
 
     cfg = _cfg(); cfg["sources"]["deezer"]["editorial_genres"] = [85]; cfg["sources"]["deezer"]["days"] = 45
+    cfg["sources"]["deezer"]["kinds"] = ["direct"]; cfg["backfill"] = {"years": 0}
     out = deezer.fetch(cfg, PROFILE, Recorder(route))
     assert {(i.artist, i.title) for i in out} == {("Jungle", "Older EP"), ("Someone", "Glow")}
     cfg["sources"]["deezer"]["days"] = 10
     assert {i.title for i in deezer.fetch(cfg, PROFILE, Recorder(route))} == {"Glow"}   # the 40-day-old EP falls outside deezer's own window
+    # …but with backfill on, an artist's older album is a candidate again (the editorial feed keeps its own window)
+    cfg["backfill"] = {"years": 3}
+    assert {i.title for i in deezer.fetch(cfg, PROFILE, Recorder(route))} == {"Older EP", "Glow"}
+    # and the pool follows `kinds`: the similar and genre artists are searched too
+    cfg["sources"]["deezer"]["kinds"] = ["direct", "similar", "genre"]
+    rec = Recorder(route); deezer.fetch(cfg, PROFILE, rec)
+    assert {c[1]["params"]["q"] for c in rec.calls if c[0].endswith("/search/artist")} >= {"Parcels", "TOPS"}
 
 
 def test_ytmusic_artists_uses_region_client_and_dated_misses(sandbox, monkeypatch):
@@ -164,14 +177,15 @@ def test_ytmusic_artists_uses_region_client_and_dated_misses(sandbox, monkeypatc
         made.append(cfg["youtube_music"]["region"]); return FakeYT()
     monkeypatch.setattr(yta, "ytmusic", fake_client)
 
-    out = yta.fetch(_cfg(), PROFILE, None)
+    cfg = _cfg(); cfg["sources"]["ytmusic_artists"]["kinds"] = ["direct"]
+    out = yta.fetch(cfg, PROFILE, None)
     assert made == ["US"]                                                   # the same region-pinned constructor resolve uses
     assert [(i.artist, i.title) for i in out] == [("Jungle", "Candle Flame")] and searched == []
     stored = util.read_json(yta.CACHE, {})
     assert stored["v"] == yta.CACHE_VERSION and stored["ids"]["jungle"] == "UCjungle" and stored["ids"]["roosevelt"] == {"miss": TODAY.isoformat()}
     stored["ids"]["roosevelt"] = {"miss": (TODAY - timedelta(days=45)).isoformat()}
     util.write_json(yta.CACHE, stored, compact=True)
-    yta.fetch(_cfg(), PROFILE, None)
+    yta.fetch(cfg, PROFILE, None)
     assert searched == ["Roosevelt"]
 
 
@@ -375,7 +389,9 @@ def test_apple_music_charts(sandbox):
             {"artistName": "Old Popstar", "name": "Old LP", "releaseDate": (TODAY - timedelta(days=60)).isoformat(), "url": "https://music.apple.com/us/album/4", "genres": [{"name": "Pop"}], "id": "4"},
         ]}}
 
-    out = apple_music.fetch(_cfg(), PROFILE, Recorder(route))
+    both = _cfg(); both["sources"]["apple_music"]["feeds"] = ["most-recent", "most-played"]
+    assert _cfg()["sources"]["apple_music"]["feeds"] == ["most-played"]   # most-recent-albums 404s; the config ships without it
+    out = apple_music.fetch(both, PROFILE, Recorder(route))
     got = {(i.artist, i.title, tuple(i.sources)) for i in out}
     assert got == {("Jungle", "Volcano II", ("apple:most-recent",)), ("Some Popstar", "Pop LP", ("apple:most-recent",)),
                    ("Jungle", "Volcano II", ("apple:most-played",)), ("Some Popstar", "Pop LP", ("apple:most-played",))}
@@ -392,7 +408,7 @@ def test_musicbrainz_artists_rotates_and_shapes_release_groups(sandbox):
 
     def route(url, kw):
         q = kw["params"]["query"]
-        assert url == mba.MB_SEARCH and kw["params"]["fmt"] == "json" and kw["params"]["limit"] == 25
+        assert url == mba.MB_SEARCH and kw["params"]["fmt"] == "json" and kw["params"]["limit"] == 40
         assert q.startswith("arid:m-") and f"TO {TODAY.isoformat()}]" in q
         if "m-jungle" in q:
             return {"release-groups": [
@@ -403,6 +419,7 @@ def test_musicbrainz_artists_rotates_and_shapes_release_groups(sandbox):
         return {"release-groups": []}
 
     cfg = _cfg(); cfg["sources"]["musicbrainz_artists"]["top_artists"] = 1
+    cfg["sources"]["musicbrainz_artists"]["kinds"] = ["direct"]; cfg["backfill"] = {"years": 0}
     http = Recorder(route)
     out = mba.fetch(cfg, PROFILE, http)                                   # only direct artists with an MBID: Jungle, Roosevelt
     assert len(out) == 1 and out[0].artist == "Jungle" and out[0].kind == "release" and out[0].release_type == "Single"
@@ -413,6 +430,14 @@ def test_musicbrainz_artists_rotates_and_shapes_release_groups(sandbox):
     assert util.read_json(mba.cache_path(), {})["cursor"] == 0
     since = (TODAY - timedelta(days=60)).isoformat()
     assert f"firstreleasedate:[{since} TO" in http.calls[0][1]["params"]["query"]                          # its own 60-day window
+    # with backfill on the window opens to the backfill years, and every configured kind with an MBID joins the pool
+    cfg["backfill"] = {"years": 3}; cfg["sources"]["musicbrainz_artists"]["kinds"] = ["direct", "similar", "genre"]
+    http2 = Recorder(route)
+    for _ in range(4):
+        mba.fetch(cfg, PROFILE, http2)
+    asked = {c[1]["params"]["query"].split()[0] for c in http2.calls}
+    assert asked == {"arid:m-jungle", "arid:m-roosevelt", "arid:m-parcels", "arid:m-tops"}
+    assert f"firstreleasedate:[{date(TODAY.year - 3, 1, 1).isoformat()} TO" in http2.calls[0][1]["params"]["query"]
 
 
 def test_nts_tracklists(sandbox):
@@ -506,6 +531,9 @@ def test_new_sources_are_registered_and_enabled():
     from discovery.sources import PER_FEED_HEALTH, SOURCE_MODULES
 
     cfg = _cfg()
+    # no source watches record labels any more: the feed follows artists and the genres they sit in
+    assert "musicbrainz_labels" not in SOURCE_MODULES and "musicbrainz_labels" not in cfg["sources"]
+    assert not (ROOT / "discovery" / "sources" / "labels.py").exists()
     for key in ("apple_music", "musicbrainz_artists", "nts", "reddit"):
         assert key in SOURCE_MODULES and cfg["sources"][key]["enabled"] is True
         assert callable(__import__(f"discovery.sources.{SOURCE_MODULES[key]}", fromlist=["fetch"]).fetch)

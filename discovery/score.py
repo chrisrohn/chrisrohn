@@ -55,9 +55,6 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
     tags_w: dict[str, float] = profile["tags"]
     learned = profile.get("learned")
     today = date.today()
-    # labels you trust (sources.musicbrainz_labels.labels): a release on one of them is a signal of its own, whatever
-    # the tag table knows (label: tags never match a genre weight)
-    trusted = {norm(label) for label in ((cfg.get("sources") or {}).get("musicbrainz_labels") or {}).get("labels") or []}
 
     for it in items:
         reasons: list[str] = []
@@ -72,6 +69,11 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
             elif kind == "saved":
                 s += w.get("saved", 2.0) * (0.5 + entry["affinity"])
                 reasons.append(f"{entry['name']} is in your playlists")
+            elif kind == "genre":
+                # a top act of a genre you play on Last.fm (profile.genre_artists): the scene, beyond the acts you know
+                s += float(w.get("genre", 0.8 * w["similar"])) * (0.4 + entry["affinity"])
+                via = ", ".join(entry.get("via", [])[:2])
+                reasons.append(f"a top {via} act on Last.fm" if via else "a top genre act on Last.fm")
             else:
                 s += w["similar"] * (0.4 + entry["affinity"])
                 via = ", ".join(entry.get("via", [])[:2])
@@ -103,11 +105,6 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
             s += w["freshness"] * undated
         if it.youtube:
             s += float(w.get("playable", 0.3))
-        labels = [t[6:].strip() for t in it.tags if t.lower().startswith("label:")]
-        on = next((label for label in labels if norm(label) in trusted), None)
-        if on:
-            s += float(w.get("label", 1.0))
-            reasons.append(f"on {on}")
         # what the curator actually kept: sources, blogs, tags and artists with a track record (see learn.py)
         adj, why = adjustment(learned, it.sources, it.tags, it.artist)
         if adj:
@@ -132,34 +129,38 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
 
 
 def diversify(items: list[Item], cfg: dict) -> list[Item]:
-    """One artist (or label) must not own the day. Past `max_per_artist` / `max_per_label` tracks, each further one
-    by the same act loses `repeat_penalty` per extra so it drops down the list rather than off it; and the top
-    `shown_rank` is guaranteed `explore_slots` tracks by artists the profile does not know, so newcomers are seen.
-    The penalties live in the score itself, which is what the site sorts by, so the order survives the trip."""
+    """One artist must not own the day, nor one tag crawler. Past `max_per_artist` tracks, each further one by the
+    same act loses `repeat_penalty` per extra so it drops down the list rather than off it; past
+    `max_unknown_per_source` tracks by artists the profile does not know from the same source family (bandcamp,
+    rss, musicbrainz…) the same applies, so the day stays anchored on your artists and their associates; and the
+    top `shown_rank` is guaranteed `explore_slots` tracks by artists the profile does not know, so newcomers are
+    seen. The penalties live in the score itself, which is what the site sorts by, so the order survives the trip."""
     r = cfg.get("ranking") or {}
     per_artist = int(r.get("max_per_artist", 0) or 0)
-    per_label = int(r.get("max_per_label", 0) or 0)
+    per_source = int(r.get("max_unknown_per_source", 0) or 0)
     penalty = float(r.get("repeat_penalty", 2.0))
     slots = int(r.get("explore_slots", 0) or 0)
     shown = int((cfg.get("learn") or {}).get("shown_rank", 80) or 80)
-    if not items or not (per_artist or per_label or slots):
+    if not items or not (per_artist or per_source or slots):
         return items
     items.sort(key=lambda i: (-i.score, i.artist_norm))
     a_count: dict[str, int] = {}
-    l_count: dict[str, int] = {}
+    s_count: dict[str, int] = {}
     for it in items:
         extra = 0
         a = it.artist_norm
         if per_artist:
             a_count[a] = a_count.get(a, 0) + 1
             extra = max(extra, a_count[a] - per_artist)
-        if per_label:
-            for label in {norm(t[6:]) for t in it.tags if t.lower().startswith("label:")}:
-                l_count[label] = l_count.get(label, 0) + 1
-                extra = max(extra, l_count[label] - per_label)
+        crowded: str | None = None
+        if per_source and not it.match_kind:
+            for fam in {s.split(":")[0] for s in it.sources if s}:
+                s_count[fam] = s_count.get(fam, 0) + 1
+                if s_count[fam] - per_source > extra:
+                    extra, crowded = s_count[fam] - per_source, fam
         if extra > 0:
             it.score = round(it.score - penalty * extra, 3)
-            it.reasons.append(f"no. {a_count.get(a, 0)} by them today" if per_artist and a_count.get(a, 0) > per_artist else "label well represented today")
+            it.reasons.append(f"many unknown acts from {crowded} today" if crowded else f"no. {a_count.get(a, 0)} by them today")
     items.sort(key=lambda i: (-i.score, i.artist_norm))
     if slots and len(items) > shown:
         top = items[:shown]

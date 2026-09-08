@@ -29,6 +29,7 @@ class Item:
     listen_count: int = 0
     editorial: bool = False          # surfaced by a curated human feed
     blurb: str | None = None
+    backfill: bool = False           # an older release pulled in because the current timeframe ran thin (build.py)
     # filled in by resolve/score
     year: int | None = None                 # best year for filing into "<year> | Indie Discotheque"
     year_source: str | None = None          # "musicbrainz-recording" | "release-date" | "youtube" | "feed-date" | "unknown"
@@ -104,6 +105,7 @@ class Item:
         self.remixer = self.remixer or other.remixer
         self.remix_kind = self.remix_kind or other.remix_kind
         self.stated_year = self.stated_year or other.stated_year
+        self.backfill = self.backfill and other.backfill    # a fresh sighting of an older release makes it current
         if self.kind == "release" and other.kind == "track":
             self.kind = "track"
             self.title = other.title

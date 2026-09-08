@@ -137,7 +137,9 @@ function deckOnId() { const el = $("#deck-card .dcard"); return el ? /** @type {
 export function renderMeta() {
   const f = /** @type {import("./types").Feed} */ (state.feed);
   const when = f.generated_at ? new Date(f.generated_at) : null;
-  $("#meta").textContent = `${f.count} candidates · ${f.new_today} new today · built ${when ? relTime(when) : "?"} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar`;
+  // what the day is made of: the current timeframe, and what the build filled in from earlier years when it ran thin
+  const fill = f.backfill ? ` · ${f.backfill} filling in from earlier years` : "";
+  $("#meta").textContent = `${f.count} candidates${fill} · ${f.new_today} new today · built ${when ? relTime(when) : "?"} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar + ${f.profile?.counts?.genre ?? 0} from your genres`;
   const stale = $("#stale"); const age = when ? Date.now() - when.getTime() : 0;
   stale.hidden = !(when && age > STALE_AFTER_MS);
   if (!stale.hidden && when) stale.textContent = `This feed is ${Math.round(age / 86400e3)} days old — the daily build has not run since ${when.toLocaleDateString()}. Check the Discover workflow on GitHub.`;
@@ -147,7 +149,7 @@ export function renderMeta() {
 }
 function fillYears() { const f = state.feed; state._years = (f?.years && f.years.length) ? f.years : range(new Date().getFullYear(), 1979); }
 /** @type {Record<string, string>} */
-const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", "musicbrainz-label": "Labels", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "Artist watch", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify", reddit: "Reddit", apple: "Apple Music",
+const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "Artist watch", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify", reddit: "Reddit", apple: "Apple Music",
   "lastfm:top tracks": "Most played", "lastfm:loved": "Loved", "lastfm:artist top": "Your artists' hits", "lastfm:similar top": "Similar artists' hits" };
 /** The source chips: the feed's source families, or the catalog's Last.fm lists, whichever tab is open. */
 export function fillSources() {
@@ -296,7 +298,9 @@ function listFor(view) {
     };
     return list.sort(ccmp[f.catSort] || ccmp.score);
   }
-  const today = state.feed?.generated_at?.slice(0, 10); const lastYear = new Date().getFullYear() - 1;
+  const today = state.feed?.generated_at?.slice(0, 10);
+  // "new releases only" keeps this year, last year and whatever the build deliberately filled in from (recent_since)
+  const oldest = Math.min(state.feed?.recent_since ?? new Date().getFullYear() - 1, new Date().getFullYear() - 1);
   const list = items().filter(i => {
     if (hiddenBy(i)) return false;
     if (terms.length && !matches(i, terms)) return false;
@@ -304,7 +308,7 @@ function listFor(view) {
     if (f.onlyNew && i.first_seen !== today) return false;
     if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
     if (f.onlyKnown && !i.match_kind) return false;
-    if (f.onlyRecent && Number.isFinite(i.year) && i.year_source !== "unknown" && /** @type {number} */ (i.year) < lastYear) return false;
+    if (f.onlyRecent && !i.backfill && Number.isFinite(i.year) && i.year_source !== "unknown" && /** @type {number} */ (i.year) < oldest) return false;
     return true;
   });
   /** @type {Record<string, (a: FeedItem, b: FeedItem) => number>} */
