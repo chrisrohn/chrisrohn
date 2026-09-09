@@ -209,7 +209,11 @@ session that the playlist's owner approved in that browser.
   `backfill.max` a day). They carry a *filling in from &lt;year&gt;* note, their year badge says *· filling in*, and
   each files into its own year playlist, so a quiet week works through the back catalogue of the artists and genres
   you follow instead of showing you 130 cards. Nothing older than that window is ever pulled into the feed — that is
-  what the Catalog tab below is for.
+  what the Catalog tab below is for. The target is set to a day's *rating* appetite (300), not to what the fresh
+  window happens to yield: those older candidates are fetched, scored and resolved on YouTube every run whatever the
+  target says, so raising it costs nothing but keeps what a lower one threw away. `ranking.max_items` has to stay
+  clear of `backfill.target` + the unplayable current cards riding along, or the final cut-by-score drops the fill
+  it just made — a test in `tests/test_sources.py` holds that line.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
