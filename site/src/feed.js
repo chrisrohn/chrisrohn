@@ -11,6 +11,7 @@ import { scoreOf, invalidateRank } from "./rank.js";
 /** @typedef {import("./types").FeedItem} FeedItem */
 
 const REFRESH_AFTER_MS = 30 * 60e3;   // an app left open: look for a newer daily build when it comes back to the foreground
+const WAITING_POLL_MS = 4 * 60e3;     // …but while the day's build is still missing, look far more often (see watchForToday)
 let loadedAt = 0;
 
 // same URL every time: GitHub Pages answers 304 from the ETag when nothing changed, and the service worker keeps one copy
@@ -73,7 +74,7 @@ export async function refreshFeed(force = false) {
   render();
   if (state.catalogState === "ready") loadCatalog(true).catch(() => {});
   if (keep) { const i = state.order.indexOf(keep); if (i >= 0) { state.deckIndex = i; render(); } }
-  toast(`Feed updated · ${feed.new_today} new today`);
+  toast(`Today's feed is in · ${feed.new_today} new`);
   return true;
 }
 /* The catalog (data/catalog.json): candidates for the earlier years, from your Last.fm history. Loaded the first
@@ -134,18 +135,49 @@ function openPermalink() {
 /** The track showing in the deck, so a refresh can stay on it. */
 function deckOnId() { const el = $("#deck-card .dcard"); return el ? /** @type {HTMLElement} */ (el).dataset.id : null; }
 
+const FIRST_SLOT_HOUR = 3;   // the earliest morning build lands at 02:07 New York; before that nothing is late yet
+/** True while what is on screen was built on an earlier day and the morning's first build should already have
+ * landed. Between midnight and then the day's feed is not late, it is simply not due. */
+export function waitingForToday() {
+  const when = buildTime(); const now = new Date();
+  return !!when && when.toDateString() !== now.toDateString() && now.getHours() >= FIRST_SLOT_HOUR;
+}
+/** When the feed on screen was built. */
+export function buildTime() { const g = state.feed?.generated_at; return g ? new Date(g) : null; }
+
 export function renderMeta() {
   const f = /** @type {import("./types").Feed} */ (state.feed);
-  const when = f.generated_at ? new Date(f.generated_at) : null;
+  const when = buildTime();
   // what the day is made of: the current timeframe, and what the build filled in from earlier years when it ran thin
   const fill = f.backfill ? ` · ${f.backfill} filling in from earlier years` : "";
   $("#meta").textContent = `${f.count} candidates${fill} · ${f.new_today} new today · built ${when ? relTime(when) : "?"} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar + ${f.profile?.counts?.genre ?? 0} from your genres`;
+  // Two different pieces of news, and the day's feed being late is the common one: it deserves its own words rather
+  // than a screen that just says there is nothing to rate. Anything past STALE_AFTER_MS is a real breakage.
   const stale = $("#stale"); const age = when ? Date.now() - when.getTime() : 0;
-  stale.hidden = !(when && age > STALE_AFTER_MS);
-  if (!stale.hidden && when) stale.textContent = `This feed is ${Math.round(age / 86400e3)} days old — the daily build has not run since ${when.toLocaleDateString()}. Check the Discover workflow on GitHub.`;
+  const broken = !!when && age > STALE_AFTER_MS;
+  stale.hidden = !(broken || waitingForToday());
+  stale.classList.toggle("waiting", !broken);
+  if (!stale.hidden && when) {
+    stale.textContent = broken
+      ? `This feed is ${Math.round(age / 86400e3)} days old — the daily build has not run since ${when.toLocaleDateString()}. Check the Discover workflow on GitHub.`
+      : `Today's build has not landed yet — this is ${when.toLocaleDateString()}'s feed, built ${relTime(when)}. The morning job retries until it lands, and this page picks it up on its own.`;
+  }
   $("#lfm").href = "https://www.last.fm/user/" + (f.lastfm_user || "tt_discotheque");
   const rev = $("#tb-rev"); if (rev && when) rev.textContent = when.toISOString().slice(0, 10);   // title block: revision = build date
   document.title = `${f.site_name || "Chris Rohn's New Music"} · ${f.new_today} new`;
+  watchForToday();
+}
+/** @type {any} */
+let waitTimer = null;
+/** While the day's build is still missing, look for it every few minutes instead of every half hour, so a tab left
+ * open overnight has the morning feed on it by the time it is read — no reload, no pull. Idle once it has landed. */
+function watchForToday() {
+  clearTimeout(waitTimer); waitTimer = null;
+  if (!waitingForToday()) return;   // armed from the first load too: refreshFeed waits for `ready` on its own
+  waitTimer = setTimeout(() => {
+    waitTimer = null;   // this one has fired: a new build re-arms through renderMeta, an unchanged one below
+    refreshFeed(true).catch(() => {}).finally(() => { if (!waitTimer) watchForToday(); });
+  }, WAITING_POLL_MS);
 }
 function fillYears() { const f = state.feed; state._years = (f?.years && f.years.length) ? f.years : range(new Date().getFullYear(), 1979); }
 /** @type {Record<string, string>} */

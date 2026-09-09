@@ -766,3 +766,71 @@ test("the ratings push survives a dropped connection: quiet retry, no re-upload 
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("a feed built on an earlier day says the morning build is late, and an all-rated day says so instead of going blank", async ({ browser }) => {
+  const live = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  // the same feed, built the day before yesterday morning: what the site serves whenever the daily job is late
+  const built = new Date(); built.setDate(built.getDate() - 1); built.setHours(6, 55, 0, 0);
+  const feed = { ...live, generated_at: built.toISOString() };
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  const morning = new Date(); morning.setHours(8, 30, 0, 0);   // read over coffee, whatever hour CI happens to run at
+  await page.clock.setFixedTime(morning);
+  await page.route("**/data/feed.json", r => r.fulfill({ json: feed }));
+
+  // 1. late, but nothing is wrong upstream: the quiet bar, not the "something failed" one
+  let errors = await open(page);
+  const bar = page.locator("#stale");
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveClass(/waiting/);
+  await expect(bar).toContainText("Today's build has not landed yet");
+  await expect(bar).not.toContainText("days old");
+  expect(errors).toEqual([]);
+
+  // 2. …and every card of it rated: the reason, the counts, and the two tabs that still have something in them
+  const rated = {};
+  for (const i of feed.items) rated[i.id] = { decision: "down", local: true, at: Date.now(), videoId: i.youtube?.videoId, artist: i.artist, title: i.title };
+  await ctx.addInitScript(([r, hash]) => {
+    localStorage.setItem("id:rated", JSON.stringify(r));
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+  }, [rated, feed.google.curator_hashes[0]]);
+  errors = await open(page);
+  const empty = page.locator("#empty");
+  await expect(empty).toBeVisible();
+  await expect(empty).toContainText(`You have rated all ${feed.items.length} cards`);
+  await expect(empty).toContainText("today's has not landed yet");
+  await expect(empty.locator("button", { hasText: "what you skipped" })).toBeVisible();
+  await empty.locator("button", { hasText: "what you skipped" }).click();
+  await expect(page.locator("#list .card").first()).toBeVisible();
+  expect(errors).toEqual([]);
+
+  // 3. a full feed hidden behind the filters is a different sentence, and one button undoes it
+  await ctx.addInitScript(() => localStorage.setItem("id:rated", "{}"));
+  errors = await open(page, "/?q=zzzz-nothing-has-this");
+  await expect(empty).toContainText(/unrated cards? (is|are) in this build/);
+  await expect(empty).toContainText("the search");
+  await empty.locator("button", { hasText: "clear the filters" }).click();
+  await expect(page.locator("#q")).toHaveValue("");
+  await expect.poll(() => page.locator("#list .card").count()).toBeGreaterThan(50);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("a feed older than a day and a half is an alarm, not a late morning", async ({ browser }) => {
+  const live = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const feed = { ...live, generated_at: new Date(Date.now() - 4 * 86400e3).toISOString() };
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  // …and at an hour when the morning's first build is not even due: a real breakage says so whatever the clock reads
+  const night = new Date(); night.setHours(1, 15, 0, 0);
+  await page.clock.setFixedTime(night);
+  await page.route("**/data/feed.json", r => r.fulfill({ json: feed }));
+  const errors = await open(page);
+  const bar = page.locator("#stale");
+  await expect(bar).toBeVisible();
+  await expect(bar).not.toHaveClass(/waiting/);
+  await expect(bar).toContainText("4 days old");
+  await expect(bar).toContainText("Discover workflow");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
