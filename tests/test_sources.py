@@ -88,6 +88,17 @@ def test_source_days_falls_back_to_listenbrainz_then_ten():
     assert util.backfill_since({"backfill": {"years": 0}}) is None
 
 
+def test_the_day_has_room_for_the_backfill_it_is_configured_to_make():
+    """A filled day holds about `backfill.target` playable cards plus the unplayable current ones riding along, and
+    the final list is cut to `ranking.max_items` by score — with a filled-in card scoring below a current one, since
+    it earns no freshness. Too low a cap therefore throws away the fill it just asked for, quietly."""
+    live = _cfg()
+    back = live["backfill"]
+    assert live["ranking"]["max_items"] >= back["target"] + 120
+    # …and enough older candidates have to reach resolution to fill a day at all
+    assert back["candidates"] >= back["max"]
+
+
 def test_versioned_cache_helpers(sandbox):
     p = sandbox / "data" / "cache" / "x.json"
     util.write_json(p, {"a": 1}, compact=True)                          # written before stamps existed: version 1

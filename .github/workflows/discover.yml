@@ -4,8 +4,16 @@ name: Discover
 # Nothing in this workflow writes to your YouTube Music playlists: only a thumb pressed on the site does that.
 
 on:
+  # GitHub runs scheduled workflows on a best-effort queue and routinely holds one back for hours at busy times —
+  # the top of the hour and :15 are the worst of them, and a run can be dropped outright. A single 06:15 New York
+  # slot therefore did not mean a feed by breakfast: it started 5h34 late on 2026-09-07 and 4h16 late on 2026-09-08.
+  # So the morning gets three attempts at unpopular minutes. The `check` job below stops every slot after the one
+  # that publishes the day's feed, so a normal morning is still exactly one build — and a slot that is delayed,
+  # dropped or killed at the timeout is simply retried by the next one, in time to be read over coffee.
   schedule:
-    - cron: "15 10 * * *"      # 06:15 New York in summer (EDT), 05:15 in winter (EST): GitHub cron is UTC only
+    - cron: "7 6 * * *"        # 02:07 New York in summer (EDT), 01:07 in winter (EST): GitHub cron is UTC only
+    - cron: "29 8 * * *"       # 04:29 EDT — the retry, if the first slot was late, dropped or cut short
+    - cron: "47 10 * * *"      # 06:47 EDT — the last one that can still land before the morning read
   workflow_dispatch:
     inputs:
       rebuild_profile:
@@ -23,7 +31,40 @@ concurrency:
 permissions: {}
 
 jobs:
+  # Which of the morning's three slots does the work: the first one to find no feed for today. Every build writes
+  # site/data/history/<UTC date>.json in the same commit as the feed, so that file's existence on main is the exact
+  # question "has today's feed been published?" — and it appears only after a build that finished and pushed, so a
+  # run that was cut short leaves the next slot to try again rather than being papered over. A push (the pipeline
+  # changed) or a manual run always builds.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      build: ${{ steps.gate.outputs.build }}
+    steps:
+      - id: gate
+        uses: actions/github-script@v9
+        with:
+          script: |
+            if (context.eventName !== "schedule") return core.setOutput("build", "true");
+            const path = `site/data/history/${new Date().toISOString().slice(0, 10)}.json`;
+            try {
+              await github.rest.repos.getContent({ ...context.repo, path, ref: "main" });
+            } catch (e) {
+              // 404 is the answer we are looking for; anything else is the API having a bad minute, and a feed
+              // built twice is a great deal better than a morning with none
+              if (e.status !== 404) core.warning(`could not read ${path} (${e.status}); building anyway`);
+              else core.info(`${path} is not published yet — building the day's feed.`);
+              return core.setOutput("build", "true");
+            }
+            core.notice(`${path} is already published: today's feed is out, this slot has nothing to do.`);
+            core.setOutput("build", "false");
+
   build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -96,14 +137,17 @@ jobs:
       - name: Build the site (dist/)
         run: npm run build
 
-      # a failed build means the site keeps serving yesterday's feed with nothing to say so: open (or update) one issue
-      - name: Report a failed build
-        if: failure()
+      # A build that does not finish means the site keeps serving yesterday's feed: open (or update) one issue.
+      # `cancelled()` is in there because a job killed at `timeout-minutes` ends as cancelled, not as a failure —
+      # that is exactly how 2026-09-08's run was lost in silence, with no issue and no banner.
+      - name: Report a build that did not finish
+        if: failure() || cancelled()
         uses: actions/github-script@v9
         with:
           script: |
             const title = "Daily feed build failed";
-            const body = `The **Discover** workflow failed on ${new Date().toISOString().slice(0, 10)}: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nchrisrohn.com keeps serving the previous feed until a run succeeds (the site shows a banner once it is older than 36 hours).`;
+            const how = "${{ job.status }}" === "cancelled" ? "was cut short (the 45-minute timeout, or a cancellation)" : "failed";
+            const body = `The **Discover** workflow ${how} on ${new Date().toISOString().slice(0, 10)}: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nThe next scheduled slot this morning retries it on its own (it builds whenever no feed for the day has been published). chrisrohn.com keeps serving the previous feed meanwhile, and says on the page that the day's build has not landed.`;
             const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: "open", labels: "build-failure", per_page: 1 });
             if (open.length) await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
             else await github.rest.issues.create({ ...context.repo, title, body, labels: ["build-failure"] });

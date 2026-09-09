@@ -5,7 +5,7 @@ Everything here is free. Total setup is about 20 minutes, most of it DNS propaga
 ## What you are building
 
 ```
-GitHub Actions (daily 06:15 ET)                        chrisrohn.com (GitHub Pages, public)
+GitHub Actions (nightly, by 06:47 ET)                  chrisrohn.com (GitHub Pages, public)
 ┌──────────────────────────────────────┐               ┌───────────────────────────────────────┐
 │ profile: Last.fm tt_discotheque      │               │ anyone: listen, filter by source, Picks│
 │   + your public YT year playlists    │   feed.json   │                                       │
@@ -37,7 +37,8 @@ always means the YouTube Music library playlists, `<year> | Indie Discotheque`, 
    strongest source for original release dates of disco/electronic records.
 5. **Actions → Discover → Run workflow.** Afterwards: merging a change to `site/` publishes in about a minute
    (the *Publish site* workflow); merging a change to `discovery/` runs the full data build first, 20–30 min.
-   Feed data refreshes on the daily schedule or a manual Discover run.
+   Feed data refreshes on the morning schedule (three slots, first one wins — see *How the site is built* below)
+   or a manual Discover run.
 6. **Actions → Discover → Run workflow** (first time only). First run takes ~10–15 min (profile build + MusicBrainz rate limit).
 
 ## 2. chrisrohn.com DNS (required for the custom domain)
@@ -208,7 +209,11 @@ session that the playlist's owner approved in that browser.
   `backfill.max` a day). They carry a *filling in from &lt;year&gt;* note, their year badge says *· filling in*, and
   each files into its own year playlist, so a quiet week works through the back catalogue of the artists and genres
   you follow instead of showing you 130 cards. Nothing older than that window is ever pulled into the feed — that is
-  what the Catalog tab below is for.
+  what the Catalog tab below is for. The target is set to a day's *rating* appetite (300), not to what the fresh
+  window happens to yield: those older candidates are fetched, scored and resolved on YouTube every run whatever the
+  target says, so raising it costs nothing but keeps what a lower one threw away. `ranking.max_items` has to stay
+  clear of `backfill.target` + the unplayable current cards riding along, or the final cut-by-score drops the fill
+  it just made — a test in `tests/test_sources.py` holds that line.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
@@ -300,8 +305,19 @@ ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` 
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
 pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the
 lockfile with `cd discovery && pip-compile --generate-hashes --strip-extras -o requirements.lock requirements.txt`
-(Dependabot opens that pull request weekly). If a daily build fails, the workflow opens a **build-failure** issue and
-the site shows a banner once the feed is more than 36 hours old.
+(Dependabot opens that pull request weekly).
+
+**Discover** is scheduled three times a morning — 02:07, 04:29 and 06:47 New York — because GitHub runs cron on a
+best-effort queue and routinely holds a job back for hours (a single 06:15 slot started 5h34 late on 2026-09-07 and
+4h16 late on 2026-09-08, so there was no feed to read at breakfast). Its `check` job asks whether
+`site/data/history/<today>.json` is already on `main`; if it is, the slot stops without doing any work, so a normal
+morning is still exactly one build and a slot that was delayed, dropped or killed at the 45-minute timeout is simply
+retried by the next one. A push to `discovery/**` and a manual run always build.
+
+A build that does not finish opens (or comments on) one **build-failure** issue — including one killed at the
+timeout, which ends as *cancelled* rather than *failed* and used to pass in silence. Meanwhile the site says on the
+page that the day's build has not landed yet, keeps checking for it every four minutes and swaps it in when it
+arrives; past 36 hours that notice turns into the louder "the daily build has not run since…" banner.
 
 The installable app is `site/manifest.webmanifest` (icons in `site/icons/`, the install-dialog pictures in
 `site/screenshots/`) plus `site/sw.js` (network first with a cached fallback for the shell and the feed, a capped

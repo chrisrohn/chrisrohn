@@ -2,12 +2,12 @@
 /* Cards (list view, paged as you scroll) and the one-card deck (phones).
  * Cards are keyed by id and reused between renders: a thumb, a filter or a keystroke moves the elements that are
  * still visible and builds only the new ones, instead of rebuilding every card on screen. */
-import { state, items, byId, decisionFor, badVideo, persist, PAGE } from "./state.js";
+import { state, items, catalogItems, byId, decisionFor, badVideo, hiddenBy, persist, PAGE } from "./state.js";
 import { $, $$, esc, safeUrl, sameName, canShare, shareTrack, copyText, permalink, buzz, announce } from "./dom.js";
 import { isCurator, isSignedIn } from "./auth.js";
 import { yearBadge, fillYearSelect, matchLabel, isMatchReason } from "./years.js";
 import { titleFor } from "./youtube.js";
-import { visibleItems, searchFor, credit, parseQuery, termText, dropTerm } from "./feed.js";
+import { visibleItems, searchFor, credit, parseQuery, termText, dropTerm, fillSources, buildTime, waitingForToday } from "./feed.js";
 import { rate, undo, restoreAll } from "./rating.js";
 import { play, toggle, refreshNow } from "./player.js";
 import { personal, scoreOf } from "./rank.js";
@@ -44,11 +44,7 @@ export function render() {
   refreshNow();
   const cleanup = state.view === "cleanup"; $("#cleanup").hidden = !cleanup; if (cleanup) renderDupes(false);
   const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup;
-  empty.replaceChildren(state.view === "feed" ? (isCurator() ? "Nothing left to rate with these filters. Come back after tomorrow's build, or loosen the filters." : "Nothing matches these filters.")
-    : state.view === "skipped" ? "Nothing skipped from this feed."
-    : state.view === "catalog" ? ({ idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog." }[state.catalogState] || "Nothing here with these filters.")
-    : "No picks yet.");
-  if (state.view === "catalog" && state.catalogState === "failed") { const b = document.createElement("button"); b.type = "button"; b.className = "btn ghost small"; b.textContent = "Retry"; b.addEventListener("click", () => import("./feed.js").then(m => m.loadCatalog(true))); empty.append(" ", b); }
+  if (!empty.hidden) fillEmpty(empty);
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters (the
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
   const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
@@ -296,3 +292,57 @@ function attachSwipe(el, it, threshold = 90) {
 }
 /** @param {string} id */
 export function focusCard(id) { ensureRendered(id); const el = $(`.card[data-id="${CSS.escape(id)}"]`); if (el) { el.focus({ preventScroll: false }); el.scrollIntoView({ block: "center", behavior: "smooth" }); } }
+
+/** An empty list is a question ("why is there nothing here?"), and the answer is never the same twice: the day's
+ * build has not landed, or it has and every card in it is rated, or the filters are hiding a feed that is full.
+ * Each one gets its own words and the button that resolves it, rather than one line about filters. @param {HTMLElement} box */
+function fillEmpty(box) {
+  box.replaceChildren();
+  /** @param {string} label @param {() => void} onClick */
+  const act = (label, onClick) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn ghost small"; b.textContent = label; b.addEventListener("click", onClick); return b; };
+  /** @param {string} text @param {...(HTMLElement | string)} rest */
+  const say = (text, ...rest) => { const p = document.createElement("p"); p.className = "empty-say"; p.textContent = text; box.append(p); if (rest.length) { const row = document.createElement("div"); row.className = "empty-acts"; row.append(...rest); box.append(row); } };
+  const goTab = (/** @type {string} */ v) => { const t = /** @type {HTMLElement | null} */ ($(`.tab[data-view=${v}]`)); if (t) t.click(); };
+  const clearFilters = () => act("clear the filters", () => {
+    Object.assign(state.filters, { q: "", sourcesOff: [], blogsOff: [], onlyNew: false, onlyPlayable: false, onlyKnown: false, onlyRecent: false, shortlist: false });
+    for (const [k, sel] of [["q", "#q"], ["onlyNew", "#only-new"], ["onlyPlayable", "#only-playable"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"], ["shortlist", "#shortlist"]]) {
+      const el = /** @type {HTMLInputElement | null} */ ($(sel)); if (!el) continue;
+      if (el.type === "checkbox") el.checked = !!state.filters[k]; else el.value = "";
+    }
+    persist(); fillSources(); render();
+  });
+
+  if (state.view === "catalog") {
+    const note = { idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog." }[state.catalogState];
+    if (note) { say(note); if (state.catalogState === "failed") box.append(" ", act("Retry", () => import("./feed.js").then(m => m.loadCatalog(true)))); return; }
+    const total = catalogItems().filter(i => !hiddenBy(i)).length;
+    return total ? say(`${total} catalog candidates, none of them matching these filters.`, clearFilters()) : say("Every catalog candidate has been rated. The next daily build tops it up.");
+  }
+  if (state.view === "skipped") return say("Nothing skipped from this feed.");
+  if (state.view === "picks") return say("No picks yet — a ▲︎ Keep puts a track here and in the year's playlist.");
+
+  // the feed
+  const all = items();
+  const unrated = all.filter(i => !hiddenBy(i));
+  const built = buildTime();
+  const late = waitingForToday();
+  if (!all.length) return say(late ? "The feed is empty and today's build has not landed yet." : "This build produced no cards at all — worth a look at the Discover workflow.");
+  if (!isCurator()) return say("Nothing matches these filters.", clearFilters());
+  if (!unrated.length) {
+    const playable = all.filter(i => i.youtube && i.youtube.videoId).length;
+    say(late
+      ? `You have rated all ${all.length} cards of ${built ? built.toLocaleDateString() : "the last"} build (${playable} playable), and today's has not landed yet. It is retried through the morning and appears here on its own.`
+      : `That is the whole day: all ${all.length} cards of this build are rated (${playable} playable). The next one lands in the morning.`,
+      act(`the catalog${state.catalog ? ` · ${catalogItems().filter(i => !hiddenBy(i)).length}` : ""}`, () => goTab("catalog")),
+      act("what you skipped", () => goTab("skipped")));
+    return;
+  }
+  const why = [];
+  if (state.filters.q) why.push("the search");
+  if (state.filters.onlyPlayable && !unrated.some(i => i.youtube && i.youtube.videoId)) why.push("“playable only”");
+  if (state.filters.onlyRecent) why.push("“new releases only”");
+  if (state.filters.onlyNew) why.push("“new today”");
+  if (state.filters.onlyKnown) why.push("“known artists”");
+  if ((state.filters.sourcesOff || []).length) why.push("the source chips");
+  say(`${unrated.length} unrated ${unrated.length === 1 ? "card is" : "cards are"} in this build, all of them hidden${why.length ? " by " + why.join(", ") : " by these filters"}.`, clearFilters());
+}

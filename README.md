@@ -13,6 +13,10 @@ tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist
 - A quiet day is not a short day: when the current timeframe has too little to show, the feed reaches back through
   the last few years of those same artists' catalogues, marks each card *filling in from &lt;year&gt;* and files it
   into its own year
+- A feed by breakfast: the build is scheduled three times a morning (02:07, 04:29 and 06:47 ET) because GitHub's
+  cron queue can hold a job back for hours, and every slot after the one that publishes the day stops without
+  working. Until it lands the site says so rather than showing an empty list, checks for it every few minutes and
+  swaps it in by itself
 - **⚙ → API activity**: every YouTube Data API request the browser makes, as it happens, with what it was for (verify a playlist's contents, add the approved track, remove one taken back), its result and quota cost, exportable as text or JSON; [docs/youtube-api-compliance.md](docs/youtube-api-compliance.md) turns it into the screencast Google's quota reviewers ask for
 - A **Cleanup** tab for what the daily build finds across the year playlists: duplicated songs, and tracks that no longer stream in the US with the streamable upload to swap in, paced by the API quota and remembered across devices
 - Audio-only where YouTube Music has it: the resolver prefers the audio track over the video and the original issue over a deluxe edition

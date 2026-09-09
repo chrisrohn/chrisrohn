@@ -211,6 +211,8 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 .status.wrong { color: var(--wrong); }
 
 .empty { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; border: 2px dashed var(--rule); }
+.empty-say { margin: 0 auto; max-width: 52ch; line-height: 1.7; }
+.empty-acts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
 .more-sentinel { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; padding: 14px; border-top: 1px solid var(--rule); }
 
 /* ---------- player: the title block along the bottom edge of the sheet ---------- */
@@ -569,6 +571,8 @@ select.year.attention { animation: attention .5s ease 2; }
 
 /* stale feed: hazard stripes in ochre */
 .stale { margin: 0 20px 12px; padding: 10px 14px; border: 2px solid var(--warn); background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--warn) 22%, transparent) 0 10px, transparent 10px 20px) var(--card); color: var(--ink); font: 13px var(--mono); }
+/* the day's build merely running late is news, not an alarm: same bar, quieter paint */
+.stale.waiting { border-color: var(--rule); background: var(--card); color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
   html, body, .top, .filters, .card, .dcard, .card.swiping, .art .play, .audition-bar i, .btn, .player, footer, dialog, .prose { transition: none !important; }

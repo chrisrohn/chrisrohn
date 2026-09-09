@@ -333,7 +333,9 @@ sources:
 
 # ---------- Ranking ----------
 ranking:
-  max_items: 400           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
+  max_items: 450           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
+                           # …with room for a full backfill on top of a rich fresh window: this cut is by score, so too
+                           # low a cap silently drops the fill it was told to make (the older cards score lowest)
   min_score: 0.6
   # One act must not own the day: past this many tracks by the same artist each further one loses `repeat_penalty`
   # from its score, so it drops down the list. Nor may one tag crawler: past `max_unknown_per_source` tracks by
@@ -374,10 +376,14 @@ ranking:
 # artists, their associates and the genre artists. The feed is built from the fresh window first; only when it holds
 # fewer than `target` playable, unrated cards do the best older releases fill the gap, up to `max` a day, marked
 # "filling in from <year>" on the card and filed into their own year. Nothing older than the window is ever pulled.
+# The fill costs nothing extra: those older candidates are fetched, scored and resolved on YouTube every run
+# whatever `target` says — a lower target only threw the resolved ones away (373 of them on 2026-09-08, for a day
+# that was emptied by the evening). `target` is therefore set to what a day is actually rated down to, not to what
+# the fresh window happens to yield.
 backfill:
   years: 3                 # 0 turns backfill off (the sources fall back to their own `days`)
-  target: 160              # playable current cards the day should hold before anything older is used
-  max: 120                 # the most older cards one day may carry
+  target: 300              # playable current cards the day should hold before anything older is used
+  max: 200                 # the most older cards one day may carry: even a thin day stays a third current music
   candidates: 600          # the best older candidates carried into resolution (the rest wait for another day)
 
 # ---------- Learning from outcomes (discovery/learn.py) ----------
