@@ -323,7 +323,9 @@ The installable app is `site/manifest.webmanifest` (icons in `site/icons/`, the 
 `site/screenshots/`) plus `site/sw.js` (network first with a cached fallback for the shell and the feed, a capped
 cache for artwork, and a waiting worker the page promotes on *Reload*) and `site/src/pwa.js` (install button, how-to
 sheet, shortcuts, foreground refresh). `npm run screenshots` rebuilds the three pictures from `dist/` after a visible
-redesign. The light/dark switch is `site/theme.js`, a classic script every page loads in `<head>` before the first paint:
+redesign. `npm test` needs a browser: `npx playwright install chromium` once (CI does the same with `--with-deps`).
+An environment that preloads one Chromium under `PLAYWRIGHT_BROWSERS_PATH` at a revision Playwright does not pin
+is used as it is, so the suite runs there without a download; `PW_CHROMIUM=/path/to/chrome` overrides both. The light/dark switch is `site/theme.js`, a classic script every page loads in `<head>` before the first paint:
 it keeps the choice in `localStorage` (`id:theme`), sets `<html data-theme>`, which `style.css` reads through `light-dark()`
 tokens, and wires the header buttons; `site/src/theme.js` hooks ⚙ → *Theme* and the `t` key into it.
 
