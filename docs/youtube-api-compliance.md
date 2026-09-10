@@ -34,6 +34,16 @@ cleaning duplicates and dead uploads (the **Cleanup** tab) spends 50 units per a
 units cap a day at about 200 playlist edits. The site already paces itself: it shows the running meter in ⚙, refuses
 bulk actions the day's quota cannot cover, and reuses one playlist reading for every Keep in the following half hour.
 
+## Branding
+
+The site names YouTube and YouTube Music in full and never abbreviates them: source chips, filter chips, links,
+buttons and notices all come through `sourceLabel()` in `site/src/feed.js` or say "YouTube Music" outright. No
+YouTube logo, icon, play button or wordmark is used anywhere (the icons in `site/icons` are the site's own, the
+player is YouTube's unmodified iframe) and the application's name contains no YouTube reference. This is what the
+[branding guidelines](https://developers.google.com/youtube/terms/branding-guidelines) require; the September 2026
+ToS report that caught a raw `YTMUSIC` key on the cards, and the reply to it, are in
+[youtube-tos-reply.md](youtube-tos-reply.md), together with the data refresh and retention table.
+
 ## Recording the screencast
 
 **Before you start**
