@@ -234,8 +234,7 @@ test("the third verdict: ≠ wrong video hides a card without judging the song, 
   const before = Number(await page.locator("#count-feed").innerText());   // the pill counts the whole list; the page is paged
   await target.locator(".btn.wrong").click();
   await expect(target).toHaveCount(0);
-  await expect(page.locator(".toast")).toContainText(`≠ ${flagged.artist}`);
-  await expect(page.locator(".toast")).toContainText("wrong video");
+  await expect(page.locator(".toast")).toContainText(new RegExp(`≠ ${flagged.artist.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*wrong video`));
   await expect(page.locator("#count-feed")).toHaveText(String(before - 1));
   await page.locator("#meta").click();
   await page.keyboard.press("z");

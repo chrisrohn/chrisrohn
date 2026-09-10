@@ -3,7 +3,7 @@
  * Google Drive (appDataFolder). Newest record per track wins; "undone" tombstones travel too. The same debounce also
  * pushes data/ratings.json to the site's repository when a GitHub token is set (github.js), so the build learns. */
 import { state, persist, reconcileRated, ptDay, DRIVE, DRIVE_UPLOAD, SYNC_FILE } from "./state.js";
-import { toast } from "./dom.js";
+import { toast, toastBusy } from "./dom.js";
 import { withAuth, isCurator, tokenValid } from "./auth.js";
 import { render } from "./render.js";
 import { scheduleGhPush } from "./github.js";
@@ -77,8 +77,11 @@ export async function pullRatings() {
     for (const f of files.slice(1)) drive("DELETE", `${DRIVE}/files/${f.id}`).catch(() => {});
     if (changed) { persist(); render(); schedulePush(); }
     state.sync.at = Date.now(); persist();
-  } catch (e) { toast("Rating sync (pull) failed: " + /** @type {Error} */ (e).message, true); }
+  } catch (e) { background("Rating sync (pull) failed: " + /** @type {Error} */ (e).message); }
 }
+/** A notice from the mirror, which runs on its own timer: it waits its turn behind a toast the user is still acting on
+ * (the Undo after a Keep) rather than replacing it, since the next change retries the mirror anyway. @param {string} msg */
+function background(msg) { if (toastBusy()) { console.warn(msg); return; } toast(msg, true); }
 export function schedulePush() { clearTimeout(state.syncTimer); state.syncTimer = setTimeout(() => pushRatings().catch(() => {}), 1500); scheduleGhPush(); }
 export async function pushRatings() {
   if (!isCurator() || !state.online) return;
@@ -99,5 +102,5 @@ export async function pushRatings() {
       id = (await r.json()).id; state.sync.fileId = id;
     }
     state.sync.at = Date.now(); persist();
-  } catch (e) { toast("Rating sync (push) failed: " + /** @type {Error} */ (e).message, true); }
+  } catch (e) { background("Rating sync (push) failed: " + /** @type {Error} */ (e).message); }
 }
