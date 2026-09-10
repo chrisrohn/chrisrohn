@@ -37,7 +37,7 @@ BROWSER_USER_AGENT = os.environ.get(
     "DISCOVERY_BROWSER_USER_AGENT",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
 )
-PROFILE_VERSION = 3   # bump when profile.json's shape or meaning changes; `daily` then rebuilds it regardless of age (3: genre artists)
+PROFILE_VERSION = 4   # bump when profile.json's shape or meaning changes; `daily` then rebuilds it regardless of age (3: genre artists, 4: album/duration/videoType on the playlist scan)
 ETAG_VERSION = 1          # data/cache/feed_etags.json: url -> {etag, last_modified, body, at}
 ETAG_BODY_MAX = 400_000   # bytes of feed text kept per URL for the 304 path
 ETAG_KEEP_DAYS = 45       # validators for a feed nobody has fetched this long are dropped

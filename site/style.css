@@ -549,20 +549,75 @@ body.doc .tab { text-decoration: none; }
   body.deck-mode #player:not([hidden]) ~ #deck-card .dcard:not(.current) { margin-top: 12px; }
 }
 
-/* duplicate report (settings) */
-.dupes { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.dupe { border: 1px solid var(--rule); border-left: 4px solid var(--ink); padding: 8px 10px; font-size: 12px; }
-.dupe-song { margin-bottom: 4px; }
+/* ---------- the Cleanup tab: one sheet per song, its copies as rows ---------- */
+.dupes { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.dupe { border: 1px solid var(--rule); border-left: 4px solid var(--ink); padding: 8px 10px 8px; font-size: 12px; }
+.dupe.dismissed { border-left-color: var(--muted); opacity: .75; }
+.dupe.live { border-left-color: var(--blue); }
+.dupe-song { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; font-size: 13px; }
+.dupe-song .dname { font-family: var(--sans); }
+.dupe-song .flags { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.flag { display: inline-block; font: 700 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border: 1px solid var(--ink); color: var(--ink); }
+.flag.same-video { background: var(--ink); color: var(--on-ink); }
+.flag.cross-year { border-color: var(--warn); color: var(--warn); }
+.flag.same-song { border-color: var(--blue); color: var(--blue); }
+.flag.versions { border-style: dashed; color: var(--muted); border-color: var(--muted); }
+.flag.dead { border-color: var(--down); color: var(--down); }
+.dupe .verified { color: var(--up); font: 11px var(--mono); }
+.dupe .misfiled { color: var(--down); font: 700 11px var(--mono); }
+.dupe-rows { display: flex; flex-direction: column; border-top: 1px solid var(--hair); }
+.drow { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--hair); }
+.drow.wrong .dyear { color: var(--down); }
+.drow.dead .dtitle { text-decoration: line-through; color: var(--muted); }
+.drow.playing { background: color-mix(in srgb, var(--accent) 12%, transparent); outline: 1px solid var(--accent); outline-offset: -1px; }
+.drow .keep { margin: 0 2px; width: 16px; height: 16px; accent-color: var(--up); cursor: pointer; }
+.dthumb { position: relative; width: 64px; height: 48px; padding: 0; border: 1px solid var(--rule); background: var(--card2); cursor: pointer; overflow: hidden; flex: none; }
+.dthumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.dthumb span { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 18px; text-shadow: 0 0 6px #000; opacity: .85; }
+.dthumb:hover span { opacity: 1; color: var(--accent); }
+.dyear { font: 700 12px var(--mono); min-width: 44px; }
+.dyear b { color: var(--down); }
+.dwhat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dwhat-1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 0; }
+.ded { font: 700 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 2px 5px; background: var(--card2); border: 1px solid var(--hair); color: var(--ink); }
+.ed-remix .ded, .ed-live .ded, .ed-acoustic .ded, .ed-instrumental .ded, .ed-demo .ded { border-color: var(--blue); color: var(--blue); }
+.ed-radio .ded, .ed-extended .ded { border-color: var(--gold); color: var(--gold); }
+.dlabel { font: 11px var(--mono); color: var(--ink); }
+.dtitle { font: 12px var(--sans); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dmeta { font: 11px var(--mono); color: var(--muted); }
+.dact { display: inline-flex; align-items: center; gap: 6px; justify-self: end; }
+.dact .dmove { font: 11px var(--mono); padding: 3px 4px; max-width: 110px; border: 1px solid var(--rule); background: var(--card); color: var(--ink); }
+.dact .dmove option.verified { color: var(--up); font-weight: 700; }
+.dact .dopen { font-size: 14px; text-decoration: none; padding: 0 3px; }
+.dupe .x { background: none; border: 0; color: var(--down); cursor: pointer; font-size: 15px; padding: 0 4px; }
+.dupe .x:disabled { opacity: .4; }
+.dupe-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 8px; }
+.dupe-player { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.dupe-player iframe { width: min(100%, 480px); aspect-ratio: 16 / 9; border: 2px solid var(--ink); background: #000; }
+/* not streamable here: the dead copy, its counterpart, the replacements a search found */
 .dupe-entries { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .dupe .chip, .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--rule); padding: 2px 8px; font: 11px var(--mono); color: var(--muted); }
 .dupe .chip a { color: var(--ink); text-decoration: none; }
-.dupe .x { background: none; border: 0; color: var(--down); cursor: pointer; font-size: 13px; padding: 0 2px; }
-.dupe .x:disabled { opacity: .4; }
 .dupe .chip.wrong, .chip.wrong { border-color: var(--down); color: var(--down); }
-.dupe .verified { color: var(--up); }
 .dupe .chip.ok { border-color: var(--up); color: var(--up); } .dupe .chip.ok a { color: var(--up); }
+.cthumb { width: 32px; height: 24px; object-fit: cover; border: 1px solid var(--hair); }
+.dalts { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; width: 100%; }
+.dalt { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--hair); }
+.dalt .dthumb { width: 56px; height: 42px; }
+.dsearch { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.dsearch input { font: 12px var(--mono); padding: 5px 8px; border: 1px solid var(--rule); background: var(--card); color: var(--ink); min-width: 220px; }
 .dupe-filters { flex-wrap: wrap; gap: 8px; align-items: center; }
 .dupe-filters input[type=search] { flex: 1 1 160px; min-width: 120px; }
+.cl-help { margin: 2px 0 4px; }
+.cl-help p { margin-top: 6px; }
+.cl-audit .feeds span { margin-right: 6px; } .cl-audit .feeds span.dead { text-decoration: none; }
+.cl-audit .feeds span i { font-style: normal; color: var(--muted); margin-left: 4px; }
+@media (max-width: 760px) {
+  .drow { grid-template-columns: auto auto minmax(0, 1fr); grid-template-areas: "keep thumb what" "year act act"; row-gap: 4px; }
+  .drow .keep { grid-area: keep; } .drow .dthumb { grid-area: thumb; } .drow .dwhat { grid-area: what; } .drow .dyear { grid-area: year; align-self: center; } .drow .dact { grid-area: act; justify-self: end; }
+  .dtitle { white-space: normal; }
+  .dupe-player iframe { width: 100%; }
+}
 
 /* unknown release year: the select shows a "year?" placeholder until you pick */
 select.year.unknown { border-color: var(--warn); color: var(--warn); border-style: dashed; }
@@ -593,6 +648,8 @@ select.year.attention { animation: attention .5s ease 2; }
   .links a, .dlinks a, .share { display: inline-block; padding-top: 6px; padding-bottom: 6px; }
   .year { min-height: 40px; }
   .dupe .x { font-size: 18px; padding: 6px 8px; }
+  .drow .keep { width: 22px; height: 22px; }
+  .dact .dmove { min-height: 36px; }
   details summary { padding: 8px 0; }
   .hint { display: none; }
   /* 16px stops iOS Safari zooming the page when a field gets focus */

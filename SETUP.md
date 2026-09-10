@@ -124,21 +124,39 @@ prefers an original issue over a deluxe, remastered or live edition. Older cache
 playlist, which is what the "full release" link and the year fallback come from.
 
 **No duplicates:** every Keep first asks YouTube whether that video is already in the target playlist (1 quota unit)
-and skips the add if so. The daily build scans all year playlists for the exact same video appearing twice in a
-year or in two different years — a different upload of the same song is deliberately not counted (full report in
-`site/data/duplicates.json`). The site warns you on load; the **Cleanup** tab
-(curators only; its pill counts what is left) filters by kind, year and name, removes copies one tap at a time or all
-extra same-video copies in a year at once (quota-aware: 50 units per removal, and the tab says how many removals
-today's quota allows), marks the wrong-year copy where the catalogues verified the original year, and offers a live
-"scan this year now" for anything added since the last build. What you clean is remembered with your ratings in the
-Drive mirror, so it stays cleaned on every device; the next build drops it from the report.
+and skips the add if so. The daily build scans all year playlists and lists every *song* they hold more than once
+(full report in `site/data/duplicates.json`, one item per song with every copy): a song is an artist plus a title with
+its edition suffixes peeled off (`discovery/editions.py`), so the audio track, the official video, a remaster and a
+radio edit of the same song land in one item, and each item names its problems — **extra copy** (the same video twice
+in one year), **two years** (the same edition filed in two years; the catalogues verify the original year, a batch a
+run: `resolve.max_duplicate_year_lookups_per_run`), **several uploads** (two uploads of one edition) and **versions**
+(two editions: original and remix, radio and extended — a judgement call, so remixes and live takes keep their own
+year). The site warns you on load; the **Cleanup** tab (curators only; its pill counts what is left) lays every copy
+out as a row — edition, length, album, position, whether it plays here, ▶ to play it in place — and **look up the
+copies** asks YouTube what each upload is (channel, views, upload date, region; 1 unit per 50). Pick a copy with its
+radio button and **keep the chosen copy** removes the rest; ✕ removes one; **move to…** refiles a copy into another
+year (the verified year marked ✓, and a song filed entirely in the wrong year gets a one-tap **move everything**);
+**looks fine · dismiss** keeps every copy and stops listing the song. Filters by problem, year, order and name; bulk
+buttons trim all extra copies in a year or fix all wrong-year copies of verified songs in a year (removed when the
+verified year already has that edition, moved there when not), within the day's quota (51 units a removal, 102 a
+move; the tab says how many today's quota allows). What you do is remembered as marks with your ratings in the Drive
+mirror, so it stays done on every device; a song stays listed while the copies left still add up to a problem, and
+the next build drops what is gone. **Scan a year now** reads one playlist as it is right now (1 unit per 50 tracks),
+groups it by song the same way and removes without a lookup.
 
 **Not streamable here:** the same playlist scan sees which tracks YouTube Music greys out in the region the
-playlists are listened to in (`youtube_music.region`, US) — label rights, a withdrawn upload, a region lock — and
-the build searches for another upload of the same song that streams there, the audio track first, a batch a run
-(`resolve.counterparts_per_run`, cached). They are the *not streamable here* kind on the Cleanup tab: a **swap**
-adds the counterpart and removes the dead copy (100 units), *swap all in a year* does it in bulk within the day's
-quota, and a track with no other upload can be removed or searched by hand. The report is `site/data/unavailable.json`.
+playlists are listened to in (`youtube_music.region`, US) — label rights, a withdrawn upload, a region lock — but
+YouTube Music's listing drops deleted and private videos altogether, so the tab's **playability audit** reads a
+year playlist through the Data API and checks every video with YouTube (about 2 units per 50 tracks; a whole library
+in a day's quota, and *audit every year* stops by itself when the quota runs low): a video YouTube no longer answers
+for is deleted or private, one restricted away from the region is blocked. Findings are kept on that device, listed
+under *not streamable here* with why (a deleted video keeps whatever name the site's own records still have for it),
+and travel to the build with the ratings file (`data/ratings.json` → `unplayable`), where the build searches for
+another upload of each song that streams there, the audio track first, a batch a run (`resolve.counterparts_per_run`,
+cached). A **swap** adds the counterpart and removes the dead copy (100 units, 101 for the build's rows), *swap all
+in a year* does it in bulk within the day's quota, **find a replacement now** does the search from the tab for 101
+units (the audio track first, anything blocked here left out, each result playable in place before you use it), and
+a track with no other upload can be removed or searched by hand. The report is `site/data/unavailable.json`.
 If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free). The reviewers ask for a screencast of the client
 verifying playlist contents and adding or removing tracks: **⚙ → API activity** lists every YouTube Data API request
@@ -298,7 +316,7 @@ npm run check && npm test        # eslint + type check (tsc --checkJs) + build, 
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
-`render`, `player`, `rank` (the personal ranking), `stats`, `dupes`, `settings`, `keys`, `theme`, `main`); the Python side is
+`render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
 `discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/learn.py` (what the playlists teach the
 ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what

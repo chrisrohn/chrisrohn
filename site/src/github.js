@@ -20,6 +20,7 @@
 import { state, persist } from "./state.js";
 import { toast } from "./dom.js";
 import { isOwner } from "./auth.js";
+import { openAuditRows } from "./dupes.js";
 
 const API = "https://api.github.com";
 const PATH = "data/ratings.json";
@@ -48,7 +49,11 @@ export function ratingsPayload() {
     if (!r || r.pending || r.queued || (r.decision !== "up" && r.decision !== "down" && r.decision !== "wrong")) continue;
     rated[id] = { decision: r.decision, year: r.year ?? null, videoId: r.videoId || null, artist: r.artist || "", title: r.title || "", at: r.at || 0 };
   }
-  return { version: 1, updatedAt: new Date().toISOString(), count: Object.keys(rated).length, rated };
+  // what the playability audit found still in the playlists: the build searches for a playable upload of each
+  // (discovery/unavailable.py) so the tab can swap it in, without a search's 100 units
+  /** @type {Record<string, any>} */ const unplayable = {};
+  for (const u of openAuditRows()) unplayable[`${u.playlistId}:${u.videoId}`] = { year: u.year, playlistId: u.playlistId, videoId: u.videoId, position: u.position, artist: u.artist, title: u.title, why: u.why, at: u.at };
+  return { version: 1, updatedAt: new Date().toISOString(), count: Object.keys(rated).length, rated, ...(Object.keys(unplayable).length ? { unplayable } : {}) };
 }
 /** @param {string} text */
 function b64(text) {

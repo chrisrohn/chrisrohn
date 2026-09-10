@@ -132,6 +132,31 @@ export async function playlistItemsFor(playlistId, videoId, ctx = {}) {
   const j = await yt("GET", "/playlistItems", { params: { part: "id", playlistId, videoId, maxResults: 50 }, ...ctx });
   return (j.items || []).map((/** @type {any} */ i) => i.id);
 }
+/** What YouTube itself says about up to 50 videos in one request (1 unit): the upload's own title and channel (a
+ * "- Topic" channel is the auto-generated audio track), its length, views, upload date, and whether it is blocked
+ * in the region the playlists are listened to in. The Cleanup tab compares copies of a song by these.
+ * @param {string[]} ids @param {{why?: string, detail?: string}} [ctx] @param {boolean} [fresh] ask again even for videos looked up earlier this session
+ * @returns {Promise<Record<string, import("./types").VideoInfo>>} */
+export async function videoDetails(ids, ctx = {}, fresh = false) {
+  /** @type {Record<string, import("./types").VideoInfo>} */ const out = {};
+  const want = [...new Set(ids)].filter(v => v && (fresh || !state.videoInfo[v]));
+  for (let i = 0; i < want.length; i += 50) {
+    const batch = want.slice(i, i + 50);
+    const j = await yt("GET", "/videos", { params: { part: "snippet,contentDetails,statistics,status", id: batch.join(","), maxResults: 50 }, why: ctx.why || "Cleanup: look up the copies of a song (length, channel, views, region) to compare them", detail: ctx.detail });
+    const region = (state.feed?.youtube && state.feed.youtube.region) || "US";
+    for (const v of j.items || []) {
+      const sn = v.snippet || {}, cd = v.contentDetails || {}, st = v.statistics || {}, rr = cd.regionRestriction || {};
+      const blocked = Array.isArray(rr.blocked) ? rr.blocked.includes(region) : Array.isArray(rr.allowed) ? !rr.allowed.includes(region) : false;
+      const status = v.status || {};
+      state.videoInfo[v.id] = { title: sn.title || "", channel: sn.channelTitle || "", topic: /\s-\sTopic$/.test(sn.channelTitle || ""), seconds: isoSeconds(cd.duration), views: st.viewCount != null ? +st.viewCount : null, published: sn.publishedAt || null, blocked, embeddable: status.embeddable !== false, rejected: ["rejected", "failed", "deleted"].includes(status.uploadStatus) };
+    }
+    for (const id of batch) if (!state.videoInfo[id] || (fresh && !(j.items || []).some((/** @type {any} */ v) => v.id === id))) state.videoInfo[id] = { title: "", channel: "", topic: false, seconds: null, views: null, published: null, blocked: false, embeddable: false, rejected: false, missing: true };   // deleted or private: YouTube leaves it out
+  }
+  for (const id of ids) if (state.videoInfo[id]) out[id] = state.videoInfo[id];
+  return out;
+}
+/** "PT3M42S" → 222. @param {string | undefined} iso */
+export function isoSeconds(iso) { const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso || ""); return m ? (+(m[1] || 0)) * 3600 + (+(m[2] || 0)) * 60 + (+(m[3] || 0)) : null; }
 const RECENT_EVERY_MS = 30 * 60e3;
 // Hide things filed from another device since the last daily build. playlistItems come back in playlist order and
 // new saves are appended, so the whole playlist is paged (1 quota unit per 50 tracks) — the first page alone would

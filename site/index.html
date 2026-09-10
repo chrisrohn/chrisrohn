@@ -51,7 +51,7 @@
     <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="catalog" title="Earlier years: what you have played and loved on Last.fm but never filed, and your artists' and their neighbours' best-known tracks">Catalog <span class="pill" id="count-catalog">…</span></button>
     <button class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="picks">Picks <span class="pill" id="count-picks">0</span></button>
     <button class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="skipped" title="What you thumbed down or flagged as the wrong video — restore any of them">Skipped <span class="pill" id="count-skipped">0</span></button>
-    <button class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="cleanup" title="Duplicated songs in the year playlists, and a live scan of one year — work through them a few at a time">Cleanup <span class="pill" id="count-cleanup">0</span></button>
+    <button class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="cleanup" title="Songs the year playlists hold more than once (extra copies, two years, several uploads, versions), tracks that will not play here, a live scan and a playability audit — work through them a few at a time">Cleanup <span class="pill" id="count-cleanup">0</span></button>
   </nav>
   <div class="actions">
     <span id="who" class="who" hidden></span>
@@ -161,22 +161,35 @@
     <div class="cl-head">
       <h2 id="cl-title">Cleanup</h2>
       <p class="muted" id="cl-summary"></p>
-      <p class="muted">Every Keep first checks the target playlist, so the same video is never added twice by the site. The daily build scans all year playlists for the exact same video appearing twice in a year (an extra copy: remove it, one stays) or in two different years (a filing question: the verified year marks the wrong copy). It also notes every track YouTube Music greys out in the US (label rights, a withdrawn upload, a region lock) and looks for another upload of the same song that streams here, the audio track first: <b>not streamable here</b> in the kind menu, where a swap adds the counterpart and removes the dead copy. A removal costs 50 YouTube API units and a swap 100, so this is a job for a few minutes a day; what you clean is remembered on every device you sign into.</p>
+      <details class="cl-help"><summary>How this works</summary>
+        <p class="muted">The daily build reads every year playlist and lists each <b>song</b> it holds more than once — the same video twice, the same song in two years, two uploads of it (the audio track and the video, say), or two editions of it (the original and a remix, the radio edit and the extended mix). Every copy is laid out with its edition, length, album, position and whether it plays here; ▶ plays a copy in place so two can be heard back to back, and <b>look up the copies</b> asks YouTube what each upload is (1 unit per 50). Choose a copy with its radio button and <b>keep the chosen copy</b> removes the rest; ✕ removes one; <b>move to…</b> refiles a copy into another year (the verified year is marked ✓, and a song filed entirely in the wrong year gets a one-tap <b>move everything</b>); <b>looks fine · dismiss</b> keeps every copy and stops listing the song. A removal costs 51 YouTube API units, a move 102. What you do here is remembered on every device you sign into, and the next build drops what is gone.</p>
+        <p class="muted"><b>Not streamable here</b> lists the tracks that will not play in the US: what the build's scan found greyed out on YouTube Music, plus what the <b>playability audit</b> below finds — deleted, private and region-blocked videos, which YouTube Music's listing hides altogether. The build searches for a playable upload of each (free, overnight) and a swap adds it and removes the dead copy; <b>find a replacement now</b> does the search from here for 100 units.</p>
+      </details>
       <p class="muted" id="cl-quota"></p>
       <p class="muted" id="cl-dupe-kinds"></p>
     </div>
     <div class="row dupe-filters">
-      <select id="cl-dupe-kind" aria-label="kind"><option value="">all duplicates</option><option value="same-video">same video twice in a year</option><option value="cross-year">same video in two years</option><option value="unavailable">not streamable here</option></select>
+      <select id="cl-dupe-kind" aria-label="what to list"><option value="">everything open</option><option value="same-video">extra copies (same video twice in a year)</option><option value="cross-year">same edition in two years</option><option value="same-song">several uploads of one edition</option><option value="versions">versions (remix, edit, live…)</option><option value="wrong-year">verified: filed in the wrong year</option><option value="unavailable">not streamable here</option><option value="dismissed">dismissed</option></select>
       <select id="cl-dupe-yr" aria-label="year"><option value="">all years</option></select>
-      <input id="cl-dupe-q" type="search" placeholder="filter artist / title" autocomplete="off" aria-label="filter artist or title">
+      <select id="cl-dupe-sort" aria-label="order"><option value="issue">by issue</option><option value="year">newest year first</option><option value="artist">by artist</option><option value="copies">most copies first</option></select>
+      <input id="cl-dupe-q" type="search" placeholder="filter artist / title / edition" autocomplete="off" aria-label="filter artist, title or edition">
+      <span class="muted" id="cl-dupe-shown"></span>
+      <button class="btn ghost small" id="cl-dupe-lookup" type="button" hidden>look up the copies shown</button>
       <button class="btn ghost small" id="cl-dupe-bulk" type="button" hidden>remove all extra copies…</button>
     </div>
     <div id="cl-dupes" class="dupes"></div>
     <div class="cl-live">
       <h3>Scan a year now</h3>
-      <p class="muted">The report above is from the last build; a live scan reads one playlist as it is right now (1 unit per 50 tracks) and catches today's double-taps.</p>
+      <p class="muted">The report above is from the last build; a live scan reads one playlist as it is right now (1 unit per 50 tracks), groups it by song the same way, and catches today's double-taps and second uploads before the nightly build does. Removals here need no lookup: the scan already knows each row.</p>
       <div class="row"><select id="cl-dupe-year" aria-label="year to scan"></select><button class="btn ghost" type="button" id="cl-dupe-scan">Scan this year now</button><span class="muted" id="cl-dupe-status"></span></div>
       <div id="cl-dupes-live" class="dupes"></div>
+    </div>
+    <div class="cl-audit">
+      <h3>Playability audit</h3>
+      <p class="muted">Which tracks cannot play in the US at all: the playlist is read through the YouTube Data API and every video is checked with YouTube (about 2 units per 50 tracks) — a video YouTube no longer answers for is deleted or private, one restricted away from the US is blocked. Findings go under <b>not streamable here</b> above, are kept on this device, and travel to the build with your ratings so it can look for a playable upload of each overnight.</p>
+      <div class="row"><select id="cl-audit-year" aria-label="year to audit"></select><button class="btn ghost" type="button" id="cl-audit-one">Audit this year</button><button class="btn ghost" type="button" id="cl-audit-all" title="every year not audited in the last day, until today's quota runs low">Audit every year</button><span class="muted" id="cl-audit-status"></span></div>
+      <p class="muted" id="cl-audit-summary"></p>
+      <div class="feeds" id="cl-audit-done"></div>
     </div>
   </section>
   <div id="empty" class="empty" role="status" hidden></div>

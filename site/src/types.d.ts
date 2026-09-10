@@ -18,7 +18,7 @@ export interface Feed {
   google?: { client_id?: string; curator_hashes?: string[]; curators?: string[]; guests?: boolean; guest_playlist_title_pattern?: string };
   youtube?: { playlist_title_pattern?: string; skipped_playlist_title?: string; playlists?: Record<string, string>; skipped_playlist_id?: string; skips_in_youtube?: boolean;
     duplicates_count?: number; duplicates_kinds?: Record<string, number>; duplicates_checked_at?: string | null;
-    unavailable_count?: number; unavailable_with_alt?: number; unavailable_pending?: number };
+    unavailable_count?: number; unavailable_with_alt?: number; unavailable_pending?: number; region?: string };
   picks?: Array<{ artist: string; title: string; videoId?: string | null; year?: string; thumbnail?: string | null; album?: string | null }>;
   learned?: LearnedSummary;
   feed_health?: Record<string, { ok: boolean; entries: number; kept: number; error?: string | null }>;
@@ -35,9 +35,33 @@ export interface Rated {
   sources?: string[]; tags?: string[];   // what the card carried when it was rated: the personal ranking and the stats learn from these
 }
 export interface Auth { email?: string; name?: string; picture?: string; hash?: string; access_token?: string; expires_at: number }
-export interface Unavailable { year: string; playlistId: string; videoId: string; position?: number; artist: string; title: string; pending?: boolean; alt: { videoId: string; title?: string; album?: string | null; thumbnail?: string | null; videoType?: string } | null }
-export interface DupeEntry { year: string; playlistId: string; videoId: string; position: number }
-export interface Dupe { key: string; videoId: string; artist: string; title: string; kind: string; years: string[]; count: number; entries: DupeEntry[]; verified_year?: number; verified_source?: string }
+/** A playlist row that will not play here: found greyed out by the build's scan (data/unavailable.json) or dead by the tab's audit. */
+export interface Unavailable {
+  year: string; playlistId: string; videoId: string; position?: number; artist: string; title: string; pending?: boolean;
+  alt: { videoId: string; title?: string; album?: string | null; thumbnail?: string | null; videoType?: string } | null;
+  why?: string;            // deleted | private | blocked | rejected | greyed (the build's scan)
+  found?: "build" | "audit"; at?: number; itemId?: string;   // audit rows: when, and the playlist item to remove without a lookup
+}
+/** One finding of the playability audit (audit.js), kept on this device. */
+export interface AuditRow { year: string; playlistId: string; videoId: string; itemId: string; position: number; artist: string; title: string; why: string; at: number }
+export interface Audit { years: Record<string, { at: number; tracks: number; dead: AuditRow[]; units: number }> }
+/** A search result that can play here, offered as a replacement for a dead track. */
+export interface Replacement extends VideoInfo { videoId: string }
+/** One playlist row of a duplicated song, as the build's playlist scan saw it (title, edition, album, length, audio or video). */
+export interface DupeEntry {
+  year: string; playlistId: string; videoId: string; position: number;
+  title?: string; edition?: string; label?: string; album?: string | null; duration?: number | null; videoType?: string | null; avail?: boolean;
+  itemIds?: string[];   // live scan only: the playlistItem ids, so a removal needs no lookup
+}
+/** One song the year playlists hold more than once (data/duplicates.json, version 2), with every copy listed. */
+export interface Dupe {
+  key: string; artist: string; title: string; kind: string; kinds?: string[]; years: string[]; count: number; uploads?: number; editions?: string[];
+  entries: DupeEntry[]; verified_year?: number; verified_source?: string;
+  videoId?: string;   // version 1 reports: one item per video
+  live?: boolean;     // built by the tab's own scan of a playlist, not by the daily build
+}
+/** What the tab knows about a video from a videos.list lookup (1 unit for up to 50 ids). */
+export interface VideoInfo { title: string; channel: string; topic: boolean; seconds: number | null; views: number | null; published: string | null; blocked: boolean; embeddable: boolean; rejected?: boolean; missing?: boolean }
 
 export interface Settings {
   audition: boolean; auditionSeconds: number; auditionStart: number; deck: boolean | null; skipsInYouTube: boolean | null; dupesNoticed?: string; dupesDone: string[]; installDismissedAt?: number; shortlistSize: number;
@@ -59,7 +83,10 @@ export interface State {
   ghTimer: any; ghRetry: any; ghBusy: Promise<boolean> | null; ghAt: number; ghDirty: boolean; ghFails: number;
   ghErr: string | null; ghSaid: { msg: string; at: number } | null;
   ghSha: { sha: string; updatedAt: string; count: number } | null;   // the blob this browser last committed, so an unchanged sitting is recognised without downloading it
- _years: number[]; dupes: Dupe[] | null; dupePage: number; dupeQT: any;
+  _years: number[]; dupes: Dupe[] | null; dupePage: number; dupeQT: any;
+  videoInfo: Record<string, VideoInfo>;   // videos.list lookups made by the Cleanup tab this session
+  liveDupes: Dupe[] | null; liveYear: string | null;   // the tab's own scan of one year playlist
+  audit: Audit | null;                                  // the playability audit's findings (id:audit), loaded on first use
   unavailable: Unavailable[] | null; library: any[] | null; notOwner: boolean; signingIn: Promise<boolean> | null; authCb: any; authErrCb: any; keepAliveAt: number;
   lastAuthError: { why: string; at: number } | null; ready: boolean; online: boolean; recentAt: number; recentVideos: Set<string>;
   apiLog: ApiEntry[];

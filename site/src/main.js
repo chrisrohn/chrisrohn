@@ -20,6 +20,7 @@ import { wireKeys, currentYear } from "./keys.js";
 import { wirePwa } from "./pwa.js";
 import { applyLaunchParams, wireLayers } from "./url.js";
 import { wireGhPush } from "./github.js";
+import { wireCleanup } from "./dupes.js";
 
 function wire() {
   const tabs = $$(".tab");
@@ -88,6 +89,7 @@ function wire() {
   wireOffline();
   wireLayers();
   wireSettings();
+  wireCleanup();   // the Cleanup tab: its filters, the actions on every song and copy, the live scan and the audit
   wireKeys();
   wirePwa();
   wireGhPush();   // the ratings file for the build: a last push when the tab goes away, and the retries after a dropped connection
