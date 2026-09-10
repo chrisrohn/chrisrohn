@@ -34,7 +34,7 @@ export async function rate(id, decision, year) {
     // nothing says when this came out — never guess "this year" on your behalf
     const sel = $(`.card[data-id="${CSS.escape(id)}"] .year, .dcard[data-id="${CSS.escape(id)}"] .year`);
     if (sel) { sel.focus(); sel.classList.add("attention"); setTimeout(() => sel.classList.remove("attention"), 1500); }
-    toast(`Release year unknown for ${credit(it)} — pick the year playlist first (the YT Music link may show it)`, true);
+    toast(`Release year unknown for ${credit(it)} — pick the year playlist first (the YouTube Music link may show it)`, true);
     return;
   }
   year = year || yearOf(it);

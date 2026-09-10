@@ -4,7 +4,7 @@
  * keyboard is on — they part when you browse while listening, and the player's own thumbs always judge what plays. */
 import { state, byId, badVideo, markBadVideo, persist } from "./state.js";
 import { $, $$, esc, sameName, toast } from "./dom.js";
-import { visibleItems } from "./feed.js";
+import { visibleItems, sourceLabel } from "./feed.js";
 import { renderDeck, deckOn, deckItem, focusCard } from "./render.js";
 import { matchLabel } from "./years.js";
 import { scoreOf } from "./rank.js";
@@ -38,7 +38,7 @@ window.onYouTubeIframeAPIReady = () => {
         const it = current(); const vid = it?.youtube?.videoId; const url = vid ? "https://music.youtube.com/watch?v=" + vid : null;
         // 100 = removed or private, 101/150 = the owner disallows embedding: remember it so autoplay steps over it next time
         if (vid && [100, 101, 150].includes(Number(e && e.data))) { markBadVideo(vid); $$(`.card[data-id="${CSS.escape(it.id)}"], .dcard[data-id="${CSS.escape(it.id)}"]`).forEach(c => c.classList.add("noembed")); }
-        toast("Can't embed this one", true, url ? { label: "Open in YT Music", fn: () => window.open(url, "_blank", "noopener") } : undefined);
+        toast("Can't embed this one", true, url ? { label: "Open in YouTube Music", fn: () => window.open(url, "_blank", "noopener") } : undefined);
         if (autoplayOn()) nextTrack();   // keep the queue moving; a popup here would be blocked anyway
       },
     },
@@ -154,7 +154,7 @@ function renderNow(it) {
   const rel = it.release && !sameName(it.release, it.title) ? ` <span class="muted">· ${esc(it.release)}</span>` : "";
   $("#now").innerHTML = `<b class="np-artist">${esc(it.artist)}${ml ? ` <span class="match ${esc(it.match_kind || "")}">${esc(ml)}</span>` : ""}</b><span class="np-sep"> - </span><span class="np-title">${esc(it.display_title || it.title)}${rel}</span>`;
   $("#np-spec").textContent = [it.release_type, it.release_date, (it.tags || []).slice(0, 4).join(", ")].filter(Boolean).join(" · ");
-  $("#np-sources").innerHTML = (it.sources || []).map(s => { const [k, name] = s.split(":"); return `<span class="src ${esc(k)}" title="${esc(s)}">${esc(name || k)}</span>`; }).join("");
+  $("#np-sources").innerHTML = (it.sources || []).map(s => `<span class="src ${esc(s.split(":")[0])}" title="${esc(sourceLabel(s))}">${esc(sourceLabel(s))}</span>`).join("");
   $("#np-score").textContent = it.score ? scoreOf(it).toFixed(1) : "";
   const nx = upNext(); const b = $("#np-next"); b.hidden = !nx;
   if (nx) b.innerHTML = `<b>${esc(nx.artist)}</b><span>${esc(nx.display_title || nx.title)}</span>`;

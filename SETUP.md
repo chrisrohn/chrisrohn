@@ -8,11 +8,11 @@ Everything here is free. Total setup is about 20 minutes, most of it DNS propaga
 GitHub Actions (nightly, by 06:47 ET)                  chrisrohn.com (GitHub Pages, public)
 ┌──────────────────────────────────────┐               ┌───────────────────────────────────────┐
 │ profile: Last.fm tt_discotheque      │               │ anyone: listen, filter by source, Picks│
-│   + your public YT year playlists    │   feed.json   │                                       │
+│   + your public year playlists       │   feed.json   │                                       │
 │   + Last.fm & ListenBrainz similar   │ ────────────▶ │ you (Sign in with Google):            │
 │   + Last.fm top acts of your genres  │               │   keep → "<year> | Indie Discotheque" │
 │ sources: your artists' new releases  │               │   skip → unlisted "Skipped" playlist  │
-│   (YT Music · Deezer · MusicBrainz)  │               │   (YouTube Data API, from your browser)│
+│   (YouTube Music · Deezer · MB)      │               │   (YouTube Data API, from your browser)│
 │   ListenBrainz fresh · MB tags       │               │                                       │
 │   Bandcamp · radio · blog RSS        │               │                                       │
 │   thin day → earlier years fill in   │               │                                       │

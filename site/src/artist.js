@@ -6,7 +6,7 @@ import { state, allItems, decisionFor } from "./state.js";
 import { $, esc, sameName } from "./dom.js";
 import { isCurator } from "./auth.js";
 import { play } from "./player.js";
-import { searchFor, credit } from "./feed.js";
+import { searchFor, credit, sourceLabel } from "./feed.js";
 import { matchLabel } from "./years.js";
 import { scoreOf } from "./rank.js";
 import { openLayer } from "./url.js";
@@ -38,7 +38,7 @@ export function openArtist(name) {
     return `<div class="arow${state.playingId === i.id ? " current" : ""}" data-id="${esc(i.id)}">
       <button type="button" class="btn small aplay" ${yt.videoId ? "" : "disabled"} title="${yt.videoId ? "play" : "no YouTube match"}" aria-label="play ${esc(credit(i))}">▶&#xFE0E;</button>
       <span class="atitle"><b>${esc(i.display_title || i.title)}</b>${i.release && !sameName(i.release, i.title) ? ` <span class="muted">· ${esc(i.release)}</span>` : ""}${i.year ? ` <span class="muted">· ${esc(i.year)}</span>` : ""}</span>
-      <span class="aspec">${i.plays != null ? `${i.plays} plays` : (i.sources || []).map(s => s.split(":").slice(-1)[0]).slice(0, 3).join(", ")}</span>
+      <span class="aspec">${i.plays != null ? `${i.plays} plays` : (i.sources || []).map(sourceLabel).slice(0, 3).join(", ")}</span>
       <span class="ascore">${i.score ? scoreOf(i).toFixed(1) : ""}</span>
       <span class="astatus ${status.split(" ")[0]}">${status}</span>
     </div>`;
@@ -52,7 +52,7 @@ export function openArtist(name) {
     <div class="row">
       <button type="button" class="btn ghost small" id="artist-filter">only ${esc(name)} in the list</button>
       <a class="btn ghost small" href="https://www.last.fm/music/${encodeURIComponent(name)}" target="_blank" rel="noopener">last.fm</a>
-      <a class="btn ghost small" href="https://music.youtube.com/search?q=${encodeURIComponent(name)}" target="_blank" rel="noopener">YT Music</a>
+      <a class="btn ghost small" href="https://music.youtube.com/search?q=${encodeURIComponent(name)}" target="_blank" rel="noopener">YouTube Music</a>
       <a class="btn ghost small" href="https://musicbrainz.org/search?query=${encodeURIComponent(name)}&type=artist&method=indexed" target="_blank" rel="noopener">MusicBrainz</a>
     </div>`;
   $("#artist-body").querySelectorAll(".aplay").forEach(b => b.addEventListener("click", () => { const id = /** @type {HTMLElement} */ (b.closest(".arow")).dataset.id; if (id) { play(id); $("#artist-body").querySelectorAll(".arow").forEach(r => r.classList.toggle("current", /** @type {HTMLElement} */ (r).dataset.id === id)); } }));

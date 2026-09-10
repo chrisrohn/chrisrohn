@@ -181,8 +181,11 @@ function watchForToday() {
 }
 function fillYears() { const f = state.feed; state._years = (f?.years && f.years.length) ? f.years : range(new Date().getFullYear(), 1979); }
 /** @type {Record<string, string>} */
-const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "Artist watch", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify", reddit: "Reddit", apple: "Apple Music",
+const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "YouTube Music", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify", reddit: "Reddit", apple: "Apple Music",
   "lastfm:top tracks": "Most played", "lastfm:loved": "Loved", "lastfm:artist top": "Your artists' hits", "lastfm:similar top": "Similar artists' hits" };
+/** A source as the site names it: the family's full name ("ytmusic" → "YouTube Music", never an abbreviation of a
+ * trademark), a named feed by its own name ("rss:Gorilla vs. Bear" → "Gorilla vs. Bear"). @param {string} s */
+export function sourceLabel(s) { const [k, ...rest] = String(s).split(":"); return SOURCE_LABELS[s] || rest.join(":") || SOURCE_LABELS[k] || k; }
 /** The source chips: the feed's source families, or the catalog's Last.fm lists, whichever tab is open. */
 export function fillSources() {
   const box = $("#sources"); const catalog = state.view === "catalog";
@@ -190,7 +193,7 @@ export function fillSources() {
   const names = catalog ? (state.catalog?.sources || []) : (state.feed?.sources || []); const off = new Set(state.filters[key] || []);
   const blogs = catalog ? [] : (state.feed?.blogs || []); const boff = new Set(state.filters.blogsOff || []);
   const blogCount = blogs.filter(b => !boff.has(b)).length;
-  box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s.split(":").slice(1).join(":") || s)}</label>` +
+  box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(sourceLabel(s))}</label>` +
       (s === "rss" && blogs.length ? `<button class="all pick" type="button" id="blogs-btn" title="choose which blogs, stations and channels">${blogCount}/${blogs.length} feeds ▾</button>` : "")).join("") +
     (names.length > 1 ? `<button class="all" type="button" data-all="1">all</button><button class="all" type="button" data-all="0">none</button>` : "");
   $$("input", box).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters[key] || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters[key] = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render(); }));

@@ -7,7 +7,7 @@ import { $, $$, esc, safeUrl, sameName, canShare, shareTrack, copyText, permalin
 import { isCurator, isSignedIn } from "./auth.js";
 import { yearBadge, fillYearSelect, matchLabel, isMatchReason } from "./years.js";
 import { titleFor } from "./youtube.js";
-import { visibleItems, searchFor, credit, parseQuery, termText, dropTerm, fillSources, buildTime, waitingForToday } from "./feed.js";
+import { visibleItems, searchFor, credit, parseQuery, termText, dropTerm, fillSources, buildTime, waitingForToday, sourceLabel } from "./feed.js";
 import { rate, undo, restoreAll } from "./rating.js";
 import { play, toggle, refreshNow } from "./player.js";
 import { personal, scoreOf } from "./rank.js";
@@ -159,9 +159,9 @@ export function renderDeck(vis) {
   why.push(...personal(it).why);
   $(".dwhy", el).textContent = why.join(" · ");
   $(".dtags", el).replaceChildren(...(it.tags || []).slice(0, 4).map(tagButton));
-  $(".dsources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}">${esc(n || k)}</span>`; }).join("");
+  $(".dsources", el).innerHTML = (it.sources || []).map(s => `<span class="src ${esc(s.split(":")[0])}">${esc(sourceLabel(s))}</span>`).join("");
   const links = [];
-  if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YT Music</a>`);
+  if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YouTube Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
   if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
   $(".dlinks", el).innerHTML = links.join("");
@@ -191,7 +191,7 @@ function card(it, tpl) {
   const art = $(".art", el); const img = $("img", art);
   if (it.artwork || yt.thumbnail) { img.src = it.artwork || yt.thumbnail; dropIfDead(img); } else img.remove();
   if (!yt.videoId) art.classList.add("unplayable");
-  if (badVideo(yt.videoId)) { el.classList.add("noembed"); art.title = "YouTube would not embed this video here recently — open it in YT Music"; }
+  if (badVideo(yt.videoId)) { el.classList.add("noembed"); art.title = "YouTube would not embed this video here recently — open it in YouTube Music"; }
   if (it.first_seen && it.first_seen === state.feed?.generated_at?.slice(0, 10) && !it._pick) el.classList.add("new");
   const artist = $(".artist", el); artist.textContent = it.artist; artist.title = `everything by ${it.artist} (the artist sheet)`;
   artist.addEventListener("click", (/** @type {Event} */ e) => { e.stopPropagation(); openArtist(it.artist); });
@@ -205,11 +205,11 @@ function card(it, tpl) {
   else { const badge = yearBadge(it); yb.classList.add(badge.conf); yb.title = badge.title; yb.textContent = badge.text; }
   applyLearned(el, it);
   $(".tags", el).replaceChildren(...(it.tags || []).slice(0, 6).map(tagButton));
-  $(".sources", el).innerHTML = (it.sources || []).map(s => { const [k, n] = s.split(":"); return `<span class="src ${esc(k)}" title="${esc(s)}">${esc(n || k)}</span>`; }).join("");
+  $(".sources", el).innerHTML = (it.sources || []).map(s => `<span class="src ${esc(s.split(":")[0])}" title="${esc(sourceLabel(s))}">${esc(sourceLabel(s))}</span>`).join("");
   const links = [];
   if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YouTube Music</a>`);
   if (yt.playlistId) links.push(`<a href="https://music.youtube.com/playlist?list=${esc(yt.playlistId)}" target="_blank" rel="noopener">full release</a>`);
-  if (!yt.videoId) links.push(`<a href="https://music.youtube.com/search?q=${encodeURIComponent(it.artist + " " + it.title)}" target="_blank" rel="noopener">search YT Music</a>`);
+  if (!yt.videoId) links.push(`<a href="https://music.youtube.com/search?q=${encodeURIComponent(it.artist + " " + it.title)}" target="_blank" rel="noopener">search YouTube Music</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
   links.push(`<a href="https://www.last.fm/music/${encodeURIComponent(it.artist)}" target="_blank" rel="noopener">last.fm</a>`);
   if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
