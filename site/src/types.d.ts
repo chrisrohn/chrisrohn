@@ -66,6 +66,7 @@ export interface VideoInfo { title: string; channel: string; topic: boolean; sec
 export interface Settings {
   audition: boolean; auditionSeconds: number; auditionStart: number; deck: boolean | null; skipsInYouTube: boolean | null; dupesNoticed?: string; dupesDone: string[]; installDismissedAt?: number; shortlistSize: number;
   autoplay: boolean; shuffle: boolean; introDismissed?: boolean;
+  background: boolean;   // keep playing when the screen goes off or another app comes in front (phones pause the embed by themselves; the player asks for it back)
   ghToken?: string | null;   // a fine-grained GitHub token (contents: write on the site repo) that lets the browser push data/ratings.json for the build to learn from
 }
 export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyPlayable: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[] }

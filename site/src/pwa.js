@@ -2,7 +2,7 @@
 /* Installed-app plumbing: the service worker and its "new version ready" prompt, the Install button (Chromium's
  * prompt where the browser offers one, a how-to sheet on iOS and elsewhere), the app shortcuts from the manifest
  * (?view=picks, ?new=1, ?audition=1) and a feed refresh when a long-open app comes back to the foreground.
- * Lock-screen controls live in player.js (Media Session) and the share sheet in dom.js. */
+ * Lock-screen controls and background play live in player.js (Media Session, visibility) and the share sheet in dom.js. */
 import { state, persist } from "./state.js";
 import { $, toast } from "./dom.js";
 import { refreshFeed } from "./feed.js";
@@ -57,8 +57,8 @@ async function install() {
 function showHowTo() {
   /** @type {string[]} */
   let steps;
-  if (isIOS()) steps = ["Open this page in Safari (Chrome and Firefox on iPhone can install too, from their share menu).", "Tap the <b>Share</b> button — the square with an arrow at the bottom (iPhone) or top (iPad) of the screen.", "Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.", "New Music opens full-screen from its own icon and keeps the last feed for offline listening."];
-  else if (isAndroid()) steps = ["Open the browser menu (<b>⋮</b>) in the top-right corner.", "Tap <b>Install app</b> (Chrome, Edge, Samsung Internet) or <b>Add to Home screen</b> (Firefox).", "Confirm. New Music appears with the other apps, with lock-screen play/pause/next while it plays."];
+  if (isIOS()) steps = ["Open this page in Safari (Chrome and Firefox on iPhone can install too, from their share menu).", "Tap the <b>Share</b> button — the square with an arrow at the bottom (iPhone) or top (iPad) of the screen.", "Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.", "New Music opens full-screen from its own icon, keeps the last feed for offline listening, and keeps playing with the screen off (the lock screen has play/pause/next)."];
+  else if (isAndroid()) steps = ["Open the browser menu (<b>⋮</b>) in the top-right corner.", "Tap <b>Install app</b> (Chrome, Edge, Samsung Internet) or <b>Add to Home screen</b> (Firefox).", "Confirm. New Music appears with the other apps, keeps playing with the screen off, and the lock screen has play/pause/next."];
   else if (isFirefox()) steps = ["Firefox on the desktop does not install web apps. Use Chrome, Edge, Brave or Safari 17+ for that.", "On Android, Firefox can: menu → <b>Add to Home screen</b>."];
   else if (isSafari()) steps = ["In Safari 17 or newer on macOS Sonoma: <b>File → Add to Dock…</b>", "Confirm the name and icon. New Music opens in its own window, like any Mac app."];
   else steps = ["Look for the <b>install icon</b> at the right end of the address bar (a monitor with a down arrow) and click it.", "Or open the browser menu (<b>⋮</b>) → <b>Cast, save and share → Install page as app…</b> (Chrome) / <b>Apps → Install this site as an app</b> (Edge).", "New Music opens in its own window, with media keys driving play/pause and next/previous."];
@@ -76,8 +76,8 @@ export function renderInstallUi() {
   $("#s-install-btn").hidden = standalone || !supported;
   $("#s-update-btn").hidden = !reg;
   $("#s-install-text").textContent = standalone
-    ? "Running as an installed app: full-screen, offline with the last feed, lock-screen controls while it plays."
-    : supported ? "Install as an app for a full-screen feed from its own icon, offline with the last feed, and lock-screen play/pause/next."
+    ? "Running as an installed app: full-screen, offline with the last feed, playing on with the screen off, lock-screen controls while it plays."
+    : supported ? "Install as an app for a full-screen feed from its own icon, offline with the last feed, music that carries on with the screen off, and lock-screen play/pause/next."
     : "This browser does not install web apps; Chrome, Edge, Brave and Safari do.";
   $("#s-build").textContent = `build ${build()}`;
 }

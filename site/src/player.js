@@ -1,7 +1,8 @@
 // @ts-check
-/* The YouTube embed, autoplay through the list (in order or shuffled), the queue, and audition mode (start partway
- * in, move on after N seconds). `state.playingId` is the track in the player; `state.currentId` is the card the
- * keyboard is on — they part when you browse while listening, and the player's own thumbs always judge what plays. */
+/* The YouTube embed, autoplay through the list (in order or shuffled), the queue, audition mode (start partway in,
+ * move on after N seconds) and background play (the screen off or another app in front does not stop the music).
+ * `state.playingId` is the track in the player; `state.currentId` is the card the keyboard is on — they part when
+ * you browse while listening, and the player's own thumbs always judge what plays. */
 import { state, byId, badVideo, markBadVideo, persist } from "./state.js";
 import { $, $$, esc, sameName, toast } from "./dom.js";
 import { visibleItems } from "./feed.js";
@@ -30,8 +31,12 @@ window.onYouTubeIframeAPIReady = () => {
       },
       onStateChange: (/** @type {any} */ e) => {
         if (e.data === YT.PlayerState.ENDED && autoplayOn()) { clearAudition(); nextTrack(); }
-        if (e.data === YT.PlayerState.PLAYING) { startAudition(); setPlaybackState("playing"); reflectPlaying(true); startPosition(); }
-        if (e.data === YT.PlayerState.PAUSED) { clearAudition(false); setPlaybackState("paused"); reflectPlaying(false); stopPosition(); }
+        if (e.data === YT.PlayerState.PLAYING) { userPaused = false; hidePaused = false; startAudition(); setPlaybackState("playing"); reflectPlaying(true); startPosition(); }
+        if (e.data === YT.PlayerState.PAUSED) {
+          // a pause that arrives with the page hidden, and none asked for here, is the browser's: ask for the track back
+          if (document.visibilityState === "hidden" && !userPaused) { hidePaused = true; resumeInBackground(); } else userPaused = true;
+          clearAudition(false); setPlaybackState("paused"); reflectPlaying(false); stopPosition();
+        }
         if (e.data === YT.PlayerState.ENDED) { setPlaybackState("none"); reflectPlaying(false); stopPosition(); }
       },
       onError: (/** @type {any} */ e) => {
@@ -56,8 +61,8 @@ function wireMediaSession() {
   const s = ms(); if (!s || msWired) return; msWired = true;
   /** @param {MediaSessionAction} a @param {(d?: any) => void} fn */
   const on = (a, fn) => { try { s.setActionHandler(a, fn); } catch { /* not every browser knows every action */ } };
-  on("play", () => { if (state.playerReady) state.player.playVideo(); });
-  on("pause", () => { if (state.playerReady) state.player.pauseVideo(); });
+  on("play", () => { userPaused = false; if (state.playerReady) state.player.playVideo(); });
+  on("pause", () => { userPaused = true; if (state.playerReady) state.player.pauseVideo(); });
   on("stop", stopPlayer);
   on("nexttrack", nextTrack);
   on("previoustrack", prevTrack);
@@ -82,6 +87,38 @@ function announce(it) {
 }
 /** @param {"none" | "paused" | "playing"} st */
 function setPlaybackState(st) { const s = ms(); if (s) { try { s.playbackState = st; } catch { /* ignore */ } } }
+/* Background play. Phones pause the embed the moment the screen goes off or another app comes in front — the
+ * browser's doing, not the listener's (Chrome on Android and Safari on iOS both pause a video the page can no longer
+ * show, while both carry the audio on once it is playing again). So while ⚙ → "keep playing in the background" is
+ * on, a pause that arrives with the page hidden, and none asked for here, is answered with play again — at once,
+ * then a few more times with widening gaps, in case the browser pauses it back. The tries run out per stretch out of
+ * sight rather than per pause, so a browser that insists is never fought forever. Where it does insist (an iPhone
+ * asleep freezes the page before the answer goes out), the lock screen's play button brings the track back, and so
+ * does coming back to the app within a few minutes. A pause the listener asked for — a button, a key, the lock
+ * screen, a tap on the embed — is left alone. */
+export const backgroundOn = () => state.settings.background !== false;
+const RESUME_GAPS_MS = [0, 400, 1200, 3000];   // one stretch out of sight: now, then three more tries
+const RETURN_RESUME_MS = 5 * 60e3;             // back within this long after a pause it did not ask for: carry on
+let userPaused = false;   // the last pause was the listener's own, not the browser's
+let hidePaused = false;   // the browser paused the player while the page was hidden, and it has not played since
+let hiddenAt = 0; let resumeTries = 0;
+/** @type {any} */
+let resumeTimer = null;
+function resumeInBackground() {
+  if (!backgroundOn() || !state.playerReady || !state.playingId || userPaused || resumeTries >= RESUME_GAPS_MS.length) return;
+  const gap = RESUME_GAPS_MS[resumeTries++];
+  clearTimeout(resumeTimer);
+  const go = () => { resumeTimer = null; if (!userPaused && state.playerReady && state.playingId && state.player.getPlayerState() !== YT.PlayerState.PLAYING) state.player.playVideo(); };
+  if (gap) resumeTimer = setTimeout(go, gap); else go();
+}
+/** Hooks the page's coming and going: a fresh set of tries each time, and the track back on a prompt return. */
+export function wireBackgroundPlay() {
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(resumeTimer); resumeTimer = null; resumeTries = 0;
+    if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; }
+    if (hidePaused && !userPaused && backgroundOn() && state.playerReady && state.playingId && Date.now() - hiddenAt < RETURN_RESUME_MS) { hidePaused = false; state.player.playVideo(); }
+  });
+}
 function ensureApi() { if (window.YT && window.YT.Player) return; if ($("#yt-api")) return; const s = document.createElement("script"); s.id = "yt-api"; s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s); }
 /** @param {string | null | undefined} id */
 export function play(id) {
@@ -97,6 +134,7 @@ export function play(id) {
   renderNow(it);
   ensureApi(); wireMediaSession(); announce(it);
   clearAudition(); state.auditionArmed = null;
+  userPaused = false; hidePaused = false; resumeTries = 0; clearTimeout(resumeTimer); resumeTimer = null;
   if (state.playerReady) state.player.loadVideoById(vid); else state.pendingVideo = vid;
 }
 /** ±seconds through the track (the arrow keys, the lock screen). @param {number} delta */
@@ -164,7 +202,7 @@ function renderNow(it) {
 export function refreshNow() { const it = state.playingId ? current() : null; if (it && !$("#player").hidden) renderNow(it); }
 /** Close the player. The card you were on stays current, so j/k carry on from there. */
 export function stopPlayer() {
-  clearAudition(); stopPosition(); if (state.playerReady) state.player.stopVideo();
+  clearAudition(); stopPosition(); userPaused = true; hidePaused = false; clearTimeout(resumeTimer); resumeTimer = null; if (state.playerReady) state.player.stopVideo();
   const was = !$("#player").hidden;
   $("#player").hidden = true; state.playingId = null; setPlaybackState("none"); reflectPlaying(false);
   if (was) closeLayer("player");
@@ -202,4 +240,4 @@ export function step(delta) {
 }
 export const nextTrack = () => step(1);
 export const prevTrack = () => step(-1);
-export function toggle() { if (!state.playerReady) return; const s = state.player.getPlayerState(); if (s === YT.PlayerState.PLAYING) state.player.pauseVideo(); else state.player.playVideo(); }
+export function toggle() { if (!state.playerReady) return; const s = state.player.getPlayerState(); if (s === YT.PlayerState.PLAYING) { userPaused = true; state.player.pauseVideo(); } else { userPaused = false; state.player.playVideo(); } }

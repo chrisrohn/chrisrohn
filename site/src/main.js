@@ -14,7 +14,7 @@ import { pullRatings } from "./sync.js";
 import { load, loadCatalog, fillSources, refreshFeed } from "./feed.js";
 import { render, deckOn, deckItem, deckYear } from "./render.js";
 import { rate, replayQueued } from "./rating.js";
-import { play, toggle, nextTrack, prevTrack, holdAudition, stopPlayer, playerActive, toggleShuffle, reflectShuffle, autoplayOn } from "./player.js";
+import { play, toggle, nextTrack, prevTrack, holdAudition, stopPlayer, playerActive, toggleShuffle, reflectShuffle, autoplayOn, wireBackgroundPlay } from "./player.js";
 import { wireSettings } from "./settings.js";
 import { wireKeys, currentYear } from "./keys.js";
 import { wirePwa } from "./pwa.js";
@@ -87,6 +87,7 @@ function wire() {
   $("#intro-signin").addEventListener("click", () => $("#signin").click());
   $("#feed-retry").addEventListener("click", () => boot());
   wireOffline();
+  wireBackgroundPlay();   // the screen off or another app in front: the player is asked to carry on
   wireLayers();
   wireSettings();
   wireCleanup();   // the Cleanup tab: its filters, the actions on every song and copy, the live scan and the audit

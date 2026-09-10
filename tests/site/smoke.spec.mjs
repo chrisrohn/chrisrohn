@@ -1060,3 +1060,65 @@ test("a feed older than a day and a half is an alarm, not a late morning", async
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("background play: a pause the browser makes while the page is hidden is answered with play; the listener's own pause is kept", async ({ browser }) => {
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  const errors = await open(page);
+  // a stand-in for the YouTube IFrame API: the page never reaches www.youtube.com here, and the test needs to raise its events
+  await page.evaluate(() => {
+    const log = window.__yt = { plays: 0, pauses: 0, state: -1, cfg: null };
+    window.YT = {
+      PlayerState: { UNSTARTED: -1, ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 },
+      Player: class { constructor(_id, cfg) { log.cfg = cfg; setTimeout(() => cfg.events.onReady(), 0); }
+        loadVideoById() { log.state = 1; } playVideo() { log.plays++; log.state = 1; } pauseVideo() { log.pauses++; log.state = 2; } stopVideo() { log.state = -1; }
+        getPlayerState() { return log.state; } getDuration() { return 200; } getCurrentTime() { return 10; } getVideoData() { return { video_id: "v" }; } },
+    };
+    window.onYouTubeIframeAPIReady();
+  });
+  await expect.poll(() => page.evaluate(() => !!window.__yt.cfg)).toBeTruthy();
+  const fire = st => page.evaluate(s => { window.__yt.state = s; window.__yt.cfg.events.onStateChange({ data: s }); }, st);
+  const setVisibility = v => page.evaluate(v => { Object.defineProperty(document, "visibilityState", { get: () => v, configurable: true }); Object.defineProperty(document, "hidden", { get: () => v === "hidden", configurable: true }); document.dispatchEvent(new Event("visibilitychange")); }, v);
+  const plays = () => page.evaluate(() => window.__yt.plays);
+  await page.locator("#list .card .art").first().click();
+  await expect(page.locator("#player")).toBeVisible();
+  await fire(1);
+  await expect(page.locator("#p-toggle")).toHaveClass(/playing/);
+  // the screen goes off: the browser pauses the embed, the site asks for it back at once
+  await setVisibility("hidden");
+  await fire(2);
+  expect(await plays()).toBe(1);
+  // the browser pauses it back: answered again after a short gap, twice more with longer ones, then no more (four a stretch)
+  await fire(1); await fire(2); expect(await plays()).toBe(1);
+  await expect.poll(plays, { timeout: 2000 }).toBe(2);
+  await fire(1); await fire(2); await expect.poll(plays, { timeout: 3000 }).toBe(3);
+  await fire(1); await fire(2); await expect.poll(plays, { timeout: 5000 }).toBe(4);
+  await fire(1); await fire(2); await page.waitForTimeout(3500); expect(await plays()).toBe(4);
+  // back in front: the track was paused by the browser and not the listener, so it carries on
+  await fire(2);
+  await setVisibility("visible");
+  expect(await plays()).toBe(5);
+  await fire(1);
+  // the listener presses pause, then locks the phone: nothing brings it back
+  await page.click("#p-toggle");
+  expect(await page.evaluate(() => window.__yt.pauses)).toBe(1);
+  await fire(2);
+  await setVisibility("hidden");
+  await fire(2);
+  await setVisibility("visible");
+  expect(await plays()).toBe(5);
+  // play again, then switch the setting off: a hidden pause stays a pause
+  await page.click("#p-toggle"); await fire(1);
+  expect(await plays()).toBe(6);
+  await page.click("#settings-btn");
+  await expect(page.locator("#s-background")).toBeChecked();
+  await page.locator("#s-background").uncheck();
+  await page.locator("#settings .btn.primary").click();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("id:settings")).background)).toBe(false);
+  await setVisibility("hidden");
+  await fire(2);
+  await setVisibility("visible");
+  expect(await plays()).toBe(6);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

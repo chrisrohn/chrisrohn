@@ -201,7 +201,12 @@ session that the playlist's owner approved in that browser.
   walks through Share → Add to Home Screen). The installed app runs full-screen from its own icon, opens offline with
   the last feed, shows the track on the lock screen with play/pause/next, offers **New today**, **Picks** and
   **Audition** as long-press shortcuts on the icon, and refreshes itself when a new daily build lands while it is
-  open. A new site build shows a *Reload* toast rather than switching under you. Swipe a card right to keep, left to
+  open. The music carries on with the screen off or another app in front (installed or not): phones pause the
+  embed the moment the page is out of sight, so the player answers a pause it did not ask for with play again, a
+  few tries per stretch out of sight; where the browser still insists (an iPhone asleep freezes the page), the lock
+  screen's play button brings the track back, and so does coming back within a few minutes. A pause you press
+  yourself — a button, a key, the lock screen, a tap on the video — is always kept. ⚙ → **Keep playing in the
+  background** turns it off. A new site build shows a *Reload* toast rather than switching under you. Swipe a card right to keep, left to
   skip (curator or guest mode only); **share** on a card opens the system share sheet. Desktop Chrome/Edge/Safari 17
   install it too (the Install button in the header, or the icon in the address bar).
 - **Shortlist:** the Feed tab opens on the top 60 by score (⚙ sets how many); *show all* at the end of the list, or the
@@ -340,7 +345,8 @@ arrives; past 36 hours that notice turns into the louder "the daily build has no
 The installable app is `site/manifest.webmanifest` (icons in `site/icons/`, the install-dialog pictures in
 `site/screenshots/`) plus `site/sw.js` (network first with a cached fallback for the shell and the feed, a capped
 cache for artwork, and a waiting worker the page promotes on *Reload*) and `site/src/pwa.js` (install button, how-to
-sheet, shortcuts, foreground refresh). `npm run screenshots` rebuilds the three pictures from `dist/` after a visible
+sheet, shortcuts, foreground refresh); lock-screen controls (Media Session) and background play (a hidden-page pause
+answered with play, `wireBackgroundPlay`) are in `site/src/player.js`. `npm run screenshots` rebuilds the three pictures from `dist/` after a visible
 redesign. `npm test` needs a browser: `npx playwright install chromium` once (CI does the same with `--with-deps`).
 An environment that preloads one Chromium under `PLAYWRIGHT_BROWSERS_PATH` at a revision Playwright does not pin
 is used as it is, so the suite runs there without a download; `PW_CHROMIUM=/path/to/chrome` overrides both. The light/dark switch is `site/theme.js`, a classic script every page loads in `<head>` before the first paint:

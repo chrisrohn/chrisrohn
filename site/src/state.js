@@ -42,7 +42,7 @@ export const state = {
   rated: LS.get("id:rated", {}),          // local mirror of what this account rated
   auth: loadAuth(),
   playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL...", "__loaded_at": ms}
-  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60, autoplay: true, shuffle: false, introDismissed: false, ghToken: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
+  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60, autoplay: true, shuffle: false, background: true, introDismissed: false, ghToken: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
   badVideos: LS.get("id:badvideos", {}),   // videoId → when YouTube refused to embed it here (autoplay steps over these)
   badVersion: 0,                            // bumps whenever badVideos changes (a count can stay the same while an entry is swapped)
   ratedVersion: 0,                          // bumps whenever `rated` is persisted with a change: the personal ranking recomputes
