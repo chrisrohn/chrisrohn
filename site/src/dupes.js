@@ -9,7 +9,7 @@
  * "…|in|<year>" that a move put it there. A song stays listed while the copies left still add up to a problem
  * (editions.js kindsOf), so removing one copy of three never hides the other two. */
 import { state, persist, quotaLeft, quotaText } from "./state.js";
-import { $, $$, esc, relTime, toast } from "./dom.js";
+import { $, $$, esc, relTime, toast, toastBusy } from "./dom.js";
 import { schedulePush } from "./sync.js";
 import { isOwner } from "./auth.js";
 import { yt, titleFor, knownYear, playlistItemsFor, removePlaylistItem, addToPlaylist, videoDetails } from "./youtube.js";
@@ -139,7 +139,9 @@ export function noticeDupes() {
   const stamp = (state.feed?.youtube || {}).duplicates_checked_at || "";
   if (!dupCount() || state.settings.dupesNoticed === stamp) return;
   state.settings.dupesNoticed = stamp; persist();
-  setTimeout(() => toast(`⚠ ${dupCount()} duplicated songs in the year playlists${unavCount() ? ` · ${unavCount()} not streamable here` : ""}`, true, { label: "Review", fn: showCleanup }), 2500);
+  // once per build, after the page settles; it waits behind a toast the curator is still acting on (an Undo) rather than replacing it
+  const show = () => { if (toastBusy()) { setTimeout(show, 3000); return; } toast(`⚠ ${dupCount()} duplicated songs in the year playlists${unavCount() ? ` · ${unavCount()} not streamable here` : ""}`, true, { label: "Review", fn: showCleanup }); };
+  setTimeout(show, 2500);
 }
 /** Switch to the Cleanup tab (from the toast, from Settings). */
 export function showCleanup() { const tab = $(".tab[data-view=cleanup]"); if (tab) tab.click(); }
