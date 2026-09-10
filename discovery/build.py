@@ -116,14 +116,16 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     ymeta = profile.get("youtube") or {}
     dups = find_duplicates(ymeta.get("entries") or []) if ymeta.get("entries") else list(ymeta.get("duplicates") or [])
     annotate_duplicate_years(dups, cfg, http, deadline)
+    # a song counts under every problem it has (an extra copy in one year and two uploads is both)
     dup_kinds: dict[str, int] = {}
     for d in dups:
-        dup_kinds[d.get("kind", "?")] = dup_kinds.get(d.get("kind", "?"), 0) + 1
+        for k in d.get("kinds") or [d.get("kind", "?")]:
+            dup_kinds[k] = dup_kinds.get(k, 0) + 1
     checked_at = (profile.get("youtube") or {}).get("checked_at")
     # tracks the playlists hold that will not stream here, with a counterpart that will (ytmusicapi, no quota)
     unavailable = unavailable_report(profile, cfg, deadline)
     # the full report lives in its own file (thousands of rows on a big library); feed.json only carries the counts
-    write_json(SITE_DATA_DIR / "duplicates.json", {"checked_at": checked_at, "count": len(dups), "kinds": dup_kinds, "duplicates": dups}, compact=True)
+    write_json(SITE_DATA_DIR / "duplicates.json", {"version": 2, "checked_at": checked_at, "count": len(dups), "kinds": dup_kinds, "duplicates": dups}, compact=True)
 
     today_s = date.today().isoformat()
     for it in items:
@@ -154,6 +156,7 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
             "skipped_playlist_id": (profile.get("youtube") or {}).get("skipped") or ycfg.get("skipped_playlist_id") or "",
             "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
             "channel_id": (profile.get("youtube") or {}).get("channel") or ycfg.get("channel_id") or "",
+            "region": str(ycfg.get("region") or "US"),   # where availability is judged: the build's scan, the site's audit and its replacement search agree on it
             # songs that appear more than once across the year playlists: counts here, the full list in data/duplicates.json
             "duplicates_count": len(dups),
             "duplicates_kinds": dup_kinds,

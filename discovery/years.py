@@ -422,18 +422,21 @@ def annotate_duplicate_years(dups: list[dict], cfg: dict, http, deadline: Deadli
     """Attach the catalogue-verified year to duplicate reports so the wrong-year copy is obvious.
 
     Songs already verified for the feed come free from the cache (same key). Otherwise a bounded number of
-    cross-year duplicates are looked up per run; the rest follow on later runs."""
+    songs filed in more than one year are looked up per run; the rest follow on later runs."""
     rcfg = cfg.get("resolve") or {}
     budget = int(rcfg.get("max_duplicate_year_lookups_per_run", 120))
     deadline = deadline or Deadline(None)
     cache = _load_cache()
     today_s = date.today().isoformat()
     looked = 0
-    order = sorted(dups, key=lambda d: (0 if d.get("kind") == "cross-year" else 1, -int(d["years"][0]) if d.get("years") else 0))
+    # a song filed in more than one year is what a verified year settles: those are looked up first, the exact
+    # same video in two years before two different uploads of it
+    spans = lambda d: len(d.get("years") or []) > 1   # noqa: E731
+    order = sorted(dups, key=lambda d: (0 if "cross-year" in (d.get("kinds") or [d.get("kind")]) else 1 if spans(d) else 2, -int(d["years"][0]) if d.get("years") else 0))
     for d in order:
         k = item_key(d["artist"], d["title"])          # same key the feed uses, so feed verifications come free
         entry = cache.get(k)
-        if (entry is None or entry.get("v") != CACHE_VERSION) and looked < budget and d.get("kind") == "cross-year" and not deadline.expired:
+        if (entry is None or entry.get("v") != CACHE_VERSION) and looked < budget and spans(d) and not deadline.expired:
             looked += 1
             entry = lookup_track(http, d["artist"], d["title"], cfg)
             cache[k] = entry
@@ -445,5 +448,5 @@ def annotate_duplicate_years(dups: list[dict], cfg: dict, http, deadline: Deadli
             if y:
                 d["verified_year"], d["verified_source"] = y, LABEL.get(src, src)
     _save_cache(cache, cfg)
-    log.info("duplicate report: %d cross-year songs verified this run", looked)
+    log.info("duplicate report: %d songs filed in more than one year verified this run", looked)
     return looked

@@ -70,7 +70,7 @@ export const state = {
   // the ratings file for the build (github.js): when it last went up, the blob it left there, and whether decisions
   // are still waiting — all persisted, so a sitting the network cut short is finished on the next visit
   ...Object.assign({ ghAt: 0, ghDirty: false, ghSha: null }, LS.get("id:gh", {})), ghFails: 0, ghErr: null, ghSaid: null,
-  _years: [], dupes: null, unavailable: null, dupePage: 1, dupeQT: null, library: null, notOwner: false,
+  _years: [], dupes: null, unavailable: null, dupePage: 1, dupeQT: null, videoInfo: {}, liveDupes: null, liveYear: null, audit: null, library: null, notOwner: false,
   signingIn: null, authCb: null, authErrCb: null, keepAliveAt: 0, lastAuthError: null, ready: false,
   online: typeof navigator === "undefined" || navigator.onLine !== false, recentAt: 0, recentVideos: new Set(),
   apiLog: LS.get("id:apilog", []),          // every YouTube Data API request this browser made (⚙ → API activity), newest last

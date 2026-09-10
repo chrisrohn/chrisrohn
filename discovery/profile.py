@@ -277,30 +277,80 @@ def discover_playlists(cfg: dict, yt) -> tuple[dict[str, str], str | None, str |
     return found, skipped, channel
 
 
+KIND_ORDER = ("same-video", "cross-year", "same-song", "versions")
+
+
 def find_duplicates(where: dict[str, list[dict]] | list[dict]) -> list[dict]:
-    """The exact same YouTube video present more than once: twice in one year playlist ("same-video") or in two
-    different year playlists ("cross-year"). Grouped by video id only — a different upload of the same song is
-    deliberately not counted.
+    """Every song the year playlists hold more than once, one report item per song, with every copy listed.
+
+    A song is an artist plus a title with its edition suffixes peeled off (discovery/editions.py), so the audio
+    track, the official video, a remaster and a radio edit of the same song land in one item. Each item names the
+    problems it has, from the most mechanical to the most judgement-bound:
+
+        same-video   the exact same video twice in one year playlist (an extra copy: remove it, one stays)
+        cross-year   the same edition filed in two different years (a filing question: the verified year decides)
+        same-song    two different uploads of the same edition (audio and video, two channels: pick one to keep)
+        versions     two editions of the song (original and remix, radio and extended: a judgement call)
 
     Accepts either {video id: [entry, ...]} or the flat `youtube.entries` list stored in profile.json, so the daily
     build can recompute the report from the stored playlist scan instead of trusting a days-old profile."""
-    if isinstance(where, list):
-        grouped: dict[str, list[dict]] = {}
-        for e in where:
-            if e.get("videoId"):
-                grouped.setdefault(e["videoId"], []).append(e)
-        where = grouped
+    from .editions import edition_of, song_key
+
+    rows = [{**e, "videoId": e.get("videoId") or vid} for vid, es in where.items() for e in es] if isinstance(where, dict) else list(where)
+    songs: dict[tuple[str, str], list[dict]] = {}
+    for e in rows:
+        if e.get("videoId"):
+            songs.setdefault(song_key(e.get("artist"), e.get("title")), []).append(e)
     out: list[dict] = []
-    for vid, entries in where.items():
+    for entries in songs.values():
         if len(entries) < 2:
             continue
-        years = sorted({e["year"] for e in entries}, reverse=True)
-        first = entries[0]
-        out.append({"key": vid, "videoId": vid, "artist": first["artist"], "title": first["title"],
-                    "kind": "same-video" if len(years) == 1 else "cross-year", "years": years, "count": len(entries),
-                    "entries": [{"year": e["year"], "playlistId": e["playlistId"], "videoId": vid, "position": e["position"]} for e in entries]})
+        shaped = []
+        for e in entries:
+            ed = edition_of(e.get("title"))
+            row = {"year": str(e.get("year") or ""), "playlistId": e.get("playlistId"), "videoId": e["videoId"], "position": e.get("position"),
+                   "title": e.get("title") or "", "edition": ed["edition"], "label": ed["label"]}
+            for k in ("album", "duration", "videoType"):
+                if e.get(k) is not None:
+                    row[k] = e[k]
+            if e.get("avail") is False:
+                row["avail"] = False
+            shaped.append(row)
+        kinds = kinds_of(shaped)
+        if not kinds:
+            continue
+        shaped.sort(key=lambda r: (r["year"], r["position"] if isinstance(r["position"], int) else 0), reverse=True)
+        # the item's own title is the plainest one on file (the original where there is one)
+        first = min(entries, key=lambda e: (edition_of(e.get("title"))["edition"] != "original", len(e.get("title") or "")))
+        core = edition_of(first.get("title"))["core"]
+        years = sorted({r["year"] for r in shaped}, reverse=True)
+        out.append({"key": item_key(first.get("artist") or "", core), "artist": first.get("artist") or "", "title": core,
+                    "kind": kinds[0], "kinds": kinds, "years": years, "count": len(shaped), "uploads": len({r["videoId"] for r in shaped}),
+                    "editions": sorted({r["edition"] for r in shaped}), "entries": shaped})
     out.sort(key=lambda d: (d["years"][0], d["artist"].lower(), d["title"].lower()), reverse=True)
     return out
+
+
+def kinds_of(entries: list[dict]) -> list[str]:
+    """The problems a song's rows add up to, in KIND_ORDER (see find_duplicates). The site recomputes this as rows
+    are cleaned, with the same rules in site/src/editions.js."""
+    per_playlist: dict[tuple[str, str], int] = {}
+    years_by_edition: dict[str, set[str]] = {}
+    videos_by_edition: dict[str, set[str]] = {}
+    for r in entries:
+        per_playlist[(r.get("playlistId") or r.get("year") or "", r["videoId"])] = per_playlist.get((r.get("playlistId") or r.get("year") or "", r["videoId"]), 0) + 1
+        years_by_edition.setdefault(r.get("edition") or "original", set()).add(str(r.get("year") or ""))
+        videos_by_edition.setdefault(r.get("edition") or "original", set()).add(r["videoId"])
+    kinds = []
+    if any(n > 1 for n in per_playlist.values()):
+        kinds.append("same-video")
+    if any(len(ys) > 1 for ys in years_by_edition.values()):
+        kinds.append("cross-year")
+    if any(len(vs) > 1 for vs in videos_by_edition.values()):
+        kinds.append("same-song")
+    if len(videos_by_edition) > 1:
+        kinds.append("versions")
+    return kinds
 
 
 def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict], list[dict], dict]:
@@ -337,8 +387,10 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
                 saved[k] = {"artist": names[0], "title": title, "year": year, "videoId": t.get("videoId"), "decision": "up"}
                 if t.get("videoId"):
                     # isAvailable is False for a row YouTube Music greys out in this region: the Cleanup tab swaps those
+                    # what the Cleanup tab compares copies by: the album, the length and whether it is the audio track or a video
+                    album = (t.get("album") or {}).get("name") if isinstance(t.get("album"), dict) else None
                     where.setdefault(t["videoId"], []).append({"year": year, "playlistId": pid, "position": pos, "videoId": t["videoId"], "artist": names[0], "title": title,
-                                                               "avail": bool(t.get("isAvailable", True))})
+                                                               "avail": bool(t.get("isAvailable", True)), "album": album, "duration": t.get("duration_seconds"), "videoType": t.get("videoType")})
         if year == current:
             for t in tracks[-picks_n:][::-1]:
                 names = [a.get("name") for a in (t.get("artists") or []) if a.get("name")]

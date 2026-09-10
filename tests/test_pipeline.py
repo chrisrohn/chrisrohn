@@ -475,21 +475,59 @@ def test_discover_playlists_tolerant_titles_and_channel_from_author():
     assert years["1999"] == "PLTW5JZnPjE_rgIDfV4vL5g4EZ3SCc-R_d"             # pinned ids are never overridden by title matches
 
 
-def test_find_duplicates_only_counts_the_exact_same_video():
-    from discovery.profile import find_duplicates
+def test_edition_of_tells_the_editions_of_a_song_apart():
+    from discovery.editions import YEAR_FREE, edition_of, song_key
 
-    def e(year, artist, title, pos):
-        return {"year": year, "playlistId": "PL" + year, "position": pos, "artist": artist, "title": title}
+    def ed(t):
+        e = edition_of(t)
+        return e["core"], e["edition"], e["label"]
 
-    where = {
-        "v1": [e("2026", "Dark Chisme", "Suffer Like Me", 3), e("2026", "Dark Chisme", "Suffer Like Me", 6)],   # twice in one playlist
-        "v4": [e("2016", "Roosevelt", "Lovers", 0), e("2017", "Roosevelt", "Lovers (2017 Remaster)", 1)],       # same video, two years
-        "v2": [e("2023", "Jungle", "Back On 74", 0)],                                                             # another upload lives under v3
-        "v3": [e("2023", "Jungle", "Back On 74 (Official Video)", 9)],
-    }
-    out = find_duplicates(where)
-    assert [(d["videoId"], d["kind"], d["count"]) for d in out] == [("v1", "same-video", 2), ("v4", "cross-year", 2)]   # newest year first
-    assert out[1]["years"] == ["2017", "2016"] and all(x["videoId"] == "v4" for x in out[1]["entries"])
+    assert ed("Lovers") == ("Lovers", "original", "")
+    assert ed("Lovers (Official Video)") == ("Lovers", "original", "Official Video")            # the upload's form, not another edition
+    assert ed("Lovers - 2017 Remaster") == ("Lovers", "original", "2017 Remaster")
+    assert ed("Lovers (Radio Edit)") == ("Lovers", "radio", "Radio Edit")
+    assert ed("Lovers (Extended Mix)") == ("Lovers", "extended", "Extended Mix")
+    assert ed("Lovers (Fred Falke Remix)") == ("Lovers", "remix", "Fred Falke Remix")
+    assert ed("Wait Up (Midnight Version)") == ("Wait Up", "remix", "Midnight Version")
+    assert ed("Lovers (Live at Glastonbury 2019)") == ("Lovers", "live", "Live At Glastonbury 2019")
+    assert ed("Lovers (feat. A & B) [X Remix] (Radio Edit)") == ("Lovers", "remix", "X Remix · Radio Edit")   # the most specific wins
+    assert edition_of("Lovers (feat. A & B)")["featuring"] == ["A", "B"]
+    assert ed("Bloodletting (The Vampire Song)") == ("Bloodletting", "original", "The Vampire Song")   # a subtitle is shown, not judged
+    assert ed("Part 2 - The Return") == ("Part 2 - The Return", "original", "")                        # a dashed tail naming no edition is the title
+    assert song_key("Roosevelt", "Lovers (Official Video)") == song_key("roosevelt feat. Kim", "Lovers - 2017 Remaster") == ("roosevelt", "lovers")
+    assert song_key("Roosevelt", "Lovers") != song_key("Roosevelt", "Lovers Part 2")
+    assert "remix" in YEAR_FREE and "radio" not in YEAR_FREE
+
+
+def test_find_duplicates_lists_every_copy_of_a_song_and_names_its_problems():
+    from discovery.profile import find_duplicates, kinds_of
+
+    def e(year, artist, title, pos, vid, **kw):
+        return {"year": year, "playlistId": "PL" + year, "position": pos, "artist": artist, "title": title, "videoId": vid, **kw}
+
+    entries = [
+        e("2026", "Dark Chisme", "Suffer Like Me", 3, "v1"), e("2026", "Dark Chisme", "Suffer Like Me", 6, "v1"),               # the same video twice in one year
+        e("2016", "Roosevelt", "Lovers", 0, "v4", album="Roosevelt", duration=241, videoType="MUSIC_VIDEO_TYPE_ATV"),
+        e("2017", "Roosevelt", "Lovers (2017 Remaster)", 1, "v4"),                                                              # the same video in two years
+        e("2023", "Jungle", "Back On 74", 0, "v2"), e("2023", "Jungle", "Back On 74 (Official Video)", 9, "v3", avail=False),  # two uploads of one edition
+        e("2010", "Two Door Cinema Club", "Something Good Can Work", 0, "v5"), e("2011", "Two Door Cinema Club", "Something Good Can Work (Mitzi Remix)", 0, "v6"),   # two editions
+        e("2020", "Solo", "Only Once", 0, "v7"),                                                                                # one copy: not a report item
+    ]
+    out = {d["artist"]: d for d in find_duplicates(entries)}
+    assert set(out) == {"Dark Chisme", "Roosevelt", "Jungle", "Two Door Cinema Club"}
+    assert out["Dark Chisme"]["kinds"] == ["same-video"] and out["Dark Chisme"]["count"] == 2 and out["Dark Chisme"]["uploads"] == 1
+    assert out["Roosevelt"]["kinds"] == ["cross-year"] and out["Roosevelt"]["years"] == ["2017", "2016"] and out["Roosevelt"]["title"] == "Lovers"
+    lovers = {r["year"]: r for r in out["Roosevelt"]["entries"]}
+    assert (lovers["2016"]["album"], lovers["2016"]["duration"], lovers["2016"]["videoType"]) == ("Roosevelt", 241, "MUSIC_VIDEO_TYPE_ATV")
+    assert lovers["2017"]["label"] == "2017 Remaster" and lovers["2017"]["edition"] == "original" and "album" not in lovers["2017"]
+    assert out["Jungle"]["kinds"] == ["same-song"] and out["Jungle"]["uploads"] == 2
+    assert next(r for r in out["Jungle"]["entries"] if r["videoId"] == "v3")["avail"] is False and "avail" not in next(r for r in out["Jungle"]["entries"] if r["videoId"] == "v2")
+    assert out["Two Door Cinema Club"]["kinds"] == ["versions"] and out["Two Door Cinema Club"]["editions"] == ["original", "remix"]
+    assert [d["artist"] for d in find_duplicates(entries)] == ["Dark Chisme", "Jungle", "Roosevelt", "Two Door Cinema Club"]   # newest year first
+    # the site recomputes the problems as copies go: one copy left of the video means the extra-copy problem is solved
+    assert kinds_of([{"playlistId": "PL2026", "year": "2026", "videoId": "v1", "edition": "original"}]) == []
+    # the {video id: entries} form the profile builder uses still works
+    assert find_duplicates({"v1": [e("2026", "A", "S", 0, "v1"), e("2026", "A", "S", 1, "v1")]})[0]["kinds"] == ["same-video"]
 
 
 def test_lb_identify_falls_back_and_records_status(monkeypatch):
@@ -530,7 +568,8 @@ def test_duplicates_get_verified_years_and_their_own_file(monkeypatch):
     dups = [
         {"key": item_key("Roosevelt", "Lovers"), "artist": "Roosevelt", "title": "Lovers", "kind": "cross-year", "years": ["2017", "2016"], "count": 2, "entries": []},
         {"key": item_key("Bag Raiders", "Shooting Stars"), "artist": "Bag Raiders", "title": "Shooting Stars", "kind": "cross-year", "years": ["2010", "2009"], "count": 2, "entries": []},
-        {"key": item_key("Austra", "Home"), "artist": "Austra", "title": "Home", "kind": "same-video", "years": ["2013"], "count": 2, "entries": []},
+        {"key": item_key("Austra", "Home"), "artist": "Austra", "title": "Home", "kind": "same-video", "kinds": ["same-video"], "years": ["2013"], "count": 2, "entries": []},
+        {"key": item_key("Friendly Fires", "On Board"), "artist": "Friendly Fires", "title": "On Board", "kind": "same-song", "kinds": ["same-song"], "years": ["2009", "2008"], "count": 2, "entries": []},
     ]
 
     class FakeHttp:
@@ -543,10 +582,11 @@ def test_duplicates_get_verified_years_and_their_own_file(monkeypatch):
 
     cfg = _cfg(); cfg["resolve"]["max_duplicate_year_lookups_per_run"] = 5
     looked = years.annotate_duplicate_years(dups, cfg, FakeHttp())
-    assert looked == 1                                                     # only the unverified cross-year song hit the network
+    assert looked == 2                                                     # the two unverified songs filed in two years hit the network
     assert (dups[0]["verified_year"], dups[0]["verified_source"]) == (2016, "MusicBrainz recording")
     assert (dups[1]["verified_year"], dups[1]["verified_source"]) == (2008, "MusicBrainz recording")
     assert "verified_year" not in dups[2]                                   # same-video needs no year to clean up
+    assert "verified_year" not in dups[3]                                   # looked up (two uploads in two years), nothing found for it
 
 
 def test_dates_caches_and_deadline(monkeypatch):
@@ -1061,6 +1101,20 @@ def test_unavailable_playlist_tracks_get_a_streamable_counterpart(monkeypatch, s
     assert report["pending"] == 0 and {r["videoId"]: r["alt"] for r in report["rows"]}["deadN"] is None
     assert all("Nobody" in q for q, _ in searches[n:])
     assert util.read_json(sandbox / "site" / "data" / "unavailable.json", {})["count"] == 3
+    assert all(r["why"] == "greyed" for r in report["rows"])
+    # what the site's playability audit found (pushed with the ratings) joins the report: a named row gets the same
+    # search, a nameless one (a deleted video) is listed for removal without a search
+    ratings = {"version": 1, "rated": {}, "unplayable": {
+        "PL2016:deadR": {"year": "2016", "playlistId": "PL2016", "videoId": "deadR", "why": "blocked", "artist": "Roosevelt", "title": "Lovers", "at": 1},
+        "PL2019:deadX": {"year": "2019", "playlistId": "PL2019", "videoId": "deadX", "position": 40, "why": "private", "artist": "Jungle", "title": "Keep Moving", "at": 2},
+        "PL2014:gone1": {"year": "2014", "playlistId": "PL2014", "videoId": "gone1", "position": 7, "why": "deleted", "artist": "", "title": "", "at": 3}}}
+    monkeypatch.setattr(unavailable, "load_unplayable", lambda path=None: ratings)
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert report["count"] == 5 and rows["deadR"]["why"] == "blocked" and rows["deadR"]["alt"]["videoId"] == "vidR-atv"   # one row, the audit's reason, the search kept
+    assert rows["deadX"]["alt"]["videoId"] == "liveJ" and rows["deadX"]["why"] == "private" and rows["deadX"]["position"] == 40
+    assert rows["gone1"]["alt"] is None and rows["gone1"]["pending"] is False and rows["gone1"]["why"] == "deleted"
+    assert [r["year"] for r in report["rows"]] == ["2021", "2019", "2016", "2016", "2014"]
 
 
 def test_build_merges_a_release_renamed_to_an_existing_track(monkeypatch, sandbox):
