@@ -14,6 +14,14 @@ async function open(page, path = SITE_FILES) {
   return errors;
 }
 
+/** Wait for the history entry a sheet or dialog pushed to be gone again. Closing one by its own control (Esc, ✕,
+ * "not now") pops that entry with history.back(), a traversal the browser process commits on its own time; a reload
+ * or goto issued while it is still pending is cancelled with net::ERR_ABORTED, and a dialog opened meanwhile lands on
+ * the entry about to be popped and closes with it. Fast enough locally to never show; a CI runner is not. */
+async function layersSettled(page) {
+  await expect.poll(() => page.evaluate(() => !(history.state && history.state.layer)), { timeout: 10_000 }).toBeTruthy();
+}
+
 test("feed renders, filters work, controls unlock, no console errors", async ({ page }) => {
   const errors = await open(page);
   const feed = await page.evaluate(() => fetch("data/feed.json").then(r => r.json()));
@@ -72,6 +80,7 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   expect(await page.locator("#artist .arow").count()).toBeGreaterThan(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("#artist")).toBeHidden();
+  await layersSettled(page);
   // a first visit shows the intro card; ✕ dismisses it for good
   await expect(page.locator("#intro")).toBeVisible();
   await page.click("#intro-x");
@@ -380,6 +389,7 @@ test("theme toggle: header button, ⚙ select and the t key switch, persist and 
   await expect(html).not.toHaveAttribute("data-theme");
   await bg("rgb(231, 227, 218)");
   await page.keyboard.press("Escape");
+  await layersSettled(page);
   // the t key cycles too, with a toast
   await page.locator("#meta").click();
   await page.keyboard.press("t");
@@ -436,10 +446,12 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   await page.click("#install-later");
   await page.keyboard.press("Escape");
   await expect(page.locator("#install-btn")).toBeHidden();   // "not now" sticks
+  await layersSettled(page);
   await page.click("#settings-btn");
   await expect(page.locator("#s-build")).toHaveText(/build [0-9a-f]{6,}/);
   await expect(page.locator("#s-update-btn")).toBeVisible();
   await page.keyboard.press("Escape");
+  await layersSettled(page);   // the reload below must not race the history.back() that Escape just queued
   // offline: the controlled page reloads from the cache with the feed intact. "ready" resolves while the worker is
   // still activating, and it claims this page (controller set) from inside its activate step; a navigation handed to
   // a worker that is still activating can be dropped on a slow runner (net::ERR_ABORTED on the reload), so wait
@@ -998,13 +1010,16 @@ test("a feed built on an earlier day says the morning build is late, and an all-
   const built = new Date(); built.setDate(built.getDate() - 1); built.setHours(6, 55, 0, 0);
   const feed = { ...live, generated_at: built.toISOString() };
   const ctx = await browser.newContext({ serviceWorkers: "block" });
-  const page = await ctx.newPage();
   const morning = new Date(); morning.setHours(8, 30, 0, 0);   // read over coffee, whatever hour CI happens to run at
-  await page.clock.setFixedTime(morning);
-  await page.route("**/data/feed.json", r => r.fulfill({ json: feed }));
+  await ctx.route("**/data/feed.json", r => r.fulfill({ json: feed }));
+  // each step gets a fresh page: a renderer worn down by the previous document (a whole feed rated, then re-listed)
+  // has crashed on a CI runner while navigating to the next one, taking the test with it
+  /** @type {import("@playwright/test").Page} */
+  let page;
+  const fresh = async () => { if (page) await page.close(); page = await ctx.newPage(); await page.clock.setFixedTime(morning); return page; };
 
   // 1. late, but nothing is wrong upstream: the quiet bar, not the "something failed" one
-  let errors = await open(page);
+  let errors = await open(await fresh());
   const bar = page.locator("#stale");
   await expect(bar).toBeVisible();
   await expect(bar).toHaveClass(/waiting/);
@@ -1019,7 +1034,7 @@ test("a feed built on an earlier day says the morning build is late, and an all-
     localStorage.setItem("id:rated", JSON.stringify(r));
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
   }, [rated, feed.google.curator_hashes[0]]);
-  errors = await open(page);
+  errors = await open(await fresh());
   const empty = page.locator("#empty");
   await expect(empty).toBeVisible();
   await expect(empty).toContainText(`You have rated all ${feed.items.length} cards`);
@@ -1031,10 +1046,11 @@ test("a feed built on an earlier day says the morning build is late, and an all-
 
   // 3. a full feed hidden behind the filters is a different sentence, and one button undoes it
   await ctx.addInitScript(() => localStorage.setItem("id:rated", "{}"));
-  errors = await open(page, "/?q=zzzz-nothing-has-this");
-  await expect(empty).toContainText(/unrated cards? (is|are) in this build/);
-  await expect(empty).toContainText("the search");
-  await empty.locator("button", { hasText: "clear the filters" }).click();
+  errors = await open(await fresh(), "/?q=zzzz-nothing-has-this");
+  const hidden = page.locator("#empty");
+  await expect(hidden).toContainText(/unrated cards? (is|are) in this build/);
+  await expect(hidden).toContainText("the search");
+  await hidden.locator("button", { hasText: "clear the filters" }).click();
   await expect(page.locator("#q")).toHaveValue("");
   await expect.poll(() => page.locator("#list .card").count()).toBeGreaterThan(50);
   expect(errors).toEqual([]);

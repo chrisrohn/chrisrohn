@@ -27,7 +27,10 @@ const executablePath = browserPath();
 export default defineConfig({
   testDir: "tests/site",
   timeout: 30_000,
-  retries: 0,
+  // one retry on CI, for the runner rather than the app: a renderer that dies mid-navigation on a loaded GitHub
+  // runner ("Page crashed") is not a site bug, and must not block a deploy. The list reporter still marks the test
+  // flaky, so a real intermittent failure stays visible; locally a failure fails at once
+  retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],
   use: {
     baseURL: "http://127.0.0.1:8765",
