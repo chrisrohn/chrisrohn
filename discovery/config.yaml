@@ -463,8 +463,8 @@ concerts:
   lastfm_limit: 0             # user.getTopArtists over 12 months, 200 a request; 0 = every artist Last.fm has
   playlist_years: 1           # artists filed into this year's playlist count as played (2 = last year's too)
   refresh_days: 2             # an artist's listings are asked for again after this
-  artists_per_run: 1500       # Bandsintown lookups a run, the most played first; the rest wait for the next run
-  time_budget_minutes: 12     # wall clock for the artist loop (the workflow times out at 30)
+  artists_per_run: 0          # Bandsintown lookups a run, the most played first; 0 = as many as the time budget allows (~6 a second)
+  time_budget_minutes: 20     # wall clock for the run (the workflow times out at 30); the artist loop stops 5 minutes early for the songs
   top_tracks_per_run: 300     # most-popular-song lookups a run (only artists with a show nearby; cached for good)
   resolve_per_run: 300        # YouTube Music lookups for those songs a run (the feed's cache is shared)
   bandsintown:
