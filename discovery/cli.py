@@ -4,6 +4,7 @@
   build             fetch sources, score, resolve, write site/data/feed.json (+ feed.xml, history)
   daily             profile (if stale or from an older pipeline version) + build + catalog, inside `job.budget_minutes`
   catalog           the infill catalog for earlier years: Last.fm history → site/data/catalog.json
+  concerts          upcoming shows near Detroit by the artists played in the last year → site/data/concerts.json
   seed-everynoise   scrape frozen Everynoise genre pages into data/seeds_everynoise.json
 """
 from __future__ import annotations
@@ -24,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     daily = sub.add_parser("daily", help="profile (when stale) + build; the default")
     daily.add_argument("--rebuild-profile", action="store_true", help="rebuild the profile even if it is fresh")
     sub.add_parser("catalog", help="build the infill catalog (site/data/catalog.json) from Last.fm history")
+    sub.add_parser("concerts", help="build the concert list (site/data/concerts.json): shows near Detroit by the artists played in the last year")
     sub.add_parser("seed-everynoise", help="scrape frozen Everynoise genre pages into data/seeds_everynoise.json")
     return p
 
@@ -58,9 +60,15 @@ def main(argv: list[str] | None = None) -> int:
 
         build_catalog(cfg)
         return 0
+    if cmd == "concerts":
+        from .concerts import build_concerts
+
+        build_concerts(cfg)
+        return 0
     if cmd == "daily":
         from .build import build_feed
         from .catalog import build_catalog
+        from .concerts import build_concerts
         from .profile import build_profile
 
         t0 = time.monotonic()
@@ -79,6 +87,9 @@ def main(argv: list[str] | None = None) -> int:
             # the catalog takes what is left of the job: the feed comes first, the job dies at its timeout
             left = float((cfg.get("catalog") or {}).get("job_budget_minutes", 40)) - (time.monotonic() - t0) / 60
             build_catalog(cfg, deadline_minutes=max(0.0, left))
+        if (cfg.get("concerts") or {}).get("in_daily", False):
+            left = float((cfg.get("catalog") or {}).get("job_budget_minutes", 40)) - (time.monotonic() - t0) / 60
+            build_concerts(cfg, deadline_minutes=max(0.0, left))
         return 0
     if cmd == "seed-everynoise":
         from .profile import scrape_everynoise

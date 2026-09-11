@@ -247,6 +247,25 @@ session that the playlist's owner approved in that browser.
   loved, your keeps and skips all rank it; the shortlist, search, source chips and the phone deck work as in the
   feed. Tuning is under `catalog:` in config.yaml (candidate counts, per-run lookup budgets, its share of the job's
   time after the feed). Nothing here spends YouTube API quota; the Last.fm key is the only one it needs.
+- **Concerts** tab — who is playing near Detroit. The **Concerts** workflow (its own job, 13:33 ET) takes every
+  artist played on Indie Discotheque in the last year — the Last.fm 12-month chart of `station.lastfm_user`, plus
+  anyone filed into this year's playlist (`concerts.playlist_years`) — and asks Bandsintown's public artist-events
+  API (free, no key; `concerts.bandsintown.app_id` names the caller, `BANDSINTOWN_APP_ID` overrides it) where each of
+  them plays next, `artists_per_run` a run and again after `refresh_days`, so the list fills in over its first few
+  runs and then keeps pace. Every venue within `radius_miles` (150) of `center` (Detroit) makes the list, out to
+  `months_ahead`; each act's most popular song comes from Last.fm `artist.getTopTracks` (Deezer's artist top without
+  a key), is resolved on YouTube Music through the feed's resolver and cache, and plays in place from the row. Add a
+  free `TICKETMASTER_API_KEY` secret (developer.ticketmaster.com, 5,000 calls a day; the list needs five) and
+  Ticketmaster's Discovery API contributes every music event it lists in the radius — matched against the same
+  artists — with prices, sale status and the venue's picture; a show on both sources is one row with both links.
+  TicketWeb (Ticketmaster's club arm) and AXS have no public API: TicketWeb's inventory rides the Discovery API,
+  and Bandsintown's ticket links lead to whichever seller the venue uses, so the button names the seller from the
+  link (Ticketmaster, TicketWeb, AXS, Etix, DICE, Eventbrite…). The report is `site/data/concerts.json`; the
+  per-artist state (last asked, shows, top song) is `data/concerts_state.json`. On the tab: search matches artists,
+  venues, cities and song titles; selects for when (this week, 30, 90 days), how far (25/50/100 miles) and the order
+  (soonest, most played, nearest, artist); `space` plays the first song, `j`/`k` walk the list; an artist's name
+  opens the sheet, which also lists their dates. `python -m discovery concerts` runs it by hand; nothing here spends
+  YouTube API quota.
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list (with release dates, artwork and
   tags; the internal score stays internal).
 
@@ -309,6 +328,7 @@ export LASTFM_API_KEY=...
 python -m discovery profile      # once, then every few days automatically
 python -m discovery build        # writes site/data/feed.json + site/feed.xml
 python -m discovery catalog      # writes site/data/catalog.json (the earlier years, from Last.fm history)
+python -m discovery concerts     # writes site/data/concerts.json (shows near Detroit by the artists played this year)
 npm install && npm run serve     # builds dist/ from site/src and serves it at http://localhost:8000
 
 pip install ruff pytest && ruff check discovery tests && python -m pytest tests   # lint + offline tests
@@ -316,8 +336,8 @@ npm run check && npm test        # eslint + type check (tsc --checkJs) + build, 
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
-`render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
-`discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/learn.py` (what the playlists teach the
+`render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `concerts` (the Concerts tab), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
+`discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/concerts.py` (the concert list), `discovery/learn.py` (what the playlists teach the
 ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every

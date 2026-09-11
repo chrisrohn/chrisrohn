@@ -15,6 +15,7 @@ import { addYearFinder, discogsSearch } from "./yearfind.js";
 import { renderDupes, openCleanup } from "./dupes.js";
 import { syncUrl } from "./url.js";
 import { openArtist } from "./artist.js";
+import { renderConcerts, concertsCount } from "./concerts.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -41,32 +42,35 @@ export function render() {
     const keep = state.rendered; state.rendered = 0;
     appendCards(Math.max(PAGE, keep));
   }
+  // the Concerts tab: a section of its own; its rows' songs become the queue (state.order) before the player reads it
+  const concerts = state.view === "concerts"; $("#concerts").hidden = !concerts; if (concerts) renderConcerts();
   refreshNow();
   const cleanup = state.view === "cleanup"; $("#cleanup").hidden = !cleanup; if (cleanup) renderDupes(false);
-  const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup;
+  const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup || concerts;
   if (!empty.hidden) fillEmpty(empty);
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters (the
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
   const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
   const counts = { feed: full("feed"), picks: visibleItems("picks").length, skipped: isCurator() ? visibleItems("skipped").length : 0, catalog: state.catalog ? full("catalog") : 0,
-    cleanup: openCleanup() };
+    cleanup: openCleanup(), concerts: concertsCount() };
   state.shortlistHidden = hidden;
-  for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = k === "catalog" && !state.catalog ? "…" : String(n); }
+  for (const [k, n] of Object.entries(counts)) { const el = $("#count-" + k); if (el) el.textContent = (k === "catalog" && !state.catalog) || n == null ? "…" : String(n); }
   $(".tab[data-view=feed]").title = `${items().filter(i => !decisionFor(i.id)).length} unrated in the whole feed · ${items().length} total`;
   $$(".tab").forEach(t => { const on = t.dataset.view === state.view; t.classList.toggle("active", on); t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; });
   $("#filters").classList.toggle("picks", state.view === "picks" || state.view === "skipped");
   $("#filters").classList.toggle("cleanup", cleanup);
   $("#filters").classList.toggle("catalog", state.view === "catalog");
+  $("#filters").classList.toggle("concerts", concerts);
   renderChips();
   renderIntro();
   syncUrl();
-  const name = { feed: "candidates", catalog: "catalog tracks", picks: "picks", skipped: "skipped tracks", cleanup: "cleanup items" }[state.view] || "items";
-  announce(cleanup ? `Cleanup: ${counts.cleanup} to review` : `${vis.length}${state.shortlistHidden && (state.view === "feed" || state.view === "catalog") ? ` of ${vis.length + state.shortlistHidden}` : ""} ${name} shown`);
+  const name = { feed: "candidates", catalog: "catalog tracks", picks: "picks", skipped: "skipped tracks", cleanup: "cleanup items", concerts: "shows" }[state.view] || "items";
+  announce(cleanup ? `Cleanup: ${counts.cleanup} to review` : concerts ? `Concerts: ${counts.concerts ?? 0} shows listed` : `${vis.length}${state.shortlistHidden && (state.view === "feed" || state.view === "catalog") ? ` of ${vis.length + state.shortlistHidden}` : ""} ${name} shown`);
 }
 /** The active search terms as chips, each with its own ✕, so two tags combine and any one can go. */
 function renderChips() {
   const box = $("#chips"); if (!box) return;
-  const terms = state.view === "cleanup" ? [] : parseQuery(state.filters.q.trim());
+  const terms = state.view === "cleanup" ? [] : parseQuery(state.filters.q.trim());   // the concert list searches too
   box.hidden = !terms.length;
   box.replaceChildren(...terms.map(t => {
     const b = document.createElement("button"); b.type = "button"; b.className = "chip qchip" + (t.not ? " not" : "");

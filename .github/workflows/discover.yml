@@ -93,6 +93,7 @@ jobs:
             data/cache/sources.json
             data/cache/profile.json
             data/cache/catalog.json
+            data/cache/concerts.json
             data/cache/feed_etags.json
           key: http-cache-${{ github.run_id }}
           restore-keys: http-cache-
@@ -163,7 +164,7 @@ jobs:
     permissions:
       pages: write
       id-token: write
-    # one Pages deployment at a time across Discover, Catalog and Publish: two at once race for the same site
+    # one Pages deployment at a time across Discover, Catalog, Concerts and Publish: two at once race for the same site
     concurrency:
       group: pages-deploy
       cancel-in-progress: false

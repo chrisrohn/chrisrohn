@@ -9,6 +9,24 @@ export interface FeedItem {
   backfill?: boolean;   // an older release the build pulled in because the current timeframe was thin
   _pick?: boolean; _year?: string | number | null; _skipped?: boolean;
   plays?: number; loved?: boolean;   // catalog items: Last.fm play count, loved track
+  _concert?: boolean;   // a concert row's most popular song (concerts.js): playable, never rated
+}
+/** One upcoming show (data/concerts.json, discovery/concerts.py): the headliner is the most played act on the bill. */
+export interface ConcertEvent {
+  id: string; artist: string; artists: string[]; lineup: string[]; title?: string | null; date: string; time?: string | null;
+  venue: string; city: string; region: string; country: string; lat?: number | null; lon?: number | null; miles?: number | null;
+  tickets?: string | null; ticketer?: string | null; url?: string | null; status?: string | null; sources: string[]; links?: Record<string, string>;
+  price?: { min?: number | null; max?: number | null; currency?: string | null } | null; image?: string | null; festival?: boolean;
+}
+export interface ConcertArtist {
+  plays: number; filed: number; via?: string[]; image?: string | null; links?: Record<string, string>;
+  top_track: { id: string; title: string; source?: string | null; listeners?: number | null; plays?: number | null; url?: string | null;
+    youtube?: { videoId?: string | null; thumbnail?: string | null; album?: string | null; playlistId?: string | null; year?: string | number | null } | null } | null;
+}
+export interface Concerts {
+  generated_at: string; center?: { name?: string; lat: number; lon: number }; radius_miles: number; months_ahead?: number;
+  artists_total?: number; artists_checked?: number; artists_with_shows?: number; sources?: string[];
+  health?: Record<string, { ok: boolean; error?: string; [k: string]: any }>; count: number; events: ConcertEvent[]; artists: Record<string, ConcertArtist>;
 }
 export interface Catalog { generated_at: string; candidates: number; count: number; undated: number; pending?: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; items: FeedItem[] }
 export interface LearnedRow { n: number; k: number; rate: number; adj: number }
@@ -68,7 +86,7 @@ export interface Settings {
   autoplay: boolean; shuffle: boolean; introDismissed?: boolean;
   ghToken?: string | null;   // a fine-grained GitHub token (contents: write on the site repo) that lets the browser push data/ratings.json for the build to learn from
 }
-export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyPlayable: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[] }
+export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyPlayable: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[]; conWhen: string; conRadius: string; conSort: string }
 export interface State {
   feed: Feed | null; rated: Record<string, Rated>; auth: Auth | null; playlists: Record<string, any>; settings: Settings;
   deckIndex: number; auditionTimer: any; auditionTick: any; auditionArmed: string | null;
@@ -78,6 +96,7 @@ export interface State {
   lastRated: string | null;     // the last thumb, for the z key
   badVideos: Record<string, number>; badVersion: number; ratedVersion: number; shortlistHidden: number; focusId: string | null; shareIn: { url?: string; text?: string; title?: string; artist?: string } | null;
   catalog: Catalog | null; catalogState: "idle" | "loading" | "ready" | "missing" | "failed"; index: Map<string, FeedItem>;
+  concerts: Concerts | null; concertsState: "idle" | "loading" | "ready" | "missing" | "failed"; concertTracks: FeedItem[];
   player: any; playerReady: boolean; pendingVideo: string | null; tokenClient: any; busy: Set<string>;
   sync: { fileId: string | null; at: number }; syncTimer: any;
   ghTimer: any; ghRetry: any; ghBusy: Promise<boolean> | null; ghAt: number; ghDirty: boolean; ghFails: number;
