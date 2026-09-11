@@ -1,7 +1,7 @@
 // @ts-check
 /* The address bar as state, and the Back button as a way out.
  *
- * The view and the filters are readable and shareable (?view=catalog&year=2014&q=nu+disco); the site keeps the
+ * The view and the filters are readable and shareable (?view=catalog&year=2014&q=nu+disco, ?view=concerts&when=30&miles=50); the site keeps the
  * address in step as you browse (replaceState, so filtering never piles up history) and reads it back on launch,
  * from an app shortcut or from a pasted link. What opens over the list (the player, a dialog) pushes one history
  * entry, so Back closes it instead of leaving the page: in the installed app on Android that is the difference
@@ -9,7 +9,7 @@
 import { state, persist } from "./state.js";
 import { $, $$ } from "./dom.js";
 
-const VIEWS = ["feed", "catalog", "picks", "skipped", "cleanup"];
+const VIEWS = ["feed", "catalog", "picks", "concerts", "skipped", "cleanup"];
 
 /** The address for the state on screen. */
 export function urlFor() {
@@ -28,6 +28,11 @@ export function urlFor() {
     if (f.catYear) p.set("year", f.catYear);
     if (f.catSort && f.catSort !== "score") p.set("csort", f.catSort);
     if (!f.shortlist) p.set("shortlist", "0");
+  }
+  if (state.view === "concerts") {
+    if (f.conWhen) p.set("when", f.conWhen);
+    if (f.conRadius) p.set("miles", f.conRadius);
+    if (f.conSort && f.conSort !== "date") p.set("order", f.conSort);
   }
   const s = p.toString();
   return location.pathname + (s ? "?" + s : "");
@@ -52,6 +57,10 @@ export function applyLaunchParams() {
   const sort = p.get("sort"); if (sort && $(`#sort option[value="${sort}"]`)) { f.sort = sort; $("#sort").value = sort; changed = true; }
   const csort = p.get("csort"); if (csort && $(`#cat-sort option[value="${csort}"]`)) { f.catSort = csort; $("#cat-sort").value = csort; changed = true; }
   const year = p.get("year"); if (year != null) { f.catYear = year; changed = true; }
+  for (const [k, key, el] of /** @type {const} */ ([["when", "conWhen", "#con-when"], ["miles", "conRadius", "#con-radius"], ["order", "conSort", "#con-sort"]])) {
+    const v = p.get(k); if (v == null || !$(`${el} option[value="${v}"]`)) continue;
+    f[key] = v; $(el).value = v; changed = true;
+  }
   for (const [k, key, el] of /** @type {const} */ ([["new", "onlyNew", "#only-new"], ["playable", "onlyPlayable", "#only-playable"], ["known", "onlyKnown", "#only-known"], ["recent", "onlyRecent", "#only-recent"], ["shortlist", "shortlist", "#shortlist"]])) {
     const v = bool(k); if (v == null) continue;
     f[key] = v; const cb = $(el); if (cb) cb.checked = v; changed = true;

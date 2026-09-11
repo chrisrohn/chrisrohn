@@ -21,6 +21,7 @@ import { wirePwa } from "./pwa.js";
 import { applyLaunchParams, wireLayers } from "./url.js";
 import { wireGhPush } from "./github.js";
 import { wireCleanup } from "./dupes.js";
+import { loadConcerts, wireConcerts } from "./concerts.js";
 
 function wire() {
   const tabs = $$(".tab");
@@ -29,6 +30,7 @@ function wire() {
     const was = state.view; state.view = b.dataset.view || "feed"; tabs.forEach(x => x.classList.toggle("active", x === b));
     if ((was === "catalog") !== (state.view === "catalog")) fillSources();   // the chips are the feed's sources or the catalog's lists
     if (state.view === "catalog") loadCatalog().catch(() => {});
+    if (state.view === "concerts") loadConcerts().catch(() => {});
     state.deckIndex = 0; render();
   };
   tabs.forEach(b => b.addEventListener("click", () => goTab(b)));
@@ -90,6 +92,7 @@ function wire() {
   wireLayers();
   wireSettings();
   wireCleanup();   // the Cleanup tab: its filters, the actions on every song and copy, the live scan and the audit
+  wireConcerts();  // the Concerts tab: when, how far, and in what order
   wireKeys();
   wirePwa();
   wireGhPush();   // the ratings file for the build: a last push when the tab goes away, and the retries after a dropped connection
@@ -112,7 +115,7 @@ function wireOffline() {
 
 function boot() {
   $("#meta").textContent = "loading feed…"; $("#feed-failed").hidden = true;
-  load().catch(e => { $("#meta").textContent = "The feed did not load. (" + e.message + ")"; $("#empty").hidden = false; $("#empty").textContent = state.online ? "No feed yet — run the Discover workflow once, or try again." : "Offline, and no feed cached yet."; $("#feed-failed").hidden = false; });
+  load().then(() => { if (state.view === "concerts") loadConcerts().catch(() => {}); }).catch(e => { $("#meta").textContent = "The feed did not load. (" + e.message + ")"; $("#empty").hidden = false; $("#empty").textContent = state.online ? "No feed yet — run the Discover workflow once, or try again." : "Offline, and no feed cached yet."; $("#feed-failed").hidden = false; });
 }
 wire();
 boot();

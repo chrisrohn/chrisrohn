@@ -750,3 +750,45 @@ body.offline .art, body.offline .dart, body.offline .thumbs, body.offline .deck-
 .src.reddit { border-left-color: #ff4500; } .src.apple { border-left-color: #fc3c44; } .src.nts { border-left-color: var(--blue); }
 body:not(.curator) .owner-only, body.guest .owner-only { display: none !important; }
 #s-gh-token { width: 100%; }
+
+/* ---------- the Concerts tab: one row per show, Songkick fashion ---------- */
+.filters:not(.concerts) .concerts-only { display: none; }
+.filters.concerts > *:not(#q):not(.concerts-only):not(#filters-more) { display: none; }
+.con-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.con-month { margin: 14px 0 2px; font: 700 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+.con-month:first-child { margin-top: 4px; }
+.show { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: start; border: 1px solid var(--rule); border-left: 4px solid var(--ink); background: var(--card); padding: 10px 12px; }
+.show.current { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.show.cancelled { opacity: .6; } .show.cancelled .show-venue b { text-decoration: line-through; }
+.show-date { display: flex; flex-direction: column; align-items: center; font: 700 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border: 2px solid var(--ink); padding: 6px 4px; background: var(--card2); box-shadow: 3px 3px 0 var(--ink); }
+.show-date .dd { font: 800 26px/1 var(--sans); color: var(--ink); letter-spacing: -.02em; margin: 3px 0; }
+.show-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.show-line1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.show-line1 .artist { font: 800 17px/1.1 var(--sans); text-transform: uppercase; letter-spacing: -.01em; background: none; border: 0; padding: 0; color: var(--ink); cursor: pointer; text-align: left; }
+.show-line1 .artist:hover { color: var(--accent); }
+.show-with { font: 12px var(--mono); color: var(--muted); }
+.show-with .linkish { font: inherit; }
+.show-title { font: 13px var(--sans); color: var(--ink); }
+.show-venue { font: 12px var(--mono); color: var(--ink); } .show-venue .miles { color: var(--blue); }
+.show-why { font: 11px var(--mono); color: var(--muted); }
+.show-track { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: 12px var(--sans); margin-top: 2px; }
+.show-track .tplay { padding: 3px 9px; min-height: 0; }
+.show-track a { font: 11px var(--mono); }
+.show .links { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; } .show .links a { font-family: var(--mono); }
+.show-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.show-side img { width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); }
+.show-side .tba { font: 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.show-side .price { font: 700 13px var(--mono); color: var(--ink); white-space: nowrap; }
+.show-side .tickets { text-decoration: none; white-space: nowrap; }
+.flag.soon { border-color: var(--accent); color: var(--accent); }
+.flag.cancelled, .flag.off-sale, .flag.sold-out { border-color: var(--down); color: var(--down); }
+.flag.postponed, .flag.rescheduled { border-color: var(--warn); color: var(--warn); }
+.ashows a { color: var(--ink); }
+@media (max-width: 760px) {
+  .show { grid-template-columns: 52px minmax(0, 1fr); grid-template-areas: "date body" "side side"; gap: 8px 10px; padding: 10px; }
+  .show-date { grid-area: date; } .show-body { grid-area: body; } .show-side { grid-area: side; flex-direction: row-reverse; align-items: center; justify-content: space-between; }
+  .show-side img { width: 48px; height: 48px; }
+  .show-date .dd { font-size: 22px; }
+  .filters.concerts #layout-toggle { display: none; }
+}
+@media (pointer: coarse) { .show-track .tplay { min-height: 40px; padding: 6px 12px; } .show-side .tickets { min-height: 40px; display: inline-flex; align-items: center; } }

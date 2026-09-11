@@ -8,7 +8,7 @@
  *  - Updates: a new build installs and waits; the page shows "new version ready → reload" and posts SKIP_WAITING.
  *    (Without a previous worker there is nothing to wait for, so a first visit activates at once.)
  *  - Navigations are keyed by path only, so /?view=picks, /?q=… and the share target's query resolve to the cached shell.
- *  - The Cleanup reports (duplicates.json, unavailable.json) are cached like the feed: network first, so a fresh
+ *  - The concert list and the Cleanup reports (concerts.json, duplicates.json, unavailable.json) are cached like the feed: network first, so a fresh
  *    session never re-downloads an unchanged 460 KB report, and the tab still opens offline.
  *
  * __APP_JS__ and __BUILD__ are filled in by build.mjs from the bundle's content hash. */
@@ -16,7 +16,7 @@ const BUILD = "__BUILD__";
 const CACHE = "newmusic-" + BUILD;
 const ART = "newmusic-art";                          // survives builds: artwork does not change with the app
 const ART_MAX = 400;
-const SHELL = ["/", "/index.html", "__APP_JS__", "/style.css", "/theme.js", "/manifest.webmanifest", "/data/feed.json", "/data/catalog.json", "/data/duplicates.json", "/data/unavailable.json",
+const SHELL = ["/", "/index.html", "__APP_JS__", "/style.css", "/theme.js", "/manifest.webmanifest", "/data/feed.json", "/data/catalog.json", "/data/concerts.json", "/data/duplicates.json", "/data/unavailable.json",
   "/privacy.html", "/terms.html", "/icons/icon.svg", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png", "/icons/favicon-32.png"];
 const SHELL_SET = new Set(SHELL);
 

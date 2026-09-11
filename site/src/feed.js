@@ -307,7 +307,7 @@ function listFor(view) {
     for (const it of [...mine, ...picks]) { const k = ((it.youtube && it.youtube.videoId) || it.id); if (seen.has(k)) continue; seen.add(k); all.push({ ...it, _pick: true, _year: it._year || (state.rated[it.id] && state.rated[it.id].year) }); }
     return all.filter(i => !terms.length || matches(i, terms));
   }
-  if (view === "cleanup") return [];   // the Cleanup tab is its own section, not a list of cards
+  if (view === "cleanup" || view === "concerts") return [];   // the Cleanup and Concerts tabs are sections of their own, not lists of cards
   if (view === "skipped") {
     // what this account thumbed down or flagged as the wrong video and is still in the feed or the catalog, newest
     // first; Undo brings any back (a flag whose video the build has since replaced is already back on its own)

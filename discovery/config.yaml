@@ -447,3 +447,31 @@ resolve:
   cache_keep_days: 120          # drop YouTube / year cache entries that no feed item has touched for this long
   discogs: true                 # use Discogs when DISCOGS_TOKEN is set
   always_cross_check: false     # true = also ask Deezer/ISRC even when MusicBrainz already answered (slower, more evidence)
+
+# ---------- Concerts: who is playing near Detroit (discovery/concerts.py) ----------
+# The Songkick page, rebuilt from open sources: every artist played on Indie Discotheque in the last year (the
+# Last.fm 12-month chart of tt_discotheque, plus anyone filed into this year's playlist), asked on Bandsintown for
+# upcoming shows, kept when the venue is within `radius_miles` of `center`, with each act's most popular song
+# (Last.fm, else Deezer) resolved on YouTube Music so the Concerts tab plays it in place. With a free
+# TICKETMASTER_API_KEY secret, Ticketmaster's Discovery API adds every music event in the radius (tickets, prices,
+# sale status) matched against the same artists. Its own daily workflow (Concerts); nothing here spends YouTube quota.
+concerts:
+  enabled: true
+  center: { name: "Detroit, MI", lat: 42.3314, lon: -83.0458 }
+  radius_miles: 150
+  months_ahead: 12            # shows further out wait (Bandsintown lists festivals a year ahead)
+  lastfm_limit: 2000          # user.getTopArtists over 12 months, 200 a request
+  playlist_years: 1           # artists filed into this year's playlist count as played (2 = last year's too)
+  refresh_days: 2             # an artist's listings are asked for again after this
+  artists_per_run: 1500       # Bandsintown lookups a run, the most played first; the rest wait for the next run
+  time_budget_minutes: 12     # wall clock for the artist loop (the workflow times out at 30)
+  top_tracks_per_run: 300     # most-popular-song lookups a run (only artists with a show nearby; cached for good)
+  resolve_per_run: 300        # YouTube Music lookups for those songs a run (the feed's cache is shared)
+  bandsintown:
+    enabled: true
+    app_id: chrisrohn.com     # Bandsintown's public API asks for an app id naming the caller (BANDSINTOWN_APP_ID overrides)
+  ticketmaster:
+    enabled: true             # only does anything when the TICKETMASTER_API_KEY secret is set (free at developer.ticketmaster.com)
+    pages: 5                  # × size, capped by Ticketmaster's 1,000-result deep-paging limit
+    size: 200
+  in_daily: false             # true = also run at the end of the daily feed job; the Concerts workflow is its own job

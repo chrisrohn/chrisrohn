@@ -1059,3 +1059,113 @@ test("a feed older than a day and a half is an alarm, not a late morning", async
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+/** A concert list the way discovery/concerts.py writes it, dated from today so the "this week" filter has something to keep. */
+function concertsFixture() {
+  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+  return {
+    generated_at: new Date().toISOString(), center: { name: "Detroit, MI", lat: 42.3314, lon: -83.0458 }, radius_miles: 150, months_ahead: 12,
+    artists_total: 1200, artists_checked: 900, artists_with_shows: 2, sources: ["bandsintown", "ticketmaster"], health: { bandsintown: { ok: true }, ticketmaster: { ok: true } }, count: 3,
+    events: [
+      { id: "bit:1", artist: "Cut Copy", artists: ["Cut Copy"], lineup: ["Cut Copy", "Opener"], date: day(3), time: "20:00", venue: "Saint Andrew's Hall", city: "Detroit", region: "MI", country: "United States", miles: 0.4,
+        tickets: "https://www.axs.com/events/1/cut-copy", ticketer: "AXS", url: "https://www.bandsintown.com/e/1", status: "available", sources: ["bandsintown"], links: { bandsintown: "https://www.bandsintown.com/e/1" }, festival: false },
+      { id: "tm:2", artist: "Jungle", artists: ["Jungle"], lineup: ["Jungle"], date: day(40), time: "19:30", venue: "Royal Oak Music Theatre", city: "Royal Oak", region: "MI", country: "United States", miles: 14.2,
+        tickets: "https://www.ticketmaster.com/event/2", ticketer: "Ticketmaster", url: "https://www.ticketmaster.com/event/2", status: "onsale", sources: ["ticketmaster"], price: { min: 35, max: 65, currency: "USD" }, links: { ticketmaster: "https://www.ticketmaster.com/event/2" }, festival: false },
+      { id: "bit:3", artist: "Cut Copy", artists: ["Cut Copy"], lineup: ["Cut Copy"], date: day(100), time: null, venue: "Agora", city: "Cleveland", region: "OH", country: "United States", miles: 90.5,
+        tickets: null, ticketer: null, url: "https://www.bandsintown.com/e/3", status: null, sources: ["bandsintown"], links: { bandsintown: "https://www.bandsintown.com/e/3" }, festival: false },
+    ],
+    artists: {
+      "Cut Copy": { plays: 143, filed: 4, via: ["lastfm:12month", "playlists"], image: null, top_track: { id: "concert-cutcopy-01", title: "Hearts on Fire", source: "lastfm", listeners: 1200000, youtube: { videoId: "dQw4w9WgXcQ", thumbnail: null } },
+        links: { "last.fm": "https://www.last.fm/music/Cut%20Copy", songkick: "https://www.songkick.com/search?query=Cut%20Copy&type=artists" } },
+      "Jungle": { plays: 80, filed: 0, via: ["lastfm:12month"], image: null, top_track: { id: "concert-jungle-01", title: "Back on 74", source: "deezer", youtube: null }, links: {} },
+    },
+  };
+}
+
+test("the Concerts tab: shows nearby, soonest first, with the ticket seller named and each act's most popular song in the queue", async ({ browser }) => {
+  const ctx = await browser.newContext({ serviceWorkers: "block" });   // page.route must see the fetch, not a worker
+  const page = await ctx.newPage();
+  await page.route("**/data/concerts.json", route => route.fulfill({ json: concertsFixture() }));
+  const errors = await open(page);
+  await expect(page.locator("#count-concerts")).toHaveText("…");   // not loaded until the tab opens
+  await page.click(".tab[data-view=concerts]");
+  await expect(page.locator("#concerts")).toBeVisible();
+  const rows = page.locator("#con-list .show");
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator("#count-concerts")).toHaveText("3");
+  await expect(page.locator("#con-summary")).toContainText("3 shows within 150 miles of Detroit, MI by 2 artists you played this year");
+  await expect(page.locator("#con-summary")).toContainText("900 of 1,200 played artists checked so far");
+  expect(new URL(page.url()).searchParams.get("view")).toBe("concerts");
+  // the feed's controls step aside; the tab's own take their place
+  await expect(page.locator("#sort")).toBeHidden();
+  await expect(page.locator("#con-when")).toBeVisible();
+  // soonest first, under month headings; the ticket button names the seller; distance, bill and plays on the row
+  const first = rows.first();
+  await expect(first.locator(".artist")).toHaveText("Cut Copy");
+  await expect(first.locator(".show-side .tickets")).toHaveText("Tickets · AXS");
+  await expect(first.locator(".show-side .tickets")).toHaveAttribute("href", "https://www.axs.com/events/1/cut-copy");
+  await expect(first.locator(".show-venue")).toContainText("Saint Andrew's Hall · Detroit, MI · under a mile");
+  await expect(first.locator(".show-why")).toHaveText("you played them 143 times this year · 4 tracks filed this year · also on the bill: Opener");
+  await expect(first.locator(".show-track b")).toHaveText("Hearts on Fire");
+  await expect(first.locator(".show-track")).toContainText("1,200,000 listeners on Last.fm");
+  await expect(first.locator(".show-track a")).toHaveAttribute("href", "https://music.youtube.com/watch?v=dQw4w9WgXcQ");
+  await expect(first.locator(".links a").first()).toHaveText("tickets · AXS");
+  await expect(first.locator(".flag.soon")).toHaveText("this week");
+  expect(await page.locator("#con-list .con-month").count()).toBeGreaterThanOrEqual(2);
+  const second = rows.nth(1);
+  await expect(second.locator(".show-venue")).toContainText("Royal Oak Music Theatre · Royal Oak, MI · 14 mi");
+  await expect(second.locator(".show-side .price")).toHaveText("$35–$65");   // Ticketmaster's face value, under the button
+  await expect(first.locator(".show-side .price")).toHaveCount(0);            // Bandsintown lists no prices
+  await expect(second.locator(".show-side .tickets")).toHaveText("Tickets · Ticketmaster");
+  await expect(second.locator(".show-track .tplay")).toBeDisabled();           // no YouTube match for that song yet
+  await expect(second.locator(".show-track a")).toHaveAttribute("href", /music\.youtube\.com\/search\?q=Jungle/);
+  await expect(rows.nth(2).locator(".show-side a")).toHaveText("Details");   // no ticket link: the event page
+  // when, how far, in what order — and the address follows
+  await page.selectOption("#con-when", "7"); await expect(rows).toHaveCount(1);
+  expect(new URL(page.url()).searchParams.get("when")).toBe("7");
+  await page.selectOption("#con-when", ""); await expect(rows).toHaveCount(3);
+  await page.selectOption("#con-radius", "50"); await expect(rows).toHaveCount(2);
+  await page.selectOption("#con-radius", "");
+  await page.selectOption("#con-sort", "plays");
+  await expect(page.locator("#con-list .con-month")).toHaveCount(0);
+  await expect(rows.nth(2).locator(".artist")).toHaveText("Jungle");
+  await page.selectOption("#con-sort", "date");
+  // search matches venues, cities and the songs too
+  await page.fill("#q", "royal oak"); await expect(rows).toHaveCount(1); await expect(rows.first().locator(".artist")).toHaveText("Jungle");
+  await page.fill("#q", "hearts on fire"); await expect(rows).toHaveCount(2);
+  await page.fill("#q", ""); await expect(rows).toHaveCount(3);
+  // the rows' songs are the queue: space plays the first one, and its row lights up
+  await page.locator("#meta").click();
+  await page.keyboard.press(" ");
+  await expect(page.locator("#player")).toBeVisible();
+  await expect(page.locator("#now")).toContainText("Cut Copy");
+  await expect(page.locator("#now")).toContainText("Hearts on Fire");
+  await expect(page.locator("#np-eyebrow")).toContainText("No. 01 / 1");   // one song in the queue: both Cut Copy rows share it, Jungle's has no video yet
+  await expect(rows.first()).toHaveClass(/current/);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#player")).toBeHidden();
+  // the artist sheet lists their dates and hands over to the tab filtered to them
+  await rows.first().locator(".artist").click();
+  await expect(page.locator("#artist")).toBeVisible();
+  await expect(page.locator("#artist .ashows")).toContainText("Saint Andrew's Hall, Detroit");
+  await expect(page.locator("#artist .ashows")).toContainText("Agora, Cleveland");
+  await page.click("#artist-shows");
+  await expect(page.locator("#artist")).toBeHidden();
+  await expect(page.locator("#q")).toHaveValue('artist:"Cut Copy"');
+  await expect(rows).toHaveCount(2);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("no concert list yet: the Concerts tab says so instead of an empty sheet", async ({ browser }) => {
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  await page.route("**/data/concerts.json", route => route.fulfill({ status: 404, body: "" }));
+  const errors = await open(page, "/?view=concerts");
+  await expect(page.locator("#concerts")).toBeVisible();
+  await expect(page.locator("#con-empty")).toContainText("No concert list yet");
+  await expect(page.locator("#count-concerts")).toHaveText("…");
+  await expect(page.locator(".tab[data-view=concerts]")).toHaveClass(/active/);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

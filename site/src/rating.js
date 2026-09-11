@@ -28,6 +28,7 @@ export async function rate(id, decision, year) {
   if (!isCurator()) return;
   if (state.busy.has(id)) return;
   const it = byId(id); if (!it) return;
+  if (it._concert) { toast(`${credit(it)} is a concert row's most popular song — it can be kept from the Feed or the Catalog when it turns up there`, true); return; }
   const vid = it.youtube && it.youtube.videoId;
   if (!vid) { toast(decision === "wrong" ? "This card has no YouTube match to be wrong" : "No YouTube match for this one — open it via the search link instead", true); return; }
   if (decision === "up" && !year && yearGuess(it) == null) {

@@ -52,10 +52,13 @@ export const state = {
   quota: LS.get("id:quota", { day: "", units: 0 }),   // YouTube API units spent today by this account's devices (resets midnight Pacific)
   // "new releases only" is on for a first visit: radio and recommendation sources surface catalogue too
   // "shortlist" keeps the day to the top N (⚙ sets N); "show all" on the list or the deck lifts it for that visit
-  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true, shortlist: true, catYear: "", catSort: "score", catSourcesOff: [] }, LS.get("id:filters", {})),
+  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true, shortlist: true, catYear: "", catSort: "score", catSourcesOff: [], conWhen: "", conRadius: "", conSort: "date" }, LS.get("id:filters", {})),
   view: "feed",
   catalog: null,                            // data/catalog.json: earlier years' candidates, loaded when the Catalog tab is first opened
   catalogState: "idle",                     // idle | loading | ready | missing | failed
+  concerts: null,                           // data/concerts.json: upcoming shows near Detroit by the artists played this year, loaded when the Concerts tab is first opened
+  concertsState: "idle",                    // idle | loading | ready | missing | failed
+  concertTracks: [],                        // each listed act's most popular song as a playable item (concerts.js), indexed below
   index: new Map(),                         // id → item, across the feed and the catalog
   shortlistHidden: 0,                       // how many tracks the shortlist is holding back under the current filters
   focusId: null,                            // ?t=<id> from a permalink: focus that card once the feed is in
@@ -82,8 +85,9 @@ export const items = () => (state.feed && state.feed.items) || [];
 export const catalogItems = () => (state.catalog && state.catalog.items) || [];
 /** @returns {FeedItem[]} */
 export const allItems = () => items().concat(catalogItems());
-/** Rebuild the id index after either payload changes. */
-export function reindex() { state.index = new Map(allItems().map(i => [i.id, i])); }
+/** Rebuild the id index after any payload changes. The concert rows' songs go in first, so a song that is also in
+ * the feed or the catalog keeps that card (with its year, sources and thumbs) and the row plays the same item. */
+export function reindex() { state.index = new Map([...state.concertTracks, ...allItems()].map(i => [i.id, i])); }
 /** @param {string} id */
 export const byId = id => state.index.get(id);
 /** A rating that still counts: an "undone" record is a tombstone, not a decision. @param {string} id */

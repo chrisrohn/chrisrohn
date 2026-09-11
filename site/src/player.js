@@ -88,8 +88,8 @@ export function play(id) {
   if (!id) return;
   const it = byId(id) || visibleItems().find(i => i.id === id); const vid = it?.youtube?.videoId; if (!it || !vid) return;
   state.currentId = id; state.playingId = id;
-  $$(".card.current, .dcard.current").forEach(c => c.classList.remove("current"));
-  const el = $(`.card[data-id="${CSS.escape(id)}"], .dcard[data-id="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
+  $$(".card.current, .dcard.current, .show.current").forEach(c => c.classList.remove("current"));
+  const el = $(`.card[data-id="${CSS.escape(id)}"], .dcard[data-id="${CSS.escape(id)}"], .show[data-track="${CSS.escape(id)}"]`); if (el) el.classList.add("current");
   reflectPlaying(true);
   const was = $("#player").hidden;
   $("#player").hidden = false;
