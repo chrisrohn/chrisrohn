@@ -250,8 +250,8 @@ session that the playlist's owner approved in that browser.
 - **Concerts** tab — who is playing near Detroit. The **Concerts** workflow (its own job, 13:33 ET) takes every
   artist played on Indie Discotheque in the last year — the Last.fm 12-month chart of `station.lastfm_user`, plus
   anyone filed into this year's playlist (`concerts.playlist_years`) — and asks Bandsintown's artist-events API
-  where each of them plays next, `artists_per_run` a run and again after `refresh_days`, so the list fills in over
-  its first few runs and then keeps pace. Bandsintown's API is free but refuses any `app_id` it did not issue
+  where each of them plays next, as many a run as `time_budget_minutes` allows (about six a second; `artists_per_run`
+  caps it when set) and again after `refresh_days`, so the list fills in over its first run or two and then keeps pace. Bandsintown's API is free but refuses any `app_id` it did not issue
   (every request comes back 403 and the tab is Ticketmaster-only, which the summary line says): an artist gets a key
   under Bandsintown for Artists → Settings → General → *Get API Key*; anyone else asks biz@bandsintown.com. Put it
   in the `BANDSINTOWN_APP_ID` secret (`concerts.bandsintown.app_id` is only the fallback). A run of

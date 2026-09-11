@@ -47,6 +47,7 @@ TM_DEEP_PAGING_LIMIT = 1000     # Ticketmaster refuses page × size beyond this:
 TM_MIN_WINDOW = timedelta(hours=1)   # a window this short is not split further, whatever it holds
 TM_TIME = "%Y-%m-%dT%H:%M:%SZ"  # the only datetime format Ticketmaster's Discovery API accepts (UTC, no fraction)
 EARTH_RADIUS_MILES = 3958.7613
+SONGS_RESERVE_MINUTES = 5       # the artist loop leaves this much of the time budget for the top songs and their videos
 
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
@@ -56,8 +57,8 @@ DEFAULTS: dict[str, Any] = {
     "lastfm_limit": 0,            # user.getTopArtists over 12 months (200 a request); 0 = every artist Last.fm has
     "playlist_years": 1,          # artists filed into this year's playlist count as played (2 = last year's too)
     "refresh_days": 2,            # an artist's listings are asked for again after this
-    "artists_per_run": 1500,      # Bandsintown lookups a run, the most played first
-    "time_budget_minutes": 12,    # wall clock for the artist loop
+    "artists_per_run": 0,         # Bandsintown lookups a run, the most played first; 0 = as many as the time budget allows
+    "time_budget_minutes": 20,    # wall clock for the run (the workflow times out at 30); the artist loop stops SONGS_RESERVE_MINUTES early
     "top_tracks_per_run": 300,    # Last.fm / Deezer top-song lookups a run (only artists with a show nearby)
     "resolve_per_run": 300,       # YouTube Music lookups for those songs a run
     "bandsintown": {"enabled": True, "app_id": "chrisrohn.com", "give_up_after": 10},   # BANDSINTOWN_APP_ID overrides app_id
@@ -380,7 +381,7 @@ def build_concerts(cfg: dict, *, deadline_minutes: float | None = None) -> dict 
     center, radius = c["center"], float(c["radius_miles"])
     profile = load_profile()
     http = Http("concerts", ttl_hours=20)
-    http.min_interval.update({"rest.bandsintown.com": 0.25, "app.ticketmaster.com": 0.25})
+    http.min_interval.update({"rest.bandsintown.com": 0.15, "app.ticketmaster.com": 0.25})   # Bandsintown answers in ~10ms; a 429 widens this on its own
     lastfm = LastFm(http, os.environ.get("LASTFM_API_KEY"))
     played = played_artists(cfg, profile, lastfm)
     http.save()
@@ -429,8 +430,10 @@ def build_concerts(cfg: dict, *, deadline_minutes: float | None = None) -> dict 
     if bcfg.get("enabled", True):
         cutoff = (utcnow() - timedelta(days=float(c["refresh_days"]))).isoformat()
         due = [k for k in ranked(played) if (arts.get(k) or {}).get("checked_at", "") < cutoff]
-        for k in due[: int(c["artists_per_run"])]:
-            if deadline.expired:
+        per_run = int(c["artists_per_run"] or 0)
+        for k in due if per_run <= 0 else due[:per_run]:
+            if deadline.expired or deadline.remaining_minutes < SONGS_RESERVE_MINUTES:
+                log.info("concerts: time budget spent after %d artists; %d stay due for the next run", asked, len(due) - asked)
                 break
             if asked == failed == give_up_after:
                 # every request so far failed the same way: Bandsintown is refusing us (an app_id it did not issue,
