@@ -8,8 +8,10 @@ to new applications, so this draws the same list from what is still open:
     Without a Last.fm key the profile's 12-month artists stand in.
   * where they play – Bandsintown's public artist-events API (free, no key; `concerts.bandsintown.app_id` names the
     app) asked artist by artist, a rotating batch a run, kept per artist for `refresh_days`; and, when a free
-    TICKETMASTER_API_KEY is set, Ticketmaster's Discovery API for every music event within the radius, matched
-    against the same artists (a second ticket link, prices, sale status and the venue's picture).
+    TICKETMASTER_API_KEY is set, Ticketmaster's Discovery API for every music event within the radius up to
+    `months_ahead` (Ticketmaster stops paging at its 1,000th result, so the horizon is split into date windows
+    small enough to fit), matched against the same artists (a second ticket link, prices, sale status and the
+    venue's picture).
   * how close – a great-circle distance from `concerts.center` (Detroit); anything past `radius_miles` is dropped.
   * their most popular song – Last.fm `artist.getTopTracks` (Deezer's artist top when there is no key), resolved
     on YouTube Music through the feed's resolver and cache so the card plays it in place.
@@ -22,7 +24,7 @@ from __future__ import annotations
 import math
 import os
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -37,7 +39,9 @@ STATE_VERSION = 1
 BIT_API = "https://rest.bandsintown.com/artists/{name}/events/"
 TM_API = "https://app.ticketmaster.com/discovery/v2/events.json"
 DEEZER_API = "https://api.deezer.com"
-TM_DEEP_PAGING_LIMIT = 1000     # Ticketmaster refuses page × size beyond this
+TM_DEEP_PAGING_LIMIT = 1000     # Ticketmaster refuses page × size beyond this: a date window holding more is split
+TM_MIN_WINDOW = timedelta(hours=1)   # a window this short is not split further, whatever it holds
+TM_TIME = "%Y-%m-%dT%H:%M:%SZ"  # the only datetime format Ticketmaster's Discovery API accepts (UTC, no fraction)
 EARTH_RADIUS_MILES = 3958.7613
 
 DEFAULTS: dict[str, Any] = {
@@ -45,7 +49,7 @@ DEFAULTS: dict[str, Any] = {
     "center": {"name": "Detroit, MI", "lat": 42.3314, "lon": -83.0458},
     "radius_miles": 150,
     "months_ahead": 12,           # shows further out than this wait; Bandsintown lists festivals a year ahead
-    "lastfm_limit": 2000,         # user.getTopArtists over 12 months (200 a request)
+    "lastfm_limit": 0,            # user.getTopArtists over 12 months (200 a request); 0 = every artist Last.fm has
     "playlist_years": 1,          # artists filed into this year's playlist count as played (2 = last year's too)
     "refresh_days": 2,            # an artist's listings are asked for again after this
     "artists_per_run": 1500,      # Bandsintown lookups a run, the most played first
@@ -53,7 +57,7 @@ DEFAULTS: dict[str, Any] = {
     "top_tracks_per_run": 300,    # Last.fm / Deezer top-song lookups a run (only artists with a show nearby)
     "resolve_per_run": 300,       # YouTube Music lookups for those songs a run
     "bandsintown": {"enabled": True, "app_id": "chrisrohn.com"},
-    "ticketmaster": {"enabled": True, "pages": 5, "size": 200},   # needs TICKETMASTER_API_KEY (free)
+    "ticketmaster": {"enabled": True, "size": 200, "requests_per_run": 60},   # needs TICKETMASTER_API_KEY (free)
 }
 
 
@@ -206,22 +210,44 @@ def shape_bandsintown(ev: dict, artist: str) -> dict:
 
 # ---------- Ticketmaster ----------
 
-def ticketmaster_events(http: Http, key: str, center: dict, radius: float, *, pages: int, size: int) -> list[dict]:
-    """Every music event Ticketmaster lists within the radius, soonest first, as many pages as the deep-paging limit
-    allows. Raises on a failed request so the caller can keep the last snapshot."""
-    out: list[dict] = []
-    params = {"apikey": key, "latlong": f"{center['lat']},{center['lon']}", "radius": str(int(radius)), "unit": "miles", "classificationName": "music",
-              "size": str(size), "sort": "date,asc", "locale": "*"}
-    for page in range(max(1, int(pages))):
-        if (page + 1) * size > TM_DEEP_PAGING_LIMIT:
-            break
-        data = http.get(TM_API, params={**params, "page": str(page)}, cache=False, timeout=30)
-        evs = ((data or {}).get("_embedded") or {}).get("events") or []
-        out.extend(e for e in evs if isinstance(e, dict))
-        total = int(((data or {}).get("page") or {}).get("totalPages") or 0)
-        if not evs or page + 1 >= total:
-            break
-    return out
+def ticketmaster_events(http: Http, key: str, center: dict, radius: float, *, start: datetime, end: datetime, size: int = 200,
+                        max_requests: int = 60) -> list[dict]:
+    """Every music event Ticketmaster lists within the radius between `start` and `end` (UTC), soonest first, each
+    once by id. Ticketmaster refuses to page past its 1,000th result (page × size), so a window it says holds more
+    than that is split in half and each half asked for on its own, down to TM_MIN_WINDOW; a busy metro's whole
+    year comes back in a few dozen requests, capped at `max_requests` a run (the soonest windows first, so a cap
+    trims the far end). Raises on a failed request so the caller can keep the last snapshot."""
+    base = {"apikey": key, "latlong": f"{center['lat']},{center['lon']}", "radius": str(int(radius)), "unit": "miles", "classificationName": "music",
+            "size": str(size), "sort": "date,asc", "locale": "*", "includeTBA": "yes", "includeTBD": "yes"}
+    out: dict[str, dict] = {}
+    windows: list[tuple[datetime, datetime]] = [(start, end)]
+    spent = asked = 0
+    while windows:
+        lo, hi = windows.pop(0)
+        asked += 1
+        page = 0
+        while True:
+            if spent >= max(1, int(max_requests)):
+                log.warning("concerts: ticketmaster request budget (%d) spent with %d windows unasked; the list stops at %s", spent, len(windows) + 1, lo.strftime(TM_TIME))
+                return list(out.values())
+            data = http.get(TM_API, params={**base, "startDateTime": lo.strftime(TM_TIME), "endDateTime": hi.strftime(TM_TIME), "page": str(page)}, cache=False, timeout=30)
+            spent += 1
+            evs = [e for e in (((data or {}).get("_embedded") or {}).get("events") or []) if isinstance(e, dict)]
+            for e in evs:
+                out[str(e.get("id") or f"{lo.strftime(TM_TIME)}/{page}/{len(out)}")] = e
+            pg = (data or {}).get("page") or {}
+            total, total_pages = int(pg.get("totalElements") or 0), int(pg.get("totalPages") or 0)
+            if page == 0 and total > TM_DEEP_PAGING_LIMIT and hi - lo > TM_MIN_WINDOW:
+                mid = lo + (hi - lo) / 2
+                windows[:0] = [(lo, mid), (mid + timedelta(seconds=1), hi)]   # the halves, still soonest first
+                break
+            if page == 0 and total > TM_DEEP_PAGING_LIMIT:
+                log.warning("concerts: ticketmaster lists %d events between %s and %s; only the first %d can be paged", total, lo.strftime(TM_TIME), hi.strftime(TM_TIME), TM_DEEP_PAGING_LIMIT)
+            if not evs or page + 1 >= total_pages or (page + 1) * size >= TM_DEEP_PAGING_LIMIT:
+                break
+            page += 1
+    log.info("concerts: ticketmaster asked %d request(s) over %d date window(s)", spent, asked)
+    return list(out.values())
 
 
 def shape_ticketmaster(ev: dict) -> dict:
@@ -352,12 +378,14 @@ def build_concerts(cfg: dict, *, deadline_minutes: float | None = None) -> dict 
     deadline = Deadline(max(0.01, minutes))
     health: dict[str, dict] = {}
 
-    # 1. Ticketmaster: everything within the radius, matched against the played artists (five requests a run)
+    # 1. Ticketmaster: everything within the radius up to the horizon, matched against the played artists
     tcfg = c["ticketmaster"]
     tm_key = os.environ.get("TICKETMASTER_API_KEY")
     if tcfg.get("enabled", True) and tm_key:
         try:
-            raw = ticketmaster_events(http, tm_key, center, radius, pages=int(tcfg.get("pages", 5)), size=int(tcfg.get("size", 200)))
+            now = utcnow()
+            raw = ticketmaster_events(http, tm_key, center, radius, start=now, end=now + timedelta(days=30 * int(c["months_ahead"]) + 1),
+                                      size=int(tcfg.get("size", 200)), max_requests=int(tcfg.get("requests_per_run", 60)))
             shaped = []
             for ev in raw:
                 s = within(shape_ticketmaster(ev), center, radius)

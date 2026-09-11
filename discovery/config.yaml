@@ -460,7 +460,7 @@ concerts:
   center: { name: "Detroit, MI", lat: 42.3314, lon: -83.0458 }
   radius_miles: 150
   months_ahead: 12            # shows further out wait (Bandsintown lists festivals a year ahead)
-  lastfm_limit: 2000          # user.getTopArtists over 12 months, 200 a request
+  lastfm_limit: 0             # user.getTopArtists over 12 months, 200 a request; 0 = every artist Last.fm has
   playlist_years: 1           # artists filed into this year's playlist count as played (2 = last year's too)
   refresh_days: 2             # an artist's listings are asked for again after this
   artists_per_run: 1500       # Bandsintown lookups a run, the most played first; the rest wait for the next run
@@ -472,6 +472,7 @@ concerts:
     app_id: chrisrohn.com     # Bandsintown's public API asks for an app id naming the caller (BANDSINTOWN_APP_ID overrides)
   ticketmaster:
     enabled: true             # only does anything when the TICKETMASTER_API_KEY secret is set (free at developer.ticketmaster.com)
-    pages: 5                  # × size, capped by Ticketmaster's 1,000-result deep-paging limit
-    size: 200
+    size: 200                 # events a request (Ticketmaster's most)
+    requests_per_run: 60      # Ticketmaster stops paging at 1,000 results, so the months_ahead horizon is split into date windows
+                              # that fit; this caps the requests spent on them a run (the soonest windows first; 5,000 a day is free)
   in_daily: false             # true = also run at the end of the daily feed job; the Concerts workflow is its own job

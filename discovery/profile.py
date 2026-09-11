@@ -64,11 +64,14 @@ class LastFm:
             return {}
         return data or {}
 
-    def top_artists(self, user: str, period: str, limit: int) -> list[dict]:
+    def top_artists(self, user: str, period: str, limit: int = 0) -> list[dict]:
+        """user.getTopArtists, most played first, 200 a request; `limit` <= 0 = every artist Last.fm has (as many
+        pages as it reports), else the top `limit`."""
         out: list[dict] = []
         page = 1
-        while len(out) < limit:
-            data = self.call("user.gettopartists", user=user, period=period, limit=min(200, limit - len(out)), page=page)
+        while limit <= 0 or len(out) < limit:
+            per = 200 if limit <= 0 else min(200, limit - len(out))
+            data = self.call("user.gettopartists", user=user, period=period, limit=per, page=page)
             arts = (data.get("topartists") or {}).get("artist") or []
             if not arts:
                 break
@@ -77,7 +80,7 @@ class LastFm:
             if page >= int(attrs.get("totalPages", 1) or 1):
                 break
             page += 1
-        return out[:limit]
+        return out[:limit] if limit > 0 else out
 
     def _paged(self, method: str, outer: str, inner: str, limit: int, **params: Any) -> list[dict]:
         out: list[dict] = []

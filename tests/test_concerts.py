@@ -3,7 +3,7 @@ shapes, the merge across sources, the most popular song, and a whole build again
 from __future__ import annotations
 
 import sys
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -142,17 +142,51 @@ def test_shape_ticketmaster_and_matching():
     assert concerts.matched_artists(["Jungle Bros"], played) == []                                          # no fuzzy matching
 
 
+T0 = datetime(2026, 9, 11, 17, 0, 0, tzinfo=UTC)
+T1 = T0 + timedelta(days=360)
+
+
 def test_ticketmaster_paging_stops_at_the_deep_paging_limit():
     pages = []
     def answers(url, params):
         pages.append(int(params["page"]))
         assert params["latlong"] == "42.3314,-83.0458" and params["radius"] == "150" and params["unit"] == "miles" and params["classificationName"] == "music"
-        return {"_embedded": {"events": [tm_event(f"E{params['page']}", "X", ["X"], "V", "Detroit", "MI", 42.33, -83.05, SOON)]}, "page": {"totalPages": 40}}
+        assert params["startDateTime"] == "2026-09-11T17:00:00Z" and params["endDateTime"] == "2027-09-06T17:00:00Z" and params["includeTBA"] == "yes"
+        return {"_embedded": {"events": [tm_event(f"E{params['page']}", "X", ["X"], "V", "Detroit", "MI", 42.33, -83.05, SOON)]}, "page": {"totalPages": 40, "totalElements": 1000}}
     http = FakeHttp(answers)
-    evs = concerts.ticketmaster_events(http, "k", DETROIT, 150, pages=9, size=200)
-    assert pages == [0, 1, 2, 3, 4] and len(evs) == 5      # 5 × 200 = the 1,000-result limit
-    http2 = FakeHttp(lambda u, p: {"_embedded": {"events": []}, "page": {"totalPages": 0}})
-    assert concerts.ticketmaster_events(http2, "k", DETROIT, 150, pages=5, size=200) == []
+    evs = concerts.ticketmaster_events(http, "k", DETROIT, 150, start=T0, end=T1, size=200)
+    assert pages == [0, 1, 2, 3, 4] and len(evs) == 5      # 5 × 200 = the 1,000-result limit; exactly 1,000 needs no split
+    http2 = FakeHttp(lambda u, p: {"_embedded": {"events": []}, "page": {"totalPages": 0, "totalElements": 0}})
+    assert concerts.ticketmaster_events(http2, "k", DETROIT, 150, start=T0, end=T1, size=200) == []
+
+
+def test_ticketmaster_splits_a_window_past_the_deep_paging_limit():
+    """A year with 2,400 events: the whole horizon (and its first half) report more than 1,000, so they are split
+    until each window fits; every event comes back once, soonest windows first, within a handful of requests."""
+    def parse(s):
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    shows = [(T0 + timedelta(hours=3 * i), f"S{i}") for i in range(2400)]      # 2,400 shows, one every three hours (~300 days)
+    windows = []
+    def answers(url, params):
+        lo, hi, page, size = parse(params["startDateTime"]), parse(params["endDateTime"]), int(params["page"]), int(params["size"])
+        inside = [(t, i) for t, i in shows if lo <= t <= hi]
+        windows.append((lo, hi, page, len(inside)))
+        assert (page + 1) * size <= 1000                                     # never asked past what Ticketmaster allows
+        chunk = inside[page * size:(page + 1) * size]
+        return {"_embedded": {"events": [tm_event(i, "X", ["X"], "V", "Detroit", "MI", 42.33, -83.05, t.date().isoformat()) for t, i in chunk]},
+                "page": {"totalElements": len(inside), "totalPages": -(-len(inside) // size)}}
+    http = FakeHttp(answers)
+    evs = concerts.ticketmaster_events(http, "k", DETROIT, 150, start=T0, end=T1, size=200)
+    assert sorted(e["id"] for e in evs) == sorted(i for _, i in shows)        # all 2,400, each once
+    firsts = [w[3] for w in windows if w[2] == 0]
+    assert firsts[0] == 2400 and firsts[1] > 1000 and firsts[1] < 2400        # the year, then its first half: both too big
+    assert all(n <= 1000 for lo, hi, page, n in windows if page > 0)          # only windows that fit are paged
+    assert len(windows) < 40                                                   # a few dozen requests, not thousands
+    assert windows[-1][0] > windows[0][0]                                      # soonest windows first
+    # a request budget trims the far end, never the start
+    http2 = FakeHttp(answers)
+    few = concerts.ticketmaster_events(http2, "k", DETROIT, 150, start=T0, end=T1, size=200, max_requests=4)
+    assert 0 < len(few) < 2400 and "S0" in {e["id"] for e in few}
 
 
 def test_merge_events_folds_bills_and_sources():
