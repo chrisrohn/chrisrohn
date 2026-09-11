@@ -137,7 +137,10 @@ export function renderConcerts() {
   const when = c.generated_at ? relTime(new Date(c.generated_at)) : "?";
   const all = (c.events || []).filter(ev => ev.date >= todayKey()).length;
   const checked = c.artists_checked != null && c.artists_total ? ` · ${c.artists_checked.toLocaleString()} of ${c.artists_total.toLocaleString()} played artists checked so far` : "";
-  const tm = c.health && c.health.ticketmaster && !c.health.ticketmaster.ok ? " · Bandsintown listings only" : "";
+  const h = c.health || {};
+  const tmDown = !!(h.ticketmaster && !h.ticketmaster.ok), bitDown = !!(h.bandsintown && !h.bandsintown.ok && h.bandsintown.asked);
+  const tm = tmDown && bitDown ? ` · both sources failed (Ticketmaster: ${h.ticketmaster.error || "failed"}; Bandsintown: ${h.bandsintown.error || "failed"})`
+    : tmDown ? " · Bandsintown listings only" : bitDown ? ` · Ticketmaster listings only (Bandsintown: ${h.bandsintown.error || "failed"})` : "";
   sum.textContent = `${plural(vis.length, "show", "shows")}${vis.length !== all ? ` of ${all}` : ""} within ${c.radius_miles} miles of ${c.center?.name || "Detroit"} by ${plural(artists.size, "artist", "artists")} you played this year · built ${when}${checked}${tm}`;
   sum.title = `Sources: ${(c.sources || []).join(", ") || "none yet"}`;
   // the rows' top songs are the queue: space plays the first, j/k and autoplay walk on down the list

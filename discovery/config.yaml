@@ -469,7 +469,10 @@ concerts:
   resolve_per_run: 300        # YouTube Music lookups for those songs a run (the feed's cache is shared)
   bandsintown:
     enabled: true
-    app_id: chrisrohn.com     # Bandsintown's public API asks for an app id naming the caller (BANDSINTOWN_APP_ID overrides)
+    app_id: chrisrohn.com     # Bandsintown refuses an app_id it did not issue: put the one it gave you in the BANDSINTOWN_APP_ID
+                              # secret (an artist's API key from Bandsintown for Artists → Settings → General, or one from
+                              # biz@bandsintown.com); this is only the fallback when the secret is empty
+    give_up_after: 10         # a run of this many straight failures (403 for an unknown app_id, an outage) ends the batch this run
   ticketmaster:
     enabled: true             # only does anything when the TICKETMASTER_API_KEY secret is set (free at developer.ticketmaster.com)
     size: 200                 # events a request (Ticketmaster's most)

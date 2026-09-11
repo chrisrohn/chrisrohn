@@ -55,7 +55,7 @@ jobs:
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}   # optional: Ticketmaster's free Discovery API
-          BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # optional: overrides concerts.bandsintown.app_id
+          BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # the app_id Bandsintown issued you; without one its API answers 403 and the list is Ticketmaster-only
         run: python -m discovery concerts
 
       - name: Commit data

@@ -21,7 +21,7 @@ tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist
 - A **Cleanup** tab for the year playlists: every song held more than once — the same video twice, the same song in two years, two uploads of it (audio track and video), two editions of it (original and remix, radio edit and extended mix) — with every copy laid out to compare (edition, length, album, plays, whether it plays here), played in place, kept, removed or moved to another year (the catalogue-verified year marked); a **playability audit** that asks YouTube which tracks cannot play in the US at all (deleted, private, region-blocked) and finds playable replacements, overnight for free or on the spot; paced by the API quota and remembered across devices
 - A **Concerts** tab, the Songkick page rebuilt from open sources: every upcoming show within 80 miles of Detroit
   by an artist played on Indie Discotheque in the last year (the Last.fm 12-month chart plus this year's playlist),
-  from Bandsintown and, with a free key, Ticketmaster — date, venue, city, distance, the ticket link with the seller
+  from Ticketmaster (free key) and Bandsintown (an app_id it issued) — date, venue, city, distance, the ticket link with the seller
   named (Ticketmaster, TicketWeb, AXS, Etix, DICE…), the bill, and each act's most popular song, playable in place;
   its own afternoon workflow (`discovery/concerts.py`, `site/data/concerts.json`), with filters for when, how far
   and in what order, and the artist sheet lists an act's dates
