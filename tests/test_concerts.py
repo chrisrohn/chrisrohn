@@ -113,6 +113,36 @@ def test_bandsintown_name_encoding_and_answers():
     assert concerts.bandsintown_events(http, "Unknown Act", "test-app") == []
     assert concerts.bandsintown_events(http, "Gone Act", "test-app") == []
     assert concerts.bandsintown_events(http, "Down Act", "test-app") is None      # a failed request keeps the old listing
+    reasons = concerts.Counter()
+    assert concerts.bandsintown_events(http, "Down Act", "test-app", reasons) is None and reasons == {"HTTP 503": 1}
+    assert concerts.failure_reason(RuntimeError("403 Client Error: Forbidden for url: x")) == "HTTP 403"
+    assert concerts.failure_reason(TimeoutError("read timed out")) == "TimeoutError"
+
+
+def test_bandsintown_refusals_end_the_batch_and_are_named(monkeypatch):
+    """An app_id Bandsintown did not issue gets 403 on every request: the run stops after give_up_after of them,
+    the rest stay due, and the health record and the log say so instead of a silent 1,500-request failure."""
+    asked = []
+    def answers(url, params):
+        if "audioscrobbler" in url:
+            if params["method"] == "user.gettopartists":
+                return {"topartists": {"artist": [{"name": f"Act {i}", "playcount": str(100 - i)} for i in range(30)], "@attr": {"totalPages": "1"}}}
+            return {}
+        if "bandsintown" in url:
+            asked.append(url)
+            raise RuntimeError("403 Client Error: Forbidden for url: " + url)
+        return {"_embedded": {"events": []}, "page": {"totalPages": 0, "totalElements": 0}}
+    monkeypatch.setattr(concerts, "Http", lambda *a, **k: FakeHttp(answers))
+    monkeypatch.setattr(concerts, "load_profile", lambda: {"artists": {}, "youtube": {"entries": []}})
+    monkeypatch.setenv("LASTFM_API_KEY", "k"); monkeypatch.setenv("TICKETMASTER_API_KEY", "t"); monkeypatch.delenv("BANDSINTOWN_APP_ID", raising=False)
+    import discovery.resolve as resolve
+    monkeypatch.setattr(resolve, "resolve_all", lambda items, cfg, **k: None)
+    cfg = {"station": {"lastfm_user": "u"}, "concerts": {"artists_per_run": 25, "bandsintown": {"app_id": "nobody", "give_up_after": 5}}, "resolve": {"youtube_music": False}}
+    out = concerts.build_concerts(cfg)
+    b = out["health"]["bandsintown"]
+    assert len(asked) == 5 and b["asked"] == 5 and b["failed"] == 5 and b["ok"] is False
+    assert b["errors"] == {"HTTP 403": 5} and b["error"].startswith("HTTP 403 on 5 of 5 requests") and "BANDSINTOWN_APP_ID" in b["error"]
+    assert b["due"] == 30 and b["checked"] == 0 and out["count"] == 0
 
 
 def test_shape_bandsintown():
@@ -275,7 +305,7 @@ def test_build_concerts_end_to_end(monkeypatch, sandbox):
     cfg = {"station": {"lastfm_user": "u"}, "concerts": {"refresh_days": 2, "artists_per_run": 10}, "resolve": {"youtube_music": True}, "youtube_music": {"region": "US"}}
 
     out = concerts.build_concerts(cfg)
-    assert out["count"] == 2 and out["radius_miles"] == 150 and out["center"]["name"] == "Detroit, MI"
+    assert out["count"] == 2 and out["radius_miles"] == 80 and out["center"]["name"] == "Detroit, MI"
     assert out["artists_total"] == 4 and out["artists_with_shows"] == 2 and out["sources"] == ["bandsintown", "ticketmaster"]
     first, second = out["events"]
     assert first["id"] == "bit:1" and first["date"] == SOON and first["artist"] == "Cut Copy" and first["artists"] == ["Cut Copy", "Jungle"]

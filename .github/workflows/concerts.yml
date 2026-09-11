@@ -1,6 +1,6 @@
 name: Concerts
 
-# Builds the concert list (site/data/concerts.json: upcoming shows within 150 miles of Detroit by every artist played
+# Builds the concert list (site/data/concerts.json: upcoming shows within 80 miles of Detroit by every artist played
 # on Indie Discotheque in the last year, from Bandsintown and, with a key, Ticketmaster; each act's most popular
 # song resolved on YouTube Music) and publishes the site. Its own job, in the afternoon after Catalog, so neither
 # waits on the other. Nothing here writes to your YouTube Music playlists: only a thumb pressed on the site does that.
@@ -55,7 +55,7 @@ jobs:
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}   # optional: Ticketmaster's free Discovery API
-          BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # optional: overrides concerts.bandsintown.app_id
+          BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # the app_id Bandsintown issued you; without one its API answers 403 and the list is Ticketmaster-only
         run: python -m discovery concerts
 
       - name: Commit data

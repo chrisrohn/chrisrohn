@@ -249,10 +249,13 @@ session that the playlist's owner approved in that browser.
   time after the feed). Nothing here spends YouTube API quota; the Last.fm key is the only one it needs.
 - **Concerts** tab — who is playing near Detroit. The **Concerts** workflow (its own job, 13:33 ET) takes every
   artist played on Indie Discotheque in the last year — the Last.fm 12-month chart of `station.lastfm_user`, plus
-  anyone filed into this year's playlist (`concerts.playlist_years`) — and asks Bandsintown's public artist-events
-  API (free, no key; `concerts.bandsintown.app_id` names the caller, `BANDSINTOWN_APP_ID` overrides it) where each of
-  them plays next, `artists_per_run` a run and again after `refresh_days`, so the list fills in over its first few
-  runs and then keeps pace. Every venue within `radius_miles` (150) of `center` (Detroit) makes the list, out to
+  anyone filed into this year's playlist (`concerts.playlist_years`) — and asks Bandsintown's artist-events API
+  where each of them plays next, `artists_per_run` a run and again after `refresh_days`, so the list fills in over
+  its first few runs and then keeps pace. Bandsintown's API is free but refuses any `app_id` it did not issue
+  (every request comes back 403 and the tab is Ticketmaster-only, which the summary line says): an artist gets a key
+  under Bandsintown for Artists → Settings → General → *Get API Key*; anyone else asks biz@bandsintown.com. Put it
+  in the `BANDSINTOWN_APP_ID` secret (`concerts.bandsintown.app_id` is only the fallback). A run of
+  `concerts.bandsintown.give_up_after` straight failures ends the batch for that run rather than asking 1,500 times. Every venue within `radius_miles` (80) of `center` (Detroit) makes the list, out to
   `months_ahead`; each act's most popular song comes from Last.fm `artist.getTopTracks` (Deezer's artist top without
   a key), is resolved on YouTube Music through the feed's resolver and cache, and plays in place from the row. Add a
   free `TICKETMASTER_API_KEY` secret (developer.ticketmaster.com, 5,000 calls a day; the list needs five) and
@@ -262,7 +265,7 @@ session that the playlist's owner approved in that browser.
   and Bandsintown's ticket links lead to whichever seller the venue uses, so the button names the seller from the
   link (Ticketmaster, TicketWeb, AXS, Etix, DICE, Eventbrite…). The report is `site/data/concerts.json`; the
   per-artist state (last asked, shows, top song) is `data/concerts_state.json`. On the tab: search matches artists,
-  venues, cities and song titles; selects for when (this week, 30, 90 days), how far (25/50/100 miles) and the order
+  venues, cities and song titles; selects for when (this week, 30, 90 days), how far (25/50 miles) and the order
   (soonest, most played, nearest, artist); `space` plays the first song, `j`/`k` walk the list; an artist's name
   opens the sheet, which also lists their dates. `python -m discovery concerts` runs it by hand; nothing here spends
   YouTube API quota.

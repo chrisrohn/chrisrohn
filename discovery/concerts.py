@@ -6,8 +6,10 @@ to new applications, so this draws the same list from what is still open:
   * who was played – Last.fm `user.getTopArtists` for `station.lastfm_user` over the last 12 months (the scrobbles of
     the Indie Discotheque playlists), plus every artist filed into this year's playlist (`concerts.playlist_years`).
     Without a Last.fm key the profile's 12-month artists stand in.
-  * where they play – Bandsintown's public artist-events API (free, no key; `concerts.bandsintown.app_id` names the
-    app) asked artist by artist, a rotating batch a run, kept per artist for `refresh_days`; and, when a free
+  * where they play – Bandsintown's artist-events API (free, but only with an app_id Bandsintown issued: an artist's
+    API key from Bandsintown for Artists → Settings → General, or one from biz@bandsintown.com; the
+    BANDSINTOWN_APP_ID secret carries it, `concerts.bandsintown.app_id` is the fallback, and an id Bandsintown does
+    not know is refused) asked artist by artist, a rotating batch a run, kept per artist for `refresh_days`; and, when a free
     TICKETMASTER_API_KEY is set, Ticketmaster's Discovery API for every music event within the radius up to
     `months_ahead` (Ticketmaster stops paging at its 1,000th result, so the horizon is split into date windows
     small enough to fit), matched against the same artists (a second ticket link, prices, sale status and the
@@ -21,9 +23,11 @@ song); the public list is site/data/concerts.json for the Concerts tab. Nothing 
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
+from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -47,7 +51,7 @@ EARTH_RADIUS_MILES = 3958.7613
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "center": {"name": "Detroit, MI", "lat": 42.3314, "lon": -83.0458},
-    "radius_miles": 150,
+    "radius_miles": 80,
     "months_ahead": 12,           # shows further out than this wait; Bandsintown lists festivals a year ahead
     "lastfm_limit": 0,            # user.getTopArtists over 12 months (200 a request); 0 = every artist Last.fm has
     "playlist_years": 1,          # artists filed into this year's playlist count as played (2 = last year's too)
@@ -56,7 +60,7 @@ DEFAULTS: dict[str, Any] = {
     "time_budget_minutes": 12,    # wall clock for the artist loop
     "top_tracks_per_run": 300,    # Last.fm / Deezer top-song lookups a run (only artists with a show nearby)
     "resolve_per_run": 300,       # YouTube Music lookups for those songs a run
-    "bandsintown": {"enabled": True, "app_id": "chrisrohn.com"},
+    "bandsintown": {"enabled": True, "app_id": "chrisrohn.com", "give_up_after": 10},   # BANDSINTOWN_APP_ID overrides app_id
     "ticketmaster": {"enabled": True, "size": 200, "requests_per_run": 60},   # needs TICKETMASTER_API_KEY (free)
 }
 
@@ -170,19 +174,31 @@ def bit_name(name: str) -> str:
     return q.replace("%2F", "%252F").replace("%3F", "%253F").replace("%2A", "%252A").replace("%22", "%27C")
 
 
-def bandsintown_events(http: Http, name: str, app_id: str) -> list[dict] | None:
+def failure_reason(exc: BaseException) -> str:
+    """A short label for a failed request, to tally: "HTTP 403" from requests' "403 Client Error: Forbidden for
+    url: …", else the exception's class ("ReadTimeout", "ConnectionError")."""
+    m = re.match(r"\s*(\d{3})\b", str(exc))
+    return f"HTTP {m.group(1)}" if m else type(exc).__name__
+
+
+def bandsintown_events(http: Http, name: str, app_id: str, reasons: Counter | None = None) -> list[dict] | None:
     """The artist's upcoming shows, as Bandsintown lists them; [] when it does not know the act, None when the
-    request failed (the old listing is then kept and the artist asked again next run)."""
+    request failed (the old listing is then kept and the artist asked again next run; `reasons`, when given,
+    counts why — Bandsintown answers 403 to an app_id it did not issue, and that must not stay a debug line)."""
     try:
         data = http.get(BIT_API.format(name=bit_name(name)), params={"app_id": app_id, "date": "upcoming"}, cache=False, retries=1, timeout=20)
     except Exception as exc:  # noqa: BLE001
         if "404" in str(exc):
             return []
+        if reasons is not None:
+            reasons[failure_reason(exc)] += 1
         log.debug("bandsintown %s: %s", name, exc)
         return None
     if isinstance(data, dict):
         if data.get("errorMessage"):
             return []
+        if reasons is not None:
+            reasons["unexpected object"] += 1
         return None
     return [e for e in (data or []) if isinstance(e, dict)]
 
@@ -408,14 +424,22 @@ def build_concerts(cfg: dict, *, deadline_minutes: float | None = None) -> dict 
     bcfg = c["bandsintown"]
     app_id = os.environ.get("BANDSINTOWN_APP_ID") or str(bcfg.get("app_id") or "chrisrohn.com")
     asked = failed = 0
+    reasons: Counter = Counter()
+    give_up_after = max(1, int(bcfg.get("give_up_after", 10) or 10))
     if bcfg.get("enabled", True):
         cutoff = (utcnow() - timedelta(days=float(c["refresh_days"]))).isoformat()
         due = [k for k in ranked(played) if (arts.get(k) or {}).get("checked_at", "") < cutoff]
         for k in due[: int(c["artists_per_run"])]:
             if deadline.expired:
                 break
+            if asked == failed == give_up_after:
+                # every request so far failed the same way: Bandsintown is refusing us (an app_id it did not issue,
+                # an outage), not this artist; the rest of the batch would fail too and stays due for the next run
+                log.warning("concerts: bandsintown refused the first %d requests (%s) with app_id %r; giving up on the batch this run",
+                            asked, ", ".join(f"{r} ×{n}" for r, n in reasons.most_common()), app_id)
+                break
             name = played[k]["name"]
-            evs = bandsintown_events(http, name, app_id)
+            evs = bandsintown_events(http, name, app_id, reasons)
             asked += 1
             if evs is None:
                 failed += 1
@@ -429,7 +453,13 @@ def build_concerts(cfg: dict, *, deadline_minutes: float | None = None) -> dict 
             arts[k] = {"name": name, "checked_at": utcnow().isoformat(), "events": rows, "top": (arts.get(k) or {}).get("top"),
                        "page": safe_url(who.get("url")) or (arts.get(k) or {}).get("page"), "image": safe_url(who.get("image_url")) or (arts.get(k) or {}).get("image")}
         health["bandsintown"] = {"ok": failed < max(3, asked // 2), "asked": asked, "failed": failed, "due": len(due), "checked": sum(1 for a in arts.values() if a.get("checked_at"))}
-        log.info("concerts: bandsintown asked for %d of %d due artists (%d failed); %d of %d artists checked so far", asked, len(due), failed, health["bandsintown"]["checked"], len(played))
+        if reasons:
+            health["bandsintown"]["errors"] = dict(reasons.most_common())
+        if not health["bandsintown"]["ok"]:
+            top = reasons.most_common(1)[0][0] if reasons else "failed"
+            health["bandsintown"]["error"] = f"{top} on {failed} of {asked} requests" + (" (app_id not issued by Bandsintown? set the BANDSINTOWN_APP_ID secret)" if top == "HTTP 403" else "")
+        log.log(logging.WARNING if failed else logging.INFO, "concerts: bandsintown asked for %d of %d due artists (%d failed%s); %d of %d artists checked so far",
+                asked, len(due), failed, ": " + ", ".join(f"{r} ×{n}" for r, n in reasons.most_common()) if reasons else "", health["bandsintown"]["checked"], len(played))
     write_json(STATE_PATH, state, compact=True)
 
     # 3. the list: every show still ahead, within the horizon, one row per show
