@@ -153,6 +153,8 @@ test("a rated track feeds the personal ranking and the stats", async ({ page }) 
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
     localStorage.setItem("id:filters", JSON.stringify({ shortlist: false }));
   }, [rated, feed.google.curator_hashes[0]]);
+  // a remembered account with no live token: every tap starts a silent refresh, so Google's script is a stand-in here
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
   const errors = await open(page);
   await expect(page.locator("body")).toHaveClass(/curator/);
   // the Skipped tab lists the three local skips and the wrong-video flag (not the replaced one) and offers to restore them
@@ -210,6 +212,7 @@ test("the third verdict: ≠ wrong video hides a card without judging the song, 
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
     localStorage.setItem("id:filters", JSON.stringify({ shortlist: false, onlyRecent: false }));
   }, [rated, feed.google.curator_hashes[0]]);
+  await ctx.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));   // no live token: the silent refresh a tap starts must never reach a real popup
   const page = await ctx.newPage();
   const errors = await open(page);
   await expect(page.locator("body")).toHaveClass(/curator/);
