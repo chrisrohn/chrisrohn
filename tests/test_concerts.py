@@ -275,7 +275,7 @@ def test_build_concerts_end_to_end(monkeypatch, sandbox):
     cfg = {"station": {"lastfm_user": "u"}, "concerts": {"refresh_days": 2, "artists_per_run": 10}, "resolve": {"youtube_music": True}, "youtube_music": {"region": "US"}}
 
     out = concerts.build_concerts(cfg)
-    assert out["count"] == 2 and out["radius_miles"] == 150 and out["center"]["name"] == "Detroit, MI"
+    assert out["count"] == 2 and out["radius_miles"] == 80 and out["center"]["name"] == "Detroit, MI"
     assert out["artists_total"] == 4 and out["artists_with_shows"] == 2 and out["sources"] == ["bandsintown", "ticketmaster"]
     first, second = out["events"]
     assert first["id"] == "bit:1" and first["date"] == SOON and first["artist"] == "Cut Copy" and first["artists"] == ["Cut Copy", "Jungle"]

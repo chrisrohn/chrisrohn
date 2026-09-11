@@ -1,6 +1,6 @@
 name: Concerts
 
-# Builds the concert list (site/data/concerts.json: upcoming shows within 150 miles of Detroit by every artist played
+# Builds the concert list (site/data/concerts.json: upcoming shows within 80 miles of Detroit by every artist played
 # on Indie Discotheque in the last year, from Bandsintown and, with a key, Ticketmaster; each act's most popular
 # song resolved on YouTube Music) and publishes the site. Its own job, in the afternoon after Catalog, so neither
 # waits on the other. Nothing here writes to your YouTube Music playlists: only a thumb pressed on the site does that.

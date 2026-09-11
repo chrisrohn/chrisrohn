@@ -47,7 +47,7 @@ EARTH_RADIUS_MILES = 3958.7613
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "center": {"name": "Detroit, MI", "lat": 42.3314, "lon": -83.0458},
-    "radius_miles": 150,
+    "radius_miles": 80,
     "months_ahead": 12,           # shows further out than this wait; Bandsintown lists festivals a year ahead
     "lastfm_limit": 0,            # user.getTopArtists over 12 months (200 a request); 0 = every artist Last.fm has
     "playlist_years": 1,          # artists filed into this year's playlist count as played (2 = last year's too)

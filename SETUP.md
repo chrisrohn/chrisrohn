@@ -252,7 +252,7 @@ session that the playlist's owner approved in that browser.
   anyone filed into this year's playlist (`concerts.playlist_years`) — and asks Bandsintown's public artist-events
   API (free, no key; `concerts.bandsintown.app_id` names the caller, `BANDSINTOWN_APP_ID` overrides it) where each of
   them plays next, `artists_per_run` a run and again after `refresh_days`, so the list fills in over its first few
-  runs and then keeps pace. Every venue within `radius_miles` (150) of `center` (Detroit) makes the list, out to
+  runs and then keeps pace. Every venue within `radius_miles` (80) of `center` (Detroit) makes the list, out to
   `months_ahead`; each act's most popular song comes from Last.fm `artist.getTopTracks` (Deezer's artist top without
   a key), is resolved on YouTube Music through the feed's resolver and cache, and plays in place from the row. Add a
   free `TICKETMASTER_API_KEY` secret (developer.ticketmaster.com, 5,000 calls a day; the list needs five) and

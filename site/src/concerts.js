@@ -1,5 +1,5 @@
 // @ts-check
-/* The Concerts tab: every upcoming show within 150 miles of Detroit by an artist played on Indie Discotheque in the
+/* The Concerts tab: every upcoming show within 80 miles of Detroit by an artist played on Indie Discotheque in the
  * last year — the Songkick page, drawn from Bandsintown and Ticketmaster by the Concerts workflow
  * (discovery/concerts.py → data/concerts.json). One row per show: the date, who, the venue and city, how far, the
  * ticket link, and the act's most popular song, playable in place through the site's own player. Loaded the first
