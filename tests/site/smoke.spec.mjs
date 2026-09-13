@@ -111,6 +111,28 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   expect(errors).toEqual([]);
 });
 
+test("a feed written before the audio rule: cards with no YouTube match never render, in the feed or the catalog", async ({ page }) => {
+  // a stale feed.json (or a cached one) can still carry matchless cards, which could neither play nor be filed nor skipped
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const base = feed.items.find(i => i.youtube && i.youtube.videoId);
+  const ghost = { ...base, id: "ghost-1", artist: "The Supermen Lovers", title: "Coco Bingo", display: "The Supermen Lovers - Coco Bingo", youtube: null, reasons: ["no YouTube match yet"], score: 9.9 };
+  const ghost2 = { ...base, id: "ghost-2", artist: "TEED", title: "Household Goods", display: "TEED - Household Goods", youtube: { videoId: null }, score: 9.8 };
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); j.items = [ghost, ghost2, ...j.items]; j.count += 2; await r.fulfill({ json: j }); });
+  await page.route("**/data/catalog.json", async r => { const j = await (await r.fetch()).json(); j.items = [{ ...ghost, id: "ghost-cat", plays: 40 }, ...(j.items || [])]; await r.fulfill({ json: j }); });
+  const errors = await open(page);
+  await expect(page.locator("#list .card").first()).toBeVisible();
+  await expect(page.locator('.card[data-id="ghost-1"]')).toHaveCount(0);
+  await expect(page.locator('.card[data-id="ghost-2"]')).toHaveCount(0);
+  expect(await page.locator(".art.unplayable").count()).toBe(0);
+  await page.fill("#q", "Coco Bingo");
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  await page.fill("#q", "");
+  await page.click(".tab[data-view=catalog]");
+  await expect(page.locator("#count-catalog")).not.toHaveText("…", { timeout: 15_000 });
+  await expect(page.locator('.card[data-id="ghost-cat"]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test("settings dialog opens and lists feed health", async ({ page }) => {
   const errors = await open(page);
   await page.click("#settings-btn");
@@ -564,7 +586,8 @@ test("the Cleanup tab: the duplicate report, filters, and the bulk button once a
   const errors = await open(page);
   const tab = page.locator(".tab[data-view=cleanup]");
   await expect(tab).toBeVisible();
-  await expect(page.locator("#count-cleanup")).toHaveText(String(feed.youtube.duplicates_count));
+  // the pill counts every open item: duplicated songs, rows that will not stream here, rows filed as the video
+  await expect(page.locator("#count-cleanup")).toHaveText(String(feed.youtube.duplicates_count + (feed.youtube.unavailable_count || 0) + (feed.youtube.video_count || 0)));
   await tab.click();
   await expect(page.locator("#cleanup")).toBeVisible();
   await expect(page.locator("#list .card")).toHaveCount(0);
@@ -662,7 +685,7 @@ test("Cleanup: a song's copies can be looked up, played in place, kept, removed 
   const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
   page.on("dialog", d => d.accept());
   await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
-  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 1, duplicates_kinds: report.kinds, unavailable_count: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 1, duplicates_kinds: report.kinds, unavailable_count: 0, video_count: 0 }); await r.fulfill({ json: j }); });
   await page.route("**/data/duplicates.json", r => r.fulfill({ json: report }));
   const calls = [];
   // the playlists as YouTube would answer for them: two items of audioA in y1, one in y0, one of videoB in y1 — kept in step with every add and delete
@@ -748,7 +771,7 @@ test("Cleanup: the playability audit finds deleted and blocked tracks, offers a 
   const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
   page.on("dialog", d => d.accept());
   await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
-  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 0, duplicates_kinds: {}, unavailable_count: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 0, duplicates_kinds: {}, unavailable_count: 0, video_count: 0 }); await r.fulfill({ json: j }); });
   const calls = [];
   const parse = t => { try { return JSON.parse(t || ""); } catch { return t; } };
   await page.route("https://www.googleapis.com/**", async route => {
@@ -828,7 +851,7 @@ test("Cleanup: tracks that will not stream here list their streamable counterpar
   const ctx = await browser.newContext({ serviceWorkers: "block" });
   await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
   const page = await ctx.newPage();
-  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 3, unavailable_with_alt: 1, unavailable_pending: 1 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 3, unavailable_with_alt: 1, unavailable_pending: 1, video_count: 0 }); await r.fulfill({ json: j }); });
   await page.route("**/data/unavailable.json", r => r.fulfill({ json: { count: 3, with_counterpart: 1, pending: 1, rows } }));
   const errors = await open(page);
   // the pills prove the feed (with its counts) and the catalog are both in before the tab is clicked: under

@@ -16,10 +16,14 @@ let loadedAt = 0;
 
 // same URL every time: GitHub Pages answers 304 from the ETag when nothing changed, and the service worker keeps one copy
 const fetchFeed = () => fetch("data/feed.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
+/** Every card plays: the build only writes songs with their YouTube Music audio track, and a feed written before that
+ * rule (or a stale copy of one) still carries cards with no match, which could neither be played nor filed nor
+ * skipped. They are dropped on the way in, whatever file they came from. @param {FeedItem[] | undefined} list */
+const playable = list => (list || []).filter(i => i.youtube && i.youtube.videoId);
 /** @param {import("./types").Feed} feed */
 function absorb(feed) {
   // one card per id whatever the build wrote: a second item with the same id would share the first one's card element
-  const seen = new Set(); feed.items = (feed.items || []).filter(i => !seen.has(i.id) && seen.add(i.id));
+  const seen = new Set(); feed.items = playable(feed.items).filter(i => !seen.has(i.id) && seen.add(i.id));
   state.feed = feed; loadedAt = Date.now();
   hays.clear(); memo.clear(); invalidateRank(); reindex();
   reconcileRated();
@@ -87,7 +91,7 @@ export async function loadCatalog(force = false) {
     if (r.status === 404) { state.catalogState = "missing"; render(); return; }
     if (!r.ok) throw new Error("catalog.json " + r.status);
     const cat = await r.json();
-    if (cat.generated_at !== state.catalog?.generated_at) { state.catalog = cat; memo.clear(); reindex(); reconcileRated(); }
+    if (cat.generated_at !== state.catalog?.generated_at) { cat.items = playable(cat.items); state.catalog = cat; memo.clear(); reindex(); reconcileRated(); }
     state.catalogState = "ready";
   } catch (e) { state.catalogState = "failed"; toast("Could not load the catalog: " + /** @type {Error} */ (e).message, true); }
   fillSources(); fillCatalogYears(); render();
