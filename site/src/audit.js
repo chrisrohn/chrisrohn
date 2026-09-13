@@ -24,7 +24,7 @@ export const audit = () => { if (!state.audit) state.audit = /** @type {Audit} *
 function save() { LS.set("id:audit", audit()); }
 export const region = () => (state.feed?.youtube && state.feed.youtube.region) || "US";
 /** @type {Record<string, string>} */
-export const WHY = { deleted: "deleted video", private: "private video", blocked: "blocked here", rejected: "upload rejected", dead: "not playable" };
+export const WHY = { deleted: "deleted video", private: "private video", blocked: "blocked here", rejected: "upload rejected", dead: "not playable", video: "the video, not the audio track" };
 
 /** Every playable-here failure found so far, newest year first. @returns {AuditRow[]} */
 export function auditRows() { return Object.values(audit().years).flatMap(y => y.dead).sort((a, b) => b.year.localeCompare(a.year) || (a.position - b.position)); }

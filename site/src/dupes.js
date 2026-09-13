@@ -32,6 +32,10 @@ const RESERVE = 500;   // quota kept back for the day's keeps
 // ------------------------------------------------------------------ the reports
 const dupCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.duplicates_count) || 0;
 const unavCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.unavailable_count) || 0;
+/** Playlist rows that are the video rather than the audio track (the build's scan; data/unavailable.json lists them with why "video"). */
+const videoCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.video_count) || 0;
+/** @param {Unavailable} u */
+const isVideoRow = u => u.why === "video";
 async function loadUnavailable() {
   if (state.unavailable) return state.unavailable;
   try { const r = await fetch("/data/unavailable.json", { cache: "no-cache" }); state.unavailable = r.ok ? (await r.json()).rows || [] : []; }
@@ -84,7 +88,9 @@ export function unavailableRows() {
   }
   return [...m.values()].sort((a, b) => b.year.localeCompare(a.year) || (a.position || 0) - (b.position || 0));
 }
-export const openUnavailable = () => unavailableRows().filter(unavOpen).length;
+export const openUnavailable = () => unavailableRows().filter(unavOpen).filter(u => !isVideoRow(u)).length;
+/** Playlist rows still filed as the video, not yet swapped for the audio track or kept as they are. */
+export const openVideos = () => unavailableRows().filter(unavOpen).filter(isVideoRow).length;
 /** The audit's findings still in the playlists, for the ratings file the build learns from (github.js). */
 export const openAuditRows = () => auditRows().filter(unavOpen);
 
@@ -133,7 +139,7 @@ export function openDupes() {
   return openCache.n;
 }
 /** Everything the tab still lists: open songs plus tracks that will not play here, not yet swapped or removed. */
-export const openCleanup = () => (dupesLoaded() ? openDupes() : dupCount()) + (state.unavailable ? openUnavailable() : unavCount() + auditRows().filter(unavOpen).length);
+export const openCleanup = () => (dupesLoaded() ? openDupes() : dupCount()) + (state.unavailable ? openUnavailable() + openVideos() : unavCount() + videoCount() + auditRows().filter(unavOpen).length);
 
 export function noticeDupes() {
   const stamp = (state.feed?.youtube || {}).duplicates_checked_at || "";
@@ -151,9 +157,10 @@ export function dupesSummary() {
   const audited = auditRows().length;
   const unav = unavCount() ? ` · ${unavCount()} not streamable here (${yt0.unavailable_with_alt || 0} with a streamable counterpart${yt0.unavailable_pending ? `, ${yt0.unavailable_pending} still being searched` : ""})` : "";
   const dead = audited ? ` · ${audited} found unplayable in ${region()} by your audit` : "";
-  if (!dupCount()) return `Duplicate check: none found by the last build (${when})${unav}${dead}`;
+  const video = videoCount() ? ` · ${videoCount()} filed as the video rather than the audio track (${yt0.video_with_audio || 0} with the audio track found${yt0.video_pending ? `, ${yt0.video_pending} still being asked` : ""})` : "";
+  if (!dupCount()) return `Duplicate check: none found by the last build (${when})${unav}${dead}${video}`;
   const done = dupesLoaded() ? dupCount() - openDupes() : 0;
-  return `${dupCount()} duplicated songs in the year playlists (checked ${when})${done ? ` · ${done} cleaned or dismissed since` : ""}${unav}${dead}`;
+  return `${dupCount()} duplicated songs in the year playlists (checked ${when})${done ? ` · ${done} cleaned or dismissed since` : ""}${unav}${dead}${video}`;
 }
 
 // ------------------------------------------------------------------ filters
@@ -273,23 +280,23 @@ export async function renderDupes(reset = true) {
   const asel = $("#cl-audit-year");
   if (asel && !asel.options.length) asel.innerHTML = sel.innerHTML;
   renderAudit();
-  if (!dupCount() && !unavCount() && !auditRows().length) {
+  if (!dupCount() && !unavCount() && !videoCount() && !auditRows().length) {
     box.innerHTML = ""; $("#cl-summary").textContent = dupesSummary(); $("#cl-dupe-shown").textContent = ""; $("#cl-dupe-bulk").hidden = true; $("#cl-dupe-lookup").hidden = true;
     const pill = $("#count-cleanup"); if (pill) pill.textContent = String(openCleanup());
     return;
   }
   if (!dupesLoaded() && dupCount()) box.innerHTML = `<span class="muted">loading report…</span>`;
   const all = dupCount() ? await loadDupes() : (state.dupes = state.dupes || []);   // the feed's count is the authority: no duplicates, no report to read
-  if (unavCount()) await loadUnavailable();
+  if (unavCount() || videoCount()) await loadUnavailable();
   $("#cl-summary").textContent = dupesSummary();
   const pill = $("#count-cleanup"); if (pill) pill.textContent = String(openCleanup());
   const ysel = $("#cl-dupe-yr");
   if (ysel.options.length <= 1) { const yrs = [...new Set([...all.flatMap(d => d.years), ...unavailableRows().map(u => u.year)])].sort().reverse(); ysel.innerHTML = `<option value="">all years</option>` + yrs.map(y => `<option value="${y}">${y}</option>`).join(""); }
   const kinds = yt0.duplicates_kinds || {};
-  $("#cl-dupe-kinds").textContent = Object.entries(kinds).sort((a, b) => KIND_ORDER.indexOf(a[0]) - KIND_ORDER.indexOf(b[0])).map(([k, n]) => `${n} ${KIND[k] || k}`).concat(openUnavailable() ? [`${openUnavailable()} not streamable here`] : []).join(" · ");
+  $("#cl-dupe-kinds").textContent = Object.entries(kinds).sort((a, b) => KIND_ORDER.indexOf(a[0]) - KIND_ORDER.indexOf(b[0])).map(([k, n]) => `${n} ${KIND[k] || k}`).concat(openUnavailable() ? [`${openUnavailable()} not streamable here`] : [], openVideos() ? [`${openVideos()} filed as the video`] : []).join(" · ");
   if (reset) state.dupePage = 1;
   const f = filters();
-  if (f.kind === "unavailable") { updateBulk(f, []); renderUnavailable(); return; }
+  if (f.kind === "unavailable" || f.kind === "video") { updateBulk(f, []); renderUnavailable(); return; }
   const list = filteredDupes();
   updateBulk(f, list);
   $("#cl-dupe-shown").textContent = list.length ? `${list.length} song${list.length === 1 ? "" : "s"}` : "";
@@ -299,34 +306,38 @@ export async function renderDupes(reset = true) {
 function updateBulk(f, list) {
   const bulk = $("#cl-dupe-bulk"); const look = $("#cl-dupe-lookup");
   const vids = new Set(list.slice(0, PAGE * state.dupePage).flatMap(x => x.v.rows.map(r => r.videoId)).filter(v => !state.videoInfo[v]));
-  look.hidden = f.kind === "unavailable" || !vids.size; look.textContent = `look up the ${vids.size} copies shown (${Math.ceil(vids.size / 50)} unit${vids.size > 50 ? "s" : ""})`;
-  if (f.kind === "unavailable") { const swappable = unavailableRows().filter(unavOpen).filter(u => u.alt && (!f.year || u.year === f.year)); bulk.hidden = !(f.year && swappable.length); bulk.textContent = `swap all ${swappable.length} in ${f.year} for streamable uploads…`; return; }
+  look.hidden = f.kind === "unavailable" || f.kind === "video" || !vids.size; look.textContent = `look up the ${vids.size} copies shown (${Math.ceil(vids.size / 50)} unit${vids.size > 50 ? "s" : ""})`;
+  if (f.kind === "unavailable") { const swappable = unavailableRows().filter(unavOpen).filter(u => !isVideoRow(u) && u.alt && (!f.year || u.year === f.year)); bulk.hidden = !(f.year && swappable.length); bulk.textContent = `swap all ${swappable.length} in ${f.year} for streamable uploads…`; return; }
+  if (f.kind === "video") { const swappable = unavailableRows().filter(unavOpen).filter(u => isVideoRow(u) && u.alt && (!f.year || u.year === f.year)); bulk.hidden = !(f.year && swappable.length); bulk.textContent = `swap all ${swappable.length} in ${f.year} for the audio track…`; return; }
   if (f.kind === "same-video" && f.year) { const n = list.reduce((k, x) => k + x.v.rows.filter(r => r.year === f.year && r.copies > 1).length, 0); bulk.hidden = !n; bulk.textContent = `remove all ${n} extra copies in ${f.year}…`; return; }
   if (f.kind === "wrong-year" && f.year) { const n = list.reduce((k, x) => k + x.v.rows.filter(r => r.year === f.year && wrongYear(x.d, r)).length, 0); bulk.hidden = !n; bulk.textContent = `fix all ${n} wrong-year copies in ${f.year}…`; return; }
   bulk.hidden = true;
 }
 
-/** The tracks that will not play here: each with why, the upload that does (the build's counterpart or a search's), and a swap. */
+/** The tracks that will not play here (or, under "video", the rows filed as the video rather than the audio track):
+ * each with why, the upload that does (the build's counterpart or a search's), and a swap. */
 function renderUnavailable() {
   const box = $("#cl-dupes"); const f = filters();
-  const list = unavailableRows().filter(unavOpen).filter(u => (!f.year || u.year === f.year) && (!f.q || `${u.artist} ${u.title} ${u.why}`.toLowerCase().includes(f.q)));
+  const list = unavailableRows().filter(unavOpen).filter(u => isVideoRow(u) === (f.kind === "video") && (!f.year || u.year === f.year) && (!f.q || `${u.artist} ${u.title} ${u.why}`.toLowerCase().includes(f.q)));
   const shown = list.slice(0, PAGE * state.dupePage);
   $("#cl-dupe-shown").textContent = list.length ? `${list.length} track${list.length === 1 ? "" : "s"}` : "";
   box.innerHTML = shown.map(unavHtml).join("") + (list.length > shown.length ? `<button class="btn ghost small" type="button" data-act="more">show ${Math.min(PAGE, list.length - shown.length)} more of ${list.length - shown.length}</button>` : "") + (list.length ? "" : `<span class="muted">nothing matches these filters</span>`);
 }
 /** @param {Unavailable} u */
 function unavHtml(u) {
+  const video = isVideoRow(u);
   const why = u.why && u.why !== "greyed" ? WHY[u.why] || u.why : `greyed out on YouTube Music in ${region()}`;
   const name = u.artist || u.title ? `<b>${esc(u.artist)}</b> - ${esc(u.title)}` : `<span class="muted">no title left on YouTube</span> <span class="muted">(row #${(u.position || 0) + 1} of ${esc(titleFor(u.year))})</span>`;
   const q = `${u.artist} ${u.title}`.trim();
-  return `<div class="dupe unav" data-key="${esc(unavKey(u))}">
-      <div class="dupe-song"><span class="dname">${name}</span> <span class="flags"><span class="flag dead" title="${u.found === "audit" ? `found by your audit ${u.at ? relTime(new Date(u.at)) : ""}` : "found by the daily build's scan"}">${esc(why)}</span><span class="muted">${esc(u.year)}${u.found === "audit" ? " · audit" : ""}</span></span></div>
-      <div class="dupe-entries"><span class="chip wrong" title="the copy in the playlist, which will not play here"><img class="cthumb" src="https://i.ytimg.com/vi/${esc(u.videoId)}/default.jpg" alt="" loading="lazy">${esc(u.year)} <a href="https://music.youtube.com/watch?v=${esc(u.videoId)}&list=${esc(u.playlistId)}" target="_blank" rel="noopener">▶︎ dead</a></span>
-        ${u.alt ? `<span class="chip ok" title="${esc(u.alt.album || "")}"><img class="cthumb" src="https://i.ytimg.com/vi/${esc(u.alt.videoId)}/default.jpg" alt="" loading="lazy">→ <a href="https://music.youtube.com/watch?v=${esc(u.alt.videoId)}" target="_blank" rel="noopener">▶︎ ${esc(u.alt.title || "streamable upload")}</a>${u.alt.videoType === "MUSIC_VIDEO_TYPE_ATV" ? " · audio" : " · video"}</span><button class="btn ghost small" type="button" data-swap="1">swap (100 units)</button>`
-        : u.pending ? `<span class="muted">counterpart search pending — the next build looks</span>`
+  return `<div class="dupe unav${video ? " video" : ""}" data-key="${esc(unavKey(u))}">
+      <div class="dupe-song"><span class="dname">${name}</span> <span class="flags"><span class="flag ${video ? "versions" : "dead"}" title="${u.found === "audit" ? `found by your audit ${u.at ? relTime(new Date(u.at)) : ""}` : "found by the daily build's scan"}">${esc(why)}</span><span class="muted">${esc(u.year)}${u.found === "audit" ? " · audit" : ""}</span></span></div>
+      <div class="dupe-entries"><span class="chip wrong" title="${video ? "the copy in the playlist: the video, not the audio track" : "the copy in the playlist, which will not play here"}"><img class="cthumb" src="https://i.ytimg.com/vi/${esc(u.videoId)}/default.jpg" alt="" loading="lazy">${esc(u.year)} <a href="https://music.youtube.com/watch?v=${esc(u.videoId)}&list=${esc(u.playlistId)}" target="_blank" rel="noopener">▶︎ ${video ? "video" : "dead"}</a></span>
+        ${u.alt ? `<span class="chip ok" title="${esc(u.alt.album || "")}"><img class="cthumb" src="https://i.ytimg.com/vi/${esc(u.alt.videoId)}/default.jpg" alt="" loading="lazy">→ <a href="https://music.youtube.com/watch?v=${esc(u.alt.videoId)}" target="_blank" rel="noopener">▶︎ ${esc(u.alt.title || (video ? "the audio track" : "streamable upload"))}</a>${u.alt.videoType === "MUSIC_VIDEO_TYPE_ATV" ? " · audio" : " · video"}</span><button class="btn ghost small" type="button" data-swap="1">swap (100 units)</button>`
+        : u.pending ? `<span class="muted">${video ? "audio track lookup pending — the next build asks" : "counterpart search pending — the next build looks"}</span>`
+        : video ? `<span class="muted">YouTube Music pairs no audio track with this video yet — the build asks again</span>`
         : q ? `<span class="muted">no other upload found${u.found === "audit" ? " yet — the next build looks" : ""}</span>` : ""}
         ${q ? `<a href="https://music.youtube.com/search?q=${encodeURIComponent(q)}" target="_blank" rel="noopener">search YouTube Music</a> <button class="btn ghost small" type="button" data-find="1" title="one YouTube search (100 units) plus a check that the results play here (1 unit)">find a replacement now (101 units)</button>` : `<span class="dsearch"><input type="text" placeholder="artist - title, if you know it" aria-label="artist and title to search for"><button class="btn ghost small" type="button" data-find="1" title="one YouTube search (100 units) plus a check that the results play here (1 unit)">find a replacement (101 units)</button></span>`}
-        <button class="btn ghost small" type="button" data-drop="1" title="remove the dead copy from the playlist (${u.itemId ? "50" : "51"} units)">remove it</button>
+        ${video ? `<button class="btn ghost small" type="button" data-act="keepvideo" title="keep the video in the playlist and stop listing it (no quota)">keep the video</button>` : `<button class="btn ghost small" type="button" data-drop="1" title="remove the dead copy from the playlist (${u.itemId ? "50" : "51"} units)">remove it</button>`}
       </div><div class="dalts" hidden></div></div>`;
 }
 /** @param {import("./types").Replacement} r @param {Unavailable} u */
@@ -375,6 +386,12 @@ async function onClick(e) {
   if (t.dataset.find) { findOne(/** @type {HTMLButtonElement} */ (t)); return; }
   if (t.dataset.act === "preview") { previewHere(t); return; }
   if (t.dataset.act === "more") { state.dupePage++; renderDupes(false); return; }
+  if (t.dataset.act === "keepvideo") {
+    const key = /** @type {HTMLElement} */ (t.closest(".dupe")).dataset.key || ""; const u = unavFor(key); if (!u) return;
+    mark(key); renderDupes(false);
+    toast(`Keeping the video · ${u.artist} - ${u.title}`, false, { label: "Undo", fn: () => { unmark(key); renderDupes(false); } });
+    return;
+  }
   const d = itemFor(t); if (!d) return;
   const btn = /** @type {HTMLButtonElement} */ (t);
   if (t.dataset.fix) {
@@ -507,7 +524,7 @@ async function swapOne(btn) {
   const name = u.artist || u.title ? `${u.artist} - ${u.title}` : `the dead row #${(u.position || 0) + 1}`;
   const units = (use ? READ + WRITE : 0) + (u.itemId ? WRITE : READ + WRITE);
   if (!affordable(units)) return;
-  if (!confirm(use ? `Swap “${name}” in ${titleFor(u.year)} for the upload that plays here? (${units} quota units: one add, one removal)` : `Remove the dead copy of “${name}” from ${titleFor(u.year)}? (${units} quota units)`)) return;
+  if (!confirm(use ? (isVideoRow(u) ? `Swap the video of “${name}” in ${titleFor(u.year)} for its audio track? (${units} quota units: one add, one removal)` : `Swap “${name}” in ${titleFor(u.year)} for the upload that plays here? (${units} quota units: one add, one removal)`) : `Remove the dead copy of “${name}” from ${titleFor(u.year)}? (${units} quota units)`)) return;
   btn.disabled = true;
   try {
     const n = await swapTrack(u, use);
@@ -544,11 +561,11 @@ async function findOne(btn) {
   });
 }
 export async function bulkSwap() {
-  const f = filters(); const list = unavailableRows().filter(unavOpen).filter(u => u.alt && u.year === f.year);
+  const f = filters(); const list = unavailableRows().filter(unavOpen).filter(u => isVideoRow(u) === (f.kind === "video") && u.alt && u.year === f.year);
   const afford = Math.max(0, Math.floor((quotaLeft() - RESERVE) / (READ + WRITE + READ + WRITE)));
   const todo = list.slice(0, Math.min(list.length, afford));
   if (!todo.length) { toast("Not enough YouTube quota left today for a bulk swap — try after midnight Pacific", true); return; }
-  if (!confirm(`Swap ${todo.length} dead tracks in ${titleFor(f.year)} for streamable uploads${todo.length < list.length ? ` (${list.length - todo.length} more when quota allows)` : ""}?\nCost ≈ ${todo.length * 102} of ${quotaLeft()} quota units left today.`)) return;
+  if (!confirm(`Swap ${todo.length} ${f.kind === "video" ? "videos" : "dead tracks"} in ${titleFor(f.year)} for ${f.kind === "video" ? "their audio tracks" : "streamable uploads"}${todo.length < list.length ? ` (${list.length - todo.length} more when quota allows)` : ""}?\nCost ≈ ${todo.length * 102} of ${quotaLeft()} quota units left today.`)) return;
   const bulk = $("#cl-dupe-bulk"); bulk.disabled = true;
   let done = 0, failed = 0;
   for (const [i, u] of todo.entries()) {

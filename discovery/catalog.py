@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from .learn import load_ratings, wrong_videos
 from .models import Item
 from .profile import LastFm, load_profile
-from .resolve import collapse_shared_videos, drop_by_length, resolve_all
+from .resolve import audio_summary, collapse_shared_videos, drop_by_length, resolve_all
 from .score import dedupe, score_items
 from .util import CACHE_DIR, DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, norm, read_json, read_versioned, safe_url, utcnow, write_json, write_versioned
 from .years import verify_years
@@ -191,6 +191,7 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
         "pending": pending,
         "sources": sorted({s for i in items for s in i.sources}),
         "years": years,
+        "audio": audio_summary(items),
         "items": [_public(i, first_seen.get(i.key)) for i in items],
     }
     write_json(CATALOG_PATH, payload, compact=True)

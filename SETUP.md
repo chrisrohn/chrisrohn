@@ -123,11 +123,19 @@ allows 1 request/s), undated tracks first.
 for as long as your Google session lasts. Signing out only forgets that device. To disconnect the site from your
 Google account entirely use https://myaccount.google.com/permissions.
 
-**Audio, not video:** YouTube Music lists most songs twice, as the audio-only track and as the official video. The
-resolver prefers the audio track, swaps a video hit for its audio counterpart (the watch playlist pairs the two), and
-prefers an original issue over a deluxe, remastered or live edition. Older cached hits are re-checked a batch a run
-(`resolve.audio_heals_per_run`). The album a song names is opened once for the year YouTube Music states and its
-playlist, which is what the "full release" link and the year fallback come from.
+**Audio, not video:** YouTube Music lists most songs twice, as the audio-only track (`MUSIC_VIDEO_TYPE_ATV`, the
+one the playlists want) and as the official video. The resolver prefers the audio track in search, swaps a video hit
+— from a search or from an album page alike — for its audio counterpart (the watch playlist pairs the two), and
+prefers an original issue over a deluxe, remastered or live edition. A card that is still a video (YouTube Music
+pairs no audio track with it yet) is asked again every `resolve.audio_recheck_days` (30), a batch a run
+(`resolve.audio_heals_per_run`), because the pairing often arrives later; a hit whose kind the cache never recorded
+learns it the same way. ⚙ → *Stats* says how many of the day's cards (and the catalog's) play the audio track, the
+build's log line the same. The library itself is checked too: every playlist row that is a video rather than the
+audio track is listed in the **Cleanup** tab under *filed as the video, not the audio track*, with the audio track
+YouTube Music pairs with it (asked through the watch playlist, `resolve.counterparts_per_run` a run, no API quota)
+and a **swap** (add the audio track, remove the video: 100 units), per row or *swap all in a year*; **keep the
+video** stops listing a row you want as it is. The album a song names is opened once for the year YouTube Music
+states and its playlist, which is what the "full release" link and the year fallback come from.
 
 **Songs, not interludes or mixes:** a track shorter than `resolve.min_length` (1:55) or longer than
 `resolve.max_length` (9:31) is never a card, in the feed or the Catalog tab. Between several uploads of a song the
@@ -322,6 +330,8 @@ Everything lives in `discovery/config.yaml`:
   `target` how many playable current cards a day should hold before anything older is used, `max` the most older
   cards one day may carry, `candidates` how many are carried into YouTube resolution. Older cards say
   "filling in from &lt;year&gt;" and file into their own year.
+- `resolve.audio_heals_per_run` / `audio_recheck_days` — how many cards that still play a video are asked for their
+  audio track a run, and how often each is asked again.
 - `resolve.min_length` / `max_length` — the song-length range (1:55–9:31): shorter is an interlude, longer a mix,
   neither is a card; `resolve.max_ytmusic_date_lookups_per_run` — how many undated tracks a run ask YouTube Music
   for the upload's own release date.

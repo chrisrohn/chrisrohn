@@ -6,8 +6,10 @@ directly. A result is only accepted when both the artist and the title agree wit
 song by the same artist is worse than no result, because the card would play the wrong thing. Cached rows are
 re-checked against the same rule, so rows written by an older, looser resolver heal themselves.
 Audio first: YouTube Music lists most songs twice, as the audio-only track (videoType MUSIC_VIDEO_TYPE_ATV, the one
-the playlists want) and as the official video (OMV). Search hits prefer the audio track, and a video hit is swapped
-for its audio counterpart through the watch playlist, which pairs the two. The album a song search names is opened
+the playlists want) and as the official video (OMV). Search hits prefer the audio track, and a video hit — from a
+search or an album page alike — is swapped for its audio counterpart through the watch playlist, which pairs the
+two. A hit that is still a video (no counterpart yet) is asked again every `resolve.audio_recheck_days`, a batch a
+run, because YouTube Music pairs the audio side later for many videos. The album a song search names is opened
 once for its year and its playlist, so an undated track still has a year to fall back on.
 Song length: the playlists hold songs, not interludes or DJ mixes. Between several uploads of a song the resolver
 prefers one inside `resolve.min_length`–`resolve.max_length` (1:55–9:31 by default: a radio edit over the extended
@@ -220,31 +222,68 @@ def _shape(r: dict, via: str) -> dict[str, Any]:
     }
 
 
-def audio_counterpart(yt, video_id: str) -> str | None:
-    """The audio-only track paired with a video, from the watch playlist (which lists both sides of the pair)."""
+def watch_info(yt, video_id: str) -> tuple[str | None, str | None]:
+    """What the watch playlist says about an upload: (its own videoType, the audio-only track paired with it). The
+    playlist lists both sides of the audio/video pair, so a video's counterpart is the audio track; opened straight on
+    the audio side it is the audio track itself."""
     try:
         wp = yt.get_watch_playlist(videoId=video_id, limit=1)
     except Exception as exc:  # noqa: BLE001
         log.debug("watch playlist for %s failed: %s", video_id, exc)
-        return None
+        return None, None
     for t in (wp or {}).get("tracks") or []:
         if t.get("videoId") == video_id:
+            own = t.get("videoType")
+            if own == ATV:
+                return ATV, video_id
             cp = t.get("counterpart") or {}
-            return cp.get("videoId") if cp.get("videoType") == ATV and cp.get("videoId") else None
+            return own, (cp.get("videoId") if cp.get("videoType") == ATV and cp.get("videoId") else None)
         if t.get("videoType") == ATV and t.get("videoId"):   # the playlist opened straight on the audio side
-            return t["videoId"]
-    return None
+            return None, t["videoId"]
+    return None, None
 
 
-def prefer_audio(yt, found: dict[str, Any]) -> None:
-    """Swap a video hit for its audio-only counterpart when YouTube Music has one."""
-    if not found or found.get("videoType") == ATV or not found.get("videoId"):
-        return
-    cp = audio_counterpart(yt, found["videoId"])
-    if cp:
+def audio_counterpart(yt, video_id: str) -> str | None:
+    """The audio-only track paired with a video, from the watch playlist (which lists both sides of the pair)."""
+    own, cp = watch_info(yt, video_id)
+    return cp if cp and cp != video_id else None
+
+
+def prefer_audio(yt, found: dict[str, Any]) -> bool:
+    """Swap a video hit for its audio-only counterpart when YouTube Music has one; a hit whose kind was unknown
+    learns it (audio track, official video, upload) even when there is no counterpart. Returns whether the hit is
+    the audio track afterwards."""
+    if not found or not found.get("videoId"):
+        return False
+    if found.get("videoType") == ATV:
+        return True
+    own, cp = watch_info(yt, found["videoId"])
+    if cp and cp != found["videoId"]:
         found["videoFrom"] = found["videoId"]
         found["videoId"] = cp
         found["videoType"] = ATV
+        return True
+    if cp == found["videoId"]:
+        found["videoType"] = ATV                   # it was the audio track all along, only unlabelled
+        return True
+    if own and not found.get("videoType"):
+        found["videoType"] = own
+    return False
+
+
+def is_audio(yt_row: dict | None) -> bool:
+    return bool(yt_row) and yt_row.get("videoType") == ATV
+
+
+def audio_summary(items: list[Item]) -> dict[str, int]:
+    """How many resolved items play the audio track, the video, or an upload of unknown kind."""
+    out = {"audio": 0, "video": 0, "unknown": 0}
+    for it in items:
+        if not it.youtube or not it.youtube.get("videoId"):
+            continue
+        vt = it.youtube.get("videoType")
+        out["audio" if vt == ATV else "video" if vt else "unknown"] += 1
+    return out
 
 
 def album_year(yt, found: dict[str, Any]) -> None:
@@ -289,7 +328,8 @@ def _from_album(detail: dict, it: Item, via: str, avoid: set[str] | None = None,
     found["trackCount"] = len(tracks)
     found["albumBrowseId"] = detail.get("browseId") or detail.get("audioPlaylistId")
     found["playlistId"] = detail.get("audioPlaylistId")
-    found["videoType"] = found.get("videoType") or ATV      # album tracks are the audio side
+    # the album lists each track's kind (usually the audio side, sometimes the video): keep what it says, and a track
+    # it does not label stays unknown for the watch-playlist check rather than being assumed audio
     if not found.get("artists"):
         found["artists"] = [x.get("name") for x in (detail.get("artists") or []) if x.get("name")]
     return found
@@ -359,6 +399,7 @@ def _lookup(yt, it: Item, avoid: set[str] | None = None, length: tuple[int | Non
         if not names or artist_agrees(it.artist, names):
             found = _from_album(detail, it, "album-id", avoid, length)
             if found:
+                prefer_audio(yt, found)          # an album page can list the video side of a track: take the audio side
                 return found
     # otherwise find the release by title (an exact title first, then a title that contains ours), never "any album by them"
     res = yt.search(f"{it.artist} {want}", filter="albums", limit=5)
@@ -370,6 +411,7 @@ def _lookup(yt, it: Item, avoid: set[str] | None = None, length: tuple[int | Non
         found = _from_album(detail, it, "album", avoid, length)
         if found:
             found["year"] = found.get("year") or album.get("year")
+            prefer_audio(yt, found)
             return found
     # a single that is only listed as a song: the song must carry the release's name
     res = yt.search(f"{it.artist} {want}", filter="songs", limit=6)
@@ -400,7 +442,9 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     cache: dict[str, Any] = {k: _entry(v, today_s) for k, v in read_json(YT_CACHE, {}).items()}
     deadline = deadline or Deadline(None)
     budget = int(rcfg.get("max_lookups_per_run", 400))
-    heal_budget = int(rcfg.get("audio_heals_per_run", 150))   # rows from before the audio preference: re-checked a batch a run
+    heal_budget = int(rcfg.get("audio_heals_per_run", 150))   # hits that are not the audio track: re-checked for a counterpart, a batch a run
+    recheck_days = int(rcfg.get("audio_recheck_days", 30) or 0)
+    recheck_before = (today - timedelta(days=recheck_days)).isoformat() if recheck_days else None
     length = length_bounds(cfg)
     looked = stale = rejected = healed = flagged = relooked = 0
     skipped_deadline = 0
@@ -433,11 +477,16 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
                 it.youtube = row["yt"] or None
                 if it.youtube:
                     promote(it, it.youtube)
-                    # a hit from before the audio preference: swap in the audio track and fetch the album year, a batch a run
-                    if old and not it.youtube.get("videoType") and healed < heal_budget and not deadline.expired:
+                    # a hit that is not the audio track (a video, or one of unknown kind): ask the watch playlist for its
+                    # audio counterpart, on the first sight and again every `audio_recheck_days` (YouTube Music pairs the
+                    # audio side later for many videos), a batch a run; the album year comes along when it is missing
+                    checked = row.get("audio")
+                    due = not is_audio(it.youtube) and (not checked or (recheck_before is not None and checked < recheck_before))
+                    if due and healed < heal_budget and not deadline.expired:
                         healed += 1
                         prefer_audio(yt, it.youtube)
                         album_year(yt, it.youtube)
+                        row["audio"] = today_s
                         row["v"] = CACHE_VERSION
                         if healed % FLUSH_EVERY == 0:
                             flush()
@@ -458,8 +507,9 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
             log.debug("yt resolve rejected for %s – %s: got %s – %s", it.artist, it.title, found.get("artists"), found.get("title"))
             rejected += 1
             found = None
-        # "len": this row was looked up with the song-length preference, so a hit outside the range is not redone again
-        cache[key] = {"seen": today_s, "yt": found, "v": CACHE_VERSION, "len": 1, **({"not": sorted(not_these)} if not_these else {})}
+        # "len": this row was looked up with the song-length preference, so a hit outside the range is not redone again;
+        # "audio": when the watch playlist was last asked for the audio track (the lookup itself asks, so today)
+        cache[key] = {"seen": today_s, "yt": found, "v": CACHE_VERSION, "len": 1, "audio": today_s, **({"not": sorted(not_these)} if not_these else {})}
         it.youtube = found
         if found:
             promote(it, found)
@@ -470,8 +520,10 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     flush()
     if skipped_deadline:
         log.warning("youtube: time budget reached; %d lookups left for the next run", skipped_deadline)
+    kinds = audio_summary(items)
     log.info("youtube: %d lookups this run (%d stale rows redone, %d flagged as the wrong video redone, %d outside the song-length range looked up once more, "
-             "%d wrong-song hits rejected, %d older hits re-checked for audio), %d cached", looked, stale, flagged, relooked, rejected, healed, len(cache))
+             "%d wrong-song hits rejected, %d video hits re-checked for the audio track), %d cached; %d items play the audio track, %d the video, %d an upload of unknown kind",
+             looked, stale, flagged, relooked, rejected, healed, len(cache), kinds["audio"], kinds["video"], kinds["unknown"])
 
 
 def drop_by_length(items: list[Item], cfg: dict) -> list[Item]:

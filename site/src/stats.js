@@ -29,11 +29,13 @@ export function openStats() {
        <h3>Keep rate by tag</h3>${rates(mine.tags)}
        ${topArtists.length ? `<h3>Most kept artists</h3>${topArtists.map(([n, r]) => bar(n, r.k, topArtists[0][1].k, `${r.k} of ${r.n}`)).join("")}` : ""}`
     : `<p class="muted">Sign in as a curator to see what this account keeps and skips.</p>`;
+  const a = state.feed?.youtube?.audio; const cat = state.catalog?.audio;
+  const plays = a ? `<p class="muted">Audio, not video: ${a.audio} of today's ${a.audio + a.video + a.unknown} playable cards play the audio track${a.video ? `, ${a.video} the official video (YouTube Music pairs no audio track with it yet; the build asks again every month)` : ""}${a.unknown ? `, ${a.unknown} an upload of unknown kind` : ""}${cat ? ` · catalog: ${cat.audio} of ${cat.audio + cat.video + cat.unknown} audio` : ""}.</p>` : "";
   const b = state.feed?.learned;
   const build = b && b.outcomes
     ? `<p class="muted">Since ${esc(b.since || "?")} the build has watched ${b.outcomes} tracks it showed: ${b.kept} reached a year playlist, ${b.skipped} the Skipped playlist, base keep rate ${Math.round(b.keep_rate * 100)}%. Sources and tags below move tomorrow's scores (bounded, see <code>learn</code> in config.yaml).</p>
        <h3>Keep rate by source (build)</h3>${rates(b.sources, 12, sourceLabel)}<h3>Keep rate by tag (build)</h3>${rates(b.tags)}`
     : `<p class="muted">The daily build starts learning from the playlists once the feed has a few days of history behind it (tracks shown three or more days ago that did or did not reach a playlist). Nothing to show yet.</p>`;
-  $("#stats-body").innerHTML = `<h3>This account</h3>${acct}<h3>The daily build</h3>${build}`;
+  $("#stats-body").innerHTML = `<h3>This account</h3>${acct}<h3>The daily build</h3>${plays}${build}`;
   $("#stats").showModal();
 }

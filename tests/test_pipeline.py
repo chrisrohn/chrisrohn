@@ -239,6 +239,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     pls = payload["youtube"]["playlists"]
     assert pls["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN" and len(pls) == 48   # config ids win over the profile's title matches
     assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
+    assert payload["youtube"]["audio"] == {"audio": 0, "video": 0, "unknown": 3} and payload["youtube"]["video_count"] == 0   # the fakes label no kind
     assert payload["picks"][0]["artist"] == "Jungle"
     assert (sandbox / "site" / "feed.xml").read_text().count("<item>") == len(payload["items"])
 
@@ -1547,3 +1548,113 @@ def test_years_fall_back_to_the_youtube_music_release_date(monkeypatch, sandbox)
     fresh = Item(artist="Princeton", title="Florida (Cosmic Kids Remix)", kind="track", youtube={"videoId": "fla"})
     years.verify_years([fresh], cfg, FakeHttp(), yt=FakeYT())
     assert not asked and fresh.year is None and fresh.year_source == "unknown"
+
+
+def test_audio_track_is_taken_from_album_pages_and_video_hits_are_rechecked(monkeypatch, sandbox):
+    """Audio, not video: a release opened by its browse id whose album page lists the video side gets the audio
+    counterpart; a cached video hit is asked for its counterpart on first sight and again after
+    `audio_recheck_days`; a hit of unknown kind learns what it is; the feed tallies what the cards play."""
+    import sys
+    import types
+
+    from discovery import resolve
+
+    watched = []
+    paired = {"vOMV": "vATV"}     # what the watch playlist pairs today (YouTube Music adds pairs over time)
+
+    class FakeYT:
+        albums = {"MPREb_s": {"title": "To See You", "year": "2026", "artists": [{"name": "NINA"}], "audioPlaylistId": "OLAK_s",
+                              "tracks": [{"videoId": "vOMV", "title": "To See You", "artists": [{"name": "NINA"}], "videoType": "MUSIC_VIDEO_TYPE_OMV", "duration_seconds": 240}]}}
+        def get_album(self, bid):
+            return self.albums[bid]
+        def search(self, q, filter=None, limit=None):
+            return []
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            watched.append(videoId)
+            if videoId in paired:
+                return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": paired[videoId], "videoType": resolve.ATV}}]}
+            if videoId == "isAudio":
+                return {"tracks": [{"videoId": "isAudio", "videoType": resolve.ATV}]}
+            if videoId == "lonely":
+                return {"tracks": [{"videoId": "lonely", "videoType": "MUSIC_VIDEO_TYPE_OMV"}]}
+            return {"tracks": []}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    cfg = _cfg()
+    cfg["resolve"] = {**cfg["resolve"], "audio_recheck_days": 30, "audio_heals_per_run": 10}
+    single = Item(artist="Nina", title="To See You", kind="release", release="To See You", links={"youtube music": "https://music.youtube.com/browse/MPREb_s"})
+    resolve.resolve_all([single], cfg)
+    assert single.youtube["videoId"] == "vATV" and single.youtube["videoType"] == resolve.ATV and single.youtube["videoFrom"] == "vOMV"   # the album listed the video side
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[single.key]["audio"] == date.today().isoformat()
+
+    # cached hits: a video with no pair yet, one of unknown kind that is the audio track, one of unknown kind that stays a video
+    lonely = Item(artist="Solo", title="Lonely", kind="track")
+    unlabelled = Item(artist="Quiet", title="Is Audio", kind="track")
+    unknown = Item(artist="Quiet", title="Stays Video", kind="track")
+    stale = (date.today() - timedelta(days=31)).isoformat()
+    fresh = (date.today() - timedelta(days=3)).isoformat()
+    cache[lonely.key] = {"seen": stale, "yt": {"videoId": "lonely", "title": "Lonely", "artists": ["Solo"], "videoType": "MUSIC_VIDEO_TYPE_OMV"}, "v": 3, "audio": stale}
+    cache[unlabelled.key] = {"seen": stale, "yt": {"videoId": "isAudio", "title": "Is Audio", "artists": ["Quiet"]}, "v": 3}
+    cache[unknown.key] = {"seen": stale, "yt": {"videoId": "lonely", "title": "Stays Video", "artists": ["Quiet"]}, "v": 3, "audio": fresh}
+    util.write_json(resolve.YT_CACHE, cache)
+    watched.clear()
+    resolve.resolve_all([lonely, unlabelled, unknown], cfg)
+    assert sorted(watched) == ["isAudio", "lonely"]                                           # the stale one and the never-checked one; the fresh one waits
+    assert lonely.youtube["videoType"] == "MUSIC_VIDEO_TYPE_OMV" and lonely.youtube["videoId"] == "lonely"    # still no pair: stays the video, re-stamped
+    assert unlabelled.youtube["videoType"] == resolve.ATV and unlabelled.youtube["videoId"] == "isAudio"     # it was the audio track all along
+    assert unknown.youtube.get("videoType") is None
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[lonely.key]["audio"] == date.today().isoformat() and cache[unlabelled.key]["audio"] == date.today().isoformat() and cache[unknown.key]["audio"] == fresh
+    assert resolve.audio_summary([single, lonely, unlabelled, unknown, Item(artist="X", title="Y", kind="track")]) == {"audio": 2, "video": 1, "unknown": 1}
+    # YouTube Music paired the audio side since: the next re-check (after the recheck window) swaps it in
+    paired["lonely"] = "lonelyATV"
+    cache[lonely.key]["audio"] = stale
+    util.write_json(resolve.YT_CACHE, cache)
+    again = Item(artist="Solo", title="Lonely", kind="track")
+    resolve.resolve_all([again], cfg)
+    assert again.youtube["videoId"] == "lonelyATV" and again.youtube["videoType"] == resolve.ATV and again.youtube["videoFrom"] == "lonely"
+    assert resolve.audio_counterpart(FakeYT(), "isAudio") is None and resolve.watch_info(FakeYT(), "isAudio") == (resolve.ATV, "isAudio")
+
+
+def test_playlist_rows_that_are_videos_get_their_audio_track_in_the_report(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import unavailable
+
+    monkeypatch.setattr(unavailable, "CACHE", sandbox / "data" / "cache" / "counterparts.json")
+    monkeypatch.setattr(unavailable, "REPORT", sandbox / "site" / "data" / "unavailable.json")
+    watched = []
+
+    class FakeYT:
+        def __init__(self, **kw): pass
+        def search(self, q, filter=None, limit=None):
+            raise AssertionError("a video row is asked through the watch playlist, never searched")
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            watched.append(videoId)
+            if videoId == "vid1":
+                return {"tracks": [{"videoId": "vid1", "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": "vid1-atv", "videoType": "MUSIC_VIDEO_TYPE_ATV"}}]}
+            return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_UGC"}]}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    entries = [
+        {"year": "2024", "playlistId": "PL2024", "position": 0, "videoId": "vid1", "artist": "Jungle", "title": "Candle Flame", "album": "Volcano", "videoType": "MUSIC_VIDEO_TYPE_OMV", "avail": True},
+        {"year": "2019", "playlistId": "PL2019", "position": 5, "videoId": "vid2", "artist": "Someone", "title": "Upload", "videoType": "MUSIC_VIDEO_TYPE_UGC", "avail": True},
+        {"year": "2019", "playlistId": "PL2019", "position": 6, "videoId": "vid3", "artist": "Fine", "title": "Fine", "videoType": "MUSIC_VIDEO_TYPE_ATV", "avail": True},
+        {"year": "2018", "playlistId": "PL2018", "position": 1, "videoId": "vid4", "artist": "Gone", "title": "Greyed Video", "videoType": "MUSIC_VIDEO_TYPE_OMV", "avail": False},
+    ]
+    profile = {"youtube": {"entries": entries, "checked_at": "2026-09-06T00:00:00+00:00"}}
+    cfg = _cfg(); cfg["resolve"]["counterparts_per_run"] = 2                                # the greyed row's search first, then one video row
+    monkeypatch.setattr(unavailable, "find_counterpart", lambda yt, a, t, avoid: None)     # the greyed row's search is not what this tests
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert set(rows) == {"vid1", "vid2", "vid4"} and rows["vid4"]["why"] == "greyed"          # the audio track is never listed; a greyed video is a dead row
+    assert report["count"] == 1 and report["video"] == 2                                       # `count` stays the not-streamable rows
+    assert rows["vid1"]["why"] == "video" and rows["vid1"]["alt"] == {"videoId": "vid1-atv", "title": "Candle Flame", "album": "Volcano", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
+    assert rows["vid2"]["pending"] is True and report["video_pending"] == 1 and report["video_with_audio"] == 1   # over budget: waits
+    assert watched == ["vid1"]
+    cfg["resolve"]["counterparts_per_run"] = 5
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert watched == ["vid1", "vid2"] and rows["vid2"]["alt"] is None and rows["vid2"]["pending"] is False and report["video_pending"] == 0
+    cache = util.read_json(unavailable.CACHE, {})
+    assert cache["audio:vid1"]["alt"]["videoId"] == "vid1-atv" and "vid1" not in cache          # kept apart from the dead rows' searches

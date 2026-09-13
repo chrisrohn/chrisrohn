@@ -18,7 +18,7 @@ from datetime import date, timedelta
 from .learn import learn_from_history, load_ratings, merge_ratings, public_summary, wrong_videos
 from .models import Item
 from .profile import find_duplicates, load_profile
-from .resolve import collapse_shared_videos, drop_by_length, resolve_all
+from .resolve import audio_summary, collapse_shared_videos, drop_by_length, resolve_all
 from .score import dedupe, diversify, score_items
 from .sources import run_sources
 from .unavailable import build_report as unavailable_report
@@ -166,6 +166,12 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
             "unavailable_count": unavailable["count"],
             "unavailable_with_alt": unavailable["with_counterpart"],
             "unavailable_pending": unavailable["pending"],
+            # playlist rows that are the video rather than the audio track, and how many have the audio side to swap in
+            "video_count": unavailable.get("video", 0),
+            "video_with_audio": unavailable.get("video_with_audio", 0),
+            "video_pending": unavailable.get("video_pending", 0),
+            # what today's cards play: the audio track, the video (no audio side paired yet), or an upload of unknown kind
+            "audio": audio_summary(items),
         },
         "picks": profile.get("picks") or [],
         "learned": public_summary(profile["learned"]),

@@ -440,8 +440,14 @@ resolve:
   # mix); a song whose only upload is outside it is dropped after resolution. "m:ss" (or seconds); "" lifts that end.
   min_length: "1:55"
   max_length: "9:31"
-  audio_heals_per_run: 150      # older cached hits re-checked for an audio-only counterpart and their album year, per run
-  counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload per run (Cleanup tab → data/unavailable.json)
+  # Audio, not video: a hit that is not the audio track (a video, or an upload of unknown kind) is asked for its audio
+  # counterpart through the watch playlist on first sight and again every audio_recheck_days (YouTube Music pairs the
+  # audio side later for many videos); a batch a run, one cheap request each, no API quota. The feed's header and
+  # ⚙ → Stats say how many cards play the audio track.
+  audio_heals_per_run: 300
+  audio_recheck_days: 30
+  counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload, and playlist rows that are the video asked
+                                # for their audio track, per run (Cleanup tab → data/unavailable.json)
   year_chain: full              # the feed asks every catalogue; the catalog's own setting is under `catalog`
   # Year verification (see discovery/years.py): identify the recording via ListenBrainz's MusicBrainz mapper, take
   # MusicBrainz's earliest release date for it, cross-check with Deezer (ISRC → MusicBrainz), Discogs master year
