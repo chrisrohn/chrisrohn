@@ -445,8 +445,10 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     heal_budget = int(rcfg.get("audio_heals_per_run", 150))   # hits that are not the audio track: re-checked for a counterpart, a batch a run
     recheck_days = int(rcfg.get("audio_recheck_days", 30) or 0)
     recheck_before = (today - timedelta(days=recheck_days)).isoformat() if recheck_days else None
+    retry_days = int(rcfg.get("retry_misses_days", 7) or 0)
+    retry_before = (today - timedelta(days=retry_days)).isoformat() if retry_days else None
     length = length_bounds(cfg)
-    looked = stale = rejected = healed = flagged = relooked = 0
+    looked = stale = rejected = healed = flagged = relooked = retried = 0
     skipped_deadline = 0
 
     def flush() -> None:
@@ -472,6 +474,9 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
                 del cache[key]                   # shorter or longer upload exists (the new row is stamped, so a song that is simply long stays put)
             elif row["yt"] is None and old and browse_id(it):
                 del cache[key]                   # a miss from before releases were opened by id
+            elif row["yt"] is None and retry_before is not None and (row.get("at") or "") < retry_before and looked < budget and not deadline.expired:
+                retried += 1                     # a miss older than retry_misses_days: the audio track may have arrived since
+                del cache[key]
             else:
                 row["seen"] = today_s
                 it.youtube = row["yt"] or None
@@ -509,7 +514,8 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
             found = None
         # "len": this row was looked up with the song-length preference, so a hit outside the range is not redone again;
         # "audio": when the watch playlist was last asked for the audio track (the lookup itself asks, so today)
-        cache[key] = {"seen": today_s, "yt": found, "v": CACHE_VERSION, "len": 1, "audio": today_s, **({"not": sorted(not_these)} if not_these else {})}
+        # "at": when this lookup ran (a miss is tried again retry_misses_days later)
+        cache[key] = {"seen": today_s, "at": today_s, "yt": found, "v": CACHE_VERSION, "len": 1, "audio": today_s, **({"not": sorted(not_these)} if not_these else {})}
         it.youtube = found
         if found:
             promote(it, found)
@@ -522,8 +528,8 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
         log.warning("youtube: time budget reached; %d lookups left for the next run", skipped_deadline)
     kinds = audio_summary(items)
     log.info("youtube: %d lookups this run (%d stale rows redone, %d flagged as the wrong video redone, %d outside the song-length range looked up once more, "
-             "%d wrong-song hits rejected, %d video hits re-checked for the audio track), %d cached; %d items play the audio track, %d the video, %d an upload of unknown kind",
-             looked, stale, flagged, relooked, rejected, healed, len(cache), kinds["audio"], kinds["video"], kinds["unknown"])
+             "%d older misses tried again, %d wrong-song hits rejected, %d video hits re-checked for the audio track), %d cached; %d items play the audio track, %d the video, %d an upload of unknown kind",
+             looked, stale, flagged, relooked, retried, rejected, healed, len(cache), kinds["audio"], kinds["video"], kinds["unknown"])
 
 
 def drop_by_length(items: list[Item], cfg: dict) -> list[Item]:

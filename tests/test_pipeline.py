@@ -175,6 +175,8 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
         Item(artist="Parcels", title="Lighten Up (Radio Mix)", kind="track", sources=["radio:KEXP"], editorial=True),   # different spelling, same video → hidden
         Item(artist="Parcels", title="Free", kind="track", sources=["radio:KEXP"], editorial=True, links={"kexp": "javascript:alert(1)", "article": ["https://kexp.org/x"]}),   # undated: first_seen fills the date as a sighting
         Item(artist="Someone New", title="Disco Dream", kind="release", release_date=today, sources=["musicbrainz"], tags=["nu disco"]),
+        Item(artist="Parcels", title="Video Only", kind="track", release_date=today, sources=["rss:Pitchfork"], editorial=True),   # matched to a video with no audio side: not a card today
+        Item(artist="Parcels", title="Unknown Kind", kind="track", release_date=today, sources=["rss:Pitchfork"], editorial=True),   # kind not known yet: not a card today either
         Item(artist="Unknown Metal Band", title="Skull", kind="release", release_date=today, sources=["musicbrainz"], tags=["metal"]),
         # older than the current timeframe: a candidate only because the day is thin (the artist watch reaches back)
         Item(artist="Roosevelt", title="Earlier Single", kind="track", release_date=date(today.year - 2, 3, 1), sources=["ytmusic"]),
@@ -190,14 +192,19 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         seen_avoid.update(avoid or {})
         for it in items:
+            atv = "MUSIC_VIDEO_TYPE_ATV"
             if it.artist == "Jungle":
-                it.youtube = {"videoId": "vid123", "title": it.title, "artists": ["Jungle"], "thumbnail": "https://i/x.jpg"}
+                it.youtube = {"videoId": "vid123", "title": it.title, "artists": ["Jungle"], "thumbnail": "https://i/x.jpg", "videoType": atv}
             if it.title.startswith("Lighten Up"):
-                it.youtube = {"videoId": "vidSaved", "title": it.title, "artists": ["Parcels"], "via": "track-search"}
+                it.youtube = {"videoId": "vidSaved", "title": it.title, "artists": ["Parcels"], "via": "track-search", "videoType": atv}
             if it.title == "Free":
-                it.youtube = {"videoId": "vidFree", "title": it.title, "artists": ["Parcels"]}
+                it.youtube = {"videoId": "vidFree", "title": it.title, "artists": ["Parcels"], "videoType": atv}
+            if it.title == "Video Only":
+                it.youtube = {"videoId": "vidOMV", "title": it.title, "artists": ["Parcels"], "videoType": "MUSIC_VIDEO_TYPE_OMV"}
+            if it.title == "Unknown Kind":
+                it.youtube = {"videoId": "vidUnk", "title": it.title, "artists": ["Parcels"]}
             if it.title.endswith("Single"):
-                it.youtube = {"videoId": "vid" + it.title[:3], "title": it.title, "artists": ["Roosevelt"]}
+                it.youtube = {"videoId": "vid" + it.title[:3], "title": it.title, "artists": ["Roosevelt"], "videoType": atv}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
     monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
     monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
@@ -224,6 +231,8 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert dups["count"] == 1 and dups["kinds"] == {"cross-year": 1} and payload["youtube"]["duplicates_count"] == 1
     assert ("Unknown Metal Band", "Skull") not in ids
     assert ("Someone New", "Disco Dream") not in ids        # tag-only, no YouTube match → dropped
+    assert ("Parcels", "Video Only") not in ids and ("Parcels", "Unknown Kind") not in ids   # no audio track (yet): not a card, editorial or not
+    assert all(i["youtube"] and i["youtube"]["videoId"] for i in payload["items"])            # every card plays
     # the day is thin, so the older release fills in — marked as such, and dated by its own year, never today's
     older = next(i for i in payload["items"] if i["title"] == "Earlier Single")
     assert older["backfill"] is True and older["release_date"] == date(today.year - 2, 3, 1).isoformat()
@@ -239,7 +248,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     pls = payload["youtube"]["playlists"]
     assert pls["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN" and len(pls) == 48   # config ids win over the profile's title matches
     assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
-    assert payload["youtube"]["audio"] == {"audio": 0, "video": 0, "unknown": 3} and payload["youtube"]["video_count"] == 0   # the fakes label no kind
+    assert payload["youtube"]["audio"] == {"audio": len(payload["items"]), "video": 0, "unknown": 0} and payload["youtube"]["video_count"] == 0
     assert payload["picks"][0]["artist"] == "Jungle"
     assert (sandbox / "site" / "feed.xml").read_text().count("<item>") == len(payload["items"])
 
@@ -803,18 +812,17 @@ def test_learn_from_history_moves_scores_without_quota(tmp_path):
     assert scored[0].title == "A" and any(r.startswith("you keep") for r in scored[0].reasons)
 
 
-def test_freshness_and_playable_are_configurable():
+def test_freshness_is_configurable_and_a_match_earns_no_bonus():
     today = date.today()
     cfg = _cfg()
     cfg["ranking"]["freshness_days"] = 10
     cfg["ranking"]["undated_freshness"] = 0.2
-    cfg["ranking"]["weights"]["playable"] = 0.0
     fresh = Item(artist="Someone New", title="Now", kind="track", release_date=today, sources=["bandcamp"])
     stale = Item(artist="Someone New", title="Then", kind="track", release_date=today - timedelta(days=30), sources=["bandcamp"])
     undated = Item(artist="Someone New", title="When", kind="track", sources=["bandcamp"], youtube={"videoId": "v"})
     score_items([fresh, stale, undated], PROFILE, cfg)
     assert fresh.score > undated.score > stale.score      # an undated track sits below this week's release, above last month's
-    assert undated.score == pytest.approx(0.2)          # the playable bonus is off, so only the undated share remains
+    assert undated.score == pytest.approx(0.2)          # a YouTube match earns nothing by itself (every card has one): only the undated share
 
 
 def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandbox):
@@ -828,7 +836,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
 
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:
-            it.youtube = {"videoId": "vid1", "title": it.title, "artists": ["Jungle"]}
+            it.youtube = {"videoId": "vid1", "title": it.title, "artists": ["Jungle"], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
     monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
     monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
@@ -920,7 +928,7 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
         assert cfg["resolve"]["max_lookups_per_run"] == 800
         for it in items:
             if it.title != "Parcels Hit":
-                it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg"}
+                it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     monkeypatch.setattr(catalog, "resolve_all", fake_resolve)
 
     def fake_years(items, cfg, http, deadline=None):
@@ -1136,10 +1144,10 @@ def test_build_merges_a_release_renamed_to_an_existing_track(monkeypatch, sandbo
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:
             if it.kind == "release":
-                it.youtube = {"videoId": "vidAlbumCut", "title": "Keep Moving", "artists": ["Jungle"]}
+                it.youtube = {"videoId": "vidAlbumCut", "title": "Keep Moving", "artists": ["Jungle"], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
                 promote(it, it.youtube)        # the release becomes the track its video is: same key as the first item
             else:
-                it.youtube = {"videoId": "vidSingle", "title": "Keep Moving", "artists": ["Jungle"]}
+                it.youtube = {"videoId": "vidSingle", "title": "Keep Moving", "artists": ["Jungle"], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
     monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
     monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
@@ -1384,15 +1392,15 @@ def test_backfill_fills_the_gap_only_when_the_current_timeframe_is_thin():
 
     # two current cards can be played, the target is four: the two best playable older ones fill in
     for i, it in enumerate([recent, undated]):
-        it.youtube = {"videoId": f"v{i}"}
+        it.youtube = {"videoId": f"v{i}", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     for i, it in enumerate(back):
-        it.youtube = {"videoId": f"b{i}"}
+        it.youtube = {"videoId": f"b{i}", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     out, counts = fill_from_backfill([recent, undated, *back], cfg)
     assert [i.title for i in out] == ["new", "undated", "seen", "2024"]
     assert counts == {"fresh_playable": 2, "older": 3, "used": 2}
     assert "filling in from 2025" in out[2].reasons and "filling in from 2024" in out[3].reasons
     # a full day of current tracks leaves no room at all
-    full = [Item(artist=f"X{i}", title=str(i), youtube={"videoId": str(i)}) for i in range(4)]
+    full = [Item(artist=f"X{i}", title=str(i), youtube={"videoId": str(i), "videoType": "MUSIC_VIDEO_TYPE_ATV"}) for i in range(4)]
     kept, counts = fill_from_backfill(full + back, cfg)
     assert kept == full and counts["used"] == 0
     # backfill off: nothing older is even a candidate, and nothing fills in
@@ -1658,3 +1666,53 @@ def test_playlist_rows_that_are_videos_get_their_audio_track_in_the_report(monke
     assert watched == ["vid1", "vid2"] and rows["vid2"]["alt"] is None and rows["vid2"]["pending"] is False and report["video_pending"] == 0
     cache = util.read_json(unavailable.CACHE, {})
     assert cache["audio:vid1"]["alt"]["videoId"] == "vid1-atv" and "vid1" not in cache          # kept apart from the dead rows' searches
+
+
+def test_only_audio_cards_and_misses_are_tried_again(monkeypatch, sandbox):
+    """Every card plays its audio track; a song with no match is not a card today and is looked up again after
+    `retry_misses_days`, a fresh miss is not."""
+    import sys
+    import types
+
+    from discovery import resolve
+    from discovery.build import only_audio
+
+    audio = Item(artist="A", title="Audio", kind="track", youtube={"videoId": "a", "videoType": resolve.ATV})
+    video = Item(artist="A", title="Video", kind="track", youtube={"videoId": "v", "videoType": "MUSIC_VIDEO_TYPE_OMV"})
+    unknown = Item(artist="A", title="Unknown", kind="track", youtube={"videoId": "u"})
+    none = Item(artist="A", title="None", kind="track")
+    assert only_audio([audio, video, unknown, none]) == [audio]
+
+    searches = []
+
+    class FakeYT:
+        def search(self, q, filter=None, limit=None):
+            searches.append(q)
+            if "Arrived" in q and filter == "songs":
+                return [{"resultType": "song", "title": "Arrived", "artists": [{"name": "Late Band"}], "videoId": "arr", "videoType": resolve.ATV, "duration": "3:30"}]
+            return []
+        def get_watch_playlist(self, **kw):
+            return {"tracks": []}
+        def get_album(self, bid):
+            return {}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    old_miss = Item(artist="Late Band", title="Arrived", kind="track")
+    new_miss = Item(artist="Late Band", title="Still Missing", kind="track")
+    stale = (date.today() - timedelta(days=8)).isoformat()
+    util.write_json(resolve.YT_CACHE, {old_miss.key: {"seen": stale, "at": stale, "yt": None, "v": resolve.CACHE_VERSION},
+                                       new_miss.key: {"seen": stale, "at": date.today().isoformat(), "yt": None, "v": resolve.CACHE_VERSION}})
+    cfg = _cfg(); cfg["resolve"] = {**cfg["resolve"], "retry_misses_days": 7}
+    resolve.resolve_all([old_miss, new_miss], cfg)
+    assert old_miss.youtube["videoId"] == "arr" and new_miss.youtube is None        # the audio track arrived since; the fresh miss waits
+    assert all("Arrived" in q for q in searches)
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[old_miss.key]["at"] == date.today().isoformat() and cache[new_miss.key]["at"] == date.today().isoformat()
+    # a miss from before the stamp existed counts as due
+    legacy = Item(artist="Late Band", title="Legacy", kind="track")
+    util.write_json(resolve.YT_CACHE, {legacy.key: {"seen": stale, "yt": None, "v": resolve.CACHE_VERSION}})
+    searches.clear(); resolve.resolve_all([legacy], cfg)
+    assert searches and legacy.youtube is None
+    cfg["resolve"]["retry_misses_days"] = 0                                          # 0 turns the retry off
+    util.write_json(resolve.YT_CACHE, {legacy.key: {"seen": stale, "yt": None, "v": resolve.CACHE_VERSION}})
+    searches.clear(); resolve.resolve_all([legacy], cfg)
+    assert not searches

@@ -124,9 +124,9 @@ function openPermalink() {
   if (state.view !== "feed") { state.view = "feed"; $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === "feed")); render(); }
   if (!state.order.includes(id)) searchFor(`${it.artist} ${it.display_title || it.title}`, { add: false });   // the search index joins the fields with spaces
   if (!state.order.includes(id)) {
-    // a link means "show me this one": the toggles that hide it (new today, known artists, recent, playable) step aside
-    const f = state.filters; Object.assign(f, { onlyNew: false, onlyKnown: false, onlyRecent: false, onlyPlayable: false });
-    for (const [k, id2] of [["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"], ["onlyPlayable", "#only-playable"]]) { const cb = $(id2); if (cb) cb.checked = f[k]; }
+    // a link means "show me this one": the toggles that hide it (new today, known artists, recent) step aside
+    const f = state.filters; Object.assign(f, { onlyNew: false, onlyKnown: false, onlyRecent: false });
+    for (const [k, id2] of [["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"]]) { const cb = $(id2); if (cb) cb.checked = f[k]; }
     persist(); render();
   }
   if (!state.order.includes(id)) { toast(`${credit(it)} is hidden by your filters`, true); return; }
@@ -320,7 +320,6 @@ function listFor(view) {
       if (hiddenBy(i)) return false;
       if (terms.length && !matches(i, terms)) return false;
       if (off.size && !(i.sources || []).some(s => !off.has(s))) return false;
-      if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
       if (y === "?" ? i.year != null : (y && String(i.year) !== y)) return false;
       return true;
     });
@@ -341,7 +340,6 @@ function listFor(view) {
     if (terms.length && !matches(i, terms)) return false;
     if (!(i.sources || []).some(sourceOn)) return false;
     if (f.onlyNew && i.first_seen !== today) return false;
-    if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
     if (f.onlyKnown && !i.match_kind) return false;
     if (f.onlyRecent && !i.backfill && Number.isFinite(i.year) && i.year_source !== "unknown" && /** @type {number} */ (i.year) < oldest) return false;
     return true;

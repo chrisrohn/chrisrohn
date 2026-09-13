@@ -251,8 +251,14 @@ session that the playlist's owner approved in that browser.
   what the Catalog tab below is for. The target is set to a day's *rating* appetite (300), not to what the fresh
   window happens to yield: those older candidates are fetched, scored and resolved on YouTube every run whatever the
   target says, so raising it costs nothing but keeps what a lower one threw away. `ranking.max_items` has to stay
-  clear of `backfill.target` + the unplayable current cards riding along, or the final cut-by-score drops the fill
-  it just made — a test in `tests/test_sources.py` holds that line.
+  clear of `backfill.target`, or the final cut-by-score drops the fill it just made — a test in
+  `tests/test_sources.py` holds that line.
+- **Every card plays.** A song becomes a card only once it has its YouTube Music audio track. One with no match, a
+  video-only match or an upload whose kind is not known yet is left out of the day rather than shown as a card that
+  cannot be played or filed, and is tried again on a later build: a miss is looked up again after
+  `resolve.retry_misses_days` (7; a new release often gets its audio track a few days after the blogs write about
+  it), a video is asked for its audio side again every `resolve.audio_recheck_days`, and unknown uploads are
+  labelled a batch a run. There is no "playable" filter on the site because there is nothing for it to hide.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
@@ -337,7 +343,8 @@ Everything lives in `discovery/config.yaml`:
   for the upload's own release date.
 - `ranking.fresh_days` — what counts as the current timeframe (this calendar year always does);
   `max_unknown_per_source` — how many acts the profile does not know one source family may put in a day before it
-  is pushed down; `unplayable_penalty` — how far a card with no YouTube match falls.
+  is pushed down.
+- `resolve.retry_misses_days` — how long a song with no YouTube Music audio track waits before it is looked up again.
 - `sources.*.tags` — the Bandcamp and MusicBrainz genre lists (this replaces the "Edge of <genre>" playlists).
 - `sources.rss.feeds` — add any blog/radio RSS; headlines like `Artist – "Song"` or `Artist shares "Song"` become
   playable cards. Tour dates, interviews, listicles, obituaries and the rest are dropped by `discovery/headlines.py`

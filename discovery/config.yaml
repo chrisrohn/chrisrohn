@@ -346,9 +346,6 @@ ranking:
   max_unknown_per_source: 30
   repeat_penalty: 2.0
   explore_slots: 8
-  # A card with no YouTube match cannot be played or filed: it loses this much after resolution, so playable cards
-  # come first and an unplayable one only survives the score floor when the match is strong.
-  unplayable_penalty: 1.0
   weights:
     affinity: 4.0          # direct artist match (Last.fm / seeds: you play them)
     saved: 2.0             # artist only known from the year playlists (in your library, never scrobbled)
@@ -359,7 +356,6 @@ ranking:
     freshness: 1.0         # decays over `freshness_days`
     editorial: 1.5         # appeared in a curated feed (RSS/Bandcamp Daily/KEXP)
     listens: 0.4           # log10(listen_count) from ListenBrainz
-    playable: 0.3          # a YouTube match exists (it can be played and filed)
     learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
     explore: 1.0           # the exploration bonus for sources / tags / artists with little history (learn.explore)
     novelty: 0.5           # an artist the profile does not know, vouched for by an editorial feed or two sources
@@ -434,6 +430,11 @@ catalog:
 resolve:
   youtube_music: true
   max_lookups_per_run: 700
+  # Every card plays its YouTube Music audio track. A song with no match today is not a card today: its miss is
+  # remembered and looked up again after retry_misses_days (a new release often gets its audio track a few days
+  # after the blogs write about it), within max_lookups_per_run; a video-only match is asked for its audio side again
+  # every audio_recheck_days (below).
+  retry_misses_days: 7
   # Song length: the playlists hold songs, so anything shorter than min_length (an interlude, a skit, an intro) or
   # longer than max_length (a DJ mix, a full side, an ambient piece) is never a card, in the feed or the catalog.
   # Between several uploads of a song the resolver prefers one inside the range (the radio edit over the extended
@@ -444,7 +445,7 @@ resolve:
   # counterpart through the watch playlist on first sight and again every audio_recheck_days (YouTube Music pairs the
   # audio side later for many videos); a batch a run, one cheap request each, no API quota. The feed's header and
   # ⚙ → Stats say how many cards play the audio track.
-  audio_heals_per_run: 300
+  audio_heals_per_run: 500
   audio_recheck_days: 30
   counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload, and playlist rows that are the video asked
                                 # for their audio track, per run (Cleanup tab → data/unavailable.json)

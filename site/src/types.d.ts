@@ -88,7 +88,7 @@ export interface Settings {
   autoplay: boolean; shuffle: boolean; introDismissed?: boolean;
   ghToken?: string | null;   // a fine-grained GitHub token (contents: write on the site repo) that lets the browser push data/ratings.json for the build to learn from
 }
-export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyPlayable: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[]; conWhen: string; conRadius: string; conSort: string }
+export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[]; conWhen: string; conRadius: string; conSort: string }
 export interface State {
   feed: Feed | null; rated: Record<string, Rated>; auth: Auth | null; playlists: Record<string, any>; settings: Settings;
   deckIndex: number; auditionTimer: any; auditionTick: any; auditionArmed: string | null;

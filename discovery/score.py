@@ -103,8 +103,6 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
             s += w["freshness"] * max(0.0, 1.0 - age / fresh_days)
         else:
             s += w["freshness"] * undated
-        if it.youtube:
-            s += float(w.get("playable", 0.3))
         # what the curator actually kept: sources, blogs, tags and artists with a track record (see learn.py)
         adj, why = adjustment(learned, it.sources, it.tags, it.artist)
         if adj:

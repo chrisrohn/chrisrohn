@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from .learn import load_ratings, wrong_videos
 from .models import Item
 from .profile import LastFm, load_profile
-from .resolve import audio_summary, collapse_shared_videos, drop_by_length, resolve_all
+from .resolve import audio_summary, collapse_shared_videos, drop_by_length, is_audio, resolve_all
 from .score import dedupe, score_items
 from .util import CACHE_DIR, DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, norm, read_json, read_versioned, safe_url, utcnow, write_json, write_versioned
 from .years import verify_years
@@ -29,7 +29,7 @@ DEFAULTS = {
     "enabled": True, "refresh_days": 7, "top_tracks": 3000, "loved_tracks": 2000, "artists_top_n": 150, "per_artist": 8,
     "similar_top_n": 100, "per_similar": 5, "max_items": 2000, "time_budget_minutes": 35, "max_lookups_per_run": 800,
     "max_year_lookups_per_run": 800, "tag_lookups_per_run": 300, "loved_bonus": 1.5, "year_chain": "fast",
-    "weights": {"affinity": 4.0, "saved": 2.0, "similar": 2.5, "tags": 1.2, "source_count": 0.6, "freshness": 0.0, "editorial": 0.0, "listens": 2.0, "playable": 0.3, "learned": 1.0},
+    "weights": {"affinity": 4.0, "saved": 2.0, "similar": 2.5, "tags": 1.2, "source_count": 0.6, "freshness": 0.0, "editorial": 0.0, "listens": 2.0, "learned": 1.0},
 }
 
 
@@ -159,7 +159,7 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
     resolve_all(items, ccfg, deadline, avoid=wrong_videos(load_ratings()))
     items = collapse_shared_videos(items)
     items = drop_by_length(items, ccfg)     # the same song-length range as the feed: no interludes, no DJ mixes
-    items = [i for i in items if i.youtube and i.youtube.get("videoId") not in saved_videos]
+    items = [i for i in items if is_audio(i.youtube) and i.youtube.get("videoId") not in saved_videos]   # every card plays its audio track
     items = _score(items, profile, ccfg, float(c["loved_bonus"]))
     verify_years(items, ccfg, http, deadline)
     http.save()
