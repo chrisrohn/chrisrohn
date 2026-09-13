@@ -106,6 +106,12 @@ so the answer is consistent instead of depending on how a blog spelled the title
 5. iTunes Search API; then a release date the source itself states (Bandcamp, ListenBrainz, KEXP's album date)
    or the year YouTube Music's artist page states for a watched release; then the YouTube album year. Blog post
    and upload dates are only sightings.
+6. Still unsure (no catalogue or store has a date, at most a weak hint): the release date YouTube Music states for
+   the upload itself, read from the song's own page (ytmusicapi, no API quota) — a remix that only exists as an
+   official video, say. It is a weak hint (`2016 ?` on the badge, the evidence line names it), but a year to file
+   under rather than `year?`. Never for a fan upload, whose date is only when it was uploaded; asked once per
+   video, a bounded batch a run (`resolve.max_ytmusic_date_lookups_per_run`), and asked again when the track is
+   paired with another upload.
 
 Every year found is kept as evidence (hover the year badge on the site to see it). The earliest year from the most
 trusted tier wins: ✓ = catalogue-verified, plain = a store/source date, ? = weak hint. If nothing anywhere says when
@@ -117,11 +123,26 @@ allows 1 request/s), undated tracks first.
 for as long as your Google session lasts. Signing out only forgets that device. To disconnect the site from your
 Google account entirely use https://myaccount.google.com/permissions.
 
-**Audio, not video:** YouTube Music lists most songs twice, as the audio-only track and as the official video. The
-resolver prefers the audio track, swaps a video hit for its audio counterpart (the watch playlist pairs the two), and
-prefers an original issue over a deluxe, remastered or live edition. Older cached hits are re-checked a batch a run
-(`resolve.audio_heals_per_run`). The album a song names is opened once for the year YouTube Music states and its
-playlist, which is what the "full release" link and the year fallback come from.
+**Audio, not video:** YouTube Music lists most songs twice, as the audio-only track (`MUSIC_VIDEO_TYPE_ATV`, the
+one the playlists want) and as the official video. The resolver prefers the audio track in search, swaps a video hit
+— from a search or from an album page alike — for its audio counterpart (the watch playlist pairs the two), and
+prefers an original issue over a deluxe, remastered or live edition. A card that is still a video (YouTube Music
+pairs no audio track with it yet) is asked again every `resolve.audio_recheck_days` (30), a batch a run
+(`resolve.audio_heals_per_run`), because the pairing often arrives later; a hit whose kind the cache never recorded
+learns it the same way. ⚙ → *Stats* says how many of the day's cards (and the catalog's) play the audio track, the
+build's log line the same. The library itself is checked too: every playlist row that is a video rather than the
+audio track is listed in the **Cleanup** tab under *filed as the video, not the audio track*, with the audio track
+YouTube Music pairs with it (asked through the watch playlist, `resolve.counterparts_per_run` a run, no API quota)
+and a **swap** (add the audio track, remove the video: 100 units), per row or *swap all in a year*; **keep the
+video** stops listing a row you want as it is. The album a song names is opened once for the year YouTube Music
+states and its playlist, which is what the "full release" link and the year fallback come from.
+
+**Songs, not interludes or mixes:** a track shorter than `resolve.min_length` (1:55) or longer than
+`resolve.max_length` (9:31) is never a card, in the feed or the Catalog tab. Between several uploads of a song the
+resolver prefers one inside the range (the radio edit over the extended mix, the first real song over an album's
+one-minute intro); a song whose only upload is outside it is dropped after resolution, and hits cached before the
+range existed are looked up once more in case a song-length upload exists. Both ends take `m:ss` or seconds; an
+empty value lifts that end.
 
 **No duplicates:** every Keep first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so. The daily build scans all year playlists and lists every *song* they hold more than once
@@ -230,8 +251,14 @@ session that the playlist's owner approved in that browser.
   what the Catalog tab below is for. The target is set to a day's *rating* appetite (300), not to what the fresh
   window happens to yield: those older candidates are fetched, scored and resolved on YouTube every run whatever the
   target says, so raising it costs nothing but keeps what a lower one threw away. `ranking.max_items` has to stay
-  clear of `backfill.target` + the unplayable current cards riding along, or the final cut-by-score drops the fill
-  it just made — a test in `tests/test_sources.py` holds that line.
+  clear of `backfill.target`, or the final cut-by-score drops the fill it just made — a test in
+  `tests/test_sources.py` holds that line.
+- **Every card plays.** A song becomes a card only once it has its YouTube Music audio track. One with no match, a
+  video-only match or an upload whose kind is not known yet is left out of the day rather than shown as a card that
+  cannot be played or filed, and is tried again on a later build: a miss is looked up again after
+  `resolve.retry_misses_days` (7; a new release often gets its audio track a few days after the blogs write about
+  it), a video is asked for its audio side again every `resolve.audio_recheck_days`, and unknown uploads are
+  labelled a batch a run. There is no "playable" filter on the site because there is nothing for it to hide.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
@@ -309,9 +336,15 @@ Everything lives in `discovery/config.yaml`:
   `target` how many playable current cards a day should hold before anything older is used, `max` the most older
   cards one day may carry, `candidates` how many are carried into YouTube resolution. Older cards say
   "filling in from &lt;year&gt;" and file into their own year.
+- `resolve.audio_heals_per_run` / `audio_recheck_days` — how many cards that still play a video are asked for their
+  audio track a run, and how often each is asked again.
+- `resolve.min_length` / `max_length` — the song-length range (1:55–9:31): shorter is an interlude, longer a mix,
+  neither is a card; `resolve.max_ytmusic_date_lookups_per_run` — how many undated tracks a run ask YouTube Music
+  for the upload's own release date.
 - `ranking.fresh_days` — what counts as the current timeframe (this calendar year always does);
   `max_unknown_per_source` — how many acts the profile does not know one source family may put in a day before it
-  is pushed down; `unplayable_penalty` — how far a card with no YouTube match falls.
+  is pushed down.
+- `resolve.retry_misses_days` — how long a song with no YouTube Music audio track waits before it is looked up again.
 - `sources.*.tags` — the Bandcamp and MusicBrainz genre lists (this replaces the "Edge of <genre>" playlists).
 - `sources.rss.feeds` — add any blog/radio RSS; headlines like `Artist – "Song"` or `Artist shares "Song"` become
   playable cards. Tour dates, interviews, listicles, obituaries and the rest are dropped by `discovery/headlines.py`

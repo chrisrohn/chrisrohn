@@ -308,8 +308,8 @@ function fillEmpty(box) {
   const say = (text, ...rest) => { const p = document.createElement("p"); p.className = "empty-say"; p.textContent = text; box.append(p); if (rest.length) { const row = document.createElement("div"); row.className = "empty-acts"; row.append(...rest); box.append(row); } };
   const goTab = (/** @type {string} */ v) => { const t = /** @type {HTMLElement | null} */ ($(`.tab[data-view=${v}]`)); if (t) t.click(); };
   const clearFilters = () => act("clear the filters", () => {
-    Object.assign(state.filters, { q: "", sourcesOff: [], blogsOff: [], onlyNew: false, onlyPlayable: false, onlyKnown: false, onlyRecent: false, shortlist: false });
-    for (const [k, sel] of [["q", "#q"], ["onlyNew", "#only-new"], ["onlyPlayable", "#only-playable"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"], ["shortlist", "#shortlist"]]) {
+    Object.assign(state.filters, { q: "", sourcesOff: [], blogsOff: [], onlyNew: false, onlyKnown: false, onlyRecent: false, shortlist: false });
+    for (const [k, sel] of [["q", "#q"], ["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"], ["shortlist", "#shortlist"]]) {
       const el = /** @type {HTMLInputElement | null} */ ($(sel)); if (!el) continue;
       if (el.type === "checkbox") el.checked = !!state.filters[k]; else el.value = "";
     }
@@ -333,17 +333,15 @@ function fillEmpty(box) {
   if (!all.length) return say(late ? "The feed is empty and today's build has not landed yet." : "This build produced no cards at all — worth a look at the Discover workflow.");
   if (!isCurator()) return say("Nothing matches these filters.", clearFilters());
   if (!unrated.length) {
-    const playable = all.filter(i => i.youtube && i.youtube.videoId).length;
     say(late
-      ? `You have rated all ${all.length} cards of ${built ? built.toLocaleDateString() : "the last"} build (${playable} playable), and today's has not landed yet. It is retried through the morning and appears here on its own.`
-      : `That is the whole day: all ${all.length} cards of this build are rated (${playable} playable). The next one lands in the morning.`,
+      ? `You have rated all ${all.length} cards of ${built ? built.toLocaleDateString() : "the last"} build, and today's has not landed yet. It is retried through the morning and appears here on its own.`
+      : `That is the whole day: all ${all.length} cards of this build are rated. The next one lands in the morning.`,
       act(`the catalog${state.catalog ? ` · ${catalogItems().filter(i => !hiddenBy(i)).length}` : ""}`, () => goTab("catalog")),
       act("what you skipped", () => goTab("skipped")));
     return;
   }
   const why = [];
   if (state.filters.q) why.push("the search");
-  if (state.filters.onlyPlayable && !unrated.some(i => i.youtube && i.youtube.videoId)) why.push("“playable only”");
   if (state.filters.onlyRecent) why.push("“new releases only”");
   if (state.filters.onlyNew) why.push("“new today”");
   if (state.filters.onlyKnown) why.push("“known artists”");

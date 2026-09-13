@@ -175,6 +175,8 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
         Item(artist="Parcels", title="Lighten Up (Radio Mix)", kind="track", sources=["radio:KEXP"], editorial=True),   # different spelling, same video → hidden
         Item(artist="Parcels", title="Free", kind="track", sources=["radio:KEXP"], editorial=True, links={"kexp": "javascript:alert(1)", "article": ["https://kexp.org/x"]}),   # undated: first_seen fills the date as a sighting
         Item(artist="Someone New", title="Disco Dream", kind="release", release_date=today, sources=["musicbrainz"], tags=["nu disco"]),
+        Item(artist="Parcels", title="Video Only", kind="track", release_date=today, sources=["rss:Pitchfork"], editorial=True),   # matched to a video with no audio side: not a card today
+        Item(artist="Parcels", title="Unknown Kind", kind="track", release_date=today, sources=["rss:Pitchfork"], editorial=True),   # kind not known yet: not a card today either
         Item(artist="Unknown Metal Band", title="Skull", kind="release", release_date=today, sources=["musicbrainz"], tags=["metal"]),
         # older than the current timeframe: a candidate only because the day is thin (the artist watch reaches back)
         Item(artist="Roosevelt", title="Earlier Single", kind="track", release_date=date(today.year - 2, 3, 1), sources=["ytmusic"]),
@@ -190,14 +192,19 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         seen_avoid.update(avoid or {})
         for it in items:
+            atv = "MUSIC_VIDEO_TYPE_ATV"
             if it.artist == "Jungle":
-                it.youtube = {"videoId": "vid123", "title": it.title, "artists": ["Jungle"], "thumbnail": "https://i/x.jpg"}
+                it.youtube = {"videoId": "vid123", "title": it.title, "artists": ["Jungle"], "thumbnail": "https://i/x.jpg", "videoType": atv}
             if it.title.startswith("Lighten Up"):
-                it.youtube = {"videoId": "vidSaved", "title": it.title, "artists": ["Parcels"], "via": "track-search"}
+                it.youtube = {"videoId": "vidSaved", "title": it.title, "artists": ["Parcels"], "via": "track-search", "videoType": atv}
             if it.title == "Free":
-                it.youtube = {"videoId": "vidFree", "title": it.title, "artists": ["Parcels"]}
+                it.youtube = {"videoId": "vidFree", "title": it.title, "artists": ["Parcels"], "videoType": atv}
+            if it.title == "Video Only":
+                it.youtube = {"videoId": "vidOMV", "title": it.title, "artists": ["Parcels"], "videoType": "MUSIC_VIDEO_TYPE_OMV"}
+            if it.title == "Unknown Kind":
+                it.youtube = {"videoId": "vidUnk", "title": it.title, "artists": ["Parcels"]}
             if it.title.endswith("Single"):
-                it.youtube = {"videoId": "vid" + it.title[:3], "title": it.title, "artists": ["Roosevelt"]}
+                it.youtube = {"videoId": "vid" + it.title[:3], "title": it.title, "artists": ["Roosevelt"], "videoType": atv}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
     monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
     monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
@@ -224,6 +231,8 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert dups["count"] == 1 and dups["kinds"] == {"cross-year": 1} and payload["youtube"]["duplicates_count"] == 1
     assert ("Unknown Metal Band", "Skull") not in ids
     assert ("Someone New", "Disco Dream") not in ids        # tag-only, no YouTube match → dropped
+    assert ("Parcels", "Video Only") not in ids and ("Parcels", "Unknown Kind") not in ids   # no audio track (yet): not a card, editorial or not
+    assert all(i["youtube"] and i["youtube"]["videoId"] for i in payload["items"])            # every card plays
     # the day is thin, so the older release fills in — marked as such, and dated by its own year, never today's
     older = next(i for i in payload["items"] if i["title"] == "Earlier Single")
     assert older["backfill"] is True and older["release_date"] == date(today.year - 2, 3, 1).isoformat()
@@ -239,6 +248,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     pls = payload["youtube"]["playlists"]
     assert pls["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN" and len(pls) == 48   # config ids win over the profile's title matches
     assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
+    assert payload["youtube"]["audio"] == {"audio": len(payload["items"]), "video": 0, "unknown": 0} and payload["youtube"]["video_count"] == 0
     assert payload["picks"][0]["artist"] == "Jungle"
     assert (sandbox / "site" / "feed.xml").read_text().count("<item>") == len(payload["items"])
 
@@ -802,18 +812,17 @@ def test_learn_from_history_moves_scores_without_quota(tmp_path):
     assert scored[0].title == "A" and any(r.startswith("you keep") for r in scored[0].reasons)
 
 
-def test_freshness_and_playable_are_configurable():
+def test_freshness_is_configurable_and_a_match_earns_no_bonus():
     today = date.today()
     cfg = _cfg()
     cfg["ranking"]["freshness_days"] = 10
     cfg["ranking"]["undated_freshness"] = 0.2
-    cfg["ranking"]["weights"]["playable"] = 0.0
     fresh = Item(artist="Someone New", title="Now", kind="track", release_date=today, sources=["bandcamp"])
     stale = Item(artist="Someone New", title="Then", kind="track", release_date=today - timedelta(days=30), sources=["bandcamp"])
     undated = Item(artist="Someone New", title="When", kind="track", sources=["bandcamp"], youtube={"videoId": "v"})
     score_items([fresh, stale, undated], PROFILE, cfg)
     assert fresh.score > undated.score > stale.score      # an undated track sits below this week's release, above last month's
-    assert undated.score == pytest.approx(0.2)          # the playable bonus is off, so only the undated share remains
+    assert undated.score == pytest.approx(0.2)          # a YouTube match earns nothing by itself (every card has one): only the undated share
 
 
 def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandbox):
@@ -827,7 +836,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
 
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:
-            it.youtube = {"videoId": "vid1", "title": it.title, "artists": ["Jungle"]}
+            it.youtube = {"videoId": "vid1", "title": it.title, "artists": ["Jungle"], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
     monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
     monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
@@ -919,7 +928,7 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
         assert cfg["resolve"]["max_lookups_per_run"] == 800
         for it in items:
             if it.title != "Parcels Hit":
-                it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg"}
+                it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     monkeypatch.setattr(catalog, "resolve_all", fake_resolve)
 
     def fake_years(items, cfg, http, deadline=None):
@@ -1047,7 +1056,11 @@ def test_years_pending_marker_and_fast_chain(monkeypatch, sandbox):
     monkeypatch.setenv("DISCOGS_TOKEN", "tok")
     first = Item(artist="Chromeo", title="Night By Night", kind="track", score=2.0, youtube={"videoId": "a", "year": "2010"})
     second = Item(artist="Justice", title="Helix", kind="track", score=1.0)
-    years.verify_years([first, second], cfg, FakeHttp())
+
+    class MuteYT:
+        def get_song(self, video_id):
+            return {}                                   # YouTube Music states no date either
+    years.verify_years([first, second], cfg, FakeHttp(), yt=MuteYT())
     assert not any("discogs" in u or "itunes" in u for u in calls)
     assert (first.year, first.year_source, first.year_confidence) == (2010, "youtube", "low")   # nothing in the catalogues: the album year stands in
     assert second.year is None and second.year_source == "pending"                             # over budget: not looked up yet, not "unknown"
@@ -1131,10 +1144,10 @@ def test_build_merges_a_release_renamed_to_an_existing_track(monkeypatch, sandbo
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         for it in items:
             if it.kind == "release":
-                it.youtube = {"videoId": "vidAlbumCut", "title": "Keep Moving", "artists": ["Jungle"]}
+                it.youtube = {"videoId": "vidAlbumCut", "title": "Keep Moving", "artists": ["Jungle"], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
                 promote(it, it.youtube)        # the release becomes the track its video is: same key as the first item
             else:
-                it.youtube = {"videoId": "vidSingle", "title": "Keep Moving", "artists": ["Jungle"]}
+                it.youtube = {"videoId": "vidSingle", "title": "Keep Moving", "artists": ["Jungle"], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     monkeypatch.setattr(build, "resolve_all", fake_resolve)
     monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
     monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
@@ -1379,18 +1392,327 @@ def test_backfill_fills_the_gap_only_when_the_current_timeframe_is_thin():
 
     # two current cards can be played, the target is four: the two best playable older ones fill in
     for i, it in enumerate([recent, undated]):
-        it.youtube = {"videoId": f"v{i}"}
+        it.youtube = {"videoId": f"v{i}", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     for i, it in enumerate(back):
-        it.youtube = {"videoId": f"b{i}"}
+        it.youtube = {"videoId": f"b{i}", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     out, counts = fill_from_backfill([recent, undated, *back], cfg)
     assert [i.title for i in out] == ["new", "undated", "seen", "2024"]
     assert counts == {"fresh_playable": 2, "older": 3, "used": 2}
     assert "filling in from 2025" in out[2].reasons and "filling in from 2024" in out[3].reasons
     # a full day of current tracks leaves no room at all
-    full = [Item(artist=f"X{i}", title=str(i), youtube={"videoId": str(i)}) for i in range(4)]
+    full = [Item(artist=f"X{i}", title=str(i), youtube={"videoId": str(i), "videoType": "MUSIC_VIDEO_TYPE_ATV"}) for i in range(4)]
     kept, counts = fill_from_backfill(full + back, cfg)
     assert kept == full and counts["used"] == 0
     # backfill off: nothing older is even a candidate, and nothing fills in
     off = {"ranking": {"fresh_days": 90}, "backfill": {"years": 0}}
     assert split_fresh([recent, old], off, today) == ([recent, old], [])
     assert fill_from_backfill([recent, *back], off)[0] == [recent]
+
+
+def test_song_length_range_parses_prefers_and_drops():
+    """1:55–9:31: the resolver prefers an upload inside the range, an album card skips a one-minute intro, and the
+    feed drops a song whose only upload is outside it; a track nobody times is given the benefit of the doubt."""
+    from discovery.resolve import ATV, _album_track, _pick, drop_by_length, duration_seconds, length_bounds, length_ok
+
+    assert duration_seconds("1:55") == 115 and duration_seconds("9:31") == 571 and duration_seconds("1:02:03") == 3723
+    assert duration_seconds(282) == 282 and duration_seconds("282") == 282 and duration_seconds(None) is None and duration_seconds("") is None
+    assert duration_seconds("4 minutes") is None and duration_seconds(True) is None
+    cfg = _cfg()
+    assert length_bounds(cfg) == (115, 571)                                        # config.yaml: 1:55 / 9:31
+    assert length_bounds({"resolve": {"min_length": "", "max_length": 600}}) == (None, 600)
+    assert length_bounds({}) == (115, 571)                                         # the defaults when the keys are missing
+    assert length_ok("1:55", (115, 571)) and length_ok("9:31", (115, 571)) and length_ok(None, (115, 571)) and length_ok("0:30", None)
+    assert not length_ok("1:54", (115, 571)) and not length_ok("9:32", (115, 571))
+
+    # two uploads of the song: the extended mix is the audio track, the radio edit only a video — the edit wins
+    res = [
+        {"resultType": "song", "title": "Sunset Lover", "artists": [{"name": "Petit Biscuit"}], "videoId": "ext", "videoType": ATV, "duration": "10:12", "duration_seconds": 612},
+        {"resultType": "song", "title": "Sunset Lover", "artists": [{"name": "Petit Biscuit"}], "videoId": "edit", "videoType": "MUSIC_VIDEO_TYPE_OMV", "duration": "3:57", "duration_seconds": 237},
+    ]
+    assert _pick(res, "Petit Biscuit", "Sunset Lover", None, (115, 571))["videoId"] == "edit"
+    assert _pick(res, "Petit Biscuit", "Sunset Lover")["videoId"] == "ext"           # without the range the audio track wins as before
+    assert _pick(res[:1], "Petit Biscuit", "Sunset Lover", None, (115, 571))["videoId"] == "ext"   # the only upload is still the song
+    tracks = [{"videoId": "intro", "title": "Intro", "duration_seconds": 61}, {"videoId": "first", "title": "First Real Song", "duration_seconds": 240},
+              {"videoId": "title", "title": "The Record", "duration_seconds": 700}]
+    album = Item(artist="Someone", title="The Record", kind="release", release="The Record")
+    assert _album_track(tracks, album)["videoId"] == "title"                          # no range: the title track
+    assert _album_track(tracks, album, (115, 571))["videoId"] == "first"              # the title track is a 11:40 piece: the first song-length track
+    assert _album_track(tracks, Item(artist="Someone", title="Other", kind="release", release="Other"), (115, 571))["videoId"] == "first"   # never the intro
+    assert _album_track(tracks[:1], album, (115, 571))["videoId"] == "intro"          # nothing in range: the opener, dropped later
+
+    items = [Item(artist="A", title="Skit", kind="track", youtube={"videoId": "1", "duration": "1:54"}),
+             Item(artist="A", title="Song", kind="track", youtube={"videoId": "2", "duration": "1:55"}),
+             Item(artist="A", title="Mix", kind="track", youtube={"videoId": "3", "duration": "9:32"}),
+             Item(artist="A", title="Long Song", kind="track", youtube={"videoId": "4", "duration": "9:31"}),
+             Item(artist="A", title="Untimed", kind="track", youtube={"videoId": "5"}),
+             Item(artist="A", title="Unresolved", kind="track")]
+    assert [i.title for i in drop_by_length(items, cfg)] == ["Song", "Long Song", "Untimed", "Unresolved"]
+    assert len(drop_by_length(items, {"resolve": {"min_length": "", "max_length": ""}})) == 6   # both ends lifted: nothing dropped
+
+
+def test_resolve_all_looks_up_an_out_of_range_hit_once_more(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import resolve
+
+    searches = []
+
+    class FakeYT:
+        def search(self, q, filter=None, limit=None):
+            searches.append(q)
+            if filter == "songs" and "Sunset Lover" in q:
+                return [{"resultType": "song", "title": "Sunset Lover", "artists": [{"name": "Petit Biscuit"}], "videoId": "ext", "videoType": resolve.ATV, "duration": "10:12", "duration_seconds": 612},
+                        {"resultType": "song", "title": "Sunset Lover", "artists": [{"name": "Petit Biscuit"}], "videoId": "edit", "videoType": resolve.ATV, "duration": "3:57", "duration_seconds": 237}]
+            if filter == "songs" and "Epic" in q:
+                return [{"resultType": "song", "title": "Epic", "artists": [{"name": "Long Band"}], "videoId": "epic", "videoType": resolve.ATV, "duration": "12:00", "duration_seconds": 720}]
+            return []
+        def get_watch_playlist(self, **kw):
+            return {"tracks": []}
+        def get_album(self, bid):
+            return {}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    sunset = Item(artist="Petit Biscuit", title="Sunset Lover", kind="track")
+    epic = Item(artist="Long Band", title="Epic", kind="track")
+    # rows from before the range existed: both sit on an upload outside it
+    util.write_json(resolve.YT_CACHE, {
+        sunset.key: {"seen": "2026-09-01", "yt": {"videoId": "ext", "title": "Sunset Lover", "artists": ["Petit Biscuit"], "duration": "10:12", "videoType": resolve.ATV}, "v": resolve.CACHE_VERSION},
+        epic.key: {"seen": "2026-09-01", "yt": {"videoId": "epic", "title": "Epic", "artists": ["Long Band"], "duration": "12:00", "videoType": resolve.ATV}, "v": resolve.CACHE_VERSION}})
+    resolve.resolve_all([sunset, epic], _cfg())
+    assert sunset.youtube["videoId"] == "edit" and sunset.youtube["duration"] == "3:57"      # a song-length upload existed: swapped in
+    assert epic.youtube["videoId"] == "epic"                                                 # simply a long song: still the match (the feed drops it)
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[sunset.key]["len"] == 1 and cache[epic.key]["len"] == 1
+    # the second run leaves both alone: a stamped row is never redone for its length again
+    searches.clear()
+    again = Item(artist="Long Band", title="Epic", kind="track")
+    resolve.resolve_all([again], _cfg())
+    assert not searches and again.youtube["videoId"] == "epic"
+    assert [i.title for i in resolve.drop_by_length([sunset, epic], _cfg())] == ["Sunset Lover"]
+
+
+def test_years_fall_back_to_the_youtube_music_release_date(monkeypatch, sandbox):
+    """Nothing in the catalogues or the stores: the date YouTube Music states for the upload gives the year (a weak
+    hint, "?"), asked once per video, kept with the cache entry, redone when the track is paired with another
+    upload, and never asked when a catalogue already answered or the match is a fan upload."""
+    from discovery import years
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            p = kw.get("params", {})
+            if "listenbrainz" in url:
+                return {"artist_credit_name": "Flume", "recording_name": "Never Be Like You", "recording_mbid": "rec-flume"} if p.get("artist_name") == "Flume" else {}
+            if url.endswith("/recording/rec-flume"):
+                return {"first-release-date": "2016-01-15", "isrcs": [], "releases": [{"date": "2016-01-15", "release-group": {"first-release-date": "2016-01-15"}}]}
+            if url.endswith("/recording/"):
+                return {"recordings": []}
+            if "deezer.com/search" in url:
+                return {"data": []}
+            return {}
+
+    asked = []
+
+    class FakeYT:
+        def get_song(self, video_id):
+            asked.append(video_id)
+            if video_id == "rmx":
+                return {"microformat": {"microformatDataRenderer": {"publishDate": "2016-03-04", "uploadDate": "2016-03-04"}}}
+            if video_id == "rmx2":
+                return {"microformat": {"microformatDataRenderer": {"publishDate": "2017-06-30"}}}
+            if video_id == "epoch":
+                return {"microformat": {"microformatDataRenderer": {"publishDate": "1969-12-31", "uploadDate": "1969-12-31"}}}   # YouTube's "no date"
+            raise RuntimeError("boom")
+    cfg = _cfg()
+    cfg["resolve"] = {**cfg["resolve"], "year_chain": "fast"}
+    remix = Item(artist="Bon Iver", title="Minnesota, WI (Oliver Nelson Remix)", kind="track", youtube={"videoId": "rmx", "videoType": "MUSIC_VIDEO_TYPE_OMV"})
+    known = Item(artist="Flume", title="Never Be Like You", kind="track", youtube={"videoId": "known", "videoType": "MUSIC_VIDEO_TYPE_ATV"})
+    fan = Item(artist="Zane Alexander", title="Polarity", kind="track", youtube={"videoId": "ugc", "videoType": "MUSIC_VIDEO_TYPE_UGC"})
+    nodate = Item(artist="ColeCo", title="Rock The Boat", kind="track", youtube={"videoId": "epoch", "videoType": "MUSIC_VIDEO_TYPE_ATV"})
+    failed = Item(artist="ColeCo", title="Distant Lover", kind="track", youtube={"videoId": "err"})
+    unresolved = Item(artist="Nobody", title="Nothing", kind="track")
+    years.verify_years([remix, known, fan, nodate, failed, unresolved], cfg, FakeHttp(), yt=FakeYT())
+    assert (remix.year, remix.year_source, remix.year_confidence) == (2016, "ytmusic-date", "low")
+    assert remix.year_evidence == ["YouTube Music release date: 2016"]
+    assert (known.year, known.year_source) == (2016, "musicbrainz")           # a catalogue answered: YouTube Music not asked
+    assert fan.year is None and fan.year_source == "unknown"                  # a fan upload's date is an upload date
+    assert nodate.year is None and failed.year is None and unresolved.year is None
+    assert sorted(asked) == ["epoch", "err", "rmx"]
+    cache = util.read_json(years.YEAR_CACHE, {})
+    assert cache[remix.key]["ytdate"] == {"video": "rmx", "date": "2016-03-04"} and cache[nodate.key]["ytdate"] == {"video": "epoch", "date": None}
+    assert "ytdate" not in cache[known.key] and "ytdate" not in cache[fan.key]
+    # the second run is served from the cache — except the remix, now paired with another upload, which is asked again
+    asked.clear()
+    remix.youtube = {"videoId": "rmx2", "videoType": "MUSIC_VIDEO_TYPE_OMV"}
+    years.verify_years([remix, known, nodate], cfg, FakeHttp(), yt=FakeYT())
+    assert asked == ["rmx2"] and remix.year == 2017
+    # a stated year from the artist page still outranks it, and the album year sits beside it as evidence
+    remix.stated_year = 2015
+    remix.youtube["year"] = "2016"
+    years.verify_years([remix], cfg, FakeHttp(), yt=FakeYT())
+    assert (remix.year, remix.year_source) == (2015, "ytmusic-year") and "YouTube Music release date: 2017" in remix.year_evidence
+    # the budget bounds the lookups a run; what it leaves is not "pending" (the catalogues did run) but plain unknown
+    asked.clear()
+    cfg["resolve"]["max_ytmusic_date_lookups_per_run"] = 0
+    fresh = Item(artist="Princeton", title="Florida (Cosmic Kids Remix)", kind="track", youtube={"videoId": "fla"})
+    years.verify_years([fresh], cfg, FakeHttp(), yt=FakeYT())
+    assert not asked and fresh.year is None and fresh.year_source == "unknown"
+
+
+def test_audio_track_is_taken_from_album_pages_and_video_hits_are_rechecked(monkeypatch, sandbox):
+    """Audio, not video: a release opened by its browse id whose album page lists the video side gets the audio
+    counterpart; a cached video hit is asked for its counterpart on first sight and again after
+    `audio_recheck_days`; a hit of unknown kind learns what it is; the feed tallies what the cards play."""
+    import sys
+    import types
+
+    from discovery import resolve
+
+    watched = []
+    paired = {"vOMV": "vATV"}     # what the watch playlist pairs today (YouTube Music adds pairs over time)
+
+    class FakeYT:
+        albums = {"MPREb_s": {"title": "To See You", "year": "2026", "artists": [{"name": "NINA"}], "audioPlaylistId": "OLAK_s",
+                              "tracks": [{"videoId": "vOMV", "title": "To See You", "artists": [{"name": "NINA"}], "videoType": "MUSIC_VIDEO_TYPE_OMV", "duration_seconds": 240}]}}
+        def get_album(self, bid):
+            return self.albums[bid]
+        def search(self, q, filter=None, limit=None):
+            return []
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            watched.append(videoId)
+            if videoId in paired:
+                return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": paired[videoId], "videoType": resolve.ATV}}]}
+            if videoId == "isAudio":
+                return {"tracks": [{"videoId": "isAudio", "videoType": resolve.ATV}]}
+            if videoId == "lonely":
+                return {"tracks": [{"videoId": "lonely", "videoType": "MUSIC_VIDEO_TYPE_OMV"}]}
+            return {"tracks": []}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    cfg = _cfg()
+    cfg["resolve"] = {**cfg["resolve"], "audio_recheck_days": 30, "audio_heals_per_run": 10}
+    single = Item(artist="Nina", title="To See You", kind="release", release="To See You", links={"youtube music": "https://music.youtube.com/browse/MPREb_s"})
+    resolve.resolve_all([single], cfg)
+    assert single.youtube["videoId"] == "vATV" and single.youtube["videoType"] == resolve.ATV and single.youtube["videoFrom"] == "vOMV"   # the album listed the video side
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[single.key]["audio"] == date.today().isoformat()
+
+    # cached hits: a video with no pair yet, one of unknown kind that is the audio track, one of unknown kind that stays a video
+    lonely = Item(artist="Solo", title="Lonely", kind="track")
+    unlabelled = Item(artist="Quiet", title="Is Audio", kind="track")
+    unknown = Item(artist="Quiet", title="Stays Video", kind="track")
+    stale = (date.today() - timedelta(days=31)).isoformat()
+    fresh = (date.today() - timedelta(days=3)).isoformat()
+    cache[lonely.key] = {"seen": stale, "yt": {"videoId": "lonely", "title": "Lonely", "artists": ["Solo"], "videoType": "MUSIC_VIDEO_TYPE_OMV"}, "v": 3, "audio": stale}
+    cache[unlabelled.key] = {"seen": stale, "yt": {"videoId": "isAudio", "title": "Is Audio", "artists": ["Quiet"]}, "v": 3}
+    cache[unknown.key] = {"seen": stale, "yt": {"videoId": "lonely", "title": "Stays Video", "artists": ["Quiet"]}, "v": 3, "audio": fresh}
+    util.write_json(resolve.YT_CACHE, cache)
+    watched.clear()
+    resolve.resolve_all([lonely, unlabelled, unknown], cfg)
+    assert sorted(watched) == ["isAudio", "lonely"]                                           # the stale one and the never-checked one; the fresh one waits
+    assert lonely.youtube["videoType"] == "MUSIC_VIDEO_TYPE_OMV" and lonely.youtube["videoId"] == "lonely"    # still no pair: stays the video, re-stamped
+    assert unlabelled.youtube["videoType"] == resolve.ATV and unlabelled.youtube["videoId"] == "isAudio"     # it was the audio track all along
+    assert unknown.youtube.get("videoType") is None
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[lonely.key]["audio"] == date.today().isoformat() and cache[unlabelled.key]["audio"] == date.today().isoformat() and cache[unknown.key]["audio"] == fresh
+    assert resolve.audio_summary([single, lonely, unlabelled, unknown, Item(artist="X", title="Y", kind="track")]) == {"audio": 2, "video": 1, "unknown": 1}
+    # YouTube Music paired the audio side since: the next re-check (after the recheck window) swaps it in
+    paired["lonely"] = "lonelyATV"
+    cache[lonely.key]["audio"] = stale
+    util.write_json(resolve.YT_CACHE, cache)
+    again = Item(artist="Solo", title="Lonely", kind="track")
+    resolve.resolve_all([again], cfg)
+    assert again.youtube["videoId"] == "lonelyATV" and again.youtube["videoType"] == resolve.ATV and again.youtube["videoFrom"] == "lonely"
+    assert resolve.audio_counterpart(FakeYT(), "isAudio") is None and resolve.watch_info(FakeYT(), "isAudio") == (resolve.ATV, "isAudio")
+
+
+def test_playlist_rows_that_are_videos_get_their_audio_track_in_the_report(monkeypatch, sandbox):
+    import sys
+    import types
+
+    from discovery import unavailable
+
+    monkeypatch.setattr(unavailable, "CACHE", sandbox / "data" / "cache" / "counterparts.json")
+    monkeypatch.setattr(unavailable, "REPORT", sandbox / "site" / "data" / "unavailable.json")
+    watched = []
+
+    class FakeYT:
+        def __init__(self, **kw): pass
+        def search(self, q, filter=None, limit=None):
+            raise AssertionError("a video row is asked through the watch playlist, never searched")
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            watched.append(videoId)
+            if videoId == "vid1":
+                return {"tracks": [{"videoId": "vid1", "videoType": "MUSIC_VIDEO_TYPE_OMV", "counterpart": {"videoId": "vid1-atv", "videoType": "MUSIC_VIDEO_TYPE_ATV"}}]}
+            return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_UGC"}]}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    entries = [
+        {"year": "2024", "playlistId": "PL2024", "position": 0, "videoId": "vid1", "artist": "Jungle", "title": "Candle Flame", "album": "Volcano", "videoType": "MUSIC_VIDEO_TYPE_OMV", "avail": True},
+        {"year": "2019", "playlistId": "PL2019", "position": 5, "videoId": "vid2", "artist": "Someone", "title": "Upload", "videoType": "MUSIC_VIDEO_TYPE_UGC", "avail": True},
+        {"year": "2019", "playlistId": "PL2019", "position": 6, "videoId": "vid3", "artist": "Fine", "title": "Fine", "videoType": "MUSIC_VIDEO_TYPE_ATV", "avail": True},
+        {"year": "2018", "playlistId": "PL2018", "position": 1, "videoId": "vid4", "artist": "Gone", "title": "Greyed Video", "videoType": "MUSIC_VIDEO_TYPE_OMV", "avail": False},
+    ]
+    profile = {"youtube": {"entries": entries, "checked_at": "2026-09-06T00:00:00+00:00"}}
+    cfg = _cfg(); cfg["resolve"]["counterparts_per_run"] = 2                                # the greyed row's search first, then one video row
+    monkeypatch.setattr(unavailable, "find_counterpart", lambda yt, a, t, avoid: None)     # the greyed row's search is not what this tests
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert set(rows) == {"vid1", "vid2", "vid4"} and rows["vid4"]["why"] == "greyed"          # the audio track is never listed; a greyed video is a dead row
+    assert report["count"] == 1 and report["video"] == 2                                       # `count` stays the not-streamable rows
+    assert rows["vid1"]["why"] == "video" and rows["vid1"]["alt"] == {"videoId": "vid1-atv", "title": "Candle Flame", "album": "Volcano", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
+    assert rows["vid2"]["pending"] is True and report["video_pending"] == 1 and report["video_with_audio"] == 1   # over budget: waits
+    assert watched == ["vid1"]
+    cfg["resolve"]["counterparts_per_run"] = 5
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert watched == ["vid1", "vid2"] and rows["vid2"]["alt"] is None and rows["vid2"]["pending"] is False and report["video_pending"] == 0
+    cache = util.read_json(unavailable.CACHE, {})
+    assert cache["audio:vid1"]["alt"]["videoId"] == "vid1-atv" and "vid1" not in cache          # kept apart from the dead rows' searches
+
+
+def test_only_audio_cards_and_misses_are_tried_again(monkeypatch, sandbox):
+    """Every card plays its audio track; a song with no match is not a card today and is looked up again after
+    `retry_misses_days`, a fresh miss is not."""
+    import sys
+    import types
+
+    from discovery import resolve
+    from discovery.build import only_audio
+
+    audio = Item(artist="A", title="Audio", kind="track", youtube={"videoId": "a", "videoType": resolve.ATV})
+    video = Item(artist="A", title="Video", kind="track", youtube={"videoId": "v", "videoType": "MUSIC_VIDEO_TYPE_OMV"})
+    unknown = Item(artist="A", title="Unknown", kind="track", youtube={"videoId": "u"})
+    none = Item(artist="A", title="None", kind="track")
+    assert only_audio([audio, video, unknown, none]) == [audio]
+
+    searches = []
+
+    class FakeYT:
+        def search(self, q, filter=None, limit=None):
+            searches.append(q)
+            if "Arrived" in q and filter == "songs":
+                return [{"resultType": "song", "title": "Arrived", "artists": [{"name": "Late Band"}], "videoId": "arr", "videoType": resolve.ATV, "duration": "3:30"}]
+            return []
+        def get_watch_playlist(self, **kw):
+            return {"tracks": []}
+        def get_album(self, bid):
+            return {}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    old_miss = Item(artist="Late Band", title="Arrived", kind="track")
+    new_miss = Item(artist="Late Band", title="Still Missing", kind="track")
+    stale = (date.today() - timedelta(days=8)).isoformat()
+    util.write_json(resolve.YT_CACHE, {old_miss.key: {"seen": stale, "at": stale, "yt": None, "v": resolve.CACHE_VERSION},
+                                       new_miss.key: {"seen": stale, "at": date.today().isoformat(), "yt": None, "v": resolve.CACHE_VERSION}})
+    cfg = _cfg(); cfg["resolve"] = {**cfg["resolve"], "retry_misses_days": 7}
+    resolve.resolve_all([old_miss, new_miss], cfg)
+    assert old_miss.youtube["videoId"] == "arr" and new_miss.youtube is None        # the audio track arrived since; the fresh miss waits
+    assert all("Arrived" in q for q in searches)
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[old_miss.key]["at"] == date.today().isoformat() and cache[new_miss.key]["at"] == date.today().isoformat()
+    # a miss from before the stamp existed counts as due
+    legacy = Item(artist="Late Band", title="Legacy", kind="track")
+    util.write_json(resolve.YT_CACHE, {legacy.key: {"seen": stale, "yt": None, "v": resolve.CACHE_VERSION}})
+    searches.clear(); resolve.resolve_all([legacy], cfg)
+    assert searches and legacy.youtube is None
+    cfg["resolve"]["retry_misses_days"] = 0                                          # 0 turns the retry off
+    util.write_json(resolve.YT_CACHE, {legacy.key: {"seen": stale, "yt": None, "v": resolve.CACHE_VERSION}})
+    searches.clear(); resolve.resolve_all([legacy], cfg)
+    assert not searches

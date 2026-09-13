@@ -531,7 +531,7 @@ test("find year: an undated catalog card asks MusicBrainz and fills its year sel
   const item = { ...base, id: "cat-undated", artist: "Chromeo", title: "Night By Night", display_title: "Night By Night", display: "Chromeo - Night By Night", year: null, year_source: "unknown", year_confidence: "low", year_evidence: [], release_date: null, sources: ["lastfm:top tracks"], plays: 120, loved: false, score: 5, reasons: ["120 plays"] };
   const cat = { generated_at: feed.generated_at, candidates: 1, count: 1, undated: 1, pending: 3, sources: ["lastfm:top tracks"], years: { 2010: { playlist: 5, candidates: 0 } }, items: [item] };
   const ctx = await browser.newContext({ serviceWorkers: "block" });
-  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); localStorage.setItem("id:filters", JSON.stringify({ onlyPlayable: false })); }, [feed.google.curator_hashes[0]]);
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
   const page = await ctx.newPage();
   await page.route("**/data/catalog.json", r => r.fulfill({ json: cat }));
   await page.route("https://musicbrainz.org/ws/2/recording*", r => r.fulfill({ json: { recordings: [
@@ -855,6 +855,48 @@ test("Cleanup: tracks that will not stream here list their streamable counterpar
   await ctx.close();
 });
 
+test("Cleanup: playlist rows filed as the video list their audio track and a swap", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const rows = [
+    { year: "2024", playlistId: "PL2024", videoId: "omv1", position: 0, artist: "Jungle", title: "Candle Flame", alt: { videoId: "atv1", title: "Candle Flame", album: "Volcano", videoType: "MUSIC_VIDEO_TYPE_ATV" }, pending: false, why: "video" },
+    { year: "2019", playlistId: "PL2019", videoId: "ugc1", position: 5, artist: "Someone", title: "Upload", alt: null, pending: false, why: "video" },
+    { year: "2016", playlistId: "PL2016", videoId: "dead2", position: 9, artist: "Roosevelt", title: "Lovers", alt: null, pending: false, why: "greyed" },
+  ];
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 1, unavailable_with_alt: 0, unavailable_pending: 0, video_count: 2, video_with_audio: 1, video_pending: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/unavailable.json", r => r.fulfill({ json: { count: 1, with_counterpart: 0, pending: 0, video: 2, video_with_audio: 1, video_pending: 0, rows } }));
+  const errors = await open(page);
+  await expect(page.locator("#count-cleanup")).toHaveText(String((feed.youtube.duplicates_count || 0) + 3));   // dead rows and video rows both count
+  await expect(page.locator("#count-catalog")).not.toHaveText("…", { timeout: 15_000 });
+  await page.click(".tab[data-view=cleanup]");
+  expect(errors).toEqual([]);
+  await expect(page.locator("#cl-summary")).toContainText("1 not streamable here");
+  await expect(page.locator("#cl-summary")).toContainText("2 filed as the video rather than the audio track (1 with the audio track found)");
+  await page.selectOption("#cl-dupe-kind", "unavailable");
+  await expect(page.locator("#cl-dupes .dupe.unav")).toHaveCount(1);                       // the video rows have their own list
+  await page.selectOption("#cl-dupe-kind", "video");
+  await expect(page.locator("#cl-dupes .dupe.unav.video")).toHaveCount(2);
+  const first = page.locator('#cl-dupes .dupe[data-key="unav:PL2024:omv1"]');
+  await expect(first.locator(".flag")).toHaveText("the video, not the audio track");
+  await expect(first.locator(".chip.wrong")).toContainText("▶︎ video");
+  await expect(first.locator(".chip.ok")).toContainText("Candle Flame · audio");
+  await expect(first.locator("button[data-swap]")).toHaveText("swap (100 units)");
+  const second = page.locator('#cl-dupes .dupe[data-key="unav:PL2019:ugc1"]');
+  await expect(second).toContainText("pairs no audio track with this video yet");
+  await expect(second.locator("button[data-drop]")).toHaveCount(0);                        // a playing video is never offered a bare removal
+  await page.selectOption("#cl-dupe-yr", "2024");
+  await expect(page.locator("#cl-dupe-bulk")).toHaveText("swap all 1 in 2024 for the audio track…");
+  // keeping the video costs nothing, drops the row from the list and the pill, and can be undone
+  await page.selectOption("#cl-dupe-yr", "");
+  await second.locator('button[data-act="keepvideo"]').click();
+  await expect(page.locator("#cl-dupes .dupe.unav.video")).toHaveCount(1);
+  await expect(page.locator("#count-cleanup")).toHaveText(String((feed.youtube.duplicates_count || 0) + 2));
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
 test("a lapsed sign-in refreshes itself after the first tap, and the tap still counts", async ({ browser }) => {
   // a remembered curator with no token: the first interaction quietly asks Google for a new one, which opens a popup;
   // that must happen after the tap has done its work, or the popup swallows the tap (the tab never opened)
@@ -892,7 +934,7 @@ test("a Keep verifies the playlist, adds the track, Undo removes it — and the 
   await ctx.addInitScript(([hash]) => {
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
     localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false, shortlistSize: 500 }));
-    localStorage.setItem("id:filters", JSON.stringify({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: false, shortlist: false }));
+    localStorage.setItem("id:filters", JSON.stringify({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyKnown: false, onlyRecent: false, shortlist: false }));
     sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
   }, [feed.google.curator_hashes[0]]);
   const page = await ctx.newPage();

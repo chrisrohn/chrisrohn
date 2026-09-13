@@ -346,9 +346,6 @@ ranking:
   max_unknown_per_source: 30
   repeat_penalty: 2.0
   explore_slots: 8
-  # A card with no YouTube match cannot be played or filed: it loses this much after resolution, so playable cards
-  # come first and an unplayable one only survives the score floor when the match is strong.
-  unplayable_penalty: 1.0
   weights:
     affinity: 4.0          # direct artist match (Last.fm / seeds: you play them)
     saved: 2.0             # artist only known from the year playlists (in your library, never scrobbled)
@@ -359,7 +356,6 @@ ranking:
     freshness: 1.0         # decays over `freshness_days`
     editorial: 1.5         # appeared in a curated feed (RSS/Bandcamp Daily/KEXP)
     listens: 0.4           # log10(listen_count) from ListenBrainz
-    playable: 0.3          # a YouTube match exists (it can be played and filed)
     learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
     explore: 1.0           # the exploration bonus for sources / tags / artists with little history (learn.explore)
     novelty: 0.5           # an artist the profile does not know, vouched for by an editorial feed or two sources
@@ -434,8 +430,25 @@ catalog:
 resolve:
   youtube_music: true
   max_lookups_per_run: 700
-  audio_heals_per_run: 150      # older cached hits re-checked for an audio-only counterpart and their album year, per run
-  counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload per run (Cleanup tab → data/unavailable.json)
+  # Every card plays its YouTube Music audio track. A song with no match today is not a card today: its miss is
+  # remembered and looked up again after retry_misses_days (a new release often gets its audio track a few days
+  # after the blogs write about it), within max_lookups_per_run; a video-only match is asked for its audio side again
+  # every audio_recheck_days (below).
+  retry_misses_days: 7
+  # Song length: the playlists hold songs, so anything shorter than min_length (an interlude, a skit, an intro) or
+  # longer than max_length (a DJ mix, a full side, an ambient piece) is never a card, in the feed or the catalog.
+  # Between several uploads of a song the resolver prefers one inside the range (the radio edit over the extended
+  # mix); a song whose only upload is outside it is dropped after resolution. "m:ss" (or seconds); "" lifts that end.
+  min_length: "1:55"
+  max_length: "9:31"
+  # Audio, not video: a hit that is not the audio track (a video, or an upload of unknown kind) is asked for its audio
+  # counterpart through the watch playlist on first sight and again every audio_recheck_days (YouTube Music pairs the
+  # audio side later for many videos); a batch a run, one cheap request each, no API quota. The feed's header and
+  # ⚙ → Stats say how many cards play the audio track.
+  audio_heals_per_run: 500
+  audio_recheck_days: 30
+  counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload, and playlist rows that are the video asked
+                                # for their audio track, per run (Cleanup tab → data/unavailable.json)
   year_chain: full              # the feed asks every catalogue; the catalog's own setting is under `catalog`
   # Year verification (see discovery/years.py): identify the recording via ListenBrainz's MusicBrainz mapper, take
   # MusicBrainz's earliest release date for it, cross-check with Deezer (ISRC → MusicBrainz), Discogs master year
@@ -443,6 +456,10 @@ resolve:
   # at MusicBrainz's 1 req/s, so the budget below bounds a run to roughly 15 minutes; the rest is picked up next run.
   max_year_lookups_per_run: 500
   max_duplicate_year_lookups_per_run: 120   # cross-year duplicates in your playlists get a verified year, a batch per run
+  # When the catalogues and the stores leave a track undated (or only a weak hint stands), the release date YouTube
+  # Music states for the upload itself is asked for (ytmusicapi, no API quota) and used as the year — a weak hint,
+  # shown with a "?", but a year to file under rather than "year unknown". Lookups a run; cached with the years.
+  max_ytmusic_date_lookups_per_run: 200
   time_budget_minutes: 28       # wall clock shared by YouTube + year lookups; whatever is left over waits for tomorrow (job timeout is 45)
   cache_keep_days: 120          # drop YouTube / year cache entries that no feed item has touched for this long
   discogs: true                 # use Discogs when DISCOGS_TOKEN is set

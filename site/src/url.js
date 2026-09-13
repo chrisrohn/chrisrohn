@@ -19,7 +19,6 @@ export function urlFor() {
   if (state.view === "feed") {
     if (f.sort && f.sort !== "score") p.set("sort", f.sort);
     if (f.onlyNew) p.set("new", "1");
-    if (!f.onlyPlayable) p.set("playable", "0");
     if (f.onlyKnown) p.set("known", "1");
     if (!f.onlyRecent) p.set("recent", "0");
     if (!f.shortlist) p.set("shortlist", "0");
@@ -61,7 +60,7 @@ export function applyLaunchParams() {
     const v = p.get(k); if (v == null || !$(`${el} option[value="${v}"]`)) continue;
     f[key] = v; $(el).value = v; changed = true;
   }
-  for (const [k, key, el] of /** @type {const} */ ([["new", "onlyNew", "#only-new"], ["playable", "onlyPlayable", "#only-playable"], ["known", "onlyKnown", "#only-known"], ["recent", "onlyRecent", "#only-recent"], ["shortlist", "shortlist", "#shortlist"]])) {
+  for (const [k, key, el] of /** @type {const} */ ([["new", "onlyNew", "#only-new"], ["known", "onlyKnown", "#only-known"], ["recent", "onlyRecent", "#only-recent"], ["shortlist", "shortlist", "#shortlist"]])) {
     const v = bool(k); if (v == null) continue;
     f[key] = v; const cb = $(el); if (cb) cb.checked = v; changed = true;
   }

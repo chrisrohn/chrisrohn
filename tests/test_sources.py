@@ -89,7 +89,7 @@ def test_source_days_falls_back_to_listenbrainz_then_ten():
 
 
 def test_the_day_has_room_for_the_backfill_it_is_configured_to_make():
-    """A filled day holds about `backfill.target` playable cards plus the unplayable current ones riding along, and
+    """A filled day holds about `backfill.target` cards plus the current ones riding along above the target, and
     the final list is cut to `ranking.max_items` by score — with a filled-in card scoring below a current one, since
     it earns no freshness. Too low a cap therefore throws away the fill it just asked for, quietly."""
     live = _cfg()

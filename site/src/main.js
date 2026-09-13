@@ -41,12 +41,11 @@ function wire() {
     if (to) { e.preventDefault(); to.focus(); goTab(to); }
   });
   const f = state.filters;
-  $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-playable").checked = f.onlyPlayable; $("#only-known").checked = f.onlyKnown; $("#only-recent").checked = f.onlyRecent; $("#shortlist").checked = f.shortlist;
+  $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-known").checked = f.onlyKnown; $("#only-recent").checked = f.onlyRecent; $("#shortlist").checked = f.shortlist;
   /** @type {any} */ let qTimer;
   $("#q").addEventListener("input", (/** @type {any} */ e) => { f.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(() => { persist(); render(); }, 120); });
   $("#sort").addEventListener("change", (/** @type {any} */ e) => { f.sort = e.target.value; persist(); render(); });
   $("#only-new").addEventListener("change", (/** @type {any} */ e) => { f.onlyNew = e.target.checked; persist(); render(); });
-  $("#only-playable").addEventListener("change", (/** @type {any} */ e) => { f.onlyPlayable = e.target.checked; persist(); render(); });
   $("#only-known").addEventListener("change", (/** @type {any} */ e) => { f.onlyKnown = e.target.checked; persist(); render(); });
   $("#only-recent").addEventListener("change", (/** @type {any} */ e) => { f.onlyRecent = e.target.checked; persist(); render(); });
   $("#shortlist").addEventListener("change", (/** @type {any} */ e) => { f.shortlist = e.target.checked; persist(); render(); });

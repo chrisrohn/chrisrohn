@@ -52,7 +52,7 @@ export const state = {
   quota: LS.get("id:quota", { day: "", units: 0 }),   // YouTube API units spent today by this account's devices (resets midnight Pacific)
   // "new releases only" is on for a first visit: radio and recommendation sources surface catalogue too
   // "shortlist" keeps the day to the top N (⚙ sets N); "show all" on the list or the deck lifts it for that visit
-  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true, shortlist: true, catYear: "", catSort: "score", catSourcesOff: [], conWhen: "", conRadius: "", conSort: "date" }, LS.get("id:filters", {})),
+  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyKnown: false, onlyRecent: true, shortlist: true, catYear: "", catSort: "score", catSourcesOff: [], conWhen: "", conRadius: "", conSort: "date" }, LS.get("id:filters", {})),
   view: "feed",
   catalog: null,                            // data/catalog.json: earlier years' candidates, loaded when the Catalog tab is first opened
   catalogState: "idle",                     // idle | loading | ready | missing | failed

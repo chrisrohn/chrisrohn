@@ -28,7 +28,7 @@ export interface Concerts {
   artists_total?: number; artists_checked?: number; artists_with_shows?: number; sources?: string[];
   health?: Record<string, { ok: boolean; error?: string; [k: string]: any }>; count: number; events: ConcertEvent[]; artists: Record<string, ConcertArtist>;
 }
-export interface Catalog { generated_at: string; candidates: number; count: number; undated: number; pending?: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; items: FeedItem[] }
+export interface Catalog { generated_at: string; candidates: number; count: number; undated: number; pending?: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; audio?: { audio: number; video: number; unknown: number }; items: FeedItem[] }
 export interface LearnedRow { n: number; k: number; rate: number; adj: number }
 export interface LearnedSummary { outcomes: number; kept: number; skipped: number; keep_rate: number; since?: string | null; sources: Record<string, LearnedRow>; tags: Record<string, LearnedRow> }
 export interface Feed {
@@ -36,7 +36,9 @@ export interface Feed {
   google?: { client_id?: string; curator_hashes?: string[]; curators?: string[]; guests?: boolean; guest_playlist_title_pattern?: string };
   youtube?: { playlist_title_pattern?: string; skipped_playlist_title?: string; playlists?: Record<string, string>; skipped_playlist_id?: string; skips_in_youtube?: boolean;
     duplicates_count?: number; duplicates_kinds?: Record<string, number>; duplicates_checked_at?: string | null;
-    unavailable_count?: number; unavailable_with_alt?: number; unavailable_pending?: number; region?: string };
+    unavailable_count?: number; unavailable_with_alt?: number; unavailable_pending?: number; region?: string;
+    video_count?: number; video_with_audio?: number; video_pending?: number;   // playlist rows that are the video, not the audio track
+    audio?: { audio: number; video: number; unknown: number } };              // what the cards play: the audio track, the video, an unknown kind
   picks?: Array<{ artist: string; title: string; videoId?: string | null; year?: string; thumbnail?: string | null; album?: string | null }>;
   learned?: LearnedSummary;
   feed_health?: Record<string, { ok: boolean; entries: number; kept: number; error?: string | null }>;
@@ -57,7 +59,7 @@ export interface Auth { email?: string; name?: string; picture?: string; hash?: 
 export interface Unavailable {
   year: string; playlistId: string; videoId: string; position?: number; artist: string; title: string; pending?: boolean;
   alt: { videoId: string; title?: string; album?: string | null; thumbnail?: string | null; videoType?: string } | null;
-  why?: string;            // deleted | private | blocked | rejected | greyed (the build's scan)
+  why?: string;            // deleted | private | blocked | rejected | greyed (the build's scan) | video (the video, not the audio track)
   found?: "build" | "audit"; at?: number; itemId?: string;   // audit rows: when, and the playlist item to remove without a lookup
 }
 /** One finding of the playability audit (audit.js), kept on this device. */
@@ -86,7 +88,7 @@ export interface Settings {
   autoplay: boolean; shuffle: boolean; introDismissed?: boolean;
   ghToken?: string | null;   // a fine-grained GitHub token (contents: write on the site repo) that lets the browser push data/ratings.json for the build to learn from
 }
-export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyPlayable: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[]; conWhen: string; conRadius: string; conSort: string }
+export interface Filters { q: string; sourcesOff: string[]; blogsOff: string[]; sort: string; onlyNew: boolean; onlyKnown: boolean; onlyRecent: boolean; shortlist: boolean; catYear: string; catSort: string; catSourcesOff: string[]; conWhen: string; conRadius: string; conSort: string }
 export interface State {
   feed: Feed | null; rated: Record<string, Rated>; auth: Auth | null; playlists: Record<string, any>; settings: Settings;
   deckIndex: number; auditionTimer: any; auditionTick: any; auditionArmed: string | null;
