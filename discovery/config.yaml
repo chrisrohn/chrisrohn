@@ -434,6 +434,12 @@ catalog:
 resolve:
   youtube_music: true
   max_lookups_per_run: 700
+  # Song length: the playlists hold songs, so anything shorter than min_length (an interlude, a skit, an intro) or
+  # longer than max_length (a DJ mix, a full side, an ambient piece) is never a card, in the feed or the catalog.
+  # Between several uploads of a song the resolver prefers one inside the range (the radio edit over the extended
+  # mix); a song whose only upload is outside it is dropped after resolution. "m:ss" (or seconds); "" lifts that end.
+  min_length: "1:55"
+  max_length: "9:31"
   audio_heals_per_run: 150      # older cached hits re-checked for an audio-only counterpart and their album year, per run
   counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload per run (Cleanup tab → data/unavailable.json)
   year_chain: full              # the feed asks every catalogue; the catalog's own setting is under `catalog`
@@ -443,6 +449,10 @@ resolve:
   # at MusicBrainz's 1 req/s, so the budget below bounds a run to roughly 15 minutes; the rest is picked up next run.
   max_year_lookups_per_run: 500
   max_duplicate_year_lookups_per_run: 120   # cross-year duplicates in your playlists get a verified year, a batch per run
+  # When the catalogues and the stores leave a track undated (or only a weak hint stands), the release date YouTube
+  # Music states for the upload itself is asked for (ytmusicapi, no API quota) and used as the year — a weak hint,
+  # shown with a "?", but a year to file under rather than "year unknown". Lookups a run; cached with the years.
+  max_ytmusic_date_lookups_per_run: 200
   time_budget_minutes: 28       # wall clock shared by YouTube + year lookups; whatever is left over waits for tomorrow (job timeout is 45)
   cache_keep_days: 120          # drop YouTube / year cache entries that no feed item has touched for this long
   discogs: true                 # use Discogs when DISCOGS_TOKEN is set

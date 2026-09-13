@@ -106,6 +106,12 @@ so the answer is consistent instead of depending on how a blog spelled the title
 5. iTunes Search API; then a release date the source itself states (Bandcamp, ListenBrainz, KEXP's album date)
    or the year YouTube Music's artist page states for a watched release; then the YouTube album year. Blog post
    and upload dates are only sightings.
+6. Still unsure (no catalogue or store has a date, at most a weak hint): the release date YouTube Music states for
+   the upload itself, read from the song's own page (ytmusicapi, no API quota) — a remix that only exists as an
+   official video, say. It is a weak hint (`2016 ?` on the badge, the evidence line names it), but a year to file
+   under rather than `year?`. Never for a fan upload, whose date is only when it was uploaded; asked once per
+   video, a bounded batch a run (`resolve.max_ytmusic_date_lookups_per_run`), and asked again when the track is
+   paired with another upload.
 
 Every year found is kept as evidence (hover the year badge on the site to see it). The earliest year from the most
 trusted tier wins: ✓ = catalogue-verified, plain = a store/source date, ? = weak hint. If nothing anywhere says when
@@ -122,6 +128,13 @@ resolver prefers the audio track, swaps a video hit for its audio counterpart (t
 prefers an original issue over a deluxe, remastered or live edition. Older cached hits are re-checked a batch a run
 (`resolve.audio_heals_per_run`). The album a song names is opened once for the year YouTube Music states and its
 playlist, which is what the "full release" link and the year fallback come from.
+
+**Songs, not interludes or mixes:** a track shorter than `resolve.min_length` (1:55) or longer than
+`resolve.max_length` (9:31) is never a card, in the feed or the Catalog tab. Between several uploads of a song the
+resolver prefers one inside the range (the radio edit over the extended mix, the first real song over an album's
+one-minute intro); a song whose only upload is outside it is dropped after resolution, and hits cached before the
+range existed are looked up once more in case a song-length upload exists. Both ends take `m:ss` or seconds; an
+empty value lifts that end.
 
 **No duplicates:** every Keep first asks YouTube whether that video is already in the target playlist (1 quota unit)
 and skips the add if so. The daily build scans all year playlists and lists every *song* they hold more than once
@@ -309,6 +322,9 @@ Everything lives in `discovery/config.yaml`:
   `target` how many playable current cards a day should hold before anything older is used, `max` the most older
   cards one day may carry, `candidates` how many are carried into YouTube resolution. Older cards say
   "filling in from &lt;year&gt;" and file into their own year.
+- `resolve.min_length` / `max_length` — the song-length range (1:55–9:31): shorter is an interlude, longer a mix,
+  neither is a card; `resolve.max_ytmusic_date_lookups_per_run` — how many undated tracks a run ask YouTube Music
+  for the upload's own release date.
 - `ranking.fresh_days` — what counts as the current timeframe (this calendar year always does);
   `max_unknown_per_source` — how many acts the profile does not know one source family may put in a day before it
   is pushed down; `unplayable_penalty` — how far a card with no YouTube match falls.

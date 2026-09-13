@@ -18,7 +18,7 @@ from datetime import date, timedelta
 from .learn import learn_from_history, load_ratings, merge_ratings, public_summary, wrong_videos
 from .models import Item
 from .profile import find_duplicates, load_profile
-from .resolve import collapse_shared_videos, resolve_all
+from .resolve import collapse_shared_videos, drop_by_length, resolve_all
 from .score import dedupe, diversify, score_items
 from .sources import run_sources
 from .unavailable import build_report as unavailable_report
@@ -89,6 +89,7 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     items.sort(key=lambda i: (-i.score, i.artist_norm))
     items = dedupe(items)
     items = collapse_shared_videos(items)   # several items on one video are one song: one card
+    items = drop_by_length(items, cfg)      # an interlude or a DJ mix is not a song for the playlists (resolve.min_length / max_length)
     # after resolution, drop things with no playable YouTube result unless they are strong fresh matches; an older
     # release is only ever a card when it can be played
     items = [i for i in items if i.youtube or (not i.backfill and (i.match_kind == "direct" or i.editorial))]

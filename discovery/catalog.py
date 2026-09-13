@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from .learn import load_ratings, wrong_videos
 from .models import Item
 from .profile import LastFm, load_profile
-from .resolve import collapse_shared_videos, resolve_all
+from .resolve import collapse_shared_videos, drop_by_length, resolve_all
 from .score import dedupe, score_items
 from .util import CACHE_DIR, DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, norm, read_json, read_versioned, safe_url, utcnow, write_json, write_versioned
 from .years import verify_years
@@ -158,6 +158,7 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
     # a card the curator flagged as the wrong video is resolved again without that upload (data/ratings.json)
     resolve_all(items, ccfg, deadline, avoid=wrong_videos(load_ratings()))
     items = collapse_shared_videos(items)
+    items = drop_by_length(items, ccfg)     # the same song-length range as the feed: no interludes, no DJ mixes
     items = [i for i in items if i.youtube and i.youtube.get("videoId") not in saved_videos]
     items = _score(items, profile, ccfg, float(c["loved_bonus"]))
     verify_years(items, ccfg, http, deadline)
