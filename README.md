@@ -22,8 +22,8 @@ tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist
 - A **Concerts** tab, the Songkick page rebuilt from open sources: every upcoming show within 80 miles of Detroit
   by an artist played on Indie Discotheque in the last year (the Last.fm 12-month chart plus this year's playlist),
   from six listings — Bandsintown (an app_id it issued), Resident Advisor (no key), Ticketmaster, SeatGeek and
-  Edmtrain (each with a free key) and JamBase (a metered free tier, off unless you switch it on; a ledger in the state
-  holds it under its 1,000 calls a month) — so the clubs that sell through DICE, Etix or their own box office
+  Edmtrain (each with a free key) and JamBase (a metered free tier: the year is scanned in date bands, the near future
+  often and the far end rarely, and a ledger in the state holds it under its 1,000 calls a month) — so the clubs that sell through DICE, Etix or their own box office
   (the Lincoln Factory, Marble Bar, El Club…) are listed alongside the Fillmore; one row per show with every source's
   link — date, venue, city, distance, the ticket link with the seller named (Ticketmaster, TicketWeb, AXS, Etix, DICE,
   Resident Advisor…), the bill, and each act's most popular song, playable in place; each source is reported on its

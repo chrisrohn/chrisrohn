@@ -524,7 +524,8 @@ def test_bandsintown_empty_for_everyone_is_a_refusal(monkeypatch):
     b = out["health"]["bandsintown"]
     assert len(asked) == 8 and b["asked"] == 8 and b["failed"] == 0 and b["listed"] == 0 and b["ok"] is False and b["answers"] == {"empty": 8}
     assert b["error"].startswith("every one of 8 answers was empty (empty ×8)") and "BANDSINTOWN_APP_ID secret not set" in b["error"] and b["checked"] == 0 and b["due"] == 40 and b["app_id_from"] == "fallback"
-    assert out["health"]["seatgeek"] == {"ok": False, "error": "SEATGEEK_CLIENT_ID not set", "matched": 0} and "resident_advisor" not in out["health"] and "jambase" not in out["health"]   # paid: off unless enabled
+    assert out["health"]["seatgeek"] == {"ok": False, "error": "SEATGEEK_CLIENT_ID not set", "matched": 0} and "resident_advisor" not in out["health"]
+    assert out["health"]["jambase"] == {"ok": False, "error": "JAMBASE_API_KEY not set", "matched": 0}
     state = util.read_json(concerts.STATE_PATH, {})
     assert state["v"] == 2 and state["artists"] == {} and state["sources"]["ticketmaster"]["events"] == []
     # a short batch (fewer answers than the probe) that stayed empty is recorded: too few to call it a refusal
@@ -646,7 +647,7 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
     monkeypatch.setattr(concerts, "Http", lambda name, ttl_hours=20: FakeHttp(answers))
     import discovery.resolve as resolve
     monkeypatch.setattr(resolve, "resolve_all", lambda items, cfg, deadline=None, avoid=None: None)
-    cfg = {"station": {"lastfm_user": "u"}, "concerts": {"bandsintown": {"empty_probe": 2}, "jambase": {"enabled": True, "refresh_days": 0}}, "resolve": {"youtube_music": False}}
+    cfg = {"station": {"lastfm_user": "u"}, "concerts": {"bandsintown": {"empty_probe": 2}, "jambase": {"enabled": True}}, "resolve": {"youtube_music": False}}
     out = concerts.build_concerts(cfg)
     assert out["count"] == 2 and out["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek", "ticketmaster"]
     satin, amtrac = out["events"]
@@ -656,7 +657,11 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
     assert set(amtrac["links"]) == {"resident advisor", "jambase", "edmtrain", "seatgeek"} and amtrac["title"] == "Amtrac [Live]"
     h = out["health"]
     assert h["seatgeek"] == {"ok": True, "events": 1, "matched": 1} and h["edmtrain"] == {"ok": True, "events": 1, "matched": 1}
-    assert h["jambase"] == {"ok": True, "events": 1, "matched": 1, "quota": {"calls": 1, "used": 1, "window_days": 31, "quota": 1000, "reserve": 100, "remaining": 899}}
+    jb = h["jambase"]   # three bands (45, 120, 360 days), one call each, the same fake event in every one, folded to one row
+    assert jb["ok"] is True and jb["calls"] == 3 and jb["matched"] == 3 and jb["quota"] == {"calls": 3, "used": 3, "window_days": 31, "quota": 1000, "reserve": 100, "remaining": 897}
+    assert [(b["from"], b["to"], b["refresh_days"], b["complete"], b["calls"]) for b in jb["bands"]] == [(TODAY.isoformat(), (TODAY + timedelta(days=45)).isoformat(), 2.0, True, 1),
+        ((TODAY + timedelta(days=46)).isoformat(), (TODAY + timedelta(days=120)).isoformat(), 5.0, True, 1), ((TODAY + timedelta(days=121)).isoformat(), (TODAY + timedelta(days=360)).isoformat(), 10.0, True, 1)]
+    assert jb["planned_calls_per_month"] == 24   # 1 page × (30/2 + 30/5 + 30/10)
     assert h["resident_advisor"] == {"ok": True, "events": 1, "matched": 1} and h["ticketmaster"] == {"ok": True, "events": 1, "matched": 1}
     assert h["bandsintown"]["ok"] is False and h["bandsintown"]["error"].startswith("every one of 2 answers was empty (empty ×2)") and h["bandsintown"]["app_id_from"] == "secret"
     assert "from the BANDSINTOWN_APP_ID secret" in h["bandsintown"]["error"] and "biz@bandsintown.com" in h["bandsintown"]["error"]   # the secret is set: the key itself is what Bandsintown refuses
@@ -672,15 +677,19 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
             raise RuntimeError("401 Client Error: Unauthorized")
         return answers(url, params)
     monkeypatch.setattr(concerts, "Http", lambda name, ttl_hours=20: FakeHttp(answers2))
-    out2 = concerts.build_concerts(cfg)
+    due_now = {**cfg, "concerts": {**cfg["concerts"], "jambase": {"enabled": True, "bands": [{"days": 45, "refresh_days": 0}, {"days": 365, "refresh_days": 0}]}}}
+    out2 = concerts.build_concerts(due_now)
     assert out2["count"] == 2 and out2["health"]["resident_advisor"] == {"ok": False, "error": "403 Client Error: Forbidden", "matched": 1}
-    assert out2["health"]["jambase"]["ok"] is False and out2["health"]["jambase"]["matched"] == 1 and out2["events"][1]["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek"]
-    assert out2["health"]["jambase"]["quota"]["calls"] == 1 and out2["health"]["jambase"]["quota"]["used"] == 2   # the failed request was a call too
-    # a snapshot younger than refresh_days is reused without a call
-    out3 = concerts.build_concerts({**cfg, "concerts": {**cfg["concerts"], "jambase": {"enabled": True, "refresh_days": 2}}})
-    assert out3["health"]["jambase"]["ok"] is True and out3["health"]["jambase"]["reused"] and out3["health"]["jambase"]["quota"]["calls"] == 0 and out3["health"]["jambase"]["quota"]["used"] == 2
+    jb2 = out2["health"]["jambase"]
+    assert jb2["ok"] is False and jb2["matched"] == 1 and jb2["error"].count("401") == 2 and out2["events"][1]["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek"]
+    assert jb2["quota"]["calls"] == 2 and jb2["quota"]["used"] == 5 and [b["error"] for b in jb2["bands"]] == ["401 Client Error: Unauthorized"] * 2   # a failed request is a call too; the rows are kept
+    # back on three bands: the two still fresh are not asked again, only the far band (new again) costs a call
+    monkeypatch.setattr(concerts, "Http", lambda name, ttl_hours=20: FakeHttp(answers))
+    out3 = concerts.build_concerts(cfg)
+    jb3 = out3["health"]["jambase"]
+    assert jb3["ok"] is True and jb3["calls"] == 1 and [b["calls"] for b in jb3["bands"]] == [0, 0, 1] and jb3["quota"]["used"] == 6 and all(b["complete"] for b in jb3["bands"])
     assert out3["events"][1]["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek"]
-    assert util.read_json(concerts.STATE_PATH, {})["quota"]["jambase"]["days"] == {TODAY.isoformat(): 2}
+    assert util.read_json(concerts.STATE_PATH, {})["quota"]["jambase"]["days"] == {TODAY.isoformat(): 6}
 
 
 def test_call_quota_holds_any_31_day_window():
@@ -722,3 +731,61 @@ def test_jambase_paging_stops_at_the_quota_and_never_retries():
     with pytest.raises(RuntimeError):
         concerts.jambase_events(FakeHttp(lambda u, p: (_ for _ in ()).throw(RuntimeError("500 Server Error"))), "key", DETROIT, 80, start=T0.date(), end=T1.date(), quota=q3)
     assert q3.spent == 1 and q3.used == 1
+
+
+def test_jambase_bands_cover_the_horizon_back_to_back():
+    cfg = {"bands": [{"days": 45, "refresh_days": 2}, {"days": 120, "refresh_days": 5}, {"days": 365, "refresh_days": 10}]}
+    spans = concerts.jambase_bands(cfg, TODAY, 360)
+    assert [(s["from"], s["to"], s["refresh_days"]) for s in spans] == [
+        (TODAY.isoformat(), (TODAY + timedelta(days=45)).isoformat(), 2.0), ((TODAY + timedelta(days=46)).isoformat(), (TODAY + timedelta(days=120)).isoformat(), 5.0),
+        ((TODAY + timedelta(days=121)).isoformat(), (TODAY + timedelta(days=360)).isoformat(), 10.0)]                 # the last band clipped to the horizon
+    short = concerts.jambase_bands(cfg, TODAY, 30)
+    assert len(short) == 1 and short[0]["to"] == (TODAY + timedelta(days=30)).isoformat()
+    tail = concerts.jambase_bands({"bands": [{"days": 10, "refresh_days": 1}]}, TODAY, 100)                           # bands that stop short: the rest is one more band at the last cadence
+    assert [(s["from"], s["to"], s["refresh_days"]) for s in tail] == [(TODAY.isoformat(), (TODAY + timedelta(days=10)).isoformat(), 1.0), ((TODAY + timedelta(days=11)).isoformat(), (TODAY + timedelta(days=100)).isoformat(), 1.0)]
+    assert concerts.jambase_bands({"bands": []}, TODAY, 60) == [{"from": TODAY.isoformat(), "to": (TODAY + timedelta(days=60)).isoformat(), "refresh_days": 2.0}]
+
+
+def test_jambase_source_walks_the_bands_with_a_cursor(monkeypatch):
+    """A cap smaller than a band's pages: the band is fetched as far as the cap allows, keeps a date cursor and its
+    older rows past it, and the next run continues from the cursor; the far bands wait their turn (deferred) and
+    are fetched once the near one is complete; fresh bands cost nothing."""
+    played = {"amtrac": {"name": "Amtrac", "plays": 300, "filed": 0}}
+    # band 0 (45 days): 250 events, 3 pages; band 1: 1 page; band 2: 1 page — one played show a page
+    def answers(url, params):
+        lo, hi, page = date.fromisoformat(params["eventDateFrom"]), date.fromisoformat(params["eventDateTo"]), int(params["page"])
+        days = (hi - lo).days + 1
+        n = 250 if days > 40 and lo == TODAY else (50 if hi == TODAY + timedelta(days=45) else 100)   # the near band: 250 events; continued from a cursor, the 50 left
+        pages = -(-n // 100)
+        first = lo + timedelta(days=min(days - 1, (page - 1) * 10))
+        evs = [jb_event(f"{lo}-{page}-{i}", ["Amtrac" if i == 0 else "Nobody"], "Lincoln Factory", "Detroit", 42.36, -83.07, (first + timedelta(days=min(days - 1, i // 10))).isoformat())
+               for i in range(min(100, n - (page - 1) * 100))]
+        return {"success": True, "pagination": {"page": page, "totalPages": pages, "totalItems": n, "nextPage": "https://x" if page < pages else None}, "events": evs}
+    http = FakeHttp(answers)
+    state = {"v": 2, "artists": {}, "sources": {}, "quota": {"jambase": {}}}
+    jcfg = {**concerts.DEFAULTS["jambase"], "requests_per_run": 2}
+    def run():
+        health = {}
+        quota = concerts.CallQuota(state["quota"]["jambase"], quota=1000, reserve=100, today=TODAY)
+        concerts._jambase_source(state, health, jcfg, "key", http, quota, center=DETROIT, radius=80, played=played, today=TODAY, horizon_days=360)
+        return health["jambase"]
+    h1 = run()
+    b0, b1, b2 = h1["bands"]
+    assert h1["calls"] == 2 and b0["complete"] is False and b0["cursor"] and b0["calls"] == 2 and b0["pages"] == 3 and b0["matched"] == 2 and h1["planned_calls_per_month"] == 45
+    assert b1["deferred"] == "request budget spent" and b2["deferred"] == "request budget spent" and h1["ok"] is True and h1["matched"] == 2
+    cursor = b0["cursor"]
+    h2 = run()
+    b0, b1, b2 = h2["bands"]
+    assert b0["complete"] is True and b0["cursor"] is None and b0["calls"] >= 1 and b0["fetched_at"] and b0["matched"] == 3      # continued from the cursor: the third page joined the first two
+    assert http.calls[-2][1]["eventDateFrom"] == cursor or http.calls[-1][1]["eventDateFrom"] == cursor
+    assert b1["complete"] is True and b1["calls"] == 1 and b2["deferred"] == "request budget spent"
+    h3 = run()
+    assert h3["calls"] == 1 and h3["bands"][2]["complete"] and all(b["complete"] for b in h3["bands"]) and h3["matched"] == 5
+    h4 = run()
+    assert h4["calls"] == 0 and h4["ok"] is True and h4["quota"]["used"] == 5 and h4["planned_calls_per_month"] == 45 + 6 + 3     # a full pass of band 0 costs 3 calls every 2 days, 1/5, 1/10
+    assert state["sources"]["jambase"]["listed"] == 450 and len(state["sources"]["jambase"]["events"]) == 5
+    # the quota ledger stops a run cold and the band says so
+    state["quota"]["jambase"]["days"] = {TODAY.isoformat(): 900}
+    jcfg["bands"] = [{"days": 365, "refresh_days": 0}]
+    h5 = run()
+    assert h5["calls"] == 0 and h5["bands"][0]["deferred"] == "monthly quota reached" and h5["quota"]["remaining"] == 0 and h5["matched"] == 3   # the one band left keeps its rows

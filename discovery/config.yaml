@@ -528,14 +528,17 @@ concerts:
     requests_per_run: 40
     taxonomies: [concert, music_festival]
   jambase:
-    enabled: false            # JamBase Data (data.jambase.com) is metered: the free tier is 1,000 calls a month and 3,600 an hour, and
-                              # every call past that is charged (5¢). Switch it on with a JAMBASE_API_KEY secret for the widest
-                              # venue-calendar aggregator, each show with its ticket link and its seller; the ledger below keeps it inside the quota
+    enabled: true             # JamBase Data (data.jambase.com) is metered: the free tier is 1,000 calls a month and 3,600 an hour, and
+                              # every call past that is charged (5¢). Needs the JAMBASE_API_KEY secret: the widest venue-calendar
+                              # aggregator, each show with its ticket link and its seller; the bands and the ledger below keep it inside the quota
     base_url: https://api.data.jambase.com/v3   # the v1 API still answers at https://www.jambase.com/jb-api/v1 with auth: query
     auth: bearer              # bearer = the key in the Authorization header (v3); query = an apikey parameter (v1)
-    per_page: 100             # JamBase's most: a page is one call, so the whole 80-mile year is a few dozen calls
-    requests_per_run: 40      # calls a run at most, the soonest events first; every request counts, there are no retries
-    refresh_days: 2           # the snapshot is reused, without a call, until it is this old (15 refreshes a month × 40 = 600 calls)
+    per_page: 100             # JamBase's most: a page of 100 events, every act on every bill, is one call — the cheapest coverage there is
+    requests_per_run: 40      # calls a run at most, the nearest band first; every request counts, there are no retries
+    bands:                    # the horizon in date bands, each with its own snapshot and cadence: the near future (announcements, sold
+      - { days: 45, refresh_days: 2 }     # out, cancellations) is a few pages refreshed often; the far end, most of the events, rarely.
+      - { days: 120, refresh_days: 5 }    # A band the cap interrupts keeps a date cursor and continues next run, so a small cap still
+      - { days: 365, refresh_days: 10 }   # walks the whole year. concerts.json → health.jambase.planned_calls_per_month prices the cadences
     monthly_quota: 1000       # the plan's calls a month …
     quota_reserve: 100        # … minus this margin: at most 900 calls in any trailing 31 days (which bounds any calendar or anniversary
                               # month), counted in data/concerts_state.json → quota.jambase.days across every run, scheduled or by hand

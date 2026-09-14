@@ -333,17 +333,23 @@ session that the playlist's owner approved in that browser.
     Platform API lists in the radius, which includes the clubs that sell through DICE, Eventbrite or their own box
     office and never appear on Ticketmaster; its price is its lowest listing (resale included) and is labelled so.
   - **JamBase** (`JAMBASE_API_KEY`, data.jambase.com — metered: the free tier is 1,000 calls a month and 3,600 an
-    hour, and every call past that is charged, so it ships switched off: `concerts.jambase.enabled`): the widest
-    venue-calendar aggregator, every show in the radius with the ticket link and its seller. A page of 100 events is
-    one call and the 80-mile year is a few dozen, so a refresh costs `requests_per_run` (40) at most; the snapshot is
-    reused without a call until it is `refresh_days` (2) old; and a ledger in `data/concerts_state.json`
-    (`quota.jambase.days`, one count a day, committed with the data) holds every run, scheduled or by hand, to
-    `monthly_quota - quota_reserve` (900) calls in any trailing 31 days — which bounds every calendar month and
-    every anniversary month — counting each request before it goes out, retries included (there are none), and
-    stopping the paging where the ledger says. The health row's `quota` block (calls this run, used in the window,
-    remaining) is in `site/data/concerts.json`. Requests are spaced 1.1 s apart, under the hourly rate.
-    `concerts.jambase.base_url` and `auth` point at the v3 API (bearer token); the v1 API at
-    `https://www.jambase.com/jb-api/v1` with `auth: query` still answers.
+    hour, and every call past that is charged): the widest venue-calendar aggregator, every show in the radius with
+    the ticket link and its seller. The calls are spent for coverage, not freshness: a page of 100 events, every act
+    on every bill, is one call, so one region scan covers all 9,000 played artists at once, and the horizon is split
+    into date bands (`concerts.jambase.bands`: 45 days refreshed every 2, to 120 every 5, to 365 every 10), each
+    with its own snapshot, so the near future — where announcements, sold-outs and cancellations happen — is a few
+    pages refreshed often and the far end, most of the events, is fetched rarely. A run touches only the bands that
+    are due, nearest first, within `requests_per_run` (40); a band the cap interrupts keeps a date cursor and
+    continues from it next run (its older rows kept meanwhile), so a small cap still walks the whole year. A ledger
+    in `data/concerts_state.json` (`quota.jambase.days`, one count a day, committed with the data) holds every run,
+    scheduled or by hand, to `monthly_quota - quota_reserve` (900) calls in any trailing 31 days — which bounds every
+    calendar month and every anniversary month — counting each request before it goes out (there are no retries)
+    and stopping the paging where the ledger says. The health row in `site/data/concerts.json` lists the bands
+    (from, to, fetched, complete, calls, pages), the ledger (calls this run, used in the window, remaining) and
+    `planned_calls_per_month`, what the cadences add up to at the pages each band actually needs — tune the bands
+    if it nears 900. Requests are spaced 1.1 s apart, under the hourly rate. `concerts.jambase.base_url` and `auth`
+    point at the v3 API (bearer token); the v1 API at `https://www.jambase.com/jb-api/v1` with `auth: query` still
+    answers.
   - **Edmtrain** (`EDMTRAIN_API_KEY`, free, edmtrain.com/developer-api): every electronic show in
     `concerts.edmtrain.states` (Michigan, Ohio, Ontario), the lineups the dance venues post themselves; the radius is
     applied afterwards, live streams are left out.
