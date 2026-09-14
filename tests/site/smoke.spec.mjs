@@ -1289,6 +1289,10 @@ test("the Video tab: kept songs' videos and the library's, played in place, adde
     await r.fulfill({ json: j });
   });
   await page.route("**/data/videos.json", r => r.fulfill({ json: report }));
+  // the fixture's videos do not exist on YouTube: with the player script loaded (a runner with network) the real player
+  // would answer "not found", and the site's "Can't embed this one" toast would replace the Undo toast the test clicks.
+  // What is under test is the site's own queue, cards and thumbs, so the player script stays out, as it does offline.
+  await page.route("https://www.youtube.com/**", r => r.abort());
   const calls = [];
   const parse = t => { try { return JSON.parse(t || ""); } catch { return t; } };
   await page.route("https://www.googleapis.com/**", async route => {
