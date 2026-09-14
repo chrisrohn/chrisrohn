@@ -460,7 +460,10 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   // precache: the shell and the feed are in the build cache without a second visit
   await expect.poll(async () => page.evaluate(async () => {
     const keys = await caches.keys(); const c = await caches.open(keys.find(k => k.startsWith("newmusic-") && k !== "newmusic-art") || "");
-    const need = ["/", "/style.css", "/theme.js", "/data/feed.json", "/privacy.html", "/manifest.webmanifest"];
+    // the stylesheet and the theme script are content-hashed by build.mjs: the page says which names this build uses
+    const css = document.querySelector('link[rel="stylesheet"]')?.getAttribute("href") || "/style.css";
+    const theme = document.querySelector('script[src*="theme."]')?.getAttribute("src") || "/theme.js";
+    const need = ["/", css, theme, "/data/feed.json", "/privacy.html", "/manifest.webmanifest"];
     const hits = await Promise.all(need.map(p => c.match(location.origin + p)));
     return hits.filter(Boolean).length;
   }), { timeout: 15_000 }).toBe(6);

@@ -133,7 +133,9 @@ function openPermalink() {
   if (!state.order.includes(id)) {
     // a link means "show me this one": the toggles that hide it (new today, known artists, recent) step aside
     const f = state.filters; Object.assign(f, { onlyNew: false, onlyKnown: false, onlyRecent: false });
-    for (const [k, id2] of [["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"]]) { const cb = $(id2); if (cb) cb.checked = f[k]; }
+    /** @type {Array<["onlyNew" | "onlyKnown" | "onlyRecent", string]>} */
+    const pairs = [["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"]];
+    for (const [k, id2] of pairs) { const cb = $(id2); if (cb) cb.checked = f[k]; }
     persist(); render();
   }
   if (!state.order.includes(id)) { toast(`${credit(it)} is hidden by your filters`, true); return; }

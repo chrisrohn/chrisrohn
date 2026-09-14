@@ -117,7 +117,7 @@ function fmtPrice(p) {
   const money = (/** @type {number} */ v) => { try { return new Intl.NumberFormat([], { style: "currency", currency: cur, maximumFractionDigits: Number.isInteger(v) ? 0 : 2 }).format(v); } catch { return `${v} ${cur}`; } };
   return p.max != null && p.max !== p.min ? `${money(p.min)}–${money(p.max)}` : `from ${money(p.min)}`;
 }
-/** @param {number} n */
+/** @param {number} n @param {string} one @param {string} many */
 const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 /** The listings the build draws on, in the order the summary names them. @type {Record<string, string>} */
 export const SOURCE_NAMES = { bandsintown: "Bandsintown", resident_advisor: "Resident Advisor", jambase: "JamBase", edmtrain: "Edmtrain", ticketmaster: "Ticketmaster", seatgeek: "SeatGeek" };
@@ -164,7 +164,7 @@ export function renderConcerts() {
   $$(".concerts-only").forEach(el => { el.disabled = !c; });
   const all0 = $("#con-radius option[value='']"); if (all0 && c) all0.textContent = `within ${c.radius_miles} miles`;
   if (!c) {
-    const note = { idle: "Opening the concert list…", loading: "Loading the concert list…", missing: "No concert list yet — it appears after the first run of the Concerts workflow, then refreshes every afternoon.", failed: "Could not load the concert list." }[state.concertsState] || "";
+    const note = { idle: "Opening the concert list…", loading: "Loading the concert list…", missing: "No concert list yet — it appears after the first run of the Concerts workflow, then refreshes every afternoon.", failed: "Could not load the concert list.", ready: "" }[state.concertsState] || "";
     sum.textContent = ""; host.replaceChildren(); empty.hidden = false; empty.replaceChildren(note); const cr = $("#con-credits"); if (cr) cr.replaceChildren();
     if (state.concertsState === "failed") { const b = document.createElement("button"); b.type = "button"; b.className = "btn ghost small"; b.textContent = "Retry"; b.addEventListener("click", () => loadConcerts(true)); empty.append(" ", b); }
     state.order = [];
@@ -182,7 +182,7 @@ export function renderConcerts() {
   renderCredits(c);
   sum.title = [`Listings: ${live.map(s => s.name).join(", ") || "none yet"}`, down.length ? `Failed: ${down.map(s => `${s.name} — ${s.error}`).join("; ")}` : "", off.length ? `Not set up: ${off.map(s => `${s.name} (${s.error})`).join(", ")}` : ""].filter(Boolean).join("\n");
   // the rows' top songs are the queue: space plays the first, j/k and autoplay walk on down the list
-  const ids = []; for (const ev of vis) { const id = trackIdFor(ev); if (id && !ids.includes(id)) ids.push(id); }
+  /** @type {string[]} */ const ids = []; for (const ev of vis) { const id = trackIdFor(ev); if (id && !ids.includes(id)) ids.push(id); }
   state.order = ids;
   if (!vis.length) {
     host.replaceChildren(); empty.hidden = false;

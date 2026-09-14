@@ -31,7 +31,8 @@ export default defineConfig({
   // runner ("Page crashed") is not a site bug, and must not block a deploy. The list reporter still marks the test
   // flaky, so a real intermittent failure stays visible; locally a failure fails at once
   retries: process.env.CI ? 1 : 0,
-  reporter: [["list"]],
+  // the list in the terminal; on CI also GitHub annotations on the failing line, and an HTML report for the artifact
+  reporter: process.env.CI ? [["list"], ["github"], ["html", { open: "never", outputFolder: "playwright-report" }]] : [["list"]],
   use: {
     baseURL: "http://127.0.0.1:8765",
     headless: true,

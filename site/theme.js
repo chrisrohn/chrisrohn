@@ -45,7 +45,9 @@
     root.dataset.scheme = eff;   // the scheme actually on screen, for anything that wants to know without a media query
     chrome(eff);
     document.querySelectorAll("[data-theme-toggle]").forEach(b => {
-      b.textContent = GLYPH[pref]; b.setAttribute("title", describe(pref)); b.setAttribute("aria-label", describe(pref)); b.dataset.theme = pref;
+      // the glyph is drawn by style.css from data-glyph (.btn.icon::before), never as text: the accessible name is the
+      // description alone, and no checker sees a "◐" that the label does not repeat
+      b.dataset.glyph = GLYPH[pref]; b.replaceChildren(); b.setAttribute("title", describe(pref)); b.setAttribute("aria-label", describe(pref)); b.dataset.theme = pref;
     });
     document.dispatchEvent(new CustomEvent("themechange", { detail: { pref, scheme: eff } }));
   }

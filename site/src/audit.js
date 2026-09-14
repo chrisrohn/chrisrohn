@@ -109,7 +109,7 @@ export function renderAudit() {
 export async function findReplacements(artist, title, avoid) {
   const q = `${artist} ${editionOf(title).core}`.trim();
   const j = await yt("GET", "/search", { params: { part: "snippet", q, type: "video", videoCategoryId: "10", maxResults: 8, regionCode: region(), safeSearch: "none" }, why: `Cleanup: search YouTube for another upload of a track that cannot play in ${region()} (100 units)`, detail: q });
-  const ids = (j.items || []).map((/** @type {any} */ it) => it.id && it.id.videoId).filter((/** @type {string} */ v) => v && v !== avoid);
+  /** @type {string[]} */ const ids = (j.items || []).map((/** @type {any} */ it) => it.id && it.id.videoId).filter((/** @type {string} */ v) => v && v !== avoid);
   if (!ids.length) return [];
   const info = await videoDetails(ids, { why: "Cleanup: check the search results can play here and what they are (length, channel, views)", detail: q });
   return ids.map(v => ({ videoId: v, ...info[v] })).filter(r => !r.missing && !r.blocked)

@@ -83,10 +83,11 @@ function renderChips() {
     return b;
   }), ...(terms.length > 1 ? [(() => { const c = document.createElement("button"); c.type = "button"; c.className = "linkish"; c.textContent = "clear all"; c.addEventListener("click", () => searchFor("", { add: false })); return c; })()] : []));
 }
-/** A one-time card for a first visit: what this is, how to listen, what signing in adds. */
-function renderIntro() {
+/** A one-time card for a first visit: what this is, how to listen, what signing in adds. Decided from local state
+ * alone, so boot() can show it before the feed arrives and the list renders under it instead of pushing it down. */
+export function renderIntro() {
   const el = $("#intro"); if (!el) return;
-  el.hidden = !!state.settings.introDismissed || isSignedIn() || state.view !== "feed" || !state.feed;
+  el.hidden = !!state.settings.introDismissed || isSignedIn() || state.view !== "feed";
 }
 /** Render up to `count` cards of the current list; a sentinel at the end pulls in the next page. @param {number} count */
 function appendCards(count) {
@@ -312,7 +313,9 @@ function fillEmpty(box) {
   const goTab = (/** @type {string} */ v) => { const t = /** @type {HTMLElement | null} */ ($(`.tab[data-view=${v}]`)); if (t) t.click(); };
   const clearFilters = () => act("clear the filters", () => {
     Object.assign(state.filters, { q: "", sourcesOff: [], blogsOff: [], onlyNew: false, onlyKnown: false, onlyRecent: false, shortlist: false });
-    for (const [k, sel] of [["q", "#q"], ["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"], ["shortlist", "#shortlist"]]) {
+    /** @type {Array<["q" | "onlyNew" | "onlyKnown" | "onlyRecent" | "shortlist", string]>} */
+    const pairs = [["q", "#q"], ["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"], ["shortlist", "#shortlist"]];
+    for (const [k, sel] of pairs) {
       const el = /** @type {HTMLInputElement | null} */ ($(sel)); if (!el) continue;
       if (el.type === "checkbox") el.checked = !!state.filters[k]; else el.value = "";
     }
@@ -320,7 +323,7 @@ function fillEmpty(box) {
   });
 
   if (state.view === "catalog") {
-    const note = { idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog." }[state.catalogState];
+    const note = { idle: "Opening the catalog…", loading: "Loading the catalog…", missing: "No catalog yet — it appears after the next daily build, then grows for a couple of weeks as the lookups work through your Last.fm history.", failed: "Could not load the catalog.", ready: "" }[state.catalogState];
     if (note) { say(note); if (state.catalogState === "failed") box.append(" ", act("Retry", () => import("./feed.js").then(m => m.loadCatalog(true)))); return; }
     const total = catalogItems().filter(i => !hiddenBy(i)).length;
     return total ? say(`${total} catalog candidates, none of them matching these filters.`, clearFilters()) : say("Every catalog candidate has been rated. The next daily build tops it up.");

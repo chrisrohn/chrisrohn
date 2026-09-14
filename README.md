@@ -1,5 +1,7 @@
 ## Hi there
 
+[![CI](https://github.com/chrisrohn/chrisrohn/actions/workflows/ci.yml/badge.svg)](https://github.com/chrisrohn/chrisrohn/actions/workflows/ci.yml) [![CodeQL](https://github.com/chrisrohn/chrisrohn/actions/workflows/codeql.yml/badge.svg)](https://github.com/chrisrohn/chrisrohn/actions/workflows/codeql.yml) [![Publish](https://github.com/chrisrohn/chrisrohn/actions/workflows/publish.yml/badge.svg)](https://github.com/chrisrohn/chrisrohn/actions/workflows/publish.yml)
+
 **[Chris Rohn's New Music](https://chrisrohn.com)** — a daily new-music discovery feed where I find tracks to add to
 the Indie Discotheque library playlists on YouTube Music. It follows what my Last.fm
 ([tt_discotheque](https://www.last.fm/user/tt_discotheque)) history says I listen to: those artists, the artists
@@ -41,4 +43,4 @@ tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist
 - Light or dark: the ☀/☾ button in the header (or ⚙ → *Theme*, or the `t` key) pins either set or follows the device; the choice is remembered on that device and applies to the Privacy and Terms pages too
 - Installable: on a phone tap **Install** (or ⚙ → *Install as an app*) for a full-screen app that works offline, with lock-screen controls and home-screen shortcuts; desktop Chrome, Edge and Safari install it from the header button
 - A day is 500 songs: the build ranks up to `ranking.max_items` (500) cards a day, the Feed opens on a shortlist of them and *show all* lifts it
-- Checks: `ruff check discovery tests`, `python -m pytest tests`, `npm run check` (eslint, tsc, build) and `npm test` (Playwright smoke test of the built site, including the installable-app checks) — all run in CI on every pull request
+- Checks: `ruff check discovery tests`, `python -m pytest tests`, `npm run check` (eslint, html-validate, `tsc --strict`, build) and `npm test` (Playwright: the smoke test of the built site, the installable-app checks, an axe-core accessibility scan of every page and view, and the crawler files) — all run in CI on every pull request, alongside Lighthouse (`npm run lighthouse`, category scores as the gate) and CodeQL

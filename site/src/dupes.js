@@ -95,6 +95,7 @@ export const openVideos = () => unavailableRows().filter(unavOpen).filter(isVide
 export const openAuditRows = () => auditRows().filter(unavOpen);
 
 // ------------------------------------------------------------------ a song's copies, as they stand now
+/** @type {Record<string, number>} */
 const EDITION_RANK = { original: 0, radio: 1, extended: 2, remix: 3, live: 4, acoustic: 5, instrumental: 6, demo: 7 };
 /** @param {Dupe} d @returns {Row[]} */
 function rowsOf(d) {
@@ -178,10 +179,11 @@ function filteredDupes() {
   else if (f.kind && f.kind !== "dismissed") list = list.filter(x => x.v.kinds.includes(f.kind));
   if (f.year) list = list.filter(x => x.v.rows.some(r => r.year === f.year));
   if (f.q) list = list.filter(x => `${x.d.artist} ${x.d.title} ${x.v.rows.map(r => r.label + " " + r.title).join(" ")}`.toLowerCase().includes(f.q));
-  const by = { issue: (/** @type {any} */ a, /** @type {any} */ b) => severity(a.d, a.v) - severity(b.d, b.v) || b.d.years[0].localeCompare(a.d.years[0]),
-    year: (/** @type {any} */ a, /** @type {any} */ b) => b.d.years[0].localeCompare(a.d.years[0]) || a.d.artist.localeCompare(b.d.artist),
-    artist: (/** @type {any} */ a, /** @type {any} */ b) => a.d.artist.localeCompare(b.d.artist) || a.d.title.localeCompare(b.d.title),
-    copies: (/** @type {any} */ a, /** @type {any} */ b) => b.v.rows.reduce((n, r) => n + r.copies, 0) - a.v.rows.reduce((n, r) => n + r.copies, 0) || a.d.artist.localeCompare(b.d.artist) };
+  /** @type {Record<string, (a: {d: Dupe, v: View}, b: {d: Dupe, v: View}) => number>} */
+  const by = { issue: (a, b) => severity(a.d, a.v) - severity(b.d, b.v) || b.d.years[0].localeCompare(a.d.years[0]),
+    year: (a, b) => b.d.years[0].localeCompare(a.d.years[0]) || a.d.artist.localeCompare(b.d.artist),
+    artist: (a, b) => a.d.artist.localeCompare(b.d.artist) || a.d.title.localeCompare(b.d.title),
+    copies: (a, b) => b.v.rows.reduce((n, r) => n + r.copies, 0) - a.v.rows.reduce((n, r) => n + r.copies, 0) || a.d.artist.localeCompare(b.d.artist) };
   list.sort(by[f.sort] || by.issue);
   return list;
 }

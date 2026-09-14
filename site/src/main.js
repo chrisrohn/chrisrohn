@@ -12,7 +12,7 @@ import { $, $$, toast } from "./dom.js";
 import { isSignedIn, isCurator, tokenValid, signIn, signOut } from "./auth.js";
 import { pullRatings } from "./sync.js";
 import { load, loadCatalog, fillSources, refreshFeed } from "./feed.js";
-import { render, deckOn, deckItem, deckYear } from "./render.js";
+import { render, renderIntro, deckOn, deckItem, deckYear } from "./render.js";
 import { rate, replayQueued } from "./rating.js";
 import { play, toggle, nextTrack, prevTrack, holdAudition, stopPlayer, playerActive, toggleShuffle, reflectShuffle, autoplayOn } from "./player.js";
 import { wireSettings } from "./settings.js";
@@ -117,6 +117,8 @@ function wireOffline() {
 
 function boot() {
   $("#meta").textContent = "loading feed…"; $("#feed-failed").hidden = true;
+  // a first visit reads the intro while the feed loads, laid out as the feed will be (the deck on a phone), so nothing moves when it lands
+  document.body.classList.toggle("deck-mode", deckOn()); renderIntro();
   load().then(() => { if (state.view === "concerts") loadConcerts().catch(() => {}); }).catch(e => { $("#meta").textContent = "The feed did not load. (" + e.message + ")"; $("#empty").hidden = false; $("#empty").textContent = state.online ? "No feed yet — run the Discover workflow once, or try again." : "Offline, and no feed cached yet."; $("#feed-failed").hidden = false; });
 }
 wire();
