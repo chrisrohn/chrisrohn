@@ -46,6 +46,7 @@ export const state = {
   badVideos: LS.get("id:badvideos", {}),   // videoId → when YouTube refused to embed it here (autoplay steps over these)
   videoMarks: LS.get("id:videos", {}),     // video id → the Video tab's decision on it (approved, passed, undone), mirrored with the ratings
   videoVersion: 0, videos: null, videosState: "idle", videosPage: 1, videosQT: null, mvHeld: null, mvAt: 0,
+  videoTracks: [],                          // the Video tab's videos as playable cards (videos.js), indexed below under "video:" ids
   badVersion: 0,                            // bumps whenever badVideos changes (a count can stay the same while an entry is swapped)
   ratedVersion: 0,                          // bumps whenever `rated` is persisted with a change: the personal ranking recomputes
   playingId: null, shuffleOrder: [], shuffleFor: "", lastRated: null, shareIn: null,
@@ -88,8 +89,9 @@ export const catalogItems = () => (state.catalog && state.catalog.items) || [];
 /** @returns {FeedItem[]} */
 export const allItems = () => items().concat(catalogItems());
 /** Rebuild the id index after any payload changes. The concert rows' songs go in first, so a song that is also in
- * the feed or the catalog keeps that card (with its year, sources and thumbs) and the row plays the same item. */
-export function reindex() { state.index = new Map([...state.concertTracks, ...allItems()].map(i => [i.id, i])); }
+ * the feed or the catalog keeps that card (with its year, sources and thumbs) and the row plays the same item. The
+ * Video tab's cards have ids of their own ("video:<id>"): a kept song's card plays the audio track, its video card the video. */
+export function reindex() { state.index = new Map([...state.videoTracks, ...state.concertTracks, ...allItems()].map(i => [i.id, i])); }
 /** @param {string} id */
 export const byId = id => state.index.get(id);
 /** A rating that still counts: an "undone" record is a tombstone, not a decision. @param {string} id */

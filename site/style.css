@@ -803,28 +803,7 @@ body:not(.curator) .owner-only, body.guest .owner-only { display: none !importan
 }
 @media (pointer: coarse) { .show-track .tplay { min-height: 40px; padding: 6px 12px; } .show-side .tickets { min-height: 40px; display: inline-flex; align-items: center; } }
 
-/* ---- the Video tab: one row per video, the player under the row it belongs to ---- */
-.vrows { display: flex; flex-direction: column; gap: 6px; }
-.vrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; border: 1px solid var(--rule); border-left: 4px solid var(--ink); padding: 8px 10px; font-size: 12px; }
-.vrow.feed { border-left-color: var(--up); }
-.vrow.playing { border-color: var(--accent); border-left-color: var(--accent); }
-.vthumb { position: relative; width: 128px; height: 72px; padding: 0; border: 1px solid var(--rule); background: var(--card2); cursor: pointer; overflow: hidden; flex: none; }
-.vthumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.vthumb span { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 22px; text-shadow: 0 0 6px #000; opacity: .85; }
-.vthumb:hover span { opacity: 1; color: var(--accent); }
-.vbody { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.vname { font: 14px/1.3 var(--sans); }
-.vname .vartist { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--ink); cursor: pointer; }
-.vname .vartist:hover { color: var(--accent); }
-.vmeta { color: var(--muted); font: 11px var(--mono); }
-.vlinks { display: flex; flex-wrap: wrap; gap: 10px; font: 11px var(--mono); }
-.vlinks a { color: var(--muted); }
-.vact { display: flex; gap: 6px; align-items: center; }
-.vplayer { grid-column: 1 / -1; }
-.vplayer iframe { width: min(100%, 640px); aspect-ratio: 16 / 9; border: 2px solid var(--ink); background: #000; display: block; }
-@media (max-width: 760px) {
-  .vrow { grid-template-columns: auto minmax(0, 1fr); }
-  .vthumb { width: 96px; height: 54px; }
-  .vact { grid-column: 1 / -1; justify-content: flex-end; }
-  .vplayer iframe { width: 100%; }
-}
+/* ---- the Video tab: the same ledger of cards as the feed, inside the tab's own sheet ---- */
+.videos .list:not(:empty) { box-shadow: none; margin-top: 4px; }
+.src.videos { border-left-color: #e00; }
+.player.video #p-wrong { display: none; }   /* a video in the player: ▲︎ adds it to the music-video playlist, ▼︎ passes, ≠ has no meaning */

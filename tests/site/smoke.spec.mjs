@@ -1312,75 +1312,107 @@ test("the Video tab: kept songs' videos and the library's, played in place, adde
   await expect(page.locator("#filters")).toBeHidden();
   // opening the tab reads the music-video playlist (1 unit per 50): what it holds is hidden, the pill follows
   await expect.poll(() => calls.filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "GET" && c.params.playlistId === "PLVIDS" && !c.params.videoId).length).toBe(1);
-  await expect(page.locator("#vid-list .vrow")).toHaveCount(3);
-  await expect(page.locator('#vid-list .vrow[data-video="heldv"]')).toHaveCount(0);
+  // the list is a ledger of cards like the feed's, one per video, under "video:" ids of their own
+  const rows = page.locator("#vid-list .card");
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator('#vid-list .card[data-id="video:heldv"]')).toHaveCount(0);
   await expect(page.locator("#count-videos")).toHaveText("3");
   await expect(page.locator("#vid-summary")).toContainText("3 videos to review");
   await expect(page.locator("#vid-summary")).toContainText("4 rows still being asked");
   await expect(page.locator("#vid-summary")).toContainText("1 from songs kept here");
   await expect(page.locator("#vid-quota")).toContainText("approvals possible today");
-  // the kept song's video leads (kept most recently), then the library's, newest year first; each row says where it is from
-  const rows = page.locator("#vid-list .vrow");
-  await expect(rows.nth(0)).toHaveAttribute("data-video", "keptv");
-  await expect(rows.nth(0)).toHaveClass(/feed/);
-  await expect(rows.nth(0).locator(".vmeta")).toContainText(/^official video · (.+ · )?kept here \d+ min ago$/);
-  await expect(rows.nth(0).locator(".vname")).toContainText(kept.artist);
-  await expect(rows.nth(1)).toHaveAttribute("data-video", "libv1");
-  await expect(rows.nth(1).locator(".vmeta")).toContainText("official video · Volcano · in 2024 | Indie Discotheque, 2019 | Indie Discotheque · #4");
-  await expect(rows.nth(1).locator(".vlinks a").nth(1)).toHaveAttribute("href", "https://music.youtube.com/watch?v=liba1");
-  await expect(rows.nth(2).locator(".vmeta")).toContainText("upload · the playlist row itself is the video");
-  await expect(rows.nth(0).locator(".vthumb img")).toHaveAttribute("src", "https://i.ytimg.com/vi/keptv/mqdefault.jpg");
-  await expect(page.locator('#vid-list .vrow[data-video="unkeptv"]')).toHaveCount(0);
+  // the kept song's video leads (kept most recently), then the library's, newest year first; each card says what it is and where from
+  await expect(rows.nth(0)).toHaveAttribute("data-id", "video:keptv");
+  await expect(rows.nth(0).locator(".release")).toHaveText(/^official video/);
+  await expect(rows.nth(0).locator(".reasons")).toHaveText(/^kept here \d+ min ago$/);
+  await expect(rows.nth(0).locator(".sources .src")).toHaveText("kept here");
+  await expect(rows.nth(0).locator(".artist")).toHaveText(kept.artist);
+  await expect(rows.nth(0).locator(".art img")).toHaveAttribute("src", "https://i.ytimg.com/vi/keptv/mqdefault.jpg");
+  await expect(rows.nth(1)).toHaveAttribute("data-id", "video:libv1");
+  await expect(rows.nth(1).locator(".release")).toHaveText("official video · Volcano");
+  await expect(rows.nth(1).locator(".yearbadge")).toHaveText("2024, 2019");
+  await expect(rows.nth(1).locator(".reasons")).toHaveText("in 2024 | Indie Discotheque, 2019 | Indie Discotheque · #4");
+  await expect(rows.nth(1).locator(".sources .src")).toHaveText("year playlists");
+  await expect(rows.nth(1).locator(".links a").nth(0)).toHaveAttribute("href", "https://music.youtube.com/watch?v=libv1");
+  await expect(rows.nth(1).locator(".links a").nth(1)).toHaveText("audio track");
+  await expect(rows.nth(1).locator(".links a").nth(1)).toHaveAttribute("href", "https://music.youtube.com/watch?v=liba1");
+  await expect(rows.nth(2).locator(".release")).toHaveText(/^upload/);
+  await expect(rows.nth(2).locator(".reasons")).toContainText("the playlist row itself is the video");
+  // a video's card has the two verdicts and no year select, no wrong-video flag, no score, no permalink
+  await expect(rows.nth(0).locator(".btn.up")).toHaveAttribute("title", "add this video to the music-video playlist (u)");
+  await expect(rows.nth(0).locator(".btn.down")).toHaveAttribute("title", /pass: not for the music-video playlist \(d/);
+  await expect(rows.nth(0).locator(".btn.wrong, .year, .share:has-text('link')")).toHaveCount(0);
+  await expect(page.locator('#vid-list .card[data-id="video:unkeptv"]')).toHaveCount(0);
   // filters: where from, year, name
   await page.selectOption("#vid-source", "library");
-  await expect(page.locator("#vid-list .vrow")).toHaveCount(2);
+  await expect(rows).toHaveCount(2);
   await page.selectOption("#vid-year", "2019");
-  await expect(page.locator("#vid-list .vrow")).toHaveCount(2);   // Candle Flame is filed in 2019 too
+  await expect(rows).toHaveCount(2);   // Candle Flame is filed in 2019 too
   await page.selectOption("#vid-year", "2024");
-  await expect(page.locator("#vid-list .vrow")).toHaveCount(1);
+  await expect(rows).toHaveCount(1);
   await page.selectOption("#vid-year", ""); await page.selectOption("#vid-source", "");
   await page.fill("#vid-q", "zzzz-no-such-video");
-  await expect(page.locator("#vid-list")).toContainText("nothing matches");
+  await expect(page.locator("#vid-empty")).toContainText("Nothing matches");
   await page.fill("#vid-q", "");
-  await expect(page.locator("#vid-list .vrow")).toHaveCount(3);
-  // ▶ plays the video in place, under its row; j moves the player to the next row, Esc closes it
-  await rows.nth(1).locator(".vthumb").click();
-  await expect(rows.nth(1)).toHaveClass(/playing/);
-  await expect(rows.nth(1).locator(".vplayer iframe")).toHaveAttribute("src", /youtube-nocookie\.com\/embed\/libv1\?autoplay=1/);
+  await expect(rows).toHaveCount(3);
+  // ▶ plays the video itself in the site's player, the cards are the queue: j moves on, the card lights up, Esc closes
+  await rows.nth(1).locator(".art").click();
+  await expect(page.locator("#player")).toBeVisible();
+  await expect(page.locator("#player")).toHaveClass(/video/);
+  await expect(page.locator("#p-wrong")).toBeHidden();   // a video has no wrong-video flag
+  await expect(page.locator("#now")).toContainText("Volcano");
+  await expect(page.locator("#np-spec")).toContainText("official video · in 2024 | Indie Discotheque");
+  await expect(page.locator("#np-eyebrow")).toContainText("No. 02 / 3");
+  await expect(page.locator("#np-next")).toContainText("Upload");   // up next: the card below
+  await expect(rows.nth(1)).toHaveClass(/current/);
   await page.keyboard.press("j");
-  await expect(rows.nth(2)).toHaveClass(/playing/);
-  await expect(rows.nth(1)).not.toHaveClass(/playing/);
-  await expect(page.locator("#vid-list .vplayer iframe")).toHaveCount(1);
+  await expect(rows.nth(2)).toHaveClass(/current/);
+  await expect(rows.nth(1)).not.toHaveClass(/current/);
+  await expect(page.locator("#np-eyebrow")).toContainText("No. 03 / 3");
   await page.keyboard.press("Escape");
-  await expect(page.locator("#vid-list .vplayer iframe")).toHaveCount(0);
+  await expect(page.locator("#player")).toBeHidden();
   // ▲︎ add: the playlist was read a moment ago, so the add is the only request — into the music-video playlist, nowhere else
   const before = calls.length;
-  await rows.nth(0).locator("button[data-act=approve]").click();
+  await rows.nth(0).locator(".btn.up").click();
   await expect(page.locator(".toast")).toContainText("→ the music-video playlist");
-  await expect(page.locator('#vid-list .vrow[data-video="keptv"]')).toHaveCount(0);
+  await expect(page.locator('#vid-list .card[data-id="video:keptv"]')).toHaveCount(0);
   await expect(page.locator("#count-videos")).toHaveText("2");
   const writes = calls.slice(before).filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "POST");
   expect(writes).toHaveLength(1);
   expect(writes[0].body.snippet.playlistId).toBe("PLVIDS"); expect(writes[0].body.snippet.resourceId.videoId).toBe("keptv");
   expect(calls.slice(before).filter(c => c.method === "GET" && c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}").keptv?.playlistItemId)).toBe("PLI-video-1");
-  // ▼︎ pass: free, remembered, and the row is gone
+  // the d key passes the card the keyboard is on (focus moved on to the next card when the first left): free, remembered, gone
+  await expect(rows.first()).toBeFocused();
   const passes = calls.length;
-  await page.locator('#vid-list .vrow[data-video="libv2"] button[data-act=pass]').click();
+  await page.keyboard.press("d");
   await expect(page.locator(".toast")).toContainText("passed");
-  await expect(page.locator('#vid-list .vrow[data-video="libv2"]')).toHaveCount(0);
+  await expect(page.locator('#vid-list .card[data-id="video:libv1"]')).toHaveCount(0);
   expect(calls.slice(passes).filter(c => c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}").libv2?.decision)).toBe("down");
-  // Undo takes the pass back for free; the pill and the list follow
-  await page.locator(".toast button").click();
-  await expect(page.locator('#vid-list .vrow[data-video="libv2"]')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}").libv1?.decision)).toBe("down");
+  // z takes the last verdict back for free; the pill and the list follow
+  await page.keyboard.press("z");
+  await expect(page.locator('#vid-list .card[data-id="video:libv1"]')).toHaveCount(1);
   await expect(page.locator("#count-videos")).toHaveText("2");
+  // the player's own thumbs judge what plays: ▼︎ on the bar passes the playing video, and autoplay moves on to the next
+  await page.locator('#vid-list .card[data-id="video:libv2"] .art').click();
+  await expect(page.locator("#now")).toContainText("Someone - Upload");
+  await page.click("#p-down");
+  await expect(page.locator(".toast")).toContainText("passed");
+  await expect(page.locator('#vid-list .card[data-id="video:libv2"]')).toHaveCount(0);
+  await expect(page.locator("#now")).toContainText("Candle Flame");   // libv1 sat before it: the only card left plays
+  await expect(page.locator("#count-videos")).toHaveText("1");
+  await page.locator(".toast button").click();   // Undo on the toast
+  await expect(page.locator('#vid-list .card[data-id="video:libv2"]')).toHaveCount(1);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#player")).toBeHidden();
   // the decisions reach the build with the ratings file (`videos`), and a reload keeps them
   await page.reload();
   await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
   await expect(page.locator("#count-videos")).toHaveText("2", { timeout: 15_000 });
   const marks = await page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}"));
-  expect(marks.keptv.decision).toBe("up"); expect(marks.libv2.decision).toBe("undone");
+  expect(marks.keptv.decision).toBe("up"); expect(marks.libv1.decision).toBe("undone"); expect(marks.libv2.decision).toBe("undone");
   // Settings points here too
   await page.click("#settings-btn");
   await expect(page.locator("#s-videos-summary")).toContainText("videos to review");

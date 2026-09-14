@@ -11,6 +11,7 @@ export interface FeedItem {
   _pick?: boolean; _year?: string | number | null; _skipped?: boolean;
   plays?: number; loved?: boolean;   // catalog items: Last.fm play count, loved track
   _concert?: boolean;   // a concert row's most popular song (concerts.js): playable, never rated
+  _video?: VideoRow;    // a Video tab card (videos.js): plays the video itself; ▲︎/▼︎ approve it into the music-video playlist or pass
 }
 /** One upcoming show (data/concerts.json, discovery/concerts.py): the headliner is the most played act on the bill. */
 export interface ConcertEvent {
@@ -111,6 +112,7 @@ export interface State {
   badVideos: Record<string, number>; badVersion: number; ratedVersion: number; shortlistHidden: number; focusId: string | null; shareIn: { url?: string; text?: string; title?: string; artist?: string } | null;
   catalog: Catalog | null; catalogState: "idle" | "loading" | "ready" | "missing" | "failed"; index: Map<string, FeedItem>;
   concerts: Concerts | null; concertsState: "idle" | "loading" | "ready" | "missing" | "failed"; concertTracks: FeedItem[];
+  videoTracks: FeedItem[];      // the Video tab's videos as cards, in the index under "video:<id>" 
   player: any; playerReady: boolean; pendingVideo: string | null; tokenClient: any; busy: Set<string>;
   sync: { fileId: string | null; at: number }; syncTimer: any;
   ghTimer: any; ghRetry: any; ghBusy: Promise<boolean> | null; ghAt: number; ghDirty: boolean; ghFails: number;

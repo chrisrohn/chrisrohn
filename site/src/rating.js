@@ -13,13 +13,15 @@ import { titleFor, skippedTitle, playlistFor, skippedPlaylist, addToPlaylist, re
 import { render, deckOn, deckItem, focusCard } from "./render.js";
 import { play, stopPlayer, playerActive, autoplayOn } from "./player.js";
 import { credit } from "./feed.js";
+import { rateVideo, undoVideo, videoMark, VIDEO_ID } from "./videos.js";
 
 const UP = "▲︎", DN = "▼︎", NE = "≠";   // the same glyphs as the buttons
 
-/** Move on from a card that just left the list: focus (and, if it was playing, play) the next one. @param {string} id @param {number} idx @param {boolean} wasPlaying */
-function moveOn(id, idx, wasPlaying) {
+/** Move on from a card that just left the list (a feed card rated, a video decided): focus (and, if it was playing,
+ * play) the next one. @param {string} id @param {number} idx @param {boolean} wasPlaying */
+export function moveOn(id, idx, wasPlaying) {
   if (deckOn()) { const nxt = deckItem(); if (nxt && wasPlaying && autoplayOn() && nxt.youtube?.videoId) play(nxt.id); else if (wasPlaying && !nxt) stopPlayer(); }
-  else if (state.view === "feed" || state.view === "catalog") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasPlaying && autoplayOn() && byId(next)?.youtube?.videoId) play(next); } else if (wasPlaying) stopPlayer(); }
+  else if (state.view === "feed" || state.view === "catalog" || state.view === "videos") { const next = state.order[idx] || state.order[idx - 1]; if (next) { focusCard(next); if (wasPlaying && autoplayOn() && byId(next)?.youtube?.videoId) play(next); } else if (wasPlaying) stopPlayer(); }
 }
 
 /** @typedef {"up" | "down" | "wrong"} Decision */
@@ -28,6 +30,7 @@ export async function rate(id, decision, year) {
   if (!isCurator()) return;
   if (state.busy.has(id)) return;
   const it = byId(id); if (!it) return;
+  if (it._video) { rateVideo(it, decision); return; }   // a Video tab card: ▲︎ files into the music-video playlist, ▼︎ passes (videos.js)
   if (it._concert) { toast(`${credit(it)} is a concert row's most popular song — it can be kept from the Feed or the Catalog when it turns up there`, true); return; }
   const vid = it.youtube && it.youtube.videoId;
   if (!vid) { toast(decision === "wrong" ? "This card has no YouTube match to be wrong" : "No YouTube match for this one — open it via the search link instead", true); return; }
@@ -102,7 +105,12 @@ export async function undo(id) {
 }
 /** The z key: take back the last thumb. */
 export function undoLast() {
-  const id = state.lastRated; const r = id && state.rated[id];
+  const id = state.lastRated;
+  if (id && id.startsWith(VIDEO_ID)) {   // the last verdict was on the Video tab
+    const v = id.slice(VIDEO_ID.length); if (!videoMark(v)) { toast("Nothing to undo"); return; }
+    undoVideo(v).then(() => { if (state.view === "videos") focusCard(id); }); return;
+  }
+  const r = id && state.rated[id];
   if (!id || !r || r.decision === "undone") { toast("Nothing to undo"); return; }
   const it = byId(id);
   undo(id).then(() => { if (it) { if (deckOn()) { const i = state.order.indexOf(id); if (i >= 0) { state.deckIndex = i; render(); } } else focusCard(id); } });

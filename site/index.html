@@ -71,7 +71,7 @@
     <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="concerts" title="Upcoming shows within 80 miles of Detroit by the artists played on Indie Discotheque in the last year: dates, venues, tickets and each act's most popular song">Concerts <span class="pill" id="count-concerts">…</span></button>
     <button type="button" class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="skipped" title="What you thumbed down or flagged as the wrong video — restore any of them">Skipped <span class="pill" id="count-skipped">0</span></button>
     <button type="button" class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="cleanup" title="Songs the year playlists hold more than once (extra copies, two years, several uploads, versions), tracks that will not play here, a live scan and a playability audit — work through them a few at a time">Cleanup <span class="pill" id="count-cleanup">0</span></button>
-    <button type="button" class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="videos" title="The official videos of the songs the year playlists hold, and of the songs you keep: watch each one here, add it to the music-video playlist or pass">Video <span class="pill" id="count-videos">…</span></button>
+    <button type="button" class="tab curator" role="tab" aria-selected="false" tabindex="-1" aria-controls="main" data-view="videos" title="The official videos of the songs the year playlists hold, and of the songs you keep: cards like the Feed's that play the video, add it to the music-video playlist or pass">Video <span class="pill" id="count-videos">…</span></button>
   </nav>
   <div class="actions">
     <span id="who" class="who" hidden></span>
@@ -220,7 +220,7 @@
       <p class="muted" id="vid-summary"></p>
       <details class="cl-help"><summary>How this works</summary>
         <p class="muted">The year playlists hold audio tracks; YouTube Music pairs most of them with an official video. This tab is the one place videos are reviewed. Two things put a video here: a song you <b>keep</b> on the Feed or the Catalog whose card knows its video side (the daily build asks YouTube Music for it as it resolves each card, so the video is here the moment the song is kept), and every song in every year playlist that has a video — the <b>Videos</b> workflow asks YouTube Music about the library a batch a day (free) until every row has been asked, then keeps up with what is filed. One video is one row, however many years hold the song.</p>
-        <p class="muted">▶ plays the video here (<kbd>j</kbd>/<kbd>k</kbd> move down and up the list, <kbd>space</kbd> opens the player, <kbd>u</kbd> approves, <kbd>d</kbd> passes). <b>▲︎ add</b> puts the video into the music-video playlist — the single playlist every approved video goes to, and the only thing this tab ever writes (50 units, plus 1 to verify it is not already there unless the playlist was read in the last half hour); <b>▼︎ pass</b> is free and remembered. Decisions travel with your ratings to every device and to the daily build, which leaves them out of the next list; <b>read the playlist</b> hides what it already holds, from another device or from YouTube Music itself.</p>
+        <p class="muted">The cards work like the Feed's: ▶ (or <kbd>space</kbd>) plays the video in the player, and with autoplay on the list plays on down; <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>u</kbd> and <kbd>d</kbd> decide, <kbd>z</kbd> undoes, a swipe right or left decides on a phone, and the player's own thumbs judge what is playing. <b>▲︎</b> puts the video into the music-video playlist — the single playlist every approved video goes to, and the only thing this tab ever writes (50 units, plus 1 to verify it is not already there unless the playlist was read in the last half hour); <b>▼︎</b> passes for free and is remembered. Decisions travel with your ratings to every device and to the daily build, which leaves them out of the next list; <b>read the playlist</b> hides what it already holds, from another device or from YouTube Music itself.</p>
       </details>
       <p class="muted" id="vid-quota"></p>
     </div>
@@ -232,7 +232,8 @@
       <span class="muted" id="vid-shown"></span>
       <button class="btn ghost small" id="vid-read" type="button" title="read the music-video playlist as it is right now (1 unit per 50 videos): what it already holds is hidden, and the next adds skip their own check">read the music-video playlist</button>
     </div>
-    <div id="vid-list" class="vrows"></div>
+    <div id="vid-list" class="list"></div>
+    <p class="empty-say" id="vid-empty" hidden></p>
   </section>
   <section id="concerts" class="cleanup concerts" aria-label="concerts" hidden>
     <div class="cl-head">
