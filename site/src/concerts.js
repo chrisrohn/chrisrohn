@@ -1,7 +1,7 @@
 // @ts-check
 /* The Concerts tab: every upcoming show within 80 miles of Detroit by an artist played on Indie Discotheque in the
- * last year — the Songkick page, drawn from Bandsintown and Ticketmaster by the Concerts workflow
- * (discovery/concerts.py → data/concerts.json). One row per show: the date, who, the venue and city, how far, the
+ * last year — the Songkick page, drawn from Bandsintown, Resident Advisor, JamBase, Edmtrain, Ticketmaster and
+ * SeatGeek by the Concerts workflow (discovery/concerts.py → data/concerts.json). One row per show: the date, who, the venue and city, how far, the
  * ticket link, and the act's most popular song, playable in place through the site's own player. Loaded the first
  * time the tab opens; the rows' top songs join the id index so j/k, space and autoplay walk the list like any other. */
 import { state, persist, reindex } from "./state.js";
@@ -119,6 +119,28 @@ function fmtPrice(p) {
 }
 /** @param {number} n */
 const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+/** The listings the build draws on, in the order the summary names them. @type {Record<string, string>} */
+export const SOURCE_NAMES = { bandsintown: "Bandsintown", resident_advisor: "Resident Advisor", jambase: "JamBase", edmtrain: "Edmtrain", ticketmaster: "Ticketmaster", seatgeek: "SeatGeek" };
+/** @param {string} key */
+const sourceName = key => SOURCE_NAMES[key] || key.replace(/_/g, " ");
+/** Which sources answered, which failed (and how), and which are not set up (no key) — from the build's health
+ * record. Bandsintown's is a batch a run, so it counts as failed only when it was actually asked.
+ * @param {Concerts} c @returns {{ live: { key: string, name: string }[], down: { key: string, name: string, error: string }[], off: { key: string, name: string, error: string }[] }} */
+export function sourceHealth(c) {
+  const h = c.health || {};
+  const keys = [...Object.keys(SOURCE_NAMES).filter(k => k in h), ...Object.keys(h).filter(k => !(k in SOURCE_NAMES))];
+  /** @type {{ key: string, name: string }[]} */ const live = [];
+  /** @type {{ key: string, name: string, error: string }[]} */ const down = [];
+  /** @type {{ key: string, name: string, error: string }[]} */ const off = [];
+  for (const key of keys) {
+    const row = h[key] || {}; const name = sourceName(key); const error = String(row.error || "failed");
+    if (row.ok) live.push({ key, name });
+    else if (/not set$/.test(error)) off.push({ key, name, error: error.replace(/ not set$/, "") });
+    else if (key === "bandsintown" && !row.asked) off.push({ key, name, error: "not asked this run" });
+    else down.push({ key, name, error });
+  }
+  return { live, down, off };
+}
 
 export function renderConcerts() {
   const host = $("#con-list"); const sum = $("#con-summary"); const empty = $("#con-empty"); if (!host) return;
@@ -137,12 +159,11 @@ export function renderConcerts() {
   const when = c.generated_at ? relTime(new Date(c.generated_at)) : "?";
   const all = (c.events || []).filter(ev => ev.date >= todayKey()).length;
   const checked = c.artists_checked != null && c.artists_total ? ` · ${c.artists_checked.toLocaleString()} of ${c.artists_total.toLocaleString()} played artists checked so far` : "";
-  const h = c.health || {};
-  const tmDown = !!(h.ticketmaster && !h.ticketmaster.ok), bitDown = !!(h.bandsintown && !h.bandsintown.ok && h.bandsintown.asked);
-  const tm = tmDown && bitDown ? ` · both sources failed (Ticketmaster: ${h.ticketmaster.error || "failed"}; Bandsintown: ${h.bandsintown.error || "failed"})`
-    : tmDown ? " · Bandsintown listings only" : bitDown ? ` · Ticketmaster listings only (Bandsintown: ${h.bandsintown.error || "failed"})` : "";
-  sum.textContent = `${plural(vis.length, "show", "shows")}${vis.length !== all ? ` of ${all}` : ""} within ${c.radius_miles} miles of ${c.center?.name || "Detroit"} by ${plural(artists.size, "artist", "artists")} you played this year · built ${when}${checked}${tm}`;
-  sum.title = `Sources: ${(c.sources || []).join(", ") || "none yet"}`;
+  const { live, down, off } = sourceHealth(c);
+  const note = down.length ? ` · ${down.length === 1 ? "one source" : `${down.length} sources`} failed: ${down.map(s => `${s.name} (${s.error})`).join("; ")}` : "";
+  const only = !down.length && live.length && off.length ? ` · ${live.map(s => s.name).join(", ")} listings only` : "";
+  sum.textContent = `${plural(vis.length, "show", "shows")}${vis.length !== all ? ` of ${all}` : ""} within ${c.radius_miles} miles of ${c.center?.name || "Detroit"} by ${plural(artists.size, "artist", "artists")} you played this year · built ${when}${checked}${note}${only}`;
+  sum.title = [`Listings: ${live.map(s => s.name).join(", ") || "none yet"}`, down.length ? `Failed: ${down.map(s => `${s.name} — ${s.error}`).join("; ")}` : "", off.length ? `Not set up: ${off.map(s => `${s.name} (${s.error})`).join(", ")}` : ""].filter(Boolean).join("\n");
   // the rows' top songs are the queue: space plays the first, j/k and autoplay walk on down the list
   const ids = []; for (const ev of vis) { const id = trackIdFor(ev); if (id && !ids.includes(id)) ids.push(id); }
   state.order = ids;
@@ -187,7 +208,8 @@ function row(ev) {
   if (a.filed) why.push(`${plural(a.filed, "track", "tracks")} filed this year`);
   if (!a.plays && !a.filed) why.push("played on Indie Discotheque this year");
   const facts = [fmtTime(ev.time), ev.festival ? "festival" : ""].filter(Boolean);
-  const price = fmtPrice(ev.price);   // Ticketmaster lists face values; Bandsintown publishes none
+  const price = fmtPrice(ev.price);   // Ticketmaster and JamBase list face values, SeatGeek its lowest listing; Bandsintown and RA publish none
+  const priceFrom = sourceName(String(ev.price?.source || "ticketmaster"));
   const pop = track ? (track.source === "lastfm" && track.listeners ? `${track.listeners.toLocaleString()} listeners on Last.fm` : track.source === "deezer" ? "Deezer's most streamed" : "most popular on Last.fm") : "";
   el.innerHTML = `
     <div class="show-date" aria-hidden="true"><span class="dow">${DAYS[d.getDay()]}</span><b class="dd">${d.getDate()}</b><span class="mm">${MONTHS[d.getMonth()]}</span></div>
@@ -214,7 +236,7 @@ function row(ev) {
     </div>
     <div class="show-side">
       ${tickets ? `<a class="btn ${ev.tickets ? "primary" : "ghost"} small tickets" href="${esc(tickets)}" target="_blank" rel="noopener" title="${ev.tickets ? `tickets${ev.ticketer ? ` from ${esc(ev.ticketer)}` : ""}${price ? `, ${esc(price)}` : ""}` : "the event page"}">${ev.tickets ? `Tickets${ev.ticketer ? ` · ${esc(ev.ticketer)}` : ""}` : "Details"}</a>` : `<span class="muted tba">no link</span>`}
-      ${price ? `<span class="price" title="ticket price${ev.price?.currency ? ` in ${esc(ev.price.currency)}` : ""}, as Ticketmaster lists it">${esc(price)}</span>` : ""}
+      ${price ? `<span class="price" title="ticket price${ev.price?.currency ? ` in ${esc(ev.price.currency)}` : ""}, as ${esc(priceFrom)} lists it${ev.price?.source === "seatgeek" ? " (its lowest listing, resale included)" : ""}">${esc(price)}</span>` : ""}
       ${safeUrl(ev.image || a.image) ? `<img alt="" loading="lazy" decoding="async" width="72" height="72" src="${esc(safeUrl(ev.image || a.image))}">` : ""}
     </div>`;
   const img = $("img", el); if (img) img.addEventListener("error", () => img.remove(), { once: true });

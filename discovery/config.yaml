@@ -513,9 +513,36 @@ concerts:
                               # secret (an artist's API key from Bandsintown for Artists → Settings → General, or one from
                               # biz@bandsintown.com); this is only the fallback when the secret is empty
     give_up_after: 10         # a run of this many straight failures (403 for an unknown app_id, an outage) ends the batch this run
+    empty_probe: 25           # an app_id Bandsintown did not issue is just as often answered with an empty list for everyone: when
+                              # this many answers in a row (the most played artists first) list no show anywhere, the run is treated
+                              # as refused, nothing is recorded as checked, and the summary line says so
   ticketmaster:
     enabled: true             # only does anything when the TICKETMASTER_API_KEY secret is set (free at developer.ticketmaster.com)
     size: 200                 # events a request (Ticketmaster's most)
     requests_per_run: 60      # Ticketmaster stops paging at 1,000 results, so the months_ahead horizon is split into date windows
                               # that fit; this caps the requests spent on them a run (the soonest windows first; 5,000 a day is free)
+  seatgeek:
+    enabled: true             # only with the SEATGEEK_CLIENT_ID secret (free at seatgeek.com/account/develop): every concert within
+                              # the radius, including the clubs that sell through DICE, Eventbrite or their own box office
+    per_page: 100
+    requests_per_run: 40
+    taxonomies: [concert, music_festival]
+  jambase:
+    enabled: true             # only with the JAMBASE_API_KEY secret (free at data.jambase.com): the widest venue-calendar aggregator,
+                              # with each show's ticket link and its seller
+    base_url: https://api.data.jambase.com/v3   # the v1 API still answers at https://www.jambase.com/jb-api/v1 with auth: query
+    auth: bearer              # bearer = the key in the Authorization header (v3); query = an apikey parameter (v1)
+    per_page: 100
+    requests_per_run: 40
+  edmtrain:
+    enabled: true             # only with the EDMTRAIN_API_KEY secret (free, edmtrain.com/developer-api): every electronic show in
+                              # these states, the lineups the dance venues post themselves; the radius is applied afterwards
+    states: [Michigan, Ohio, Ontario]
+    other_genres: true        # false = only what Edmtrain files as electronic
+  resident_advisor:
+    enabled: true             # no key: ra.co's public GraphQL, the one its own event pages call, answers a browser
+    area: { country: us, city: detroit }   # the area's URL names (ra.co/events/us/detroit); its id is looked up and remembered
+    area_id: null             # or set the numeric area id directly and skip the lookup
+    page_size: 100
+    requests_per_run: 30
   in_daily: false             # true = also run at the end of the daily feed job; the Concerts workflow is its own job

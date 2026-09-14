@@ -17,7 +17,7 @@ export interface ConcertEvent {
   id: string; artist: string; artists: string[]; lineup: string[]; title?: string | null; date: string; time?: string | null;
   venue: string; city: string; region: string; country: string; lat?: number | null; lon?: number | null; miles?: number | null;
   tickets?: string | null; ticketer?: string | null; url?: string | null; status?: string | null; sources: string[]; links?: Record<string, string>;
-  price?: { min?: number | null; max?: number | null; currency?: string | null } | null; image?: string | null; festival?: boolean;
+  price?: { min?: number | null; max?: number | null; currency?: string | null; source?: string | null } | null; image?: string | null; festival?: boolean;
 }
 export interface ConcertArtist {
   plays: number; filed: number; via?: string[]; image?: string | null; links?: Record<string, string>;

@@ -1,7 +1,8 @@
 name: Concerts
 
 # Builds the concert list (site/data/concerts.json: upcoming shows within 80 miles of Detroit by every artist played
-# on Indie Discotheque in the last year, from Bandsintown and, with a key, Ticketmaster; each act's most popular
+# on Indie Discotheque in the last year, from Bandsintown, Resident Advisor and, each with a free key, Ticketmaster,
+# SeatGeek, JamBase and Edmtrain; each act's most popular
 # song resolved on YouTube Music) and publishes the site. Its own job, in the afternoon after Catalog, so neither
 # waits on the other. Nothing here writes to your YouTube Music playlists: only a thumb pressed on the site does that.
 
@@ -55,7 +56,10 @@ jobs:
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}   # optional: Ticketmaster's free Discovery API
-          BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # the app_id Bandsintown issued you; without one its API answers 403 and the list is Ticketmaster-only
+          BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # the app_id Bandsintown issued you; without one its API answers 403, or empty for everyone
+          SEATGEEK_CLIENT_ID: ${{ secrets.SEATGEEK_CLIENT_ID }}       # optional: SeatGeek's free Platform API (the clubs Ticketmaster never lists)
+          JAMBASE_API_KEY: ${{ secrets.JAMBASE_API_KEY }}             # optional: JamBase's free API (the widest venue-calendar aggregator)
+          EDMTRAIN_API_KEY: ${{ secrets.EDMTRAIN_API_KEY }}           # optional: Edmtrain's free API (every electronic show in the configured states)
         run: python -m discovery concerts
 
       - name: Commit data
