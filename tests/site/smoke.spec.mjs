@@ -1253,3 +1253,153 @@ test("no concert list yet: the Concerts tab says so instead of an empty sheet", 
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test("the Video tab: kept songs' videos and the library's, played in place, added to the music-video playlist or passed", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const playable = feed.items.filter(i => i.youtube && i.youtube.videoId).slice(0, 3);
+  const [kept, unkept, keptNoVideo] = playable;
+  const report = { generated_at: new Date().toISOString(), checked_at: new Date().toISOString(), playlist_id: "PLVIDS", count: 3, pending: 4, no_video: 10, in_playlist: 2, decided: 1, rows: [
+    { video: "libv1", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "liba1", year: "2024", years: ["2024", "2019"], playlistId: "PL2024", position: 3, artist: "Jungle", title: "Candle Flame", album: "Volcano" },
+    { video: "libv2", kind: "MUSIC_VIDEO_TYPE_UGC", own: true, videoId: "libv2", year: "2019", years: ["2019"], playlistId: "PL2019", position: 8, artist: "Someone", title: "Upload", album: null },
+    { video: "heldv", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "helda", year: "2016", years: ["2016"], playlistId: "PL2016", position: 1, artist: "Roosevelt", title: "Lovers", album: "Roosevelt" },
+  ] };
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash, keptId, keptNoVideoId]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false }));
+    // two songs kept on this account: one whose card knows its video (it belongs on the tab), one without a video (it does not)
+    localStorage.setItem("id:rated", JSON.stringify({ [keptId]: { decision: "up", at: Date.now() - 60e3, year: 2026 }, [keptNoVideoId]: { decision: "up", at: Date.now() - 30e3, year: 2026 } }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0], kept.id, keptNoVideo.id]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => {
+    const j = await (await r.fetch()).json();
+    Object.assign(j.youtube, { videos_playlist_id: "PLVIDS", videos: { with_video: 2, no_video: 1, pending: 0 } });
+    // the kept song and an unkept one both know their video; only the kept one belongs on the tab
+    for (const it of j.items) { if (it.id === kept.id) Object.assign(it.youtube, { video: "keptv", videoKind: "MUSIC_VIDEO_TYPE_OMV" }); if (it.id === unkept.id) Object.assign(it.youtube, { video: "unkeptv", videoKind: "MUSIC_VIDEO_TYPE_OMV" }); }
+    await r.fulfill({ json: j });
+  });
+  await page.route("**/data/videos.json", r => r.fulfill({ json: report }));
+  const calls = [];
+  const parse = t => { try { return JSON.parse(t || ""); } catch { return t; } };
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); const params = Object.fromEntries(u.searchParams);
+    const body = parse(req.postData()); calls.push({ method: req.method(), path: u.pathname, params, body });
+    if (u.pathname.startsWith("/drive/") || u.pathname.startsWith("/upload/")) return route.fulfill({ json: { files: [], id: "drive-1" } });
+    // the music-video playlist holds one of the report's videos already; every other playlist read is empty
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: params.playlistId === "PLVIDS" && !params.videoId ? [{ id: "PLI-held", snippet: { resourceId: { videoId: "heldv" } } }] : [] } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "POST") return route.fulfill({ json: { id: "PLI-video-1" } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") return route.fulfill({ status: 204, body: "" });
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  const tab = page.locator(".tab[data-view=videos]");
+  await expect(tab).toBeVisible();
+  // the pill: the library's three rows plus the kept song's video (the unkept song's and the kept-without-video one never count)
+  await expect(page.locator("#count-videos")).toHaveText("4", { timeout: 15_000 });
+  await tab.click();
+  await expect(page.locator("#videos")).toBeVisible();
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  await expect(page.locator("#filters")).toBeHidden();
+  // opening the tab reads the music-video playlist (1 unit per 50): what it holds is hidden, the pill follows
+  await expect.poll(() => calls.filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "GET" && c.params.playlistId === "PLVIDS" && !c.params.videoId).length).toBe(1);
+  await expect(page.locator("#vid-list .vrow")).toHaveCount(3);
+  await expect(page.locator('#vid-list .vrow[data-video="heldv"]')).toHaveCount(0);
+  await expect(page.locator("#count-videos")).toHaveText("3");
+  await expect(page.locator("#vid-summary")).toContainText("3 videos to review");
+  await expect(page.locator("#vid-summary")).toContainText("4 rows still being asked");
+  await expect(page.locator("#vid-summary")).toContainText("1 from songs kept here");
+  await expect(page.locator("#vid-quota")).toContainText("approvals possible today");
+  // the kept song's video leads (kept most recently), then the library's, newest year first; each row says where it is from
+  const rows = page.locator("#vid-list .vrow");
+  await expect(rows.nth(0)).toHaveAttribute("data-video", "keptv");
+  await expect(rows.nth(0)).toHaveClass(/feed/);
+  await expect(rows.nth(0).locator(".vmeta")).toContainText(/^official video · (.+ · )?kept here \d+ min ago$/);
+  await expect(rows.nth(0).locator(".vname")).toContainText(kept.artist);
+  await expect(rows.nth(1)).toHaveAttribute("data-video", "libv1");
+  await expect(rows.nth(1).locator(".vmeta")).toContainText("official video · Volcano · in 2024 | Indie Discotheque, 2019 | Indie Discotheque · #4");
+  await expect(rows.nth(1).locator(".vlinks a").nth(1)).toHaveAttribute("href", "https://music.youtube.com/watch?v=liba1");
+  await expect(rows.nth(2).locator(".vmeta")).toContainText("upload · the playlist row itself is the video");
+  await expect(rows.nth(0).locator(".vthumb img")).toHaveAttribute("src", "https://i.ytimg.com/vi/keptv/mqdefault.jpg");
+  await expect(page.locator('#vid-list .vrow[data-video="unkeptv"]')).toHaveCount(0);
+  // filters: where from, year, name
+  await page.selectOption("#vid-source", "library");
+  await expect(page.locator("#vid-list .vrow")).toHaveCount(2);
+  await page.selectOption("#vid-year", "2019");
+  await expect(page.locator("#vid-list .vrow")).toHaveCount(2);   // Candle Flame is filed in 2019 too
+  await page.selectOption("#vid-year", "2024");
+  await expect(page.locator("#vid-list .vrow")).toHaveCount(1);
+  await page.selectOption("#vid-year", ""); await page.selectOption("#vid-source", "");
+  await page.fill("#vid-q", "zzzz-no-such-video");
+  await expect(page.locator("#vid-list")).toContainText("nothing matches");
+  await page.fill("#vid-q", "");
+  await expect(page.locator("#vid-list .vrow")).toHaveCount(3);
+  // ▶ plays the video in place, under its row; j moves the player to the next row, Esc closes it
+  await rows.nth(1).locator(".vthumb").click();
+  await expect(rows.nth(1)).toHaveClass(/playing/);
+  await expect(rows.nth(1).locator(".vplayer iframe")).toHaveAttribute("src", /youtube-nocookie\.com\/embed\/libv1\?autoplay=1/);
+  await page.keyboard.press("j");
+  await expect(rows.nth(2)).toHaveClass(/playing/);
+  await expect(rows.nth(1)).not.toHaveClass(/playing/);
+  await expect(page.locator("#vid-list .vplayer iframe")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#vid-list .vplayer iframe")).toHaveCount(0);
+  // ▲︎ add: the playlist was read a moment ago, so the add is the only request — into the music-video playlist, nowhere else
+  const before = calls.length;
+  await rows.nth(0).locator("button[data-act=approve]").click();
+  await expect(page.locator(".toast")).toContainText("→ the music-video playlist");
+  await expect(page.locator('#vid-list .vrow[data-video="keptv"]')).toHaveCount(0);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  const writes = calls.slice(before).filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "POST");
+  expect(writes).toHaveLength(1);
+  expect(writes[0].body.snippet.playlistId).toBe("PLVIDS"); expect(writes[0].body.snippet.resourceId.videoId).toBe("keptv");
+  expect(calls.slice(before).filter(c => c.method === "GET" && c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}").keptv?.playlistItemId)).toBe("PLI-video-1");
+  // ▼︎ pass: free, remembered, and the row is gone
+  const passes = calls.length;
+  await page.locator('#vid-list .vrow[data-video="libv2"] button[data-act=pass]').click();
+  await expect(page.locator(".toast")).toContainText("passed");
+  await expect(page.locator('#vid-list .vrow[data-video="libv2"]')).toHaveCount(0);
+  expect(calls.slice(passes).filter(c => c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}").libv2?.decision)).toBe("down");
+  // Undo takes the pass back for free; the pill and the list follow
+  await page.locator(".toast button").click();
+  await expect(page.locator('#vid-list .vrow[data-video="libv2"]')).toHaveCount(1);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  // the decisions reach the build with the ratings file (`videos`), and a reload keeps them
+  await page.reload();
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("#count-videos")).toHaveText("2", { timeout: 15_000 });
+  const marks = await page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}"));
+  expect(marks.keptv.decision).toBe("up"); expect(marks.libv2.decision).toBe("undone");
+  // Settings points here too
+  await page.click("#settings-btn");
+  await expect(page.locator("#s-videos-summary")).toContainText("videos to review");
+  await page.click("#s-videos");
+  await expect(page.locator("#settings")).toBeHidden();
+  await expect(page.locator("#videos")).toBeVisible();
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("no video list yet, and a listener: the Video tab says so, and only a curator sees it", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  await page.route("**/data/videos.json", r => r.fulfill({ status: 404, body: "" }));
+  const errors = await open(page);
+  await expect(page.locator(".tab[data-view=videos]")).toBeHidden();            // curators only
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
+  const curator = await ctx.newPage();
+  await curator.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { videos_playlist_id: "PLVIDS" }); await r.fulfill({ json: j }); });
+  await curator.route("**/data/videos.json", r => r.fulfill({ status: 404, body: "" }));
+  await open(curator, "/index.html?view=videos");
+  await expect(curator.locator("#videos")).toBeVisible();
+  await expect(curator.locator("#vid-summary")).toContainText("the library's own list appears after the first Videos workflow run");
+  await expect(curator.locator("#count-videos")).toHaveText("0");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});

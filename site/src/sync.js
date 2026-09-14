@@ -39,7 +39,8 @@ async function syncFileId() {
   if (f) { state.sync.fileId = f.id; persist(); return f.id; }
   return null;
 }
-/** @param {string} id @returns {Promise<{rated: Record<string, Rated>, quota?: {day: string, units: number}, dupesDone?: string[]} | null>} */
+/** @typedef {import("./types").VideoMark} VideoMark */
+/** @param {string} id @returns {Promise<{rated: Record<string, Rated>, quota?: {day: string, units: number}, dupesDone?: string[], videos?: Record<string, VideoMark>} | null>} */
 async function readSyncFile(id) {
   const r = await drive("GET", `${DRIVE}/files/${id}`, { params: { alt: "media" } });
   const data = await r.json().catch(() => null);
@@ -49,9 +50,15 @@ async function readSyncFile(id) {
 // decision; "undone" is a tombstone so an Undo on one device also un-hides the track on the others.
 /** @param {Rated | undefined} r */
 const weak = r => !r || r.decision === "seen";
-/** @param {{rated?: Record<string, Rated>, quota?: {day: string, units: number}, dupesDone?: string[]} | null} remote */
+/** @param {{rated?: Record<string, Rated>, quota?: {day: string, units: number}, dupesDone?: string[], videos?: Record<string, VideoMark>} | null} remote */
 export function mergeRemote(remote) {
   let changed = false;
+  // the Video tab's decisions: newest record per video wins, "undone" tombstones travel too
+  for (const [v, m] of Object.entries((remote && remote.videos) || {})) {
+    if (!m || m.pending) continue;
+    const l = state.videoMarks[v];
+    if (!l || (m.at || 0) > (l.at || 0)) { state.videoMarks[v] = { ...m, pending: false }; state.videoVersion++; changed = true; }
+  }
   for (const [id, r] of Object.entries((remote && remote.rated) || {})) {
     if (!r || r.pending || r.queued) continue;
     const l = state.rated[id];
@@ -91,7 +98,8 @@ export async function pushRatings() {
     // never overwrite what another device wrote since we last looked: fold the file in first, then write the union
     if (id) { const remote = await readSyncFile(id).catch(() => null); if (remote && mergeRemote(remote)) render(); }
     const shared = Object.fromEntries(Object.entries(state.rated).filter(([, r]) => !r.pending && !r.queued));
-    const payload = JSON.stringify({ version: 4, account: state.auth?.email, updatedAt: new Date().toISOString(), rated: shared, quota: state.quota, dupesDone: state.settings.dupesDone || [] });
+    const videos = Object.fromEntries(Object.entries(state.videoMarks).filter(([, m]) => !m.pending));
+    const payload = JSON.stringify({ version: 5, account: state.auth?.email, updatedAt: new Date().toISOString(), rated: shared, quota: state.quota, dupesDone: state.settings.dupesDone || [], videos });
     if (id) {
       await drive("PATCH", `${DRIVE_UPLOAD}/files/${id}`, { params: { uploadType: "media" }, body: payload, raw: true });
     } else {

@@ -7,6 +7,7 @@ import { pullRatings } from "./sync.js";
 import { refreshRecent } from "./youtube.js";
 import { render, deckOn, focusCard } from "./render.js";
 import { scoreOf, invalidateRank } from "./rank.js";
+import { loadVideos, reconcileVideos } from "./videos.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -26,7 +27,7 @@ function absorb(feed) {
   const seen = new Set(); feed.items = playable(feed.items).filter(i => !seen.has(i.id) && seen.add(i.id));
   state.feed = feed; loadedAt = Date.now();
   hays.clear(); memo.clear(); invalidateRank(); reindex();
-  reconcileRated();
+  reconcileRated(); reconcileVideos();
   if (isOwner()) {
     for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
     if (feed.youtube && feed.youtube.skipped_playlist_id) state.playlists.__skipped = state.playlists.__skipped || feed.youtube.skipped_playlist_id;
@@ -58,6 +59,7 @@ export async function load() {
   render();
   openPermalink();
   if (isCurator() || state.view === "catalog") loadCatalog().catch(() => {});
+  if (isCurator() || state.view === "videos") loadVideos().catch(() => {});   // the Video tab's pill counts from the start
   if (isCurator() && tokenValid()) pullRatings().then(() => refreshRecent()).catch(() => {});
   if (isSignedIn()) ensureTokenClient().catch(() => {});
   // after the tap or key has done its work, never on pointerdown: the silent refresh opens a Google popup, and a
@@ -77,6 +79,7 @@ export async function refreshFeed(force = false) {
   absorb(feed);
   render();
   if (state.catalogState === "ready") loadCatalog(true).catch(() => {});
+  if (state.videosState === "ready") loadVideos(true).catch(() => {});
   if (keep) { const i = state.order.indexOf(keep); if (i >= 0) { state.deckIndex = i; render(); } }
   toast(`Today's feed is in · ${feed.new_today} new`);
   return true;
@@ -311,7 +314,7 @@ function listFor(view) {
     for (const it of [...mine, ...picks]) { const k = ((it.youtube && it.youtube.videoId) || it.id); if (seen.has(k)) continue; seen.add(k); all.push({ ...it, _pick: true, _year: it._year || (state.rated[it.id] && state.rated[it.id].year) }); }
     return all.filter(i => !terms.length || matches(i, terms));
   }
-  if (view === "cleanup" || view === "concerts") return [];   // the Cleanup and Concerts tabs are sections of their own, not lists of cards
+  if (view === "cleanup" || view === "concerts" || view === "videos") return [];   // the Cleanup, Concerts and Video tabs are sections of their own, not lists of cards
   if (view === "skipped") {
     // what this account thumbed down or flagged as the wrong video and is still in the feed or the catalog, newest
     // first; Undo brings any back (a flag whose video the build has since replaced is already back on its own)

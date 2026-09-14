@@ -17,6 +17,10 @@ mix), a cached hit outside the range is looked up once more in case a shorter or
 whose only upload is outside the range is dropped by the feed and the catalog after resolution (`drop_by_length`).
 A video the curator flagged on the site as the wrong one (≠, data/ratings.json) is refused for that track from then
 on: the cached row is redone without it, and the row remembers the refusal ("not") so the flag outlives the rating.
+The video side too: once a card plays its audio track, the watch playlist is asked (once, then again every
+`videos.recheck_days` while there is none) which official video YouTube Music pairs with it, `videos.feed_lookups_per_run`
+a run, and the id travels with the card as `youtube.video` — so a song kept on the site brings its video to the
+Video tab, where it is reviewed for the music-video playlist (discovery/videos.py does the same for the library).
 Results are cached in data/cache/youtube.json.
 """
 from __future__ import annotations
@@ -31,6 +35,7 @@ from .util import CACHE_DIR, Deadline, log, norm, norm_track, read_json, write_j
 YT_CACHE = CACHE_DIR / "youtube.json"
 CACHE_VERSION = 3   # 2: rows from the resolver that could land on another song; 3: audio-only preference, album year
 ATV = "MUSIC_VIDEO_TYPE_ATV"      # audio-only track
+OMV = "MUSIC_VIDEO_TYPE_OMV"      # the official music video
 _EDITION_RE = re.compile(r"\b(deluxe|special|expanded|anniversary|remaster(ed)?|edition|collector|bonus|live|remixes)\b", re.I)
 FLUSH_EVERY = 25    # lookups between cache writes, so a killed job keeps what it already found
 DEFAULT_MIN_LENGTH = "1:55"   # anything shorter is an interlude, a skit, an intro
@@ -222,25 +227,41 @@ def _shape(r: dict, via: str) -> dict[str, Any]:
     }
 
 
+def _sides(tracks: list[dict], video_id: str) -> tuple[str | None, str | None, dict[str, Any] | None]:
+    """What the watch playlist says about an upload: (its own videoType, the audio-only track paired with it, the
+    video paired with it). The playlist lists both sides of the audio/video pair, so a video's counterpart is the
+    audio track and an audio track's counterpart the video; opened straight on the audio side it is the audio
+    track itself, and on the video side the upload itself is the video."""
+    for t in tracks or []:
+        own = t.get("videoType")
+        cp = t.get("counterpart") or {}
+        cp_video = {"videoId": cp["videoId"], "videoType": cp["videoType"], "title": cp.get("title")} if cp.get("videoId") and cp.get("videoType") and cp["videoType"] != ATV else None
+        if t.get("videoId") == video_id:
+            if own == ATV:
+                return ATV, video_id, cp_video
+            video = {"videoId": video_id, "videoType": own, "title": t.get("title")} if own else None
+            return own, (cp.get("videoId") if cp.get("videoType") == ATV and cp.get("videoId") else None), video
+        if t.get("videoType") == ATV and t.get("videoId"):   # the playlist opened straight on the audio side
+            return None, t["videoId"], cp_video
+        if own and own != ATV and t.get("videoId") and cp.get("videoId") == video_id:   # …or on the video side
+            return None, video_id, {"videoId": t["videoId"], "videoType": own, "title": t.get("title")}
+    return None, None, None
+
+
+def _watch(yt, video_id: str) -> list[dict]:
+    """The watch playlist's tracks for an upload (one request, no API quota); raises when the request fails."""
+    wp = yt.get_watch_playlist(videoId=video_id, limit=1)
+    return (wp or {}).get("tracks") or []
+
+
 def watch_info(yt, video_id: str) -> tuple[str | None, str | None]:
-    """What the watch playlist says about an upload: (its own videoType, the audio-only track paired with it). The
-    playlist lists both sides of the audio/video pair, so a video's counterpart is the audio track; opened straight on
-    the audio side it is the audio track itself."""
+    """(own videoType, the audio-only track paired with it); (None, None) when the request failed or said nothing."""
     try:
-        wp = yt.get_watch_playlist(videoId=video_id, limit=1)
+        own, audio, _ = _sides(_watch(yt, video_id), video_id)
     except Exception as exc:  # noqa: BLE001
         log.debug("watch playlist for %s failed: %s", video_id, exc)
         return None, None
-    for t in (wp or {}).get("tracks") or []:
-        if t.get("videoId") == video_id:
-            own = t.get("videoType")
-            if own == ATV:
-                return ATV, video_id
-            cp = t.get("counterpart") or {}
-            return own, (cp.get("videoId") if cp.get("videoType") == ATV and cp.get("videoId") else None)
-        if t.get("videoType") == ATV and t.get("videoId"):   # the playlist opened straight on the audio side
-            return None, t["videoId"]
-    return None, None
+    return own, audio
 
 
 def audio_counterpart(yt, video_id: str) -> str | None:
@@ -252,19 +273,29 @@ def audio_counterpart(yt, video_id: str) -> str | None:
 def prefer_audio(yt, found: dict[str, Any]) -> bool:
     """Swap a video hit for its audio-only counterpart when YouTube Music has one; a hit whose kind was unknown
     learns it (audio track, official video, upload) even when there is no counterpart. Returns whether the hit is
-    the audio track afterwards."""
+    the audio track afterwards. The same answer names the video side of the pair, which is recorded on the hit
+    (`video`, None when there is none) so the Video tab needs no second lookup for it."""
     if not found or not found.get("videoId"):
         return False
     if found.get("videoType") == ATV:
         return True
-    own, cp = watch_info(yt, found["videoId"])
+    try:
+        own, cp, video = _sides(_watch(yt, found["videoId"]), found["videoId"])
+    except Exception as exc:  # noqa: BLE001
+        log.debug("watch playlist for %s failed: %s", found.get("videoId"), exc)
+        return False
     if cp and cp != found["videoId"]:
         found["videoFrom"] = found["videoId"]
         found["videoId"] = cp
         found["videoType"] = ATV
+        found["video"] = (video or {}).get("videoId") or found["videoFrom"]
+        found["videoKind"] = (video or {}).get("videoType") or own or OMV
         return True
     if cp == found["videoId"]:
         found["videoType"] = ATV                   # it was the audio track all along, only unlabelled
+        found["video"] = (video or {}).get("videoId")
+        if video:
+            found["videoKind"] = video.get("videoType")
         return True
     if own and not found.get("videoType"):
         found["videoType"] = own
@@ -273,6 +304,40 @@ def prefer_audio(yt, found: dict[str, Any]) -> bool:
 
 def is_audio(yt_row: dict | None) -> bool:
     return bool(yt_row) and yt_row.get("videoType") == ATV
+
+
+def video_side(yt, video_id: str) -> dict[str, Any] | None:
+    """The video paired with an upload, from the watch playlist (which lists both sides of the audio/video pair):
+    for an audio track the official video YouTube Music pairs with it, for a video the upload itself. None when no
+    video is paired (yet). A request that fails raises, so the caller does not mistake it for "no video"."""
+    return _sides(_watch(yt, video_id), video_id)[2]
+
+
+def attach_video(yt, found: dict[str, Any]) -> bool:
+    """Record the video side of a resolved hit on it (`video`, `videoKind`; `video` None when there is none), asking
+    the watch playlist unless the hit already knows it. Returns False when the request failed (nothing recorded)."""
+    if found.get("video"):
+        return True
+    try:
+        side = video_side(yt, found["videoId"])
+    except Exception as exc:  # noqa: BLE001
+        log.debug("video side of %s failed: %s", found.get("videoId"), exc)
+        return False
+    found["video"] = side["videoId"] if side else None
+    if side:
+        found["videoKind"] = side.get("videoType")
+    return True
+
+
+def video_summary(items: list[Item]) -> dict[str, int]:
+    """How many resolved items know their video side: with a video, without one, not asked yet."""
+    out = {"with_video": 0, "no_video": 0, "pending": 0}
+    for it in items:
+        yt = it.youtube or {}
+        if not yt.get("videoId"):
+            continue
+        out["with_video" if yt.get("video") else "no_video" if "video" in yt else "pending"] += 1
+    return out
 
 
 def audio_summary(items: list[Item]) -> dict[str, int]:
@@ -448,11 +513,23 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     retry_days = int(rcfg.get("retry_misses_days", 7) or 0)
     retry_before = (today - timedelta(days=retry_days)).isoformat() if retry_days else None
     length = length_bounds(cfg)
-    looked = stale = rejected = healed = flagged = relooked = retried = 0
+    # the video side of every audio hit, for the Video tab: a batch a run, and asked again while there is none
+    vcfg = cfg.get("videos") or {}
+    video_budget = int(vcfg.get("feed_lookups_per_run", 400) or 0) if vcfg.get("enabled", True) else 0
+    video_recheck = int(vcfg.get("recheck_days", 90) or 0)
+    video_before = (today - timedelta(days=video_recheck)).isoformat() if video_recheck else None
+    looked = stale = rejected = healed = flagged = relooked = retried = videos = 0
     skipped_deadline = 0
 
     def flush() -> None:
         write_json(YT_CACHE, prune_cache(cache, today, keep_days), compact=True)
+
+    def video_due(row: dict, yt_row: dict) -> bool:
+        """An audio hit whose video side was never asked, or asked long enough ago while there was none."""
+        if not is_audio(yt_row) or yt_row.get("video"):
+            return False
+        asked = row.get("vid")
+        return not asked or "video" not in yt_row or (video_before is not None and asked < video_before)
 
     for it in items:
         if it.youtube:
@@ -493,7 +570,15 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
                         album_year(yt, it.youtube)
                         row["audio"] = today_s
                         row["v"] = CACHE_VERSION
+                        if "video" in it.youtube:          # the same answer named the video side: no second request
+                            row["vid"] = today_s
                         if healed % FLUSH_EVERY == 0:
+                            flush()
+                    if video_due(row, it.youtube) and videos < video_budget and not deadline.expired:
+                        videos += 1
+                        if attach_video(yt, it.youtube):
+                            row["vid"] = today_s
+                        if videos % FLUSH_EVERY == 0:
                             flush()
                 continue
         if looked >= budget:
@@ -521,15 +606,25 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
             promote(it, found)
             if not it.artwork:
                 it.artwork = found.get("thumbnail")
+            # a fresh audio hit is asked for its video side straight away; a hit whose lookup already went through the
+            # watch playlist (a swapped video, an unlabelled audio track) knows it, with or without a video
+            if "video" in found:
+                cache[key]["vid"] = today_s
+            elif video_due(cache[key], found) and videos < video_budget and not deadline.expired:
+                videos += 1
+                if attach_video(yt, found):
+                    cache[key]["vid"] = today_s
         if looked % FLUSH_EVERY == 0:
             flush()
     flush()
     if skipped_deadline:
         log.warning("youtube: time budget reached; %d lookups left for the next run", skipped_deadline)
     kinds = audio_summary(items)
+    vids = video_summary(items)
     log.info("youtube: %d lookups this run (%d stale rows redone, %d flagged as the wrong video redone, %d outside the song-length range looked up once more, "
              "%d older misses tried again, %d wrong-song hits rejected, %d video hits re-checked for the audio track), %d cached; %d items play the audio track, %d the video, %d an upload of unknown kind",
              looked, stale, flagged, relooked, retried, rejected, healed, len(cache), kinds["audio"], kinds["video"], kinds["unknown"])
+    log.info("videos: %d cards asked for their video side this run; %d cards have a video, %d none, %d not asked yet", videos, vids["with_video"], vids["no_video"], vids["pending"])
 
 
 def drop_by_length(items: list[Item], cfg: dict) -> list[Item]:

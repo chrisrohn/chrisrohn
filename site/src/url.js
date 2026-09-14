@@ -9,7 +9,7 @@
 import { state, persist } from "./state.js";
 import { $, $$ } from "./dom.js";
 
-const VIEWS = ["feed", "catalog", "picks", "concerts", "skipped", "cleanup"];
+const VIEWS = ["feed", "catalog", "picks", "concerts", "skipped", "cleanup", "videos"];
 
 /** The address for the state on screen. */
 export function urlFor() {
