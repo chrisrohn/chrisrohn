@@ -12,7 +12,7 @@ import { $, $$, toast } from "./dom.js";
 import { isSignedIn, isCurator, tokenValid, signIn, signOut } from "./auth.js";
 import { pullRatings } from "./sync.js";
 import { load, loadCatalog, fillSources, refreshFeed } from "./feed.js";
-import { render, renderIntro, deckOn, deckItem, deckYear } from "./render.js";
+import { render, renderIntro, deckOn, deckItem, deckYear, toggleLayout } from "./render.js";
 import { rate, replayQueued } from "./rating.js";
 import { play, toggle, nextTrack, prevTrack, holdAudition, stopPlayer, playerActive, toggleShuffle, reflectShuffle, autoplayOn } from "./player.js";
 import { wireSettings } from "./settings.js";
@@ -66,7 +66,7 @@ function wire() {
   $("#deck-play").addEventListener("click", () => { const it = deckItem(); if (!it?.youtube?.videoId) return; if (state.playingId === it.id && state.playerReady) { holdAudition(); toggle(); } else play(it.id); });
   $("#deck-next").addEventListener("click", () => { state.deckIndex++; render(); const it = deckItem(); if (it?.youtube?.videoId && playerActive()) play(it.id); });
   $("#deck-prev").addEventListener("click", () => { state.deckIndex = Math.max(0, state.deckIndex - 1); render(); });
-  $("#layout-toggle").addEventListener("click", () => { state.settings.deck = !deckOn(); persist(); render(); });
+  $("#layout-toggle").addEventListener("click", toggleLayout);
   const toggleFilters = () => { const open = document.body.classList.toggle("filters-open"); $("#filters-more").textContent = open ? "hide filters ▴" : "filters ▾"; $("#filters-more").setAttribute("aria-expanded", String(open)); };
   $("#deck-filters").addEventListener("click", toggleFilters); $("#filters-more").addEventListener("click", toggleFilters);
   // keep the pinned deck buttons above the player bar whatever its height, and the deck card above the buttons

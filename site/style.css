@@ -554,6 +554,18 @@ body.doc .tab { text-decoration: none; }
   body.deck-mode #player:not([hidden]) ~ #deck-card .dcard:not(.current) { margin-top: 12px; }
 }
 
+/* the Video tab as a deck (phones): the same one-card deck as the Feed's, the player as the card's picture, ▼︎ pass /
+   ▶ / ▲︎ add pinned at the foot (a video has no wrong-video flag, so ≠ steps aside), and the tab's own sheet — its
+   summary, quota line and filters — behind the deck's filters button, as the Feed's filter strip is */
+body.deck-videos #vid-list, body.deck-videos #vid-empty { display: none; }
+body.deck-videos #deck-wrong { display: none !important; }
+body.deck-videos.filters-open .filters.videos { display: none; }   /* the deck's filters button opens the tab's sheet, never the Feed's strip */
+@media (max-width: 760px) {
+  body.deck-videos #videos { display: none; }
+  /* the sheet opens above the deck (main is a column there), so the card and the pinned bar below it stay where they are */
+  body.deck-videos.filters-open #videos:not([hidden]) { display: flex; flex: none; order: -1; margin-bottom: 12px; }
+}
+
 /* ---------- the Cleanup tab: one sheet per song, its copies as rows ---------- */
 .dupes { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .dupe { border: 1px solid var(--rule); border-left: 4px solid var(--ink); padding: 8px 10px 8px; font-size: 12px; }

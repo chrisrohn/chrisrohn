@@ -10,6 +10,8 @@
  * do on the Feed and the Catalog. ▲︎ adds it to the one music-video playlist (feed.json → youtube.videos_playlist_id;
  * 50 units, plus 1 to verify it is not there already unless the playlist was read a moment ago); ▼︎ passes on it
  * for free; both come through rate() in rating.js, so the keys, the swipe and the player's thumbs all land here.
+ * On a phone the tab is the Feed's deck (render.js): one video at a time, the player as the card's picture, ▼︎ pass /
+ * ▶ / ▲︎ add pinned at the foot, back / later above, and the tab's own filters behind the deck's filters button.
  * Decisions are remembered per account (id:videos), mirrored across devices with the ratings, and pushed to the
  * build in the ratings file (`videos`), so the next report leaves them out; the playlist itself is read (1 unit
  * per 50 videos, at most every half hour) so what another device or YouTube Music itself added is hidden too. */
@@ -19,7 +21,7 @@ import { isCurator, isOwner, tokenValid, ensureToken, needSignIn } from "./auth.
 import { yt, titleFor, addToPlaylist, removePlaylistItem, playlistItemsFor } from "./youtube.js";
 import { schedulePush } from "./sync.js";
 import { playerActive } from "./player.js";
-import { cardFor } from "./render.js";
+import { cardFor, renderDeck, deckOn, toggleLayout } from "./render.js";
 import { moveOn } from "./rating.js";
 
 /** @typedef {import("./types").VideoRow} VideoRow */
@@ -139,8 +141,11 @@ function filteredRows() {
     kept: (a, b) => (b.at || 0) - (a.at || 0) || (b.year || "").localeCompare(a.year || "") || a.artist.localeCompare(b.artist),
     artist: (a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title),
   };
-  return list.sort(by[f.sort] || by.year);
+  return list.slice().sort(by[f.sort] || by.year);
 }
+/** The tab's rows under the current filters as cards, in order: the deck's pages and the player's queue (visibleItems() in
+ * feed.js hands these out for the Video tab). Empty until the report is in, as the list is. @returns {FeedItem[]} */
+export function videoItems() { return videosLoaded() ? filteredRows().map(r => byId(videoItemId(r.video))).filter(it => !!it) : []; }
 
 /* ---- rendering ---- */
 /** The one-line state of play, for the tab's header and Settings. */
@@ -164,16 +169,23 @@ export function renderVideos(reset = true) {
   $("#vid-quota").textContent = quotaLine();
   const s = $("#s-videos-summary"); if (s) s.textContent = videosSummary();
   const pill = $("#count-videos"); if (pill) { const n = videosCount(); pill.textContent = n == null ? "…" : String(n); }
-  if (reset) state.videosPage = 1;
+  if (reset) { state.videosPage = 1; state.deckIndex = 0; }
   const ysel = $("#vid-year");
   if (ysel && ysel.options.length <= 1) { const yrs = [...new Set(videoRows().flatMap(yearsOf))].sort().reverse(); ysel.innerHTML = `<option value="">all years</option>` + yrs.map(y => `<option value="${esc(y)}">${esc(y)}</option>`).join(""); }
   const read = /** @type {HTMLButtonElement | null} */ ($("#vid-read")); if (read) read.textContent = state.mvAt ? `read ${VIDEOS_TITLE} again` : `read ${VIDEOS_TITLE} (hides what it already holds)`;
-  const empty = $("#vid-empty");
-  if (!videosLoaded()) { box.replaceChildren(); state.order = []; empty.hidden = false; empty.textContent = state.videosState === "loading" ? "Loading the video list…" : "The video list has not loaded."; $("#vid-shown").textContent = ""; return; }
+  if (!videosLoaded()) { box.replaceChildren(); state.order = []; sayEmpty(state.videosState === "loading" ? "Loading the video list…" : "The video list has not loaded."); $("#vid-shown").textContent = ""; return; }
   const list = filteredRows(); const shown = list.slice(0, PAGE * state.videosPage);
   // the cards are the queue: space plays the first, j/k and autoplay walk on down the list, past the page shown
   state.order = list.map(r => videoItemId(r.video));
   $("#vid-shown").textContent = list.length ? `${list.length} video${list.length === 1 ? "" : "s"}` : "";
+  const nothing = list.length ? "" : videoRows().length ? "Nothing matches these filters." : `Nothing to review${state.videos?.pending ? ` yet — ${state.videos.pending} playlist rows are still being asked for their video, a batch a day` : ": every video of every song in the library is decided or already in the playlist 🎉"}. A song kept on the Feed or the Catalog whose card knows its video comes here the moment you keep it.`;
+  if (deckOn()) {
+    // the phone deck: one card at a time in the shared deck (the player stays inside it), the list itself stays empty
+    box.replaceChildren(); if (more) more.disconnect();
+    renderDeck(list.map(r => byId(videoItemId(r.video))).filter(it => !!it));
+    sayEmpty(nothing);
+    return;
+  }
   const els = [];
   for (const r of shown) { const it = byId(videoItemId(r.video)); if (!it) continue; const el = cardFor(it); el.classList.toggle("current", state.currentId === it.id || state.playingId === it.id); els.push(el); }
   if (list.length > shown.length) {
@@ -182,8 +194,16 @@ export function renderVideos(reset = true) {
     more.observe(sen);
   }
   box.replaceChildren(...els);
-  empty.hidden = list.length > 0;
-  if (!list.length) empty.textContent = videoRows().length ? "Nothing matches these filters." : `Nothing to review${state.videos?.pending ? ` yet — ${state.videos.pending} playlist rows are still being asked for their video, a batch a day` : ": every video of every song in the library is decided or already in the playlist 🎉"}. A song kept on the Feed or the Catalog whose card knows its video comes here the moment you keep it.`;
+  sayEmpty(nothing);
+}
+/** The tab's empty state, or none: under the list on the tab's own sheet, and — the deck hides that sheet behind its
+ * filters button — in the page's empty box, where the Feed's deck says the same kind of thing. @param {string} text */
+function sayEmpty(text) {
+  const own = $("#vid-empty"); own.hidden = !text; own.textContent = text;
+  const page = $("#empty"); if (!page) return;
+  const deck = deckOn() && state.view === "videos";
+  page.hidden = !deck || !text;
+  if (!page.hidden) { const p = document.createElement("p"); p.className = "empty-say"; p.textContent = text; page.replaceChildren(p); }
 }
 /** Counts and summaries after any action, without redrawing the list. */
 function afterChange() {
@@ -290,6 +310,7 @@ export async function refreshHeld(force = false) {
 /* ---- wiring ---- */
 export function wireVideos() {
   ["#vid-source", "#vid-year", "#vid-sort"].forEach(id => $(id).addEventListener("change", () => renderVideos()));
+  $("#vid-layout").addEventListener("click", toggleLayout);   // the deck or the list, as the feed's own button
   $("#vid-q").addEventListener("input", () => { clearTimeout(state.videosQT); state.videosQT = setTimeout(() => renderVideos(), 200); });
   $("#vid-read").addEventListener("click", () => { const b = /** @type {HTMLButtonElement} */ ($("#vid-read")); b.disabled = true; refreshHeld(true).then(() => toast(`${VIDEOS_TITLE} holds ${state.mvHeld ? state.mvHeld.size : 0} videos — those are hidden here`)).catch(e => toast(e.message, true)).finally(() => { b.disabled = false; }); });
 }

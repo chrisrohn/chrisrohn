@@ -21,7 +21,8 @@ import { renderVideos, videosCount, ensureVideoRendered, VIDEOS_TITLE } from "./
 /** @typedef {import("./types").FeedItem} FeedItem */
 
 const isPhone = () => window.matchMedia("(max-width: 760px)").matches;
-export const deckOn = () => (state.settings.deck == null ? isPhone() : !!state.settings.deck) && (state.view === "feed" || state.view === "catalog");
+/** One card at a time: the Feed, the Catalog and the Video tab (the tabs whose cards take a verdict). Phones by default. */
+export const deckOn = () => (state.settings.deck == null ? isPhone() : !!state.settings.deck) && (state.view === "feed" || state.view === "catalog" || state.view === "videos");
 
 /** @type {IntersectionObserver | null} */
 let more = null;
@@ -34,22 +35,26 @@ let cardsFor = "";
 export function render() {
   const list = $("#list"); const vis = visibleItems(); state.order = vis.map(i => i.id); lastVis = vis;
   const stamp = `${state.feed?.generated_at || ""}|${state.videos?.generated_at || ""}|${isCurator()}`; if (cardsFor !== stamp) { cards.clear(); cardsFor = stamp; }
+  const videos = state.view === "videos";
   document.body.classList.toggle("deck-mode", deckOn());
-  const lt = $("#layout-toggle"); if (lt) lt.textContent = deckOn() ? "list view" : "card view";
-  if (deckOn()) { list.replaceChildren(); renderDeck(vis); }
+  document.body.classList.toggle("deck-videos", deckOn() && videos);   // the Video tab as a deck: ▼︎ pass / ▶ / ▲︎ add at the foot, no ≠, the tab's own filters behind the button
+  $$("#layout-toggle, #vid-layout").forEach(b => { b.textContent = deckOn() ? "list view" : "card view"; });
+  deckActionsFor(videos);
+  // the Video tab draws its own cards (renderVideos below): into its own list, or into the shared deck
+  if (deckOn()) { list.replaceChildren(); if (!videos) renderDeck(vis); }
   else {
     showDeck(false);
     // keep as many cards as were already on screen (a rating re-renders the list and must not jump back to the top)
     const keep = state.rendered; state.rendered = 0;
-    appendCards(Math.max(PAGE, keep));
+    if (videos) list.replaceChildren(); else appendCards(Math.max(PAGE, keep));
   }
   // the Concerts and Video tabs: sections of their own; their rows become the queue (state.order) before the player reads it
   const concerts = state.view === "concerts"; $("#concerts").hidden = !concerts; if (concerts) renderConcerts();
-  const videos = state.view === "videos"; $("#videos").hidden = !videos; if (videos) renderVideos(false);
+  $("#videos").hidden = !videos; if (videos) renderVideos(false);
   refreshNow();
   const cleanup = state.view === "cleanup"; $("#cleanup").hidden = !cleanup; if (cleanup) renderDupes(false);
-  const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup || concerts || videos;
-  if (!empty.hidden) fillEmpty(empty);
+  // the Video deck's empty state is renderVideos's own (it is also redrawn without render(): a verdict, an undo, the playlist read)
+  if (!(videos && deckOn())) { const empty = $("#empty"); empty.hidden = vis.length > 0 || cleanup || concerts || videos; if (!empty.hidden) fillEmpty(empty); }
   // the pills show exactly what each tab would list right now: unrated tracks under the current filters (the
   // shortlist counted in full), the library's recent picks plus everything thumbed up, and this feed's skips
   const hidden = state.shortlistHidden; const full = (/** @type {string} */ v) => { const n = visibleItems(v).length; return v === state.view ? n + hidden : n + state.shortlistHidden; };
@@ -134,12 +139,24 @@ function restoreNote() {
   const rt = $("#restore-today", s); if (rt) rt.addEventListener("click", () => restoreAll(recent.map(i => i.id)));
   return s;
 }
+/** The deck or the list, on the tab that is open (the feed's filter strip and the Video tab's own row each carry the button). */
+export function toggleLayout() { state.settings.deck = !deckOn(); persist(); render(); }
 export function showAll() { state.filters.shortlist = false; $("#shortlist").checked = false; persist(); render(); }
 /** Make sure the card for `id` exists in the list (it may sit beyond the rendered page). @param {string} id */
 export function ensureRendered(id) {
   if (state.view === "videos") { ensureVideoRendered(id); return; }
   const i = state.order.indexOf(id);
   if (i >= 0 && i >= state.rendered && !deckOn()) appendCards(Math.ceil((i + 1) / PAGE) * PAGE);
+}
+
+/** The pinned buttons under the deck read as the tab's verdicts: keep / skip / ≠ on the Feed and the Catalog, add / pass on
+ * the Video tab (a video has no wrong-video flag, so ≠ steps aside there — see .deck-videos in style.css). @param {boolean} videos */
+function deckActionsFor(videos) {
+  const up = $("#deck-up"), dn = $("#deck-down"); if (!up || !dn) return;
+  if (up.dataset.videos === String(videos)) return;
+  up.dataset.videos = dn.dataset.videos = String(videos);
+  up.innerHTML = `<span aria-hidden="true">&#x25B2;&#xFE0E;</span> ${videos ? "add" : "keep"}`; up.title = videos ? `add this video to ${VIDEOS_TITLE} (u)` : "thumbs up"; up.setAttribute("aria-label", videos ? "add this video to the music-video playlist" : "keep this track");
+  dn.innerHTML = `<span aria-hidden="true">&#x25BC;&#xFE0E;</span> ${videos ? "pass" : "skip"}`; dn.title = videos ? `pass: not for ${VIDEOS_TITLE} (d · free, remembered)` : "thumbs down"; dn.setAttribute("aria-label", videos ? "pass on this video" : "skip this track");
 }
 
 /** The deck's own parts come and go; the player inside it stays (an iframe moved in the DOM would reload and stop
@@ -154,7 +171,7 @@ export function renderDeck(vis) {
   state.deckIndex = Math.max(0, Math.min(state.deckIndex, vis.length - 1));
   const it = vis[state.deckIndex];
   const dc = $("#deck-count"); dc.replaceChildren(`${state.deckIndex + 1} / ${vis.length}`);
-  if (state.shortlistHidden) { const b = document.createElement("button"); b.type = "button"; b.className = "linkish"; b.textContent = `+${state.shortlistHidden}`; b.title = `shortlist: the top ${vis.length} by score — show all ${vis.length + state.shortlistHidden}`; b.addEventListener("click", showAll); dc.append(" ", b); }
+  if (state.shortlistHidden && (state.view === "feed" || state.view === "catalog")) { const b = document.createElement("button"); b.type = "button"; b.className = "linkish"; b.textContent = `+${state.shortlistHidden}`; b.title = `shortlist: the top ${vis.length} by score — show all ${vis.length + state.shortlistHidden}`; b.addEventListener("click", showAll); dc.append(" ", b); }
   $("#deck-prev").disabled = state.deckIndex === 0;
   const el = $("#deck-tpl").content.firstElementChild.cloneNode(true);
   el.dataset.id = it.id;
@@ -168,22 +185,27 @@ export function renderDeck(vis) {
   $(".dtitle", el).textContent = it.display_title || it.title;
   $(".release", el).textContent = [it.release_type, it.release && !sameName(it.release, it.title) ? it.release : null].filter(Boolean).join(" · ");
   $(".date", el).textContent = it.release_date || "";
-  const yb = $(".yearbadge", el); const badge = yearBadge(it); yb.classList.add(badge.conf); yb.title = badge.title; yb.textContent = badge.text;
+  const yb = $(".yearbadge", el);
+  if (it._video) {   // the playlist years the song is filed in (a kept song: the year it was kept into), as on its list card
+    const years = (it._video.years && it._video.years.length ? it._video.years : [it._video.year]).filter(Boolean);
+    if (years.length) { yb.textContent = years.join(", "); yb.title = `in ${years.map(y => titleFor(y)).join(", ")}`; } else yb.remove();
+  } else { const badge = yearBadge(it); yb.classList.add(badge.conf); yb.title = badge.title; yb.textContent = badge.text; }
   const why = [matchLabel(it)].filter(Boolean);
   for (const r of it.reasons || []) if (!isMatchReason(r)) why.push(r);
-  why.push(...personal(it).why);
+  if (!it._video) why.push(...personal(it).why);   // nothing is learned from a video
   $(".dwhy", el).textContent = why.join(" · ");
   $(".dtags", el).replaceChildren(...(it.tags || []).slice(0, 4).map(tagButton));
   $(".dsources", el).innerHTML = (it.sources || []).map(s => `<span class="src ${esc(s.split(":")[0])}">${esc(sourceLabel(s))}</span>`).join("");
   const links = [];
-  if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">YouTube Music</a>`);
+  if (yt.videoId) links.push(`<a href="https://music.youtube.com/watch?v=${esc(yt.videoId)}" target="_blank" rel="noopener">${it._video ? "video on YouTube Music" : "YouTube Music"}</a>`);
   for (const [k, u] of Object.entries(it.links || {})) if (safeUrl(u)) links.push(`<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener">${esc(k)}</a>`);
-  if (it.year == null && !it._pick) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
+  if (it.year == null && !it._pick && !it._video) links.push(`<a href="${esc(discogsSearch(it))}" target="_blank" rel="noopener">discogs</a>`);
   $(".dlinks", el).innerHTML = links.join("");
-  if (it.year == null && !it._pick && isCurator()) addYearFinder(el, it);
-  if (!it._pick) addPermalink($(".dlinks", el), it);
+  if (it.year == null && !it._pick && !it._video && isCurator()) addYearFinder(el, it);
+  if (!it._pick && !it._video) addPermalink($(".dlinks", el), it);
   addShare($(".dlinks", el), it);
-  fillYearSelect($(".year", el), it);
+  // a video goes to the one music-video playlist: no year to choose (deckYear() then reads nothing, and rate() hands the verdict to videos.js)
+  if (it._video) $(".year", el).remove(); else fillYearSelect($(".year", el), it);
   $(".dart", el).addEventListener("click", () => { if (yt.videoId) { if (state.playingId === it.id && state.playerReady) toggle(); else play(it.id); } });
   attachSwipe(el, it, 110);
   if (state.playingId === it.id) el.classList.add("current");

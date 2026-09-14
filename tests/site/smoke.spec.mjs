@@ -1428,6 +1428,143 @@ test("the Video tab: kept songs' videos and the library's, played in place, adde
   await ctx.close();
 });
 
+test("the Video tab on a phone is the Feed's deck: one video at a time, pass / play / add pinned at the foot, the player as the card's picture", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const report = { generated_at: new Date().toISOString(), checked_at: new Date().toISOString(), playlist_id: "PLVIDS", count: 3, pending: 0, no_video: 0, in_playlist: 0, decided: 0, rows: [
+    { video: "libv1000000", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "liba1000000", year: "2024", years: ["2024", "2019"], playlistId: "PL2024", position: 3, artist: "Jungle", title: "Candle Flame", album: "Volcano" },
+    { video: "libv2000000", kind: "MUSIC_VIDEO_TYPE_UGC", own: true, videoId: "libv2000000", year: "2019", years: ["2019"], playlistId: "PL2019", position: 8, artist: "Someone", title: "Upload", album: null },
+    { video: "libv3000000", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "liba3000000", year: "2016", years: ["2016"], playlistId: "PL2016", position: 1, artist: "Roosevelt", title: "Lovers", album: "Roosevelt" },
+  ] };
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await ctx.addInitScript(([hash]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now() }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { videos_playlist_id: "PLVIDS" }); await r.fulfill({ json: j }); });
+  await page.route("**/data/videos.json", r => r.fulfill({ json: report }));
+  await page.route("https://www.youtube.com/**", r => r.abort());
+  const calls = [];
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); calls.push({ method: req.method(), path: u.pathname, params: Object.fromEntries(u.searchParams) });
+    if (u.pathname.startsWith("/drive/") || u.pathname.startsWith("/upload/")) return route.fulfill({ json: { files: [], id: "drive-1" } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: [] } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "POST") return route.fulfill({ json: { id: "PLI-video-1" } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") return route.fulfill({ status: 204, body: "" });
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  // the Feed is a deck on a phone, with keep / skip / ≠ under it
+  await expect(page.locator("body")).toHaveClass(/deck-mode/);
+  await expect(page.locator("#deck-up")).toHaveText(/keep/);
+  await expect(page.locator("#count-videos")).toHaveText("3", { timeout: 15_000 });
+  await page.locator(".tab[data-view=videos]").click();
+  // …and so is the Video tab: the same deck, one video card at a time, the tab's own sheet folded away behind "filters"
+  await expect(page.locator("body")).toHaveClass(/deck-videos/);
+  await expect(page.locator("#videos")).toBeHidden();
+  await expect(page.locator("#vid-list .card")).toHaveCount(0);
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  const card = page.locator("#deck-card .dcard");
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveAttribute("data-id", "video:libv1000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  await expect(card.locator(".dartist")).toHaveText("Jungle");
+  await expect(card.locator(".dtitle")).toHaveText("Candle Flame");
+  await expect(card.locator(".release")).toHaveText("official video · Volcano");
+  await expect(card.locator(".yearbadge")).toHaveText("2024, 2019");
+  await expect(card.locator(".dwhy")).toHaveText("in 2024 | Indie Discotheque, 2019 | Indie Discotheque · #4");
+  await expect(card.locator(".dsources .src")).toHaveText("year playlists");
+  await expect(card.locator(".dlinks a").nth(0)).toHaveText("video on YouTube Music");
+  await expect(card.locator(".dlinks a").nth(1)).toHaveText("audio track");
+  await expect(card.locator(".year, .share:has-text('link')")).toHaveCount(0);   // no year to choose, no permalink
+  // the vote buttons at the foot read as the tab's verdicts, ≠ has no meaning for a video, and every one is a full-size target inside the screen
+  await expect(page.locator("#deck-wrong")).toBeHidden();
+  await expect(page.locator("#deck-up")).toHaveText(/add/);
+  await expect(page.locator("#deck-down")).toHaveText(/pass/);
+  for (const sel of ["#deck-down", "#deck-play", "#deck-up"]) { const box = await page.locator(sel).boundingBox(); expect(box.height, sel).toBeGreaterThanOrEqual(40); expect(box.x + box.width, sel).toBeLessThanOrEqual(390); }
+  const actions = await page.locator("#deck-actions").boundingBox();
+  expect(actions.y + actions.height).toBeGreaterThan(800);   // pinned at the bottom of the screen
+  // "filters" opens the tab's own sheet — summary, quota and the where / year / order filters — over the deck; a filter turns the deck to its first card
+  await page.click("#deck-filters");
+  await expect(page.locator("#videos")).toBeVisible();
+  await expect(page.locator("#filters")).toBeHidden();   // the Feed's own strip stays folded: these are the tab's filters
+  await expect(page.locator("#vid-summary")).toContainText("3 videos to review");
+  const sheet = await page.locator("#videos").boundingBox(); const deckTop = await page.locator("#deck-top").boundingBox();
+  expect(sheet.y + sheet.height).toBeLessThanOrEqual(deckTop.y + 1);   // above the deck, clear of the pinned bar
+  await page.selectOption("#vid-year", "2019");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 2");
+  await page.selectOption("#vid-year", "");
+  await page.click("#deck-filters");
+  await expect(page.locator("#videos")).toBeHidden();
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  // ▶ plays the video in the player, drawn as the card's picture (in flow above the card, not a bar over the page)
+  await page.click("#deck-play");
+  await expect(page.locator("#player")).toBeVisible();
+  await expect(page.locator("#player")).toHaveClass(/video/);
+  await expect(page.locator("#now")).toContainText("Candle Flame");
+  expect(await page.locator("#player").evaluate(el => getComputedStyle(el).position)).toBe("static");
+  const frame = await page.locator("#player").boundingBox(); const body = await card.boundingBox();
+  expect(frame.y + frame.height).toBeLessThanOrEqual(body.y + 1);   // the player sits right above the card's text
+  await expect(card.locator(".dart")).toBeHidden();                  // no second picture under it
+  await expect(card).toHaveClass(/current/);
+  // later ›  walks on without a verdict and the player follows; ‹ back returns
+  await page.click("#deck-next");
+  await expect(page.locator("#deck-count")).toHaveText("2 / 3");
+  await expect(page.locator("#now")).toContainText("Someone - Upload");
+  await page.click("#deck-prev");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  // ▼︎ pass: free, remembered; the next card slides in and, with autoplay on, plays
+  const passes = calls.length;
+  await page.click("#deck-down");
+  await expect(page.locator(".toast")).toContainText("passed");
+  await expect(card).toHaveAttribute("data-id", "video:libv2000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 2");
+  await expect(page.locator("#now")).toContainText("Someone - Upload");
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  expect(calls.slice(passes).filter(c => c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
+  // z takes it back and turns the deck to the card that came back
+  await page.keyboard.press("z");
+  await expect(card).toHaveAttribute("data-id", "video:libv1000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  // ▲︎ add: one add into the music-video playlist, the card leaves the deck
+  const before = calls.length;
+  await page.click("#deck-up");
+  await expect(page.locator(".toast")).toContainText("→ the music-video playlist");
+  await expect(card).toHaveAttribute("data-id", "video:libv2000000");
+  const writes = calls.slice(before).filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "POST");
+  expect(writes).toHaveLength(1);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  // a swipe left passes the card under the finger, as on the Feed
+  const box = await card.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6);
+  await card.dispatchEvent("pointerdown", { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: box.x + box.width * 0.7, clientY: box.y + box.height * 0.6, bubbles: true });
+  await card.dispatchEvent("pointermove", { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: box.x + box.width * 0.7 - 160, clientY: box.y + box.height * 0.6, bubbles: true });
+  await card.dispatchEvent("pointerup", { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: box.x + box.width * 0.7 - 160, clientY: box.y + box.height * 0.6, bubbles: true });
+  await expect(page.locator(".toast")).toContainText("Someone - Upload — passed");
+  await expect(card).toHaveAttribute("data-id", "video:libv3000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 1");
+  // the last verdict empties the deck: the page says so where the Feed's deck would
+  await page.click("#deck-down");
+  await expect(page.locator("#deck-card .dcard")).toHaveCount(0);
+  await expect(page.locator("#empty")).toBeVisible();
+  await expect(page.locator("#empty")).toContainText("Nothing to review");
+  await expect(page.locator("#player")).toBeHidden();   // nothing left to play
+  // the list view is one tap away and shows the same tab as cards
+  await page.keyboard.press("z");
+  await expect(page.locator("#deck-card .dcard")).toHaveCount(1);
+  await page.click("#deck-filters");
+  await page.click("#vid-layout");
+  await expect(page.locator("body")).not.toHaveClass(/deck-mode/);
+  await expect(page.locator("#vid-layout")).toHaveText("card view");
+  await expect(page.locator("#vid-list .card")).toHaveCount(1);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
 test("no video list yet, and a listener: the Video tab says so, and only a curator sees it", async ({ browser }) => {
   const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
   const ctx = await browser.newContext({ serviceWorkers: "block" });
