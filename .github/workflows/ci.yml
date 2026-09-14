@@ -44,12 +44,34 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: npm run check          # eslint, tsc --checkJs, esbuild → dist/
+      - run: npm run check          # eslint + html-validate, tsc --strict, esbuild → dist/
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
+      - run: npx playwright test    # the smoke test, plus axe and the SEO/PWA files in quality.spec.mjs
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-results
-          path: test-results/
+          path: |
+            test-results/
+            playwright-report/
           retention-days: 7
+
+  lighthouse:
+    name: lighthouse (performance, accessibility, best practices, SEO)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx lhci autorun     # lighthouserc.json: two runs per page against dist/, the category scores as the gate
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lighthouse-report
+          path: lighthouse-report/
+          retention-days: 14

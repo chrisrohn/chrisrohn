@@ -33,8 +33,10 @@ const perItem = new Map();
 export function invalidateRank() { cache = null; perItem.clear(); }
 
 /** Every outcome this account knows: kept / skipped from the ratings, pass for tracks left unrated for a few days. */
+/** @typedef {{verdict: "kept" | "skipped" | "pass", sources: string[], tags: string[], artist: string}} Outcome */
+/** @returns {Outcome[]} */
 function outcomes() {
-  const out = [];
+  /** @type {Outcome[]} */ const out = [];
   for (const r of Object.values(state.rated)) {
     // a wrong-video flag judged the pairing, not the song: it teaches nothing about sources, tags or the artist
     if (!r || r.decision === "undone" || r.decision === "seen" || r.decision === "wrong") continue;

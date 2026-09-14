@@ -169,7 +169,7 @@ export async function refreshRecent(force = false) {
   const ids = [knownYear(y) || state.playlists[y], state.playlists.__skipped].filter(Boolean);
   const seen = new Set();
   for (const pid of ids) {
-    let pageToken, pages = 0;
+    /** @type {string | undefined} */ let pageToken; let pages = 0;
     const name = pid === state.playlists.__skipped ? skippedTitle() : titleFor(y);
     do {
       const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50, pageToken }, why: `Verify what “${name}” already holds, so tracks filed from another device are hidden and Keep never adds a second copy`, detail: pages ? `page ${pages + 1}` : undefined }).catch(() => ({}));

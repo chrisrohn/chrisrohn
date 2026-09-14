@@ -1,0 +1,10 @@
+{
+  "extends": ["html-validate:recommended"],
+  "rules": {
+    "doctype-style": ["error", { "style": "lowercase" }],
+    "autocomplete-password": "off",
+    "no-inline-style": "error",
+    "no-implicit-button-type": "error",
+    "require-sri": "off"
+  }
+}

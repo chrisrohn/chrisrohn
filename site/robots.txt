@@ -1,0 +1,7 @@
+# chrisrohn.com — a static site; the feed is one page, the data files are for the app
+User-agent: *
+Allow: /
+Disallow: /data/
+Disallow: /*.map$
+
+Sitemap: https://chrisrohn.com/sitemap.xml

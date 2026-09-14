@@ -62,8 +62,8 @@ export function openArtist(name) {
       <a class="btn ghost small" href="https://music.youtube.com/search?q=${encodeURIComponent(name)}" target="_blank" rel="noopener">YouTube Music</a>
       <a class="btn ghost small" href="https://musicbrainz.org/search?query=${encodeURIComponent(name)}&type=artist&method=indexed" target="_blank" rel="noopener">MusicBrainz</a>
     </div>`;
-  $("#artist-body").querySelectorAll(".aplay").forEach(b => b.addEventListener("click", () => { const id = /** @type {HTMLElement} */ (b.closest(".arow")).dataset.id; if (id) { play(id); $("#artist-body").querySelectorAll(".arow").forEach(r => r.classList.toggle("current", /** @type {HTMLElement} */ (r).dataset.id === id)); } }));
-  $("#artist-body").querySelectorAll(".aopen").forEach(b => b.addEventListener("click", () => openArtist(/** @type {HTMLElement} */ (b).dataset.artist || "")));
+  $("#artist-body").querySelectorAll(".aplay").forEach((/** @type {HTMLElement} */ b) => b.addEventListener("click", () => { const id = /** @type {HTMLElement} */ (b.closest(".arow")).dataset.id; if (id) { play(id); $("#artist-body").querySelectorAll(".arow").forEach((/** @type {HTMLElement} */ r) => r.classList.toggle("current", r.dataset.id === id)); } }));
+  $("#artist-body").querySelectorAll(".aopen").forEach((/** @type {HTMLElement} */ b) => b.addEventListener("click", () => openArtist(b.dataset.artist || "")));
   $("#artist-filter").addEventListener("click", () => { dlg.close(); searchFor(`artist:"${name}"`, { add: false }); });
   const sb = $("#artist-shows"); if (sb) sb.addEventListener("click", () => { dlg.close(); import("./concerts.js").then(m => m.showConcertsFor(name)).catch(() => {}); });
   if (!dlg.open) dlg.showModal(); else openLayer(dlg.id, () => { if (dlg.open) dlg.close(); });

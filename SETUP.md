@@ -451,14 +451,15 @@ python -m discovery concerts     # writes site/data/concerts.json (shows near De
 npm install && npm run serve     # builds dist/ from site/src and serves it at http://localhost:8000
 
 pip install ruff pytest && ruff check discovery tests && python -m pytest tests   # lint + offline tests
-npm run check && npm test        # eslint + type check (tsc --checkJs) + build, then the Playwright smoke test
+npm run check && npm test        # eslint + html-validate + type check (tsc --strict) + build, then Playwright: smoke test, axe-core a11y scan, crawler files
+npm run lighthouse               # Lighthouse CI on dist/ (lighthouserc.json): performance, accessibility, best practices, SEO
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
 `render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `concerts` (the Concerts tab), `videos` (the Video tab), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
 `discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/concerts.py` (the concert list), `discovery/videos.py` (the Video tab's list), `discovery/learn.py` (what the playlists teach the
 ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
-`app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
+`app.<hash>.js` (minified, with a source map), minifies `style.css` and `theme.js` into hashed copies of their own, rewrites every page and `sw.js` to those names, writes `sitemap.xml`, and copies the rest of `site/` (`robots.txt`, `404.html`, the data) into `dist/`, which is what
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
 pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the
 lockfile with `cd discovery && pip-compile --generate-hashes --strip-extras -o requirements.lock requirements.txt`
