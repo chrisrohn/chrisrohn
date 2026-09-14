@@ -36,7 +36,7 @@ always means the YouTube Music library playlists, `<year> | Indie Discotheque`, 
    from a free Discogs account (Settings → Developers → Generate new token) — Discogs master years are the
    strongest source for original release dates of disco/electronic records. For the Concerts tab (all optional,
    each one another listing; all free but JamBase): `BANDSINTOWN_APP_ID`, `TICKETMASTER_API_KEY`,
-   `SEATGEEK_CLIENT_ID`, `EDMTRAIN_API_KEY`, and `JAMBASE_API_KEY` if you subscribe — see *Concerts* below.
+   `SEATGEEK_CLIENT_ID`, `EDMTRAIN_API_KEY`, and `JAMBASE_API_KEY` on its metered free tier — see *Concerts* below.
 5. **Actions → Discover → Run workflow.** Afterwards: merging a change to `site/` publishes in about a minute
    (the *Publish site* workflow); merging a change to `discovery/` runs the full data build first, 20–30 min.
    Feed data refreshes on the morning schedule (three slots, first one wins — see *How the site is built* below)
@@ -332,10 +332,18 @@ session that the playlist's owner approved in that browser.
   - **SeatGeek** (`SEATGEEK_CLIENT_ID`, free at seatgeek.com/account/develop): every concert and music festival its
     Platform API lists in the radius, which includes the clubs that sell through DICE, Eventbrite or their own box
     office and never appear on Ticketmaster; its price is its lowest listing (resale included) and is labelled so.
-  - **JamBase** (`JAMBASE_API_KEY`, a paid subscription at data.jambase.com — the one listing here that is not free,
-    so it ships switched off: `concerts.jambase.enabled`): the widest venue-calendar aggregator, every show in the
-    radius with the ticket link and its seller. `concerts.jambase.base_url` and `auth` point at the v3 API
-    (bearer token); the v1 API at `https://www.jambase.com/jb-api/v1` with `auth: query` still answers.
+  - **JamBase** (`JAMBASE_API_KEY`, data.jambase.com — metered: the free tier is 1,000 calls a month and 3,600 an
+    hour, and every call past that is charged, so it ships switched off: `concerts.jambase.enabled`): the widest
+    venue-calendar aggregator, every show in the radius with the ticket link and its seller. A page of 100 events is
+    one call and the 80-mile year is a few dozen, so a refresh costs `requests_per_run` (40) at most; the snapshot is
+    reused without a call until it is `refresh_days` (2) old; and a ledger in `data/concerts_state.json`
+    (`quota.jambase.days`, one count a day, committed with the data) holds every run, scheduled or by hand, to
+    `monthly_quota - quota_reserve` (900) calls in any trailing 31 days — which bounds every calendar month and
+    every anniversary month — counting each request before it goes out, retries included (there are none), and
+    stopping the paging where the ledger says. The health row's `quota` block (calls this run, used in the window,
+    remaining) is in `site/data/concerts.json`. Requests are spaced 1.1 s apart, under the hourly rate.
+    `concerts.jambase.base_url` and `auth` point at the v3 API (bearer token); the v1 API at
+    `https://www.jambase.com/jb-api/v1` with `auth: query` still answers.
   - **Edmtrain** (`EDMTRAIN_API_KEY`, free, edmtrain.com/developer-api): every electronic show in
     `concerts.edmtrain.states` (Michigan, Ohio, Ontario), the lineups the dance venues post themselves; the radius is
     applied afterwards, live streams are left out.

@@ -58,7 +58,7 @@ jobs:
           TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}   # optional: Ticketmaster's free Discovery API
           BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # the app_id Bandsintown issued you; without one its API answers 403, or empty for everyone
           SEATGEEK_CLIENT_ID: ${{ secrets.SEATGEEK_CLIENT_ID }}       # optional: SeatGeek's free Platform API (the clubs Ticketmaster never lists)
-          JAMBASE_API_KEY: ${{ secrets.JAMBASE_API_KEY }}             # optional, paid: JamBase Data (the widest venue-calendar aggregator; concerts.jambase.enabled)
+          JAMBASE_API_KEY: ${{ secrets.JAMBASE_API_KEY }}             # optional, metered (1,000 calls a month free, then charged): JamBase Data, held to its quota by a ledger; concerts.jambase.enabled
           EDMTRAIN_API_KEY: ${{ secrets.EDMTRAIN_API_KEY }}           # optional: Edmtrain's free API (every electronic show in the configured states)
         run: python -m discovery concerts
 

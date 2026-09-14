@@ -18,8 +18,9 @@ to new applications, so this draws the same list from what is still open:
         stops paging at its 1,000th result, so the horizon is split into date windows small enough to fit);
       - SeatGeek's Platform API (SEATGEEK_CLIENT_ID): every concert within the radius — it lists the clubs that sell
         through DICE, Eventbrite or their own box office, which Ticketmaster never sees;
-      - JamBase (JAMBASE_API_KEY, a paid subscription, so off unless `jambase.enabled`): the widest venue-calendar
-        aggregator, with the ticket link and its seller for each show;
+      - JamBase (JAMBASE_API_KEY, a metered free tier — 1,000 calls a month, then charged — so off unless
+        `jambase.enabled`, and held under the quota by a ledger of calls a day kept in the state, the snapshot
+        reused for `refresh_days`): the widest venue-calendar aggregator, with the ticket link and its seller;
       - Edmtrain (EDMTRAIN_API_KEY): every electronic show in the configured states, the lineups the dance venues
         post themselves;
       - Resident Advisor (no key; its public GraphQL, the same one ra.co's own pages call): every listing in the
@@ -89,7 +90,9 @@ DEFAULTS: dict[str, Any] = {
     "bandsintown": {"enabled": True, "app_id": "chrisrohn.com", "give_up_after": 10, "empty_probe": BIT_EMPTY_PROBE},   # BANDSINTOWN_APP_ID overrides app_id
     "ticketmaster": {"enabled": True, "size": 200, "requests_per_run": 60},   # needs TICKETMASTER_API_KEY (free)
     "seatgeek": {"enabled": True, "per_page": 100, "requests_per_run": 40, "taxonomies": ["concert", "music_festival"]},   # needs SEATGEEK_CLIENT_ID (free)
-    "jambase": {"enabled": False, "base_url": JB_V3, "auth": "bearer", "per_page": 100, "requests_per_run": 40},   # needs JAMBASE_API_KEY (a paid subscription, so off by default); v1: base_url JB_V1, auth "query"
+    # JAMBASE_API_KEY: the free tier is metered (1,000 calls a month, 3,600 an hour, then 5¢ a call), so off by default and, on, held to
+    # `monthly_quota - quota_reserve` calls in any trailing 31 days by a ledger in the state, the snapshot reused for `refresh_days`
+    "jambase": {"enabled": False, "base_url": JB_V3, "auth": "bearer", "per_page": 100, "requests_per_run": 40, "refresh_days": 2, "monthly_quota": 1000, "quota_reserve": 100},   # v1: base_url JB_V1, auth "query"
     "edmtrain": {"enabled": True, "states": ["Michigan", "Ohio", "Ontario"], "other_genres": True},   # needs EDMTRAIN_API_KEY (free)
     "resident_advisor": {"enabled": True, "area": {"country": "us", "city": "detroit"}, "area_id": None, "page_size": 100, "requests_per_run": 30,
                          "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"},   # no key: ra.co's public GraphQL answers a browser
@@ -433,11 +436,55 @@ def shape_seatgeek(ev: dict) -> dict:
 
 # ---------- JamBase ----------
 
+QUOTA_WINDOW_DAYS = 31   # a cap over any trailing 31 days bounds every calendar month and every anniversary month
+QUOTA_KEEP_DAYS = 45
+
+
+class CallQuota:
+    """A ledger of calls a day, kept in the state file (so it survives every run, scheduled or by hand), for an
+    API that meters a monthly quota and charges past it: never more than `quota - reserve` calls in any trailing
+    QUOTA_WINDOW_DAYS days. Every attempt counts, retries included, and it is counted before the request goes out,
+    so a crash mid-run never loses one."""
+
+    def __init__(self, row: dict, *, quota: int, reserve: int = 0, today: date | None = None):
+        self.row = row
+        self.quota, self.reserve = max(0, int(quota)), max(0, int(reserve))
+        self.today = today or date.today()
+        days = row.get("days") if isinstance(row.get("days"), dict) else {}
+        floor = (self.today - timedelta(days=QUOTA_KEEP_DAYS)).isoformat()
+        row["days"] = {d: int(n) for d, n in days.items() if d >= floor and int(n or 0) > 0}
+        self.spent = 0   # this run
+
+    @property
+    def used(self) -> int:
+        """Calls in the trailing window, today included."""
+        floor = (self.today - timedelta(days=QUOTA_WINDOW_DAYS - 1)).isoformat()
+        return sum(n for d, n in self.row["days"].items() if d >= floor)
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.quota - self.reserve - self.used)
+
+    def spend(self) -> bool:
+        """Record one call about to be made; False (and nothing recorded) when the window is full."""
+        if self.remaining <= 0:
+            return False
+        k = self.today.isoformat()
+        self.row["days"][k] = self.row["days"].get(k, 0) + 1
+        self.spent += 1
+        return True
+
+    def health(self) -> dict:
+        return {"calls": self.spent, "used": self.used, "window_days": QUOTA_WINDOW_DAYS, "quota": self.quota, "reserve": self.reserve, "remaining": self.remaining}
+
+
 def jambase_events(http: Http, key: str, center: dict, radius: float, *, start: date, end: date, base_url: str = JB_V3, auth: str = "bearer",
-                   per_page: int = 100, max_requests: int = 40) -> list[dict]:
+                   per_page: int = 100, max_requests: int = 40, quota: CallQuota | None = None) -> list[dict]:
     """Every concert and festival JamBase lists within the radius between `start` and `end`, each once by
     identifier. `auth` is "bearer" for the v3 API (the key in the Authorization header) or "query" for the v1 API
-    (`apikey` in the query string); the parameters are the same on both. Raises on a failed request."""
+    (`apikey` in the query string); the parameters are the same on both. Every request is one call against
+    `quota` (the free tier is metered and charged past it): no retries, and the paging stops where the run's cap or
+    the quota's window says, the soonest events first. Raises on a failed request."""
     out: dict[str, dict] = {}
     page, spent = 1, 0
     headers = {"Authorization": f"Bearer {key}"} if auth == "bearer" else None
@@ -445,11 +492,17 @@ def jambase_events(http: Http, key: str, center: dict, radius: float, *, start: 
         if spent >= max(1, int(max_requests)):
             log.warning("concerts: jambase request budget (%d) spent; the list stops at page %d", spent, page)
             break
+        if quota is not None and not quota.spend():
+            log.warning("concerts: jambase monthly quota reached (%d of %d calls in the last %d days, %d held back); the list stops at page %d",
+                        quota.used, quota.quota, QUOTA_WINDOW_DAYS, quota.reserve, page)
+            if spent == 0:
+                raise RuntimeError(f"monthly quota reached: {quota.used} of {quota.quota} calls in the last {QUOTA_WINDOW_DAYS} days ({quota.reserve} held back)")
+            break
         params = {"geoLatitude": str(center["lat"]), "geoLongitude": str(center["lon"]), "geoRadiusAmount": str(int(radius)), "geoRadiusUnits": "mi",
                   "eventDateFrom": start.isoformat(), "eventDateTo": end.isoformat(), "perPage": str(per_page), "page": str(page)}
         if auth != "bearer":
             params["apikey"] = key
-        data = http.get(f"{base_url.rstrip('/')}/events", params=params, headers=headers, cache=False, timeout=30)
+        data = http.get(f"{base_url.rstrip('/')}/events", params=params, headers=headers, cache=False, retries=0, timeout=30)
         spent += 1
         if isinstance(data, dict) and data.get("success") is False:
             raise RuntimeError(str(data.get("errors") or data.get("error") or data.get("message") or "request refused")[:200])
@@ -739,19 +792,25 @@ def _load_state() -> dict:
 
 
 def _area_source(state: dict, health: dict, name: str, *, center: dict, radius: float, played: dict[str, dict], fetch: Callable[[], list[dict]],
-                 shape: Callable[[dict], dict], missing: str | None = None) -> None:
+                 shape: Callable[[dict], dict], missing: str | None = None, reuse_days: float = 0, extra: dict | None = None) -> None:
     """Run one area source (everything within the radius, matched against the played artists) into the state's
     snapshot and the health record. `missing` names the key it lacks: the snapshot is emptied and the health says
-    so. A failed request keeps the last snapshot and says why; a successful one replaces it."""
+    so. A snapshot younger than `reuse_days` is kept as it is without a request (a metered API is not asked every
+    day). A failed request keeps the last snapshot and says why; a successful one replaces it. `extra` is merged
+    into the health row (a quota ledger's numbers)."""
     snap = state["sources"].get(name) or {"fetched_at": None, "events": []}
     if missing:
         health[name] = {"ok": False, "error": missing, "matched": 0}
         state["sources"][name] = {"fetched_at": None, "events": []}
         return
+    if reuse_days > 0 and (snap.get("fetched_at") or "") > (utcnow() - timedelta(days=reuse_days)).isoformat():
+        health[name] = {"ok": True, "events": snap.get("listed"), "matched": len(snap.get("events") or []), "reused": snap["fetched_at"], **(extra or {})}
+        log.info("concerts: %s snapshot from %s reused (younger than %s days)", name, snap["fetched_at"], reuse_days)
+        return
     try:
         raw = fetch()
     except Exception as exc:  # noqa: BLE001
-        health[name] = {"ok": False, "error": str(exc)[:200], "matched": len(snap.get("events") or [])}
+        health[name] = {"ok": False, "error": str(exc)[:200], "matched": len(snap.get("events") or []), **(extra or {})}
         state["sources"][name] = snap
         log.warning("concerts: %s failed (%s); keeping the last snapshot", name, exc)
         return
@@ -763,8 +822,8 @@ def _area_source(state: dict, health: dict, name: str, *, center: dict, radius: 
         hits = matched_artists(s["lineup"] or [s["artist"]], played)
         if hits:
             shaped.append({**s, "artist": hits[0], "artists": hits})
-    state["sources"][name] = {"fetched_at": utcnow().isoformat(), "events": shaped}
-    health[name] = {"ok": True, "events": len(raw), "matched": len(shaped)}
+    state["sources"][name] = {"fetched_at": utcnow().isoformat(), "events": shaped, "listed": len(raw)}
+    health[name] = {"ok": True, "events": len(raw), "matched": len(shaped), **(extra or {})}
     log.info("concerts: %s lists %d events within %d miles, %d by played artists", name, len(raw), radius, len(shaped))
 
 
@@ -775,7 +834,7 @@ def build_concerts(cfg: dict, *, deadline_minutes: float | None = None) -> dict 
     center, radius = c["center"], float(c["radius_miles"])
     profile = load_profile()
     http = Http("concerts", ttl_hours=20)
-    http.min_interval.update({"rest.bandsintown.com": 0.15, "app.ticketmaster.com": 0.25, "api.seatgeek.com": 0.3, "api.data.jambase.com": 0.5, "www.jambase.com": 0.5,
+    http.min_interval.update({"rest.bandsintown.com": 0.15, "app.ticketmaster.com": 0.25, "api.seatgeek.com": 0.3, "api.data.jambase.com": 1.1, "www.jambase.com": 1.1,
                               "edmtrain.com": 1.0, "ra.co": 1.5})   # Bandsintown answers in ~10ms; a 429 widens any of these on its own
     lastfm = LastFm(http, os.environ.get("LASTFM_API_KEY"))
     played = played_artists(cfg, profile, lastfm)
@@ -809,9 +868,13 @@ def build_concerts(cfg: dict, *, deadline_minutes: float | None = None) -> dict 
     jcfg = c["jambase"]
     if jcfg.get("enabled", True):
         jb_key = os.environ.get("JAMBASE_API_KEY")
-        _area_source(state, health, "jambase", **area, shape=shape_jambase, missing=None if jb_key else "JAMBASE_API_KEY not set",
+        quota = CallQuota(state.setdefault("quota", {}).setdefault("jambase", {}), quota=int(jcfg.get("monthly_quota", 1000)), reserve=int(jcfg.get("quota_reserve", 100)), today=today)
+        _area_source(state, health, "jambase", **area, shape=shape_jambase, missing=None if jb_key else "JAMBASE_API_KEY not set", reuse_days=float(jcfg.get("refresh_days", 2) or 0),
+                     extra={"quota": quota.health()} if jb_key else None,
                      fetch=lambda: jambase_events(http, jb_key, center, radius, start=today, end=today + timedelta(days=horizon_days), base_url=str(jcfg.get("base_url") or JB_V3),
-                                                  auth=str(jcfg.get("auth") or "bearer"), per_page=int(jcfg.get("per_page", 100)), max_requests=int(jcfg.get("requests_per_run", 40))))
+                                                  auth=str(jcfg.get("auth") or "bearer"), per_page=int(jcfg.get("per_page", 100)), max_requests=int(jcfg.get("requests_per_run", 40)), quota=quota))
+        if jb_key and "jambase" in health:
+            health["jambase"]["quota"] = quota.health()   # the numbers after this run's calls
     ecfg = c["edmtrain"]
     if ecfg.get("enabled", True):
         edm_key = os.environ.get("EDMTRAIN_API_KEY")

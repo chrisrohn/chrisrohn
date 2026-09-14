@@ -646,7 +646,7 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
     monkeypatch.setattr(concerts, "Http", lambda name, ttl_hours=20: FakeHttp(answers))
     import discovery.resolve as resolve
     monkeypatch.setattr(resolve, "resolve_all", lambda items, cfg, deadline=None, avoid=None: None)
-    cfg = {"station": {"lastfm_user": "u"}, "concerts": {"bandsintown": {"empty_probe": 2}, "jambase": {"enabled": True}}, "resolve": {"youtube_music": False}}
+    cfg = {"station": {"lastfm_user": "u"}, "concerts": {"bandsintown": {"empty_probe": 2}, "jambase": {"enabled": True, "refresh_days": 0}}, "resolve": {"youtube_music": False}}
     out = concerts.build_concerts(cfg)
     assert out["count"] == 2 and out["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek", "ticketmaster"]
     satin, amtrac = out["events"]
@@ -655,7 +655,8 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
     assert amtrac["tickets"] == "https://ra.co/events/3" and amtrac["ticketer"] == "Resident Advisor" and amtrac["price"]["source"] == "jambase" and amtrac["venue"] == "Lincoln Factory"
     assert set(amtrac["links"]) == {"resident advisor", "jambase", "edmtrain", "seatgeek"} and amtrac["title"] == "Amtrac [Live]"
     h = out["health"]
-    assert h["seatgeek"] == {"ok": True, "events": 1, "matched": 1} and h["jambase"] == {"ok": True, "events": 1, "matched": 1} and h["edmtrain"] == {"ok": True, "events": 1, "matched": 1}
+    assert h["seatgeek"] == {"ok": True, "events": 1, "matched": 1} and h["edmtrain"] == {"ok": True, "events": 1, "matched": 1}
+    assert h["jambase"] == {"ok": True, "events": 1, "matched": 1, "quota": {"calls": 1, "used": 1, "window_days": 31, "quota": 1000, "reserve": 100, "remaining": 899}}
     assert h["resident_advisor"] == {"ok": True, "events": 1, "matched": 1} and h["ticketmaster"] == {"ok": True, "events": 1, "matched": 1}
     assert h["bandsintown"]["ok"] is False and h["bandsintown"]["error"].startswith("every one of 2 answers was empty (empty ×2)") and h["bandsintown"]["app_id_from"] == "secret"
     assert "from the BANDSINTOWN_APP_ID secret" in h["bandsintown"]["error"] and "biz@bandsintown.com" in h["bandsintown"]["error"]   # the secret is set: the key itself is what Bandsintown refuses
@@ -674,3 +675,50 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
     out2 = concerts.build_concerts(cfg)
     assert out2["count"] == 2 and out2["health"]["resident_advisor"] == {"ok": False, "error": "403 Client Error: Forbidden", "matched": 1}
     assert out2["health"]["jambase"]["ok"] is False and out2["health"]["jambase"]["matched"] == 1 and out2["events"][1]["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek"]
+    assert out2["health"]["jambase"]["quota"]["calls"] == 1 and out2["health"]["jambase"]["quota"]["used"] == 2   # the failed request was a call too
+    # a snapshot younger than refresh_days is reused without a call
+    out3 = concerts.build_concerts({**cfg, "concerts": {**cfg["concerts"], "jambase": {"enabled": True, "refresh_days": 2}}})
+    assert out3["health"]["jambase"]["ok"] is True and out3["health"]["jambase"]["reused"] and out3["health"]["jambase"]["quota"]["calls"] == 0 and out3["health"]["jambase"]["quota"]["used"] == 2
+    assert out3["events"][1]["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek"]
+    assert util.read_json(concerts.STATE_PATH, {})["quota"]["jambase"]["days"] == {TODAY.isoformat(): 2}
+
+
+def test_call_quota_holds_any_31_day_window():
+    """The ledger caps the trailing 31 days at quota - reserve, whatever month boundary the plan counts by, and
+    every attempt counts before it goes out."""
+    row = {"days": {(TODAY - timedelta(days=d)).isoformat(): n for d, n in ((50, 500), (31, 100), (30, 300), (1, 200))}}
+    q = concerts.CallQuota(row, quota=1000, reserve=100, today=TODAY)
+    assert set(row["days"]) == {(TODAY - timedelta(days=d)).isoformat() for d in (31, 30, 1)}     # older than 45 days is dropped
+    assert q.used == 500 and q.remaining == 400                                                   # today and the 30 days before it: 300 + 200
+    for _ in range(400):
+        assert q.spend()
+    assert not q.spend() and q.spent == 400 and q.remaining == 0 and row["days"][TODAY.isoformat()] == 400
+    assert q.health() == {"calls": 400, "used": 900, "window_days": 31, "quota": 1000, "reserve": 100, "remaining": 0}
+    # tomorrow the day that fell out of the window frees its calls
+    q2 = concerts.CallQuota(row, quota=1000, reserve=100, today=TODAY + timedelta(days=1))
+    assert q2.used == 600 and q2.remaining == 300
+    assert concerts.CallQuota({}, quota=5, today=TODAY).remaining == 5
+
+
+def test_jambase_paging_stops_at_the_quota_and_never_retries():
+    calls = []
+    def answers(url, params):
+        calls.append(int(params["page"]))
+        return {"success": True, "pagination": {"page": int(params["page"]), "totalPages": 50, "nextPage": "https://x"}, "events": [jb_event(params["page"], ["X"], "V", "Detroit", 42.33, -83.05, SOON)]}
+    http = FakeHttp(answers)
+    class Recording(FakeHttp):
+        def get(self, url, params=None, **kw):
+            assert kw.get("retries") == 0            # a retry would be a charged call
+            return super().get(url, params, **kw)
+    http = Recording(answers)
+    q = concerts.CallQuota({"days": {}}, quota=10, reserve=7, today=TODAY)
+    evs = concerts.jambase_events(http, "key", DETROIT, 80, start=T0.date(), end=T1.date(), max_requests=40, quota=q)
+    assert calls == [1, 2, 3] and len(evs) == 3 and q.spent == 3 and q.remaining == 0     # the soonest three pages, then the quota
+    with pytest.raises(RuntimeError, match="monthly quota reached"):
+        concerts.jambase_events(http, "key", DETROIT, 80, start=T0.date(), end=T1.date(), quota=q)
+    assert calls == [1, 2, 3]                                                             # nothing more went out
+    # a failed request was still a call
+    q3 = concerts.CallQuota({"days": {}}, quota=10, today=TODAY)
+    with pytest.raises(RuntimeError):
+        concerts.jambase_events(FakeHttp(lambda u, p: (_ for _ in ()).throw(RuntimeError("500 Server Error"))), "key", DETROIT, 80, start=T0.date(), end=T1.date(), quota=q3)
+    assert q3.spent == 1 and q3.used == 1
