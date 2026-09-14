@@ -1,5 +1,6 @@
 // Shapes shared by the modules. feed.json is written by discovery/build.py (Item.to_dict + _public_item).
-export interface YouTubeMatch { videoId: string | null; thumbnail?: string | null; year?: string | number | null; playlistId?: string | null; album?: string | null }
+export interface YouTubeMatch { videoId: string | null; thumbnail?: string | null; year?: string | number | null; playlistId?: string | null; album?: string | null;
+  video?: string | null; videoKind?: string | null }   // the official video YouTube Music pairs with the audio track (the Video tab lists it once the song is kept)
 export interface FeedItem {
   id: string; artist: string; title: string; display?: string; display_title?: string; kind?: string;
   release?: string | null; release_type?: string | null; release_date?: string | null; date_kind?: string;
@@ -38,7 +39,8 @@ export interface Feed {
     duplicates_count?: number; duplicates_kinds?: Record<string, number>; duplicates_checked_at?: string | null;
     unavailable_count?: number; unavailable_with_alt?: number; unavailable_pending?: number; region?: string;
     video_count?: number; video_with_audio?: number; video_pending?: number;   // playlist rows that are the video, not the audio track
-    audio?: { audio: number; video: number; unknown: number } };              // what the cards play: the audio track, the video, an unknown kind
+    audio?: { audio: number; video: number; unknown: number };               // what the cards play: the audio track, the video, an unknown kind
+    videos_playlist_id?: string; videos?: { with_video: number; no_video: number; pending: number } };   // the music-video playlist, and how many cards know their video side
   picks?: Array<{ artist: string; title: string; videoId?: string | null; year?: string; thumbnail?: string | null; album?: string | null }>;
   learned?: LearnedSummary;
   feed_health?: Record<string, { ok: boolean; entries: number; kept: number; error?: string | null }>;
@@ -62,6 +64,16 @@ export interface Unavailable {
   why?: string;            // deleted | private | blocked | rejected | greyed (the build's scan) | video (the video, not the audio track)
   found?: "build" | "audit"; at?: number; itemId?: string;   // audit rows: when, and the playlist item to remove without a lookup
 }
+/** One video to review on the Video tab: a song the library holds (data/videos.json, discovery/videos.py) or one kept here whose card knows its video. */
+export interface VideoRow {
+  video: string; kind?: string | null; own?: boolean;   // the video's id and kind; own: the playlist row itself is the video
+  videoId: string; year: string; years?: string[]; playlistId?: string | null; position?: number | null;
+  artist: string; title: string; album?: string | null;
+  from?: "library" | "feed"; id?: string; at?: number;   // where it came from; a kept card's id and when it was kept
+}
+export interface Videos { generated_at: string; checked_at?: string | null; playlist_id: string; count: number; pending: number; no_video?: number; in_playlist?: number; decided?: number; looked_up?: number; rows: VideoRow[] }
+/** A decision on the Video tab (id:videos): approved (added to the music-video playlist), passed, or undone. */
+export interface VideoMark { decision: "up" | "down" | "undone"; at: number; artist?: string; title?: string; year?: string | null; videoId?: string | null; playlistItemId?: string; playlistId?: string; pending?: boolean; local?: boolean; duplicate?: boolean }
 /** One finding of the playability audit (audit.js), kept on this device. */
 export interface AuditRow { year: string; playlistId: string; videoId: string; itemId: string; position: number; artist: string; title: string; why: string; at: number }
 export interface Audit { years: Record<string, { at: number; tracks: number; dead: AuditRow[]; units: number }> }
@@ -108,6 +120,9 @@ export interface State {
   videoInfo: Record<string, VideoInfo>;   // videos.list lookups made by the Cleanup tab this session
   liveDupes: Dupe[] | null; liveYear: string | null;   // the tab's own scan of one year playlist
   audit: Audit | null;                                  // the playability audit's findings (id:audit), loaded on first use
+  videos: Videos | null; videosState: "idle" | "loading" | "ready" | "missing" | "failed"; videosPage: number; videosQT: any;   // the Video tab's report
+  videoMarks: Record<string, VideoMark>; videoVersion: number;   // this account's decisions on the Video tab
+  mvHeld: Set<string> | null; mvAt: number;              // what the music-video playlist held when it was last read, and when
   unavailable: Unavailable[] | null; library: any[] | null; notOwner: boolean; signingIn: Promise<boolean> | null; authCb: any; authErrCb: any; keepAliveAt: number;
   lastAuthError: { why: string; at: number } | null; ready: boolean; online: boolean; recentAt: number; recentVideos: Set<string>;
   apiLog: ApiEntry[];

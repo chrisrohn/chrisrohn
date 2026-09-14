@@ -23,7 +23,7 @@ from datetime import date, timedelta
 from .learn import learn_from_history, load_ratings, merge_ratings, public_summary, wrong_videos
 from .models import Item
 from .profile import find_duplicates, load_profile
-from .resolve import audio_summary, collapse_shared_videos, drop_by_length, is_audio, resolve_all
+from .resolve import audio_summary, collapse_shared_videos, drop_by_length, is_audio, resolve_all, video_summary
 from .score import dedupe, diversify, score_items
 from .sources import run_sources
 from .unavailable import build_report as unavailable_report
@@ -169,6 +169,9 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
             "video_pending": unavailable.get("video_pending", 0),
             # what today's cards play: the audio track, the video (no audio side paired yet), or an upload of unknown kind
             "audio": audio_summary(items),
+            # the music-video playlist the Video tab files approved videos into, and how many cards know their video side
+            "videos_playlist_id": str(ycfg.get("videos_playlist_id") or ""),
+            "videos": video_summary(items),
         },
         "picks": profile.get("picks") or [],
         "learned": public_summary(profile["learned"]),
@@ -281,12 +284,14 @@ _PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", 
 
 
 def _public_item(it: Item, first_seen: str | None) -> dict:
-    """What feed.json carries per item: everything the site reads, nothing it doesn't (about a third of the bytes)."""
+    """What feed.json carries per item: everything the site reads, nothing it doesn't (about a third of the bytes).
+    `youtube.video` is the official video paired with the card's audio track (the Video tab lists it once the song
+    is kept); a card asked and found without one carries no key at all."""
     d = it.to_dict()
     for k in _PRIVATE_FIELDS:
         d.pop(k, None)
     if d.get("youtube"):
-        d["youtube"] = {k: v for k, v in d["youtube"].items() if k not in _PRIVATE_YT_FIELDS}
+        d["youtube"] = {k: v for k, v in d["youtube"].items() if k not in _PRIVATE_YT_FIELDS and not (k in ("video", "videoKind") and not d["youtube"].get("video"))}
     d["links"] = {k: s for k, u in (d.get("links") or {}).items() if (s := safe_url(u))}
     d["first_seen"] = first_seen
     return d

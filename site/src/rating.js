@@ -81,7 +81,9 @@ export async function rate(id, decision, year) {
     if (decision === "up") state.recentVideos.add(vid);
     persist(); schedulePush();
     const left = Math.floor(quotaLeft() / 50);
-    toast((decision === "up" ? `${UP} ${credit(it)} → ${titleFor(year)}` : `${DN} ${credit(it)} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : ""), false, { label: "Undo", fn: () => undo(id) });
+    // a kept song whose card knows its video: the video is now on the Video tab, waiting for its own verdict
+    const video = decision === "up" && it.youtube && it.youtube.video ? " · its video is on the Video tab" : "";
+    toast((decision === "up" ? `${UP} ${credit(it)} → ${titleFor(year)}` : `${DN} ${credit(it)} → ${skippedTitle()}`) + (left < 40 ? ` · ${left} saves left today` : "") + video, false, { label: "Undo", fn: () => undo(id) });
   } catch (e) {
     delete state.rated[id]; persist(); render();
     const msg = /** @type {Error} */ (e).message;

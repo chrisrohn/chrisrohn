@@ -6,6 +6,7 @@ import { isOwner, guestsAllowed } from "./auth.js";
 import { pushRatings, pullRatings } from "./sync.js";
 import { loadLibraryPlaylists, refreshRecent } from "./youtube.js";
 import { dupesSummary, showCleanup } from "./dupes.js";
+import { videosSummary } from "./videos.js";
 import { startAudition, clearAudition, auditionOn } from "./player.js";
 import { wireTheme } from "./theme.js";
 import { openStats } from "./stats.js";
@@ -52,6 +53,7 @@ function openSettings() {
   $("#s-feeds").innerHTML = rows.length ? rows.map(([n, h]) => `<span class="${h.ok ? (h.kept ? "ok" : "quiet") : "dead"}" title="${esc(h.error || "")}">${esc(n)} ${h.ok ? h.kept + "/" + h.entries : "✗"}</span>`).join("") : "<span class=\"muted\">no blog feed data yet</span>";
   $("#s-skips").checked = skipsInYouTube();
   $("#s-dupes-summary").textContent = dupesSummary();
+  $("#s-videos-summary").textContent = videosSummary();
   $("#settings").showModal();
 }
 export function wireSettings() {
@@ -63,6 +65,7 @@ export function wireSettings() {
   $("#s-aud-secs").addEventListener("change", (/** @type {any} */ e) => { state.settings.auditionSeconds = Math.max(10, +e.target.value || 30); $("#audition-label").textContent = state.settings.auditionSeconds + "s"; persist(); });
   $("#s-aud-start").addEventListener("change", (/** @type {any} */ e) => { state.settings.auditionStart = Math.min(80, Math.max(0, +e.target.value || 0)); persist(); });
   $("#s-cleanup").addEventListener("click", () => { $("#settings").close(); showCleanup(); });
+  $("#s-videos").addEventListener("click", () => { $("#settings").close(); const tab = $(".tab[data-view=videos]"); if (tab) tab.click(); });
   $("#s-skips").addEventListener("change", (/** @type {any} */ e) => { state.settings.skipsInYouTube = e.target.checked; persist(); });
   $("#s-export").addEventListener("click", exportCsv);
   $("#s-stats").addEventListener("click", () => { $("#settings").close(); openStats(); });

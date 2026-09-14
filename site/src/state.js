@@ -44,6 +44,8 @@ export const state = {
   playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL...", "__loaded_at": ms}
   settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60, autoplay: true, shuffle: false, introDismissed: false, ghToken: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
   badVideos: LS.get("id:badvideos", {}),   // videoId → when YouTube refused to embed it here (autoplay steps over these)
+  videoMarks: LS.get("id:videos", {}),     // video id → the Video tab's decision on it (approved, passed, undone), mirrored with the ratings
+  videoVersion: 0, videos: null, videosState: "idle", videosPage: 1, videosQT: null, mvHeld: null, mvAt: 0,
   badVersion: 0,                            // bumps whenever badVideos changes (a count can stay the same while an entry is swapped)
   ratedVersion: 0,                          // bumps whenever `rated` is persisted with a change: the personal ranking recomputes
   playingId: null, shuffleOrder: [], shuffleFor: "", lastRated: null, shareIn: null,
@@ -128,7 +130,7 @@ export function reconcileRated() {
 const written = {};
 export function persist() {
   const keep = { "id:rated": state.rated, "id:auth": state.auth && { email: state.auth.email, name: state.auth.name, picture: state.auth.picture, hash: state.auth.hash },
-    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync, "id:badvideos": state.badVideos,
+    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync, "id:badvideos": state.badVideos, "id:videos": state.videoMarks,
     "id:gh": { ghAt: state.ghAt, ghDirty: state.ghDirty, ghSha: state.ghSha } };
   for (const [k, v] of Object.entries(keep)) { const j = JSON.stringify(v ?? null); if (written[k] !== j) { written[k] = j; LS.set(k, v ?? null); if (k === "id:rated") state.ratedVersion++; } }
   const tok = state.auth && state.auth.access_token ? { access_token: state.auth.access_token, expires_at: state.auth.expires_at } : null;
@@ -139,6 +141,7 @@ export function clearLocalState() { for (const k of LS.keys()) LS.del(k); for (c
 // file it cannot open.
 export function forgetAccount() {
   state.rated = {}; state.playlists = {}; state.sync = { fileId: null, at: 0 }; state.library = null; state.notOwner = false; state.lastAuthError = null;
+  state.videoMarks = {}; state.videoVersion++; state.mvHeld = null; state.mvAt = 0;
   state.ghDirty = false; state.ghSha = null; state.ghFails = 0; state.ghErr = null; state.ghSaid = null;
   clearTimeout(state.syncTimer); clearTimeout(state.ghTimer); clearTimeout(state.ghRetry); state.ghTimer = state.ghRetry = null;
 }

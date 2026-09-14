@@ -77,6 +77,9 @@ youtube_music:
   skipped_playlist_title: "Indie Discotheque – Skipped"
   skipped_playlist_id: ""
   picks_count: 40                 # newest saves shown on the public "Picks" tab
+  # The one music-video playlist: every video approved on the site's Video tab is added here, and nowhere else.
+  # The year playlists hold the audio tracks; this playlist holds the videos of songs the year playlists hold.
+  videos_playlist_id: PLTW5JZnPjE_r0Y2WwYFLFAbEVZTlt6xuX
 
 # Sign in with Google on the site. Create a "Web application" OAuth client (see SETUP.md) and put its ID here —
 # a client ID is public by design. Only the listed Google accounts get curator mode.
@@ -333,7 +336,7 @@ sources:
 
 # ---------- Ranking ----------
 ranking:
-  max_items: 450           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
+  max_items: 500           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
                            # …with room for a full backfill on top of a rich fresh window: this cut is by score, so too
                            # low a cap silently drops the fill it was told to make (the older cards score lowest)
   min_score: 0.6
@@ -464,6 +467,26 @@ resolve:
   cache_keep_days: 120          # drop YouTube / year cache entries that no feed item has touched for this long
   discogs: true                 # use Discogs when DISCOGS_TOKEN is set
   always_cross_check: false     # true = also ask Deezer/ISRC even when MusicBrainz already answered (slower, more evidence)
+
+# ---------- Music videos: the video side of every song the playlists hold (discovery/videos.py) ----------
+# The year playlists hold audio tracks; many of those songs also have an official video, which YouTube Music pairs
+# with the audio track (the watch playlist lists both sides). The Video tab on the site reviews those videos one by
+# one, and an approved one is added to `youtube_music.videos_playlist_id`, the single music-video playlist.
+# Two sources feed the tab: every row of every year playlist (this job asks the watch playlist for each audio
+# track's video, `lookups_per_run` a run, cached for good in data/cache/videos.json — a 26,000-row library takes a
+# few weeks to work through, then only new rows are asked), and the day's feed (the resolver asks each card's video
+# side as it resolves it, `feed_lookups_per_run` a run, so a song kept on the site brings its video to the tab the
+# same day). Rows already in the video playlist, or decided on the tab (data/ratings.json → `videos`), are left
+# out. Nothing here spends YouTube API quota; the report is site/data/videos.json.
+videos:
+  enabled: true
+  lookups_per_run: 1500        # playlist rows asked for their video side in the Videos workflow (≈0.3 s each)
+  feed_lookups_per_run: 400    # feed / catalog cards asked as the resolver runs (the rest wait for the next build)
+  recheck_days: 90             # a song with no video yet is asked again after this (videos get paired later)
+  time_budget_minutes: 35      # wall clock for the Videos workflow (it times out at 45)
+  in_daily: true               # also refresh the report at the end of the daily feed job (from the cache: no lookups
+                               # unless time is left), so a decision made on the tab leaves the report the next morning
+  job_budget_minutes: 41       # when run inside the daily job: never past this point of that job
 
 # ---------- Concerts: who is playing near Detroit (discovery/concerts.py) ----------
 # The Songkick page, rebuilt from open sources: every artist played on Indie Discotheque in the last year (the

@@ -7,6 +7,7 @@ import { rate, undoLast } from "./rating.js";
 import { deckOn, deckItem, focusCard } from "./render.js";
 import { play, step, toggle, stopPlayer, seek, playerActive, toggleShuffle } from "./player.js";
 import { cycleTheme } from "./theme.js";
+import { videoKey } from "./videos.js";
 
 /** The year chosen on the card for `id`, if any. @param {string | null} [id] */
 export function currentYear(id = state.currentId) { const el = id && $(`.card[data-id="${CSS.escape(id)}"] .year, .dcard[data-id="${CSS.escape(id)}"] .year`); return el && el.value ? +el.value : undefined; }
@@ -16,6 +17,8 @@ export function wireKeys() {
     if (e.ctrlKey || e.metaKey || e.altKey) return;   // Cmd+D bookmarks, Ctrl+A selects: never a thumb
     const target = /** @type {HTMLElement} */ (e.target);
     if (target.matches("input, select, textarea") || $("dialog[open]")) return;
+    // the Video tab has its own list: j/k walk the player down it, space opens it, u approves, d passes, Esc closes
+    if (state.view === "videos" && ["j", "k", "ArrowDown", "ArrowUp", " ", "u", "d", "Escape"].includes(e.key)) { if (videoKey(e.key)) { e.preventDefault(); return; } }
     // the card you are on; in list view nothing is "current" until you move to a card, so a stray key can't file the top track
     const id = deckOn() ? (deckItem()?.id || state.currentId) : state.currentId;
     switch (e.key) {

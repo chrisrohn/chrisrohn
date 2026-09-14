@@ -22,6 +22,7 @@ import { applyLaunchParams, wireLayers } from "./url.js";
 import { wireGhPush } from "./github.js";
 import { wireCleanup } from "./dupes.js";
 import { loadConcerts, wireConcerts } from "./concerts.js";
+import { loadVideos, wireVideos, refreshHeld } from "./videos.js";
 
 function wire() {
   const tabs = $$(".tab");
@@ -31,6 +32,7 @@ function wire() {
     if ((was === "catalog") !== (state.view === "catalog")) fillSources();   // the chips are the feed's sources or the catalog's lists
     if (state.view === "catalog") loadCatalog().catch(() => {});
     if (state.view === "concerts") loadConcerts().catch(() => {});
+    if (state.view === "videos") { loadVideos().catch(() => {}); if (isCurator() && tokenValid()) refreshHeld().catch(() => {}); }
     state.deckIndex = 0; render();
   };
   tabs.forEach(b => b.addEventListener("click", () => goTab(b)));
@@ -92,6 +94,7 @@ function wire() {
   wireSettings();
   wireCleanup();   // the Cleanup tab: its filters, the actions on every song and copy, the live scan and the audit
   wireConcerts();  // the Concerts tab: when, how far, and in what order
+  wireVideos();    // the Video tab: the library's videos, played in place, approved into the music-video playlist or passed
   wireKeys();
   wirePwa();
   wireGhPush();   // the ratings file for the build: a last push when the tab goes away, and the retries after a dropped connection

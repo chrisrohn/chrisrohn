@@ -137,6 +137,30 @@ and a **swap** (add the audio track, remove the video: 100 units), per row or *s
 video** stops listing a row you want as it is. The album a song names is opened once for the year YouTube Music
 states and its playlist, which is what the "full release" link and the year fallback come from.
 
+**The video side, on its own tab:** the year playlists hold audio tracks, and this stays so — the Feed, the Catalog,
+Picks and Cleanup never show or file a video. YouTube Music pairs most audio tracks with an official video (the same
+watch playlist that pairs a video with its audio track names the video for an audio track), and the **Video** tab
+(curators only) is the one place those are reviewed. Two things put a video there: a song **kept** on the Feed or
+the Catalog whose card knows its video side — the resolver asks YouTube Music for it as it resolves each card
+(`videos.feed_lookups_per_run` a run, once, then again every `videos.recheck_days` while there is none; the id
+travels in feed.json as `youtube.video`, and a swapped video hit already knows it), so a Keep brings the video to
+the tab the same day, and the Keep toast says so — and every song in every year playlist that has a video: the
+**Videos** workflow (its own job, 15:51 ET, `discovery/videos.py`) walks the profile's playlist scan, asks the
+watch playlist for each audio row's video (`videos.lookups_per_run` a run, ≈0.3 s each, cached for good in
+`data/cache/videos.json`, so a 26,000-row library is done in a few weeks and then only new rows are asked), counts
+a row that is itself a video as it stands, reads the music-video playlist (public, no quota) to leave out what it
+already holds, leaves out what the tab decided (`data/ratings.json` → `videos`), and writes one row per video
+(however many years hold the song) to `site/data/videos.json`; the daily job rewrites the same report from the cache
+at its end (`videos.in_daily`), so a decision made on the tab is out of the list the next morning. On the tab: ▶
+plays the video in place (`j`/`k` move the player down and up the list, `space` opens it, `u` approves, `d` passes,
+`Esc` closes), **▲︎ add** puts the video into the single music-video playlist — `youtube_music.videos_playlist_id`,
+https://music.youtube.com/playlist?list=PLTW5JZnPjE_r0Y2WwYFLFAbEVZTlt6xuX, the only playlist the tab ever writes
+to (50 units, plus 1 to verify the video is not there already unless the playlist was read in the last half hour;
+**read the music-video playlist** reads it on demand, 1 unit per 50, and hides what it holds) — and **▼︎ pass** is
+free. Every decision is remembered per account (`id:videos`), mirrored across devices with the ratings (the Drive
+file and the ratings push both carry `videos`), undoable from the toast (an approval's Undo removes the video
+again), and filtered by where it came from, year and name. `python -m discovery videos` runs the report by hand.
+
 **Songs, not interludes or mixes:** a track shorter than `resolve.min_length` (1:55) or longer than
 `resolve.max_length` (9:31) is never a card, in the feed or the Catalog tab. Between several uploads of a song the
 resolver prefers one inside the range (the radio edit over the extended mix, the first real song over an album's
@@ -226,7 +250,12 @@ session that the playlist's owner approved in that browser.
   skip (curator or guest mode only); **share** on a card opens the system share sheet. Desktop Chrome/Edge/Safari 17
   install it too (the Install button in the header, or the icon in the address bar).
 - **Shortlist:** the Feed tab opens on the top 60 by score (⚙ sets how many); *show all* at the end of the list, or the
-  `+N` next to the deck counter, lifts it for the visit. A search or another sort always shows everything.
+  `+N` next to the deck counter, lifts it for the visit. A search or another sort always shows everything. The day
+  itself is up to `ranking.max_items` (500) songs, ranked by score.
+- **Video** tab: the official videos of the songs you keep and of everything the year playlists already hold, each
+  played in place and either added to the music-video playlist (`▲︎ add`, the one playlist videos go to) or passed
+  (free). Only a kept song's video comes here from the feed; the year playlists themselves stay audio. See *The
+  video side* above.
 - **It learns from you, without API quota.** Every keep and skip remembers the card's sources, blogs, tags and artist.
   The site works out a keep rate for each against your overall rate and nudges the scores (the number on the card
   hovers to show `build score ± learned`), so a blog you keep from floats up and one you skip through sinks; tracks
@@ -338,6 +367,12 @@ Everything lives in `discovery/config.yaml`:
   "filling in from &lt;year&gt;" and file into their own year.
 - `resolve.audio_heals_per_run` / `audio_recheck_days` — how many cards that still play a video are asked for their
   audio track a run, and how often each is asked again.
+- `videos` — the Video tab's list: `lookups_per_run` playlist rows asked for their video side in the Videos
+  workflow, `feed_lookups_per_run` cards asked as the daily resolver runs, `recheck_days` before a song with no video
+  is asked again, `time_budget_minutes` for the workflow, `in_daily` / `job_budget_minutes` for the rewrite at the end
+  of the daily job; `youtube_music.videos_playlist_id` is the one playlist approved videos go to.
+- `ranking.max_items` — how many songs a day holds (500), cut by score after the backfill (keep it clear of
+  `backfill.target` + `backfill.max`).
 - `resolve.min_length` / `max_length` — the song-length range (1:55–9:31): shorter is an interlude, longer a mix,
   neither is a card; `resolve.max_ytmusic_date_lookups_per_run` — how many undated tracks a run ask YouTube Music
   for the upload's own release date.
@@ -372,8 +407,8 @@ npm run check && npm test        # eslint + type check (tsc --checkJs) + build, 
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
-`render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `concerts` (the Concerts tab), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
-`discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/concerts.py` (the concert list), `discovery/learn.py` (what the playlists teach the
+`render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `concerts` (the Concerts tab), `videos` (the Video tab), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
+`discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/concerts.py` (the concert list), `discovery/videos.py` (the Video tab's list), `discovery/learn.py` (what the playlists teach the
 ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js`, rewrites `index.html` and `sw.js` to it and copies the rest of `site/` into `dist/`, which is what
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
