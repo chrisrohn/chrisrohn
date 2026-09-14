@@ -30,7 +30,7 @@ export const canShare = () => typeof navigator.share === "function";
 export async function shareTrack(it) {
   const title = `${it.artist} - ${it.display_title || it.title}`;
   const yt = it.youtube && it.youtube.videoId ? "https://music.youtube.com/watch?v=" + it.youtube.videoId : (safeUrl(Object.values(it.links || {})[0]) || "");
-  const url = it._pick ? (yt || location.origin) : permalink(it.id);
+  const url = it._pick || it._video ? (yt || location.origin) : permalink(it.id);   // a pick or a video has no card of its own here
   try { await navigator.share({ title, text: `${title} · via Chris Rohn's New Music${yt && url !== yt ? ` · ${yt}` : ""}`, url }); }
   catch (e) {
     if (/** @type {Error} */ (e).name === "AbortError") return;
