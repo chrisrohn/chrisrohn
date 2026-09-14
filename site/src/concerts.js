@@ -123,6 +123,22 @@ const plural = (n, one, many) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 export const SOURCE_NAMES = { bandsintown: "Bandsintown", resident_advisor: "Resident Advisor", jambase: "JamBase", edmtrain: "Edmtrain", ticketmaster: "Ticketmaster", seatgeek: "SeatGeek" };
 /** @param {string} key */
 const sourceName = key => SOURCE_NAMES[key] || key.replace(/_/g, " ");
+/** Where each listing's data comes from, for the credits line. JamBase's Developer tier requires attribution
+ * wherever its data shows, so its credit is worded as it asks and always links. @type {Record<string, { url: string, credit?: string }>} */
+const SOURCE_SITES = { bandsintown: { url: "https://www.bandsintown.com" }, resident_advisor: { url: "https://ra.co" }, jambase: { url: "https://www.jambase.com", credit: "Concert data provided by JamBase" },
+  edmtrain: { url: "https://edmtrain.com" }, ticketmaster: { url: "https://www.ticketmaster.com" }, seatgeek: { url: "https://seatgeek.com" } };
+/** The credits line: every listing the rows on the tab came from, linked, JamBase's in its required wording. @param {Concerts} c */
+function renderCredits(c) {
+  const el = $("#con-credits"); if (!el) return;
+  const keys = Object.keys(SOURCE_NAMES).filter(k => (c.sources || []).includes(k));
+  if (!keys.length) { el.replaceChildren(); return; }
+  el.replaceChildren("Listings: ");
+  keys.forEach((k, i) => {
+    const site = SOURCE_SITES[k]; const a = document.createElement("a"); a.href = site ? site.url : "#"; a.target = "_blank"; a.rel = "noopener"; a.textContent = site?.credit || sourceName(k);
+    if (i) el.append(" · ");
+    el.append(a);
+  });
+}
 /** Which sources answered, which failed (and how), and which are not set up (no key) — from the build's health
  * record. Bandsintown's is a batch a run, so it counts as failed only when it was actually asked.
  * @param {Concerts} c @returns {{ live: { key: string, name: string }[], down: { key: string, name: string, error: string }[], off: { key: string, name: string, error: string }[] }} */
@@ -149,7 +165,7 @@ export function renderConcerts() {
   const all0 = $("#con-radius option[value='']"); if (all0 && c) all0.textContent = `within ${c.radius_miles} miles`;
   if (!c) {
     const note = { idle: "Opening the concert list…", loading: "Loading the concert list…", missing: "No concert list yet — it appears after the first run of the Concerts workflow, then refreshes every afternoon.", failed: "Could not load the concert list." }[state.concertsState] || "";
-    sum.textContent = ""; host.replaceChildren(); empty.hidden = false; empty.replaceChildren(note);
+    sum.textContent = ""; host.replaceChildren(); empty.hidden = false; empty.replaceChildren(note); const cr = $("#con-credits"); if (cr) cr.replaceChildren();
     if (state.concertsState === "failed") { const b = document.createElement("button"); b.type = "button"; b.className = "btn ghost small"; b.textContent = "Retry"; b.addEventListener("click", () => loadConcerts(true)); empty.append(" ", b); }
     state.order = [];
     return;
@@ -163,6 +179,7 @@ export function renderConcerts() {
   const note = down.length ? ` · ${down.length === 1 ? "one source" : `${down.length} sources`} failed: ${down.map(s => `${s.name} (${s.error})`).join("; ")}` : "";
   const only = !down.length && live.length && off.length ? ` · ${live.map(s => s.name).join(", ")} listings only` : "";
   sum.textContent = `${plural(vis.length, "show", "shows")}${vis.length !== all ? ` of ${all}` : ""} within ${c.radius_miles} miles of ${c.center?.name || "Detroit"} by ${plural(artists.size, "artist", "artists")} you played this year · built ${when}${checked}${note}${only}`;
+  renderCredits(c);
   sum.title = [`Listings: ${live.map(s => s.name).join(", ") || "none yet"}`, down.length ? `Failed: ${down.map(s => `${s.name} — ${s.error}`).join("; ")}` : "", off.length ? `Not set up: ${off.map(s => `${s.name} (${s.error})`).join(", ")}` : ""].filter(Boolean).join("\n");
   // the rows' top songs are the queue: space plays the first, j/k and autoplay walk on down the list
   const ids = []; for (const ev of vis) { const id = trackIdFor(ev); if (id && !ids.includes(id)) ids.push(id); }
