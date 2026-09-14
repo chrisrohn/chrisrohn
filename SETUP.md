@@ -34,9 +34,9 @@ always means the YouTube Music library playlists, `<year> | Indie Discotheque`, 
 4. **Settings → Secrets and variables → Actions → New repository secret**: `LASTFM_API_KEY` from
    https://www.last.fm/api/account/create (instant, free, any app name). Optional but recommended: `DISCOGS_TOKEN`
    from a free Discogs account (Settings → Developers → Generate new token) — Discogs master years are the
-   strongest source for original release dates of disco/electronic records. For the Concerts tab (all free, all
-   optional, each one another listing): `BANDSINTOWN_APP_ID`, `TICKETMASTER_API_KEY`, `SEATGEEK_CLIENT_ID`,
-   `JAMBASE_API_KEY`, `EDMTRAIN_API_KEY` — see *Concerts* below.
+   strongest source for original release dates of disco/electronic records. For the Concerts tab (all optional,
+   each one another listing; all free but JamBase): `BANDSINTOWN_APP_ID`, `TICKETMASTER_API_KEY`,
+   `SEATGEEK_CLIENT_ID`, `EDMTRAIN_API_KEY`, and `JAMBASE_API_KEY` if you subscribe — see *Concerts* below.
 5. **Actions → Discover → Run workflow.** Afterwards: merging a change to `site/` publishes in about a minute
    (the *Publish site* workflow); merging a change to `discovery/` runs the full data build first, 20–30 min.
    Feed data refreshes on the morning schedule (three slots, first one wins — see *How the site is built* below)
@@ -308,7 +308,7 @@ session that the playlist's owner approved in that browser.
 - **Concerts** tab — who is playing near Detroit. The **Concerts** workflow (its own job, 13:33 ET) takes every
   artist played on Indie Discotheque in the last year — the Last.fm 12-month chart of `station.lastfm_user`, plus
   anyone filed into this year's playlist (`concerts.playlist_years`) — and draws their shows from six listings, each
-  switched on by its own key and each reported on its own in the tab's summary line (so a dead one is never mistaken
+  switched on by its own key (free, except JamBase) and each reported on its own in the tab's summary line (so a dead one is never mistaken
   for a quiet one):
   - **Bandsintown** (artist by artist): asks its artist-events API where each act plays next, as many a run as
     `time_budget_minutes` allows (about six a second; `artists_per_run` caps it when set) and again after
@@ -332,8 +332,9 @@ session that the playlist's owner approved in that browser.
   - **SeatGeek** (`SEATGEEK_CLIENT_ID`, free at seatgeek.com/account/develop): every concert and music festival its
     Platform API lists in the radius, which includes the clubs that sell through DICE, Eventbrite or their own box
     office and never appear on Ticketmaster; its price is its lowest listing (resale included) and is labelled so.
-  - **JamBase** (`JAMBASE_API_KEY`, free at data.jambase.com): the widest venue-calendar aggregator, every show in
-    the radius with the ticket link and its seller. `concerts.jambase.base_url` and `auth` point at the v3 API
+  - **JamBase** (`JAMBASE_API_KEY`, a paid subscription at data.jambase.com — the one listing here that is not free,
+    so it ships switched off: `concerts.jambase.enabled`): the widest venue-calendar aggregator, every show in the
+    radius with the ticket link and its seller. `concerts.jambase.base_url` and `auth` point at the v3 API
     (bearer token); the v1 API at `https://www.jambase.com/jb-api/v1` with `auth: query` still answers.
   - **Edmtrain** (`EDMTRAIN_API_KEY`, free, edmtrain.com/developer-api): every electronic show in
     `concerts.edmtrain.states` (Michigan, Ohio, Ontario), the lineups the dance venues post themselves; the radius is

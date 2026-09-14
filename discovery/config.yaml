@@ -528,8 +528,9 @@ concerts:
     requests_per_run: 40
     taxonomies: [concert, music_festival]
   jambase:
-    enabled: true             # only with the JAMBASE_API_KEY secret (free at data.jambase.com): the widest venue-calendar aggregator,
-                              # with each show's ticket link and its seller
+    enabled: false            # JamBase Data is a paid subscription (data.jambase.com), the one listing here that is not free: switch
+                              # it on with a JAMBASE_API_KEY secret for the widest venue-calendar aggregator, each show with its
+                              # ticket link and its seller
     base_url: https://api.data.jambase.com/v3   # the v1 API still answers at https://www.jambase.com/jb-api/v1 with auth: query
     auth: bearer              # bearer = the key in the Authorization header (v3); query = an apikey parameter (v1)
     per_page: 100

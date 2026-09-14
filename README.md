@@ -21,8 +21,8 @@ tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist
 - A **Cleanup** tab for the year playlists: every song held more than once — the same video twice, the same song in two years, two uploads of it (audio track and video), two editions of it (original and remix, radio edit and extended mix) — with every copy laid out to compare (edition, length, album, plays, whether it plays here), played in place, kept, removed or moved to another year (the catalogue-verified year marked); a **playability audit** that asks YouTube which tracks cannot play in the US at all (deleted, private, region-blocked) and finds playable replacements, overnight for free or on the spot; paced by the API quota and remembered across devices
 - A **Concerts** tab, the Songkick page rebuilt from open sources: every upcoming show within 80 miles of Detroit
   by an artist played on Indie Discotheque in the last year (the Last.fm 12-month chart plus this year's playlist),
-  from six listings — Bandsintown (an app_id it issued), Resident Advisor (no key), and, each with a free key,
-  Ticketmaster, SeatGeek, JamBase and Edmtrain — so the clubs that sell through DICE, Etix or their own box office
+  from six listings — Bandsintown (an app_id it issued), Resident Advisor (no key), Ticketmaster, SeatGeek and
+  Edmtrain (each with a free key) and JamBase (a paid subscription, off unless you have one) — so the clubs that sell through DICE, Etix or their own box office
   (the Lincoln Factory, Marble Bar, El Club…) are listed alongside the Fillmore; one row per show with every source's
   link — date, venue, city, distance, the ticket link with the seller named (Ticketmaster, TicketWeb, AXS, Etix, DICE,
   Resident Advisor…), the bill, and each act's most popular song, playable in place; each source is reported on its

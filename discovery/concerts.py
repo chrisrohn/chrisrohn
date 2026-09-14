@@ -6,8 +6,8 @@ to new applications, so this draws the same list from what is still open:
   * who was played – Last.fm `user.getTopArtists` for `station.lastfm_user` over the last 12 months (the scrobbles of
     the Indie Discotheque playlists), plus every artist filed into this year's playlist (`concerts.playlist_years`).
     Without a Last.fm key the profile's 12-month artists stand in.
-  * where they play – six listings, each switched on by its own key (all free) and each reported on its own in the
-    health record so a dead one is never mistaken for a quiet one:
+  * where they play – six listings, each switched on by its own key (free, except JamBase) and each reported on its
+    own in the health record so a dead one is never mistaken for a quiet one:
       - Bandsintown's artist-events API (an app_id Bandsintown issued, in BANDSINTOWN_APP_ID; `bandsintown.app_id`
         is the fallback), asked artist by artist, a rotating batch a run, kept per artist for `refresh_days`. An
         app_id Bandsintown did not issue is answered 403 — or, just as often, with an empty list for every artist,
@@ -18,8 +18,8 @@ to new applications, so this draws the same list from what is still open:
         stops paging at its 1,000th result, so the horizon is split into date windows small enough to fit);
       - SeatGeek's Platform API (SEATGEEK_CLIENT_ID): every concert within the radius — it lists the clubs that sell
         through DICE, Eventbrite or their own box office, which Ticketmaster never sees;
-      - JamBase (JAMBASE_API_KEY): the widest venue-calendar aggregator, with the ticket link and its seller for
-        each show;
+      - JamBase (JAMBASE_API_KEY, a paid subscription, so off unless `jambase.enabled`): the widest venue-calendar
+        aggregator, with the ticket link and its seller for each show;
       - Edmtrain (EDMTRAIN_API_KEY): every electronic show in the configured states, the lineups the dance venues
         post themselves;
       - Resident Advisor (no key; its public GraphQL, the same one ra.co's own pages call): every listing in the
@@ -89,7 +89,7 @@ DEFAULTS: dict[str, Any] = {
     "bandsintown": {"enabled": True, "app_id": "chrisrohn.com", "give_up_after": 10, "empty_probe": BIT_EMPTY_PROBE},   # BANDSINTOWN_APP_ID overrides app_id
     "ticketmaster": {"enabled": True, "size": 200, "requests_per_run": 60},   # needs TICKETMASTER_API_KEY (free)
     "seatgeek": {"enabled": True, "per_page": 100, "requests_per_run": 40, "taxonomies": ["concert", "music_festival"]},   # needs SEATGEEK_CLIENT_ID (free)
-    "jambase": {"enabled": True, "base_url": JB_V3, "auth": "bearer", "per_page": 100, "requests_per_run": 40},   # needs JAMBASE_API_KEY (free); v1: base_url JB_V1, auth "query"
+    "jambase": {"enabled": False, "base_url": JB_V3, "auth": "bearer", "per_page": 100, "requests_per_run": 40},   # needs JAMBASE_API_KEY (a paid subscription, so off by default); v1: base_url JB_V1, auth "query"
     "edmtrain": {"enabled": True, "states": ["Michigan", "Ohio", "Ontario"], "other_genres": True},   # needs EDMTRAIN_API_KEY (free)
     "resident_advisor": {"enabled": True, "area": {"country": "us", "city": "detroit"}, "area_id": None, "page_size": 100, "requests_per_run": 30,
                          "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"},   # no key: ra.co's public GraphQL answers a browser

@@ -524,7 +524,7 @@ def test_bandsintown_empty_for_everyone_is_a_refusal(monkeypatch):
     b = out["health"]["bandsintown"]
     assert len(asked) == 8 and b["asked"] == 8 and b["failed"] == 0 and b["listed"] == 0 and b["ok"] is False and b["answers"] == {"empty": 8}
     assert b["error"].startswith("every one of 8 answers was empty (empty ×8)") and "BANDSINTOWN_APP_ID secret not set" in b["error"] and b["checked"] == 0 and b["due"] == 40 and b["app_id_from"] == "fallback"
-    assert out["health"]["seatgeek"] == {"ok": False, "error": "SEATGEEK_CLIENT_ID not set", "matched": 0} and "resident_advisor" not in out["health"]
+    assert out["health"]["seatgeek"] == {"ok": False, "error": "SEATGEEK_CLIENT_ID not set", "matched": 0} and "resident_advisor" not in out["health"] and "jambase" not in out["health"]   # paid: off unless enabled
     state = util.read_json(concerts.STATE_PATH, {})
     assert state["v"] == 2 and state["artists"] == {} and state["sources"]["ticketmaster"]["events"] == []
     # a short batch (fewer answers than the probe) that stayed empty is recorded: too few to call it a refusal
@@ -646,7 +646,7 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
     monkeypatch.setattr(concerts, "Http", lambda name, ttl_hours=20: FakeHttp(answers))
     import discovery.resolve as resolve
     monkeypatch.setattr(resolve, "resolve_all", lambda items, cfg, deadline=None, avoid=None: None)
-    cfg = {"station": {"lastfm_user": "u"}, "concerts": {"bandsintown": {"empty_probe": 2}}, "resolve": {"youtube_music": False}}
+    cfg = {"station": {"lastfm_user": "u"}, "concerts": {"bandsintown": {"empty_probe": 2}, "jambase": {"enabled": True}}, "resolve": {"youtube_music": False}}
     out = concerts.build_concerts(cfg)
     assert out["count"] == 2 and out["sources"] == ["edmtrain", "jambase", "resident_advisor", "seatgeek", "ticketmaster"]
     satin, amtrac = out["events"]
