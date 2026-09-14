@@ -7,7 +7,7 @@ import { pullRatings } from "./sync.js";
 import { refreshRecent } from "./youtube.js";
 import { render, deckOn, focusCard } from "./render.js";
 import { scoreOf, invalidateRank } from "./rank.js";
-import { loadVideos, reconcileVideos } from "./videos.js";
+import { loadVideos, reconcileVideos, videoItems } from "./videos.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -291,6 +291,8 @@ const memo = new Map();
 export function visibleItems(view = state.view) { return computeVisible(view).list; }
 /** @param {string} view */
 function computeVisible(view) {
+  // the Video tab's list lives in videos.js, keyed on its own filters and decisions (never memoised here): the deck's pages and the player's queue read it through this one door
+  if (view === "videos") return { list: videoItems(), hidden: 0 };
   const key = `${view}|${JSON.stringify(state.filters)}|${state.ratedVersion}|${state.feed?.generated_at || ""}|${state.catalog?.generated_at || ""}|${state.badVersion}|${Number(state.settings.shortlistSize) || 60}`;
   const hit = memo.get(key); if (hit) { if (view === "feed" || view === "catalog") state.shortlistHidden = hit.hidden; return hit; }
   const res = { list: listFor(view), hidden: 0 };
@@ -316,7 +318,7 @@ function listFor(view) {
     for (const it of [...mine, ...picks]) { const k = ((it.youtube && it.youtube.videoId) || it.id); if (seen.has(k)) continue; seen.add(k); all.push({ ...it, _pick: true, _year: it._year || (state.rated[it.id] && state.rated[it.id].year) }); }
     return all.filter(i => !terms.length || matches(i, terms));
   }
-  if (view === "cleanup" || view === "concerts" || view === "videos") return [];   // the Cleanup, Concerts and Video tabs are sections of their own, not lists of cards
+  if (view === "cleanup" || view === "concerts") return [];   // the Cleanup and Concerts tabs are sections of their own, not lists of cards
   if (view === "skipped") {
     // what this account thumbed down or flagged as the wrong video and is still in the feed or the catalog, newest
     // first; Undo brings any back (a flag whose video the build has since replaced is already back on its own)

@@ -106,14 +106,16 @@ export async function undo(id) {
 /** The z key: take back the last thumb. */
 export function undoLast() {
   const id = state.lastRated;
+  // back to the card that came back: the deck turns to it, the list scrolls to it
+  const backTo = () => { if (!id) return; if (deckOn()) { const i = state.order.indexOf(id); if (i >= 0) { state.deckIndex = i; render(); } } else focusCard(id); };
   if (id && id.startsWith(VIDEO_ID)) {   // the last verdict was on the Video tab
     const v = id.slice(VIDEO_ID.length); if (!videoMark(v)) { toast("Nothing to undo"); return; }
-    undoVideo(v).then(() => { if (state.view === "videos") focusCard(id); }); return;
+    undoVideo(v).then(() => { if (state.view === "videos") backTo(); }); return;
   }
   const r = id && state.rated[id];
   if (!id || !r || r.decision === "undone") { toast("Nothing to undo"); return; }
   const it = byId(id);
-  undo(id).then(() => { if (it) { if (deckOn()) { const i = state.order.indexOf(id); if (i >= 0) { state.deckIndex = i; render(); } } else focusCard(id); } });
+  undo(id).then(() => { if (it) backTo(); });
 }
 /** Restore a batch of skips and wrong-video flags (the Skipped tab's "restore all"). Local ones are free; skips filed on YouTube cost a removal each. @param {string[]} ids */
 export async function restoreAll(ids) {
