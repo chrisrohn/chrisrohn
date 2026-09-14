@@ -18,10 +18,11 @@ to new applications, so this draws the same list from what is still open:
         stops paging at its 1,000th result, so the horizon is split into date windows small enough to fit);
       - SeatGeek's Platform API (SEATGEEK_CLIENT_ID): every concert within the radius — it lists the clubs that sell
         through DICE, Eventbrite or their own box office, which Ticketmaster never sees;
-      - JamBase (JAMBASE_API_KEY, a metered free tier — 1,000 calls a month, then charged — so spent for coverage:
-        the horizon in date bands, the near future refreshed often and the far end rarely, a cursor where a run's
-        cap interrupts a band, and a ledger of calls a day kept in the state that never lets a trailing 31 days
-        pass the quota): the widest venue-calendar aggregator, with the ticket link and its seller;
+      - JamBase (JAMBASE_API_KEY, its Developer tier — non-commercial, 1,000 calls a month then charged, six months
+        of future events, attribution required (the tab credits it wherever its rows show) — so spent for coverage:
+        the six months in date bands, the near future refreshed often and the far end rarely, a cursor where a
+        run's cap interrupts a band, and a ledger of calls a day kept in the state that never lets a trailing 31
+        days pass the quota): the widest venue-calendar aggregator, with the ticket link and its seller;
       - Edmtrain (EDMTRAIN_API_KEY): every electronic show in the configured states, the lineups the dance venues
         post themselves;
       - Resident Advisor (no key; its public GraphQL, the same one ra.co's own pages call): every listing in the
@@ -94,7 +95,8 @@ DEFAULTS: dict[str, Any] = {
     # JAMBASE_API_KEY: the free tier is metered (1,000 calls a month, 3,600 an hour, then 5¢ a call), so held to
     # `monthly_quota - quota_reserve` calls in any trailing 31 days by a ledger in the state, the snapshot reused for `refresh_days`
     "jambase": {"enabled": True, "base_url": JB_V3, "auth": "bearer", "per_page": 100, "requests_per_run": 40, "monthly_quota": 1000, "quota_reserve": 100,   # v1: base_url JB_V1, auth "query"
-                "bands": [{"days": 45, "refresh_days": 2}, {"days": 120, "refresh_days": 5}, {"days": 365, "refresh_days": 10}]},   # the horizon in date bands, the near future refreshed most
+                "max_days_ahead": 180,   # the Developer tier lists six months of future events: asking further is calls for nothing
+                "bands": [{"days": 45, "refresh_days": 2}, {"days": 120, "refresh_days": 5}, {"days": 180, "refresh_days": 10}]},   # the horizon in date bands, the near future refreshed most
     "edmtrain": {"enabled": True, "states": ["Michigan", "Ohio", "Ontario"], "other_genres": True},   # needs EDMTRAIN_API_KEY (free)
     "resident_advisor": {"enabled": True, "area": {"country": "us", "city": "detroit"}, "area_id": None, "page_size": 100, "requests_per_run": 30,
                          "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"},   # no key: ra.co's public GraphQL answers a browser
@@ -875,7 +877,7 @@ def _jambase_source(state: dict, health: dict, jcfg: dict, key: str | None, http
         state["sources"]["jambase"] = {"fetched_at": None, "events": []}
         return
     now = utcnow()
-    spans = jambase_bands(jcfg, today, horizon_days)
+    spans = jambase_bands(jcfg, today, min(int(horizon_days), int(jcfg.get("max_days_ahead") or horizon_days)))   # the plan's horizon, not the tab's
     bands: dict[str, dict] = {k: v for k, v in (src.get("bands") or {}).items() if isinstance(v, dict)}
     budget = max(1, int(jcfg.get("requests_per_run", 40)))
     errors: list[str] = []

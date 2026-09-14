@@ -1149,7 +1149,7 @@ function concertsFixture() {
   const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
   return {
     generated_at: new Date().toISOString(), center: { name: "Detroit, MI", lat: 42.3314, lon: -83.0458 }, radius_miles: 150, months_ahead: 12,
-    artists_total: 1200, artists_checked: 900, artists_with_shows: 2, sources: ["bandsintown", "ticketmaster"], health: { bandsintown: { ok: true }, ticketmaster: { ok: true } }, count: 3,
+    artists_total: 1200, artists_checked: 900, artists_with_shows: 2, sources: ["bandsintown", "jambase", "ticketmaster"], health: { bandsintown: { ok: true }, ticketmaster: { ok: true }, jambase: { ok: true } }, count: 3,
     events: [
       { id: "bit:1", artist: "Cut Copy", artists: ["Cut Copy"], lineup: ["Cut Copy", "Opener"], date: day(3), time: "20:00", venue: "Saint Andrew's Hall", city: "Detroit", region: "MI", country: "United States", miles: 0.4,
         tickets: "https://www.axs.com/events/1/cut-copy", ticketer: "AXS", url: "https://www.bandsintown.com/e/1", status: "available", sources: ["bandsintown"], links: { bandsintown: "https://www.bandsintown.com/e/1" }, festival: false },
@@ -1179,6 +1179,9 @@ test("the Concerts tab: shows nearby, soonest first, with the ticket seller name
   await expect(page.locator("#count-concerts")).toHaveText("3");
   await expect(page.locator("#con-summary")).toContainText("3 shows within 150 miles of Detroit, MI by 2 artists you played this year");
   await expect(page.locator("#con-summary")).toContainText("900 of 1,200 played artists checked so far");
+  // the credits line names every listing the rows came from; JamBase's Developer tier requires its wording, linked
+  await expect(page.locator("#con-credits")).toHaveText("Listings: Bandsintown · Concert data provided by JamBase · Ticketmaster");
+  await expect(page.locator("#con-credits a", { hasText: "Concert data provided by JamBase" })).toHaveAttribute("href", "https://www.jambase.com");
   expect(new URL(page.url()).searchParams.get("view")).toBe("concerts");
   // the feed's controls step aside; the tab's own take their place
   await expect(page.locator("#sort")).toBeHidden();

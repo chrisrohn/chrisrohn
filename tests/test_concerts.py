@@ -657,10 +657,10 @@ def test_build_concerts_with_every_source(monkeypatch, sandbox):
     assert set(amtrac["links"]) == {"resident advisor", "jambase", "edmtrain", "seatgeek"} and amtrac["title"] == "Amtrac [Live]"
     h = out["health"]
     assert h["seatgeek"] == {"ok": True, "events": 1, "matched": 1} and h["edmtrain"] == {"ok": True, "events": 1, "matched": 1}
-    jb = h["jambase"]   # three bands (45, 120, 360 days), one call each, the same fake event in every one, folded to one row
+    jb = h["jambase"]   # three bands (45, 120, 180 days: the Developer tier's six months, not the tab's year), one call each, the same fake event in every one, folded to one row
     assert jb["ok"] is True and jb["calls"] == 3 and jb["matched"] == 3 and jb["quota"] == {"calls": 3, "used": 3, "window_days": 31, "quota": 1000, "reserve": 100, "remaining": 897}
     assert [(b["from"], b["to"], b["refresh_days"], b["complete"], b["calls"]) for b in jb["bands"]] == [(TODAY.isoformat(), (TODAY + timedelta(days=45)).isoformat(), 2.0, True, 1),
-        ((TODAY + timedelta(days=46)).isoformat(), (TODAY + timedelta(days=120)).isoformat(), 5.0, True, 1), ((TODAY + timedelta(days=121)).isoformat(), (TODAY + timedelta(days=360)).isoformat(), 10.0, True, 1)]
+        ((TODAY + timedelta(days=46)).isoformat(), (TODAY + timedelta(days=120)).isoformat(), 5.0, True, 1), ((TODAY + timedelta(days=121)).isoformat(), (TODAY + timedelta(days=180)).isoformat(), 10.0, True, 1)]
     assert jb["planned_calls_per_month"] == 24   # 1 page × (30/2 + 30/5 + 30/10)
     assert h["resident_advisor"] == {"ok": True, "events": 1, "matched": 1} and h["ticketmaster"] == {"ok": True, "events": 1, "matched": 1}
     assert h["bandsintown"]["ok"] is False and h["bandsintown"]["error"].startswith("every one of 2 answers was empty (empty ×2)") and h["bandsintown"]["app_id_from"] == "secret"
@@ -763,7 +763,7 @@ def test_jambase_source_walks_the_bands_with_a_cursor(monkeypatch):
         return {"success": True, "pagination": {"page": page, "totalPages": pages, "totalItems": n, "nextPage": "https://x" if page < pages else None}, "events": evs}
     http = FakeHttp(answers)
     state = {"v": 2, "artists": {}, "sources": {}, "quota": {"jambase": {}}}
-    jcfg = {**concerts.DEFAULTS["jambase"], "requests_per_run": 2}
+    jcfg = {**concerts.DEFAULTS["jambase"], "requests_per_run": 2, "max_days_ahead": 365, "bands": [{"days": 45, "refresh_days": 2}, {"days": 120, "refresh_days": 5}, {"days": 365, "refresh_days": 10}]}
     def run():
         health = {}
         quota = concerts.CallQuota(state["quota"]["jambase"], quota=1000, reserve=100, today=TODAY)
