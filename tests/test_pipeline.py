@@ -662,6 +662,8 @@ def test_cli_parses_commands(monkeypatch):
     import discovery.build as build
     import discovery.catalog as catalog
     import discovery.profile as profile
+    import discovery.videos as videos
+    monkeypatch.setattr(videos, "build_videos", lambda cfg, deadline_minutes=None, profile=None: calls.append("videos" if deadline_minutes is None else f"videos<{deadline_minutes:.0f}"))
     monkeypatch.setattr(build, "build_feed", lambda cfg, budget_minutes=None: calls.append("build" if budget_minutes is None else f"build<{budget_minutes:.0f}"))
     monkeypatch.setattr(profile, "build_profile", lambda cfg, http: calls.append("profile"))
     monkeypatch.setattr(catalog, "build_catalog", lambda cfg, deadline_minutes=None: calls.append("catalog" if deadline_minutes is None else f"catalog<{deadline_minutes:.0f}"))
@@ -675,6 +677,9 @@ def test_cli_parses_commands(monkeypatch):
     monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}, "catalog": {"in_daily": True}})
     assert cli.main(["daily"]) == 0 and calls[-2:] == ["build", "catalog<40"]        # … unless asked to ride along, with what is left of the job
     assert calls[-2] == "build"                                                      # no job budget configured: unbounded, as before
+    assert cli.main(["videos"]) == 0 and calls[-1] == "videos"                       # the Video tab's list: its own workflow …
+    monkeypatch.setattr(cli, "load_config", lambda: {"profile": {}, "videos": {"in_daily": True, "job_budget_minutes": 41}})
+    assert cli.main(["daily"]) == 0 and calls[-2:] == ["build", "videos<41"]         # … and a rewrite at the end of the daily job when asked
     with pytest.raises(SystemExit):
         cli.main(["--no-such-flag"])
 

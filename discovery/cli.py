@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         if (cfg.get("concerts") or {}).get("in_daily", False):
             left = float((cfg.get("catalog") or {}).get("job_budget_minutes", 40)) - (time.monotonic() - t0) / 60
             build_concerts(cfg, deadline_minutes=max(0.0, left))
-        if (cfg.get("videos") or {}).get("in_daily", True):
+        if (cfg.get("videos") or {}).get("in_daily", False):
             # the Video tab's list is rewritten from the cache (decisions made on the tab leave it, songs kept since
             # join it); lookups only with what is left of the job, the Videos workflow does the bulk of them
             left = float((cfg.get("videos") or {}).get("job_budget_minutes", 41)) - (time.monotonic() - t0) / 60
