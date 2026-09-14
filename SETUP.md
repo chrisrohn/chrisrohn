@@ -34,7 +34,9 @@ always means the YouTube Music library playlists, `<year> | Indie Discotheque`, 
 4. **Settings → Secrets and variables → Actions → New repository secret**: `LASTFM_API_KEY` from
    https://www.last.fm/api/account/create (instant, free, any app name). Optional but recommended: `DISCOGS_TOKEN`
    from a free Discogs account (Settings → Developers → Generate new token) — Discogs master years are the
-   strongest source for original release dates of disco/electronic records.
+   strongest source for original release dates of disco/electronic records. For the Concerts tab (all optional,
+   each one another listing; all free but JamBase): `BANDSINTOWN_APP_ID`, `TICKETMASTER_API_KEY`,
+   `SEATGEEK_CLIENT_ID`, `EDMTRAIN_API_KEY`, and `JAMBASE_API_KEY` on its metered free tier — see *Concerts* below.
 5. **Actions → Discover → Run workflow.** Afterwards: merging a change to `site/` publishes in about a minute
    (the *Publish site* workflow); merging a change to `discovery/` runs the full data build first, 20–30 min.
    Feed data refreshes on the morning schedule (three slots, first one wins — see *How the site is built* below)
@@ -305,26 +307,69 @@ session that the playlist's owner approved in that browser.
   time after the feed). Nothing here spends YouTube API quota; the Last.fm key is the only one it needs.
 - **Concerts** tab — who is playing near Detroit. The **Concerts** workflow (its own job, 13:33 ET) takes every
   artist played on Indie Discotheque in the last year — the Last.fm 12-month chart of `station.lastfm_user`, plus
-  anyone filed into this year's playlist (`concerts.playlist_years`) — and asks Bandsintown's artist-events API
-  where each of them plays next, as many a run as `time_budget_minutes` allows (about six a second; `artists_per_run`
-  caps it when set) and again after `refresh_days`, so the list fills in over its first run or two and then keeps pace. Bandsintown's API is free but refuses any `app_id` it did not issue
-  (every request comes back 403 and the tab is Ticketmaster-only, which the summary line says): an artist gets a key
-  under Bandsintown for Artists → Settings → General → *Get API Key*; anyone else asks biz@bandsintown.com. Put it
-  in the `BANDSINTOWN_APP_ID` secret (`concerts.bandsintown.app_id` is only the fallback). A run of
-  `concerts.bandsintown.give_up_after` straight failures ends the batch for that run rather than asking 1,500 times. Every venue within `radius_miles` (80) of `center` (Detroit) makes the list, out to
-  `months_ahead`; each act's most popular song comes from Last.fm `artist.getTopTracks` (Deezer's artist top without
-  a key), is resolved on YouTube Music through the feed's resolver and cache, and plays in place from the row. Add a
-  free `TICKETMASTER_API_KEY` secret (developer.ticketmaster.com, 5,000 calls a day; the list needs five) and
-  Ticketmaster's Discovery API contributes every music event it lists in the radius — matched against the same
-  artists — with prices, sale status and the venue's picture; a show on both sources is one row with both links.
-  TicketWeb (Ticketmaster's club arm) and AXS have no public API: TicketWeb's inventory rides the Discovery API,
-  and Bandsintown's ticket links lead to whichever seller the venue uses, so the button names the seller from the
-  link (Ticketmaster, TicketWeb, AXS, Etix, DICE, Eventbrite…). The report is `site/data/concerts.json`; the
-  per-artist state (last asked, shows, top song) is `data/concerts_state.json`. On the tab: search matches artists,
-  venues, cities and song titles; selects for when (this week, 30, 90 days), how far (25/50 miles) and the order
-  (soonest, most played, nearest, artist); `space` plays the first song, `j`/`k` walk the list; an artist's name
-  opens the sheet, which also lists their dates. `python -m discovery concerts` runs it by hand; nothing here spends
-  YouTube API quota.
+  anyone filed into this year's playlist (`concerts.playlist_years`) — and draws their shows from six listings, each
+  switched on by its own key (free, except JamBase) and each reported on its own in the tab's summary line (so a dead one is never mistaken
+  for a quiet one):
+  - **Bandsintown** (artist by artist): asks its artist-events API where each act plays next, as many a run as
+    `time_budget_minutes` allows (about six a second; `artists_per_run` caps it when set) and again after
+    `refresh_days`, so the list fills in over its first run or two and then keeps pace. Bandsintown's API is free but
+    refuses any `app_id` it has not approved — with a 403 on every request, or just as often with an empty list or
+    *"[NotFound] The artist was not found"* for every artist, which looks exactly like nobody touring. An artist
+    gets a key under Bandsintown for Artists → Settings → General → *Get API Key*; anyone else asks
+    biz@bandsintown.com — and a key that still answers empty for everyone needs Bandsintown to enable it for the
+    public API (the same address). Put it in the `BANDSINTOWN_APP_ID` **repository** secret (Settings → Secrets and
+    variables → Actions; a secret scoped to the *github-pages* environment never reaches the build job, and a
+    *variable* is not a secret): `concerts.bandsintown.app_id` is only the fallback. The build logs whether the key
+    came from the secret or the fallback (never its value), the health record's `bandsintown.app_id_from` says the
+    same, and `bandsintown.answers` tallies what Bandsintown said (`listed`, `empty`, `not found`, or its message).
+    A run of `concerts.bandsintown.give_up_after` straight failures ends the batch for that run rather than asking
+    1,500 times, and a run whose first `concerts.bandsintown.empty_probe` answers (the most played artists first)
+    list no show anywhere is treated as refused: nothing is recorded as checked, the summary line says so and names
+    where the key came from, and the batch is asked again once the key is right.
+  - **Ticketmaster** (`TICKETMASTER_API_KEY`, free at developer.ticketmaster.com, 5,000 calls a day; the list needs
+    a few dozen): every music event its Discovery API lists in the radius — matched against the same artists — with
+    prices, sale status and the venue's picture. TicketWeb (Ticketmaster's club arm) rides the same API.
+  - **SeatGeek** (`SEATGEEK_CLIENT_ID`, free at seatgeek.com/account/develop): every concert and music festival its
+    Platform API lists in the radius, which includes the clubs that sell through DICE, Eventbrite or their own box
+    office and never appear on Ticketmaster; its price is its lowest listing (resale included) and is labelled so.
+  - **JamBase** (`JAMBASE_API_KEY`, data.jambase.com — metered: the free tier is 1,000 calls a month and 3,600 an
+    hour, and every call past that is charged): the widest venue-calendar aggregator, every show in the radius with
+    the ticket link and its seller. The calls are spent for coverage, not freshness: a page of 100 events, every act
+    on every bill, is one call, so one region scan covers all 9,000 played artists at once, and the horizon is split
+    into date bands (`concerts.jambase.bands`: 45 days refreshed every 2, to 120 every 5, to 365 every 10), each
+    with its own snapshot, so the near future — where announcements, sold-outs and cancellations happen — is a few
+    pages refreshed often and the far end, most of the events, is fetched rarely. A run touches only the bands that
+    are due, nearest first, within `requests_per_run` (40); a band the cap interrupts keeps a date cursor and
+    continues from it next run (its older rows kept meanwhile), so a small cap still walks the whole year. A ledger
+    in `data/concerts_state.json` (`quota.jambase.days`, one count a day, committed with the data) holds every run,
+    scheduled or by hand, to `monthly_quota - quota_reserve` (900) calls in any trailing 31 days — which bounds every
+    calendar month and every anniversary month — counting each request before it goes out (there are no retries)
+    and stopping the paging where the ledger says. The health row in `site/data/concerts.json` lists the bands
+    (from, to, fetched, complete, calls, pages), the ledger (calls this run, used in the window, remaining) and
+    `planned_calls_per_month`, what the cadences add up to at the pages each band actually needs — tune the bands
+    if it nears 900. Requests are spaced 1.1 s apart, under the hourly rate. `concerts.jambase.base_url` and `auth`
+    point at the v3 API (bearer token); the v1 API at `https://www.jambase.com/jb-api/v1` with `auth: query` still
+    answers.
+  - **Edmtrain** (`EDMTRAIN_API_KEY`, free, edmtrain.com/developer-api): every electronic show in
+    `concerts.edmtrain.states` (Michigan, Ohio, Ontario), the lineups the dance venues post themselves; the radius is
+    applied afterwards, live streams are left out.
+  - **Resident Advisor** (no key): its public GraphQL, the one ra.co's own event pages call, for every listing in
+    `concerts.resident_advisor.area` (`ra.co/events/us/detroit`; the numeric area id is looked up once and
+    remembered, or set `area_id`), with the venue's coordinates and RA's own ticket link.
+
+  Every venue within `radius_miles` (80) of `center` (Detroit) makes the list, out to `months_ahead`; a show found by
+  several sources is one row: the listing the promoter posted (Bandsintown, then RA, JamBase, Edmtrain) leads with
+  its bill, the ticket sellers and aggregators add the link, price, status and picture it lacks, and every source's
+  link is on the row. A billing qualifier ("Amtrac [Live]", "(DJ set)") never stops a match. Each act's most popular
+  song comes from Last.fm `artist.getTopTracks` (Deezer's artist top without a key), is resolved on YouTube Music
+  through the feed's resolver and cache, and plays in place from the row. Bandsintown's, JamBase's and Edmtrain's
+  ticket links lead to whichever seller the venue uses, so the button names the seller from the link (Ticketmaster,
+  TicketWeb, AXS, Etix, DICE, Eventbrite, Resident Advisor…). The report is `site/data/concerts.json`; the per-artist
+  state (last asked, shows, top song) and each area source's last snapshot are `data/concerts_state.json`. On the
+  tab: search matches artists, venues, cities and song titles (`source:seatgeek` narrows to one listing); selects for
+  when (this week, 30, 90 days), how far (25/50 miles) and the order (soonest, most played, nearest, artist); `space`
+  plays the first song, `j`/`k` walk the list; an artist's name opens the sheet, which also lists their dates.
+  `python -m discovery concerts` runs it by hand; nothing here spends YouTube API quota.
 - Subscribe to `https://chrisrohn.com/feed.xml` in any RSS reader for the same list (with release dates, artwork and
   tags; the internal score stays internal).
 

@@ -21,10 +21,15 @@ tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist
 - A **Cleanup** tab for the year playlists: every song held more than once — the same video twice, the same song in two years, two uploads of it (audio track and video), two editions of it (original and remix, radio edit and extended mix) — with every copy laid out to compare (edition, length, album, plays, whether it plays here), played in place, kept, removed or moved to another year (the catalogue-verified year marked); a **playability audit** that asks YouTube which tracks cannot play in the US at all (deleted, private, region-blocked) and finds playable replacements, overnight for free or on the spot; paced by the API quota and remembered across devices
 - A **Concerts** tab, the Songkick page rebuilt from open sources: every upcoming show within 80 miles of Detroit
   by an artist played on Indie Discotheque in the last year (the Last.fm 12-month chart plus this year's playlist),
-  from Ticketmaster (free key) and Bandsintown (an app_id it issued) — date, venue, city, distance, the ticket link with the seller
-  named (Ticketmaster, TicketWeb, AXS, Etix, DICE…), the bill, and each act's most popular song, playable in place;
-  its own afternoon workflow (`discovery/concerts.py`, `site/data/concerts.json`), with filters for when, how far
-  and in what order, and the artist sheet lists an act's dates
+  from six listings — Bandsintown (an app_id it issued), Resident Advisor (no key), Ticketmaster, SeatGeek and
+  Edmtrain (each with a free key) and JamBase (a metered free tier: the year is scanned in date bands, the near future
+  often and the far end rarely, and a ledger in the state holds it under its 1,000 calls a month) — so the clubs that sell through DICE, Etix or their own box office
+  (the Lincoln Factory, Marble Bar, El Club…) are listed alongside the Fillmore; one row per show with every source's
+  link — date, venue, city, distance, the ticket link with the seller named (Ticketmaster, TicketWeb, AXS, Etix, DICE,
+  Resident Advisor…), the bill, and each act's most popular song, playable in place; each source is reported on its
+  own in the summary line, and a Bandsintown key that answers empty for everyone is called a refusal, not a quiet
+  year; its own afternoon workflow (`discovery/concerts.py`, `site/data/concerts.json`), with filters for when, how
+  far and in what order, and the artist sheet lists an act's dates
 - A **Video** tab, the one place videos live: the year playlists hold audio tracks, and the official video YouTube Music pairs with each of them is reviewed here — every song in every year playlist (the **Videos** workflow asks YouTube Music about the library a batch a day, free, until every row has been asked) and every song kept from the feed whose card knows its video (the resolver asks as it resolves, so a Keep brings the video the same day). Each row plays in place; **▲︎ add** puts the video into the single music-video playlist ([Indie Discotheque · videos](https://music.youtube.com/playlist?list=PLTW5JZnPjE_r0Y2WwYFLFAbEVZTlt6xuX)), the only thing the tab ever writes, and **▼︎ pass** is free; decisions travel with the ratings to every device and to the build, and what the playlist already holds is hidden
 - Audio-only where YouTube Music has it: the resolver prefers the audio track over the video (in search and on album pages, swapping a video for the audio track it is paired with) and the original issue over a deluxe edition; a card still playing a video is asked again every month, ⚙ → *Stats* counts how many cards play audio, and the Cleanup tab lists every playlist row filed as the video with a one-tap swap for its audio track
 - Every card plays: a song is a card only once it has its YouTube Music audio track; anything without one is left out of the day and tried again on a later build, so there is no "playable" filter to think about
