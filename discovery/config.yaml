@@ -218,7 +218,7 @@ sources:
   # Every release from this year and the backfill window is returned on every run; the feed decides what is fresh.
   ytmusic_artists:
     enabled: true
-    top_artists: 250          # checked per run, rotating through the pool so everyone gets covered every few days
+    top_artists: 500          # checked per run (about 0.3 s each), rotating through the pool so everyone comes round every three days
     pool: 1500                # the strongest N profile artists of the kinds below, by affinity
     kinds: [direct, similar, genre]
   # Curator / session channels on YouTube (no record labels: the feed follows artists and genres, not imprints).
@@ -267,11 +267,13 @@ sources:
     feeds: [most-played]     # most-recent-albums 404s for the us storefront (2026-09-08); most-played still serves
     genres: [Alternative, Dance, Electronic, Pop, Indie Pop]
   # Release groups of your profile artists by MusicBrainz artist id (1 req/s: `top_artists` a run, rotating through
-  # `pool`). The first-release-date window is the backfill window (see `backfill`), else `days`.
+  # `pool`). The first-release-date window is the backfill window (see `backfill`), else `days`. The slowest watch
+  # by far (a second an artist, more when MusicBrainz is over its limit) and the one whose releases are kept least,
+  # so it checks fewer artists a run than YouTube Music and Deezer and leaves the minutes to the resolver.
   musicbrainz_artists:
     enabled: true
     days: 60                 # first-release-date window when backfill is off (default 60; else listenbrainz_fresh.days)
-    top_artists: 120
+    top_artists: 80
     pool: 1500
     kinds: [direct, similar, genre]
     limit: 40                # release groups per artist query
@@ -339,6 +341,11 @@ ranking:
   max_items: 500           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
                            # …with room for a full backfill on top of a rich fresh window: this cut is by score, so too
                            # low a cap silently drops the fill it was told to make (the older cards score lowest)
+  # Current-timeframe candidates carried into resolution: max_items plus this slack, counting only items that can be
+  # cards today (a cached audio hit, or a lookup still to make — build.py reads the resolver's cache first, so a
+  # video with no audio side yet or a miss not yet due takes no slot). The slack covers what resolution then folds,
+  # drops for length or hides as already filed.
+  candidate_slack: 60
   min_score: 0.6
   # One act must not own the day: past this many tracks by the same artist each further one loses `repeat_penalty`
   # from its score, so it drops down the list. Nor may one tag crawler: past `max_unknown_per_source` tracks by
@@ -432,7 +439,13 @@ catalog:
 
 resolve:
   youtube_music: true
-  max_lookups_per_run: 700
+  # Lookups a run. The build picks its candidates with this cache in hand (build.py: an item the cache already
+  # knows is not a card today — a video with no audio side, a miss not yet due — takes no candidate slot), so the
+  # budget goes to songs that can join the day; the wall clock below is the real limit (a lookup is 1–2 s).
+  max_lookups_per_run: 800
+  # The share of `time_budget_minutes` YouTube lookups may use before the year lookups get the rest. A card whose
+  # year arrives tomorrow (the year cache carries it over) beats a card not shown today, so YouTube comes first.
+  youtube_share: 0.7
   # Every card plays its YouTube Music audio track. A song with no match today is not a card today: its miss is
   # remembered and looked up again after retry_misses_days (a new release often gets its audio track a few days
   # after the blogs write about it), within max_lookups_per_run; a video-only match is asked for its audio side again
