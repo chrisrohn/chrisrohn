@@ -290,6 +290,14 @@ session that the playlist's owner approved in that browser.
   `resolve.retry_misses_days` (7; a new release often gets its audio track a few days after the blogs write about
   it), a video is asked for its audio side again every `resolve.audio_recheck_days`, and unknown uploads are
   labelled a batch a run. There is no "playable" filter on the site because there is nothing for it to hide.
+- **The slots go to songs that can join the day.** Before it picks its candidates the build reads the resolver's
+  cache (`resolve.cached_states`, no requests): a sighting whose cached match already sits in a year playlist or
+  the Skipped playlist is hidden on the spot, and the `ranking.max_items` + `ranking.candidate_slack` current slots
+  (and the `backfill.candidates` older ones) count only what can be a card today — a cached audio hit, or a lookup
+  still to make. What the cache says is waiting on a heal or a retry rides along outside the count. Without this a
+  day's slots filled up with yesterday's answers (on 2026-09-15, 1,160 candidates held 163 lookups: the rest were
+  cached videos, misses and songs already filed) and the lookup budget went unspent while thousands of fresh
+  sightings waited below the cut.
 - **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
   Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
   the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
@@ -420,7 +428,10 @@ Everything lives in `discovery/config.yaml`:
   is asked again, `time_budget_minutes` for the workflow, `in_daily` / `job_budget_minutes` for the rewrite at the end
   of the daily job; `youtube_music.videos_playlist_id` is the one playlist approved videos go to.
 - `ranking.max_items` — how many songs a day holds (500), cut by score after the backfill (keep it clear of
-  `backfill.target` + `backfill.max`).
+  `backfill.target` + `backfill.max`); `ranking.candidate_slack` — live slots beyond it carried into resolution (60),
+  for what resolution then folds, drops or hides.
+- `resolve.max_lookups_per_run` — YouTube Music lookups a run (800; the wall clock is the real limit) and
+  `resolve.youtube_share` — the share of the resolve window they get before the year lookups (0.7).
 - `resolve.min_length` / `max_length` — the song-length range (1:55–9:31): shorter is an interlude, longer a mix,
   neither is a card; `resolve.max_ytmusic_date_lookups_per_run` — how many undated tracks a run ask YouTube Music
   for the upload's own release date.
@@ -491,7 +502,9 @@ tokens, and wires the header buttons; `site/src/theme.js` hooks ⚙ → *Theme* 
 nothing — no feed, no caches, the whole day lost. So `daily` gives itself `job.budget_minutes` (36) and hands the
 feed whatever the profile build did not use. The feed splits that: fetching the sources gets
 `sources.time_budget_minutes` (14) or half of what is left, whichever is smaller, and YouTube resolution plus year
-verification get the rest, capped at `resolve.time_budget_minutes` (28). Every slow loop honours its share — the
+verification get the rest, capped at `resolve.time_budget_minutes` (28) — of which YouTube lookups may use
+`resolve.youtube_share` (0.7) before the year lookups take what remains, because a card dated tomorrow beats a card
+not shown today. Every slow loop honours its share — the
 three artist watches stop mid-batch and leave their rotating cursor exactly where they stopped, the resolver and the
 year lookups write their caches every 25 lookups — so a run cut short is not work lost but the next run's starting
 point, and a slow catalogue day still publishes a feed. Cache rows nothing has touched for `resolve.cache_keep_days`

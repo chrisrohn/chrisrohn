@@ -10,9 +10,18 @@ no match, a video-only match, or an upload whose kind is not known yet is left o
 later build (the resolver retries misses after `resolve.retry_misses_days`, re-asks video hits for their audio side
 every `resolve.audio_recheck_days`, and labels unknown uploads a batch a run).
 
+The candidates are chosen with the resolver's cache in hand (`resolve.cached_states`, no requests): an item whose
+cached match is already in a playlist is hidden before it takes a slot, and the day's current slots
+(`ranking.max_items` plus `ranking.candidate_slack`) and older slots (`backfill.candidates`) count only items that
+can become cards today — a cached audio hit, or an item that still needs a lookup. Items the cache already knows
+cannot be cards today (a video with no audio side yet, a miss not yet due for a retry) ride along outside the count
+for their heals and retries, so the lookup budget is spent on songs that can join the day rather than on re-reading
+yesterday's answers.
+
 The build is bounded: `budget_minutes` (the daily job's, see cli.py) is split between fetching the sources and
-resolving what they found, so the job commits a feed instead of being killed at its timeout. Every slow loop keeps
-a cursor or a cache, so whatever a run does not reach is simply the next run's work.
+resolving what they found, so the job commits a feed instead of being killed at its timeout. Of the resolving share,
+YouTube lookups get `resolve.youtube_share` before the year lookups take the rest. Every slow loop keeps a cursor or
+a cache, so whatever a run does not reach is simply the next run's work.
 """
 from __future__ import annotations
 
@@ -23,7 +32,7 @@ from datetime import date, timedelta
 from .learn import learn_from_history, load_ratings, merge_ratings, public_summary, wrong_videos
 from .models import Item
 from .profile import find_duplicates, load_profile
-from .resolve import audio_summary, collapse_shared_videos, drop_by_length, is_audio, resolve_all, video_summary
+from .resolve import AUDIO, LOOKUP, audio_summary, cached_states, collapse_shared_videos, drop_by_length, is_audio, resolve_all, video_summary
 from .score import dedupe, diversify, score_items
 from .sources import run_sources
 from .unavailable import build_report as unavailable_report
@@ -63,12 +72,18 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     log.info("%d raw sightings → %d unique items", len(raw), len(items))
 
     rcfg = cfg["ranking"]
-    resolve_minutes = float((cfg.get("resolve") or {}).get("time_budget_minutes") or 0) or None
+    rescfg = cfg.get("resolve") or {}
+    resolve_minutes = float(rescfg.get("time_budget_minutes") or 0) or None
     if budget_minutes is not None:      # …and what is left of the job's own budget, whichever is less
         resolve_minutes = min(resolve_minutes or job.remaining_minutes, job.remaining_minutes)
-    log.info("time: %.1f min left of the build's budget; %.1f of it for YouTube and the year lookups",
-             job.remaining_minutes, resolve_minutes or float("inf"))
+    # YouTube lookups are what make cards; they get their share of the window first, and the year lookups
+    # (MusicBrainz at one request a second) whatever is left — a card dated tomorrow beats a card not shown today
+    yt_share = min(1.0, max(0.0, float(rescfg.get("youtube_share", 1.0) or 1.0)))
+    yt_minutes = resolve_minutes * yt_share if resolve_minutes else None
+    log.info("time: %.1f min left of the build's budget; %.1f of it for YouTube and the year lookups (YouTube's share %.1f)",
+             job.remaining_minutes, resolve_minutes or float("inf"), yt_minutes or float("inf"))
     deadline = Deadline(resolve_minutes)
+    yt_deadline = Deadline(yt_minutes)
     # drop things already in your year playlists (kept) or the Skipped playlist (skipped)
     saved = profile.get("saved") or {}
     saved_videos = {v.get("videoId") for v in saved.values() if isinstance(v, dict) and v.get("videoId")}
@@ -83,12 +98,28 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     today = date.today()
     # the current timeframe first; the older releases the artist watch found are candidates only to fill a gap
     fresh, older = split_fresh(items, cfg, today)
-    fresh = [i for i in fresh if i.score >= floor][: max_items + 60]
+    fresh = [i for i in fresh if i.score >= floor]
+    older = [i for i in older if i.score >= floor]
+    # what the resolver's cache already knows, free of charge: a match that is already in a playlist is hidden here,
+    # before it can take a candidate slot (the exact test by video id, applied again after resolution for new hits)
+    states = cached_states(fresh + older, cfg, avoid=profile["wrong_videos"])
+    if rcfg.get("hide_seen", True):
+        before = len(fresh) + len(older)
+        fresh = [i for i in fresh if not _known_saved(i, states, saved_videos)]
+        older = [i for i in older if not _known_saved(i, states, saved_videos)]
+        if before - len(fresh) - len(older):
+            log.info("hid %d items whose cached YouTube match is already in a playlist", before - len(fresh) - len(older))
+    # the slots count only what can become a card today (a cached audio hit, or a lookup still to make); what the
+    # cache says is waiting on a heal or a retry rides along outside the count, so it costs the day nothing
+    slack = int(rcfg.get("candidate_slack", 60) or 0)      # live slots beyond max_items, for what resolution then folds, drops or hides
+    fresh, fresh_live = select_candidates(fresh, max_items + slack, states)
     # only the best older candidates are carried into resolution, so the lookup budget is spent where it can pay off
-    older = [i for i in older if i.score >= floor][: int((cfg.get("backfill") or {}).get("candidates", 600) or 0)]
+    older, older_live = select_candidates(older, int((cfg.get("backfill") or {}).get("candidates", 600) or 0), states)
     items = fresh + older
-    log.info("%d candidates in the current timeframe, %d older ones held in reserve (backfill window %d years)", len(fresh), len(older), backfill_years(cfg))
-    resolve_all(items, cfg, deadline, avoid=profile["wrong_videos"])
+    lookups = sum(1 for i in items if states.get(i.key, (LOOKUP, None))[0] == LOOKUP)
+    log.info("%d candidates in the current timeframe (%d can be cards today, %d riding along for a heal or a retry), %d older ones held in reserve (%d live); "
+             "%d need a YouTube lookup (backfill window %d years)", len(fresh), fresh_live, len(fresh) - fresh_live, len(older), older_live, lookups, backfill_years(cfg))
+    resolve_all(items, cfg, yt_deadline, avoid=profile["wrong_videos"])
     # resolution renames a release to the track its video is (promote), which can give it the key of a track already in
     # the list; the score order puts the stronger one first, so the merge keeps its video and folds in the other's sources
     items.sort(key=lambda i: (-i.score, i.artist_norm))
@@ -200,6 +231,29 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     http.save()
     log.info("feed: %d items (%d new today)", payload["count"], payload["new_today"])
     return payload
+
+
+def _known_saved(it: Item, states: dict[str, tuple[str, str | None]], saved_videos: set[str]) -> bool:
+    """The cache already pairs this item with a video that sits in a year playlist or the Skipped playlist."""
+    vid = states.get(it.key, (LOOKUP, None))[1]
+    return bool(vid) and vid in saved_videos
+
+
+def select_candidates(items: list[Item], cap: int, states: dict[str, tuple[str, str | None]]) -> tuple[list[Item], int]:
+    """The candidates carried into resolution, in score order: the live ones (a cached audio hit, or an item that
+    needs a lookup) up to `cap`, plus every item the cache already knows is not a card today (a video with no
+    audio side, a miss not yet due), which rides along uncounted for its heal or its retry. Returns (the list, how
+    many are live). Without a cache preview every item counts as live, exactly as before."""
+    out: list[Item] = []
+    live = 0
+    for it in items:
+        state = states.get(it.key, (LOOKUP, None))[0]
+        if state in (AUDIO, LOOKUP):
+            if live >= cap:
+                continue
+            live += 1
+        out.append(it)
+    return out, live
 
 
 def only_audio(items: list[Item]) -> list[Item]:

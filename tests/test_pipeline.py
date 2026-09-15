@@ -276,6 +276,7 @@ def test_the_build_splits_its_budget_between_fetching_and_resolving(monkeypatch,
 
     cfg = _cfg()
     cfg["sources"]["time_budget_minutes"] = 14      # more than half of the budget below: the job's share wins
+    cfg["resolve"]["youtube_share"] = 1.0
     build.build_feed(cfg, budget_minutes=20)
     assert 9.5 < seen["sources"].remaining_minutes <= 10                     # half of the 20 the job had left
     assert 19 < seen["resolve"].remaining_minutes <= 20                      # …and the rest, the configured 28 being more
@@ -287,6 +288,13 @@ def test_the_build_splits_its_budget_between_fetching_and_resolving(monkeypatch,
     build.build_feed(cfg)                                                    # no job budget: only the configured windows
     assert 2.5 < seen["sources"].remaining_minutes <= 3
     assert 27 < seen["resolve"].remaining_minutes <= 28
+
+    # YouTube lookups get their configured share of the resolve window first; the year lookups take the rest
+    cfg["resolve"]["youtube_share"] = 0.7
+    build.build_feed(cfg, budget_minutes=20)
+    assert 13.5 < seen["resolve"].remaining_minutes <= 14
+    live = _cfg()
+    assert 0.5 <= live["resolve"]["youtube_share"] <= 0.9                    # config.yaml: cards first, but the years still get a run
 
 
 def test_discover_playlists_via_channel():
@@ -1721,3 +1729,130 @@ def test_only_audio_cards_and_misses_are_tried_again(monkeypatch, sandbox):
     util.write_json(resolve.YT_CACHE, {legacy.key: {"seen": stale, "yt": None, "v": resolve.CACHE_VERSION}})
     searches.clear(); resolve.resolve_all([legacy], cfg)
     assert not searches
+
+
+
+def test_cached_states_reads_the_cache_without_a_request(monkeypatch, sandbox):
+    """The build's preview of the resolver's cache: the state each item would be in after resolve_all read the cache,
+    and the video it would play — with the same verdicts on stale, flagged, out-of-range and expired rows."""
+    import sys
+    import types
+
+    from discovery import resolve
+
+    class NoNet:
+        def __getattr__(self, name):
+            raise AssertionError("cached_states must not open the client")
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=NoNet))
+    cfg = _cfg()
+    today = date.today().isoformat()
+    long_ago = (date.today() - timedelta(days=30)).isoformat()
+    audio = Item(artist="Jungle", title="Keep Moving", kind="track")
+    video = Item(artist="Jungle", title="Candle Flame", kind="track")
+    miss = Item(artist="Jungle", title="Nothing Yet", kind="track")
+    old_miss = Item(artist="Jungle", title="Try Again", kind="track")
+    stale = Item(artist="Jungle", title="Dominoes", kind="track")
+    flagged = Item(artist="Jungle", title="Back On 74", kind="track")
+    long = Item(artist="Jungle", title="Full Side", kind="track")
+    relook = Item(artist="Jungle", title="Long Cut", kind="track")
+    fresh = Item(artist="Jungle", title="Brand New", kind="track")
+    carried = Item(artist="Jungle", title="Already Here", kind="track", youtube={"videoId": "vHere", "videoType": resolve.ATV})
+    v = resolve.CACHE_VERSION
+    util.write_json(resolve.YT_CACHE, {
+        audio.key: {"seen": today, "at": today, "v": v, "len": 1, "yt": {"videoId": "vA", "title": "Keep Moving", "artists": ["Jungle"], "videoType": resolve.ATV, "duration": "3:20"}},
+        video.key: {"seen": today, "at": today, "v": v, "len": 1, "yt": {"videoId": "vV", "title": "Candle Flame", "artists": ["Jungle"], "videoType": resolve.OMV, "duration": "3:20"}},
+        miss.key: {"seen": today, "at": today, "v": v, "len": 1, "yt": None},
+        old_miss.key: {"seen": long_ago, "at": long_ago, "v": v, "len": 1, "yt": None},
+        stale.key: {"seen": today, "at": today, "v": v, "len": 1, "yt": {"videoId": "vS", "title": "Another Song", "artists": ["Jungle"], "videoType": resolve.ATV}},
+        flagged.key: {"seen": today, "at": today, "v": v, "len": 1, "yt": {"videoId": "vBad", "title": "Back On 74", "artists": ["Jungle"], "videoType": resolve.ATV}},
+        long.key: {"seen": today, "at": today, "v": v, "len": 1, "yt": {"videoId": "vL", "title": "Full Side", "artists": ["Jungle"], "videoType": resolve.ATV, "duration": "22:00"}},
+        relook.key: {"seen": today, "at": today, "v": v, "yt": {"videoId": "vR", "title": "Long Cut", "artists": ["Jungle"], "videoType": resolve.ATV, "duration": "22:00"}},
+    })
+    items = [audio, video, miss, old_miss, stale, flagged, long, relook, fresh, carried]
+    states = resolve.cached_states(items, cfg, avoid={flagged.key: {"vBad"}})
+    assert states[audio.key] == (resolve.AUDIO, "vA")           # a card today, free
+    assert states[video.key] == (resolve.VIDEO, "vV")           # waits on a heal
+    assert states[miss.key] == (resolve.MISS, None)             # not due for a retry
+    assert states[old_miss.key] == (resolve.LOOKUP, None)       # due: retry_misses_days have passed
+    assert states[stale.key] == (resolve.LOOKUP, None)          # the row is another song: redone
+    assert states[flagged.key] == (resolve.LOOKUP, None)        # the curator refused that upload: redone
+    assert states[long.key] == (resolve.MISS, "vL")             # looked up once more already: a song that is simply long
+    assert states[relook.key] == (resolve.LOOKUP, None)         # out of range from before the range was known: once more
+    assert states[fresh.key] == (resolve.LOOKUP, None)          # never seen
+    assert states[carried.key] == (resolve.AUDIO, "vHere")      # read from the item itself
+    assert all(i.youtube is None for i in items if i is not carried)   # a preview: nothing is written on the items
+    cfg["resolve"]["youtube_music"] = False
+    assert resolve.cached_states(items, cfg) == {}
+
+
+def test_select_candidates_counts_only_what_can_be_a_card_today():
+    from discovery import build, resolve
+
+    items = [Item(artist="A", title=f"t{n}", kind="track", score=10 - n) for n in range(8)]
+    states = {items[0].key: (resolve.AUDIO, "v0"), items[1].key: (resolve.VIDEO, "v1"), items[2].key: (resolve.MISS, None),
+              items[3].key: (resolve.LOOKUP, None), items[4].key: (resolve.LOOKUP, None), items[6].key: (resolve.VIDEO, "v6")}
+    out, live = build.select_candidates(items, 3, states)
+    # three live slots (the cached audio hit, two lookups); the video and miss rows ride along; the rest wait
+    assert [i.title for i in out] == ["t0", "t1", "t2", "t3", "t4", "t6"] and live == 3
+    out, live = build.select_candidates(items, 100, {})           # no preview: everything counts, exactly as before
+    assert len(out) == 8 and live == 8
+
+
+def test_build_picks_candidates_with_the_cache_in_hand(monkeypatch, sandbox):
+    """Yesterday's answers must not eat today's slots: a cached video-only hit or a miss rides along uncounted, a
+    cached match already in a playlist is hidden before it takes a slot, and the slots go to songs that can join the
+    day — so the lookup budget reaches the fresh sightings a fixed cut used to leave behind."""
+    import discovery.build as build
+    from discovery import learn, resolve
+    from discovery import profile as prof
+
+    profile = dict(PROFILE)
+    profile["saved"] = {util.item_key("Parcels", "Lightenup"): {"artist": "Parcels", "title": "Lightenup", "videoId": "vidSaved", "decision": "up"}}
+    util.write_json(prof.PROFILE_PATH, {**profile, "picks": [], "youtube": {}, "counts": {}})
+    monkeypatch.setattr(learn, "RATINGS_PATH", sandbox / "data" / "nope.json")
+    today = date.today()
+    v = resolve.CACHE_VERSION
+    # scores descend: the cached rows outrank every fresh sighting, so a cut by score alone would take them first
+    fake = [Item(artist="Jungle", title="Cached Video", kind="track", release_date=today, sources=["ytmusic"]),
+            Item(artist="Jungle", title="Cached Miss", kind="track", release_date=today, sources=["ytmusic"]),
+            Item(artist="Parcels", title="Lighten Up (Radio Mix)", kind="track", release_date=today, sources=["ytmusic"]),
+            Item(artist="Jungle", title="Cached Audio", kind="track", release_date=today, sources=["ytmusic"])]
+    fake += [Item(artist="Someone New", title=f"Fresh {n}", kind="track", release_date=today, sources=["bandcamp"], tags=["nu disco"]) for n in range(6)]
+
+    def row(title, vid, vt):
+        return {"seen": today.isoformat(), "at": today.isoformat(), "v": v, "len": 1, "yt": {"videoId": vid, "title": title, "artists": ["Jungle"], "videoType": vt, "duration": "3:00"}}
+    util.write_json(resolve.YT_CACHE, {
+        fake[0].key: row("Cached Video", "vidOMV", resolve.OMV),
+        fake[1].key: {"seen": today.isoformat(), "at": today.isoformat(), "v": v, "len": 1, "yt": None},
+        fake[2].key: {**row("Lighten Up (Radio Mix)", "vidSaved", resolve.ATV), "yt": {"videoId": "vidSaved", "title": "Lighten Up (Radio Mix)", "artists": ["Parcels"], "videoType": resolve.ATV}},
+        fake[3].key: row("Cached Audio", "vidATV", resolve.ATV),
+    })
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: list(fake))
+    got: dict = {}
+
+    def fake_resolve(items, cfg, deadline=None, avoid=None):
+        got["titles"] = [i.title for i in items]
+        for it in items:
+            if it.title == "Cached Audio":
+                it.youtube = {"videoId": "vidATV", "title": it.title, "artists": ["Jungle"], "videoType": resolve.ATV}
+            elif it.title.startswith("Fresh"):
+                it.youtube = {"videoId": "vid-" + it.title[-1], "title": it.title, "artists": ["Someone New"], "videoType": resolve.ATV}
+    monkeypatch.setattr(build, "resolve_all", fake_resolve)
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
+    monkeypatch.setattr(build, "unavailable_report", lambda p, cfg, deadline=None: {"count": 0, "with_counterpart": 0, "pending": 0})
+
+    class NoNet:
+        def __init__(self, *a, **k): self.deadline = None
+        def save(self): pass
+    monkeypatch.setattr(build, "Http", NoNet)
+    cfg = _cfg()
+    cfg["ranking"]["max_items"], cfg["ranking"]["candidate_slack"] = 4, 0   # four live slots, no slack
+    payload = build.build_feed(cfg)
+    titles = got["titles"]
+    assert "Lighten Up (Radio Mix)" not in titles                                  # hidden by its cached video before it could take a slot
+    assert "Cached Video" in titles and "Cached Miss" in titles                    # ride along (a heal, a retry) but take no slot
+    assert titles.index("Cached Audio") < titles.index("Fresh 0")                  # the free card keeps its place in score order
+    assert sum(t.startswith("Fresh") for t in titles) == 3                         # 4 live slots: the cached audio hit and three lookups
+    ids = {i["title"] for i in payload["items"]}
+    assert ids == {"Cached Audio", "Fresh 0", "Fresh 1", "Fresh 2"}

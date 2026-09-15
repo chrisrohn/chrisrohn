@@ -21,7 +21,9 @@ The video side too: once a card plays its audio track, the watch playlist is ask
 `videos.recheck_days` while there is none) which official video YouTube Music pairs with it, `videos.feed_lookups_per_run`
 a run, and the id travels with the card as `youtube.video` — so a song kept on the site brings its video to the
 Video tab, where it is reviewed for the music-video playlist (discovery/videos.py does the same for the library).
-Results are cached in data/cache/youtube.json.
+Results are cached in data/cache/youtube.json. `cached_states` reads that cache without a request, so the feed can
+tell before it picks its candidates which items are already cards, which are waiting on a heal or a retry, and which
+still need a lookup — the day's candidate slots and its lookup budget then go to items that can become cards today.
 """
 from __future__ import annotations
 
@@ -489,6 +491,75 @@ def _lookup(yt, it: Item, avoid: set[str] | None = None, length: tuple[int | Non
     return found if not (avoid and found.get("videoId") in avoid) else None
 
 
+USE, STALE, FLAGGED, RELOOK, OLD_MISS, RETRY = "use", "stale", "flagged", "relook", "old-miss", "retry"   # what to do with a cached row
+AUDIO, VIDEO, MISS, LOOKUP = "audio", "video", "miss", "lookup"                                              # what the cache says an item is
+
+
+def _row_action(row: dict, it: Item, not_these: set[str], length: tuple[int | None, int | None] | None, retry_before: str | None) -> str:
+    """The resolver's verdict on a cached row: USE it as it stands, or drop it and look the item up again because it is
+    STALE (the old resolver landed on another song by the same artist), FLAGGED (the curator said this video is not the
+    song), RELOOK (a hit outside the song-length range from before the range was known: once more, in case a shorter or
+    longer upload exists), an OLD_MISS (a miss from before releases were opened by id) or a RETRY (a miss older than
+    retry_misses_days: the audio track may have arrived since). The two that only pay off with a lookup, RELOOK and
+    RETRY, are taken only while the lookup budget lasts; the others always are."""
+    yt = row.get("yt")
+    if yt and not plausible(it, yt):
+        return STALE
+    if yt and yt.get("videoId") in not_these:
+        return FLAGGED
+    if yt and not row.get("len") and not length_ok(yt.get("duration"), length):
+        return RELOOK
+    if yt is None and row.get("v") != CACHE_VERSION and browse_id(it):
+        return OLD_MISS
+    if yt is None and retry_before is not None and (row.get("at") or "") < retry_before:
+        return RETRY
+    return USE
+
+
+def _load_cache(today_s: str) -> dict[str, Any]:
+    return {k: _entry(v, today_s) for k, v in read_json(YT_CACHE, {}).items()}
+
+
+def cached_states(items: list[Item], cfg: dict, avoid: dict[str, set[str]] | None = None) -> dict[str, tuple[str, str | None]]:
+    """What the resolver's cache already says about each item, without a single request: {item key: (state, video id)}.
+    AUDIO — a plausible cached audio hit: a card today at no cost (the id is there so the feed can hide one already in
+    a playlist before it takes a candidate slot). VIDEO — a cached hit that is not the audio track: not a card today
+    unless a heal finds the audio side (a batch a run). MISS — a cached miss that is not due for a retry, or an upload
+    outside the song-length range that was already looked up once more: not a card today. LOOKUP — no usable row:
+    the item needs a lookup to become a card. An item that already carries a match is read from that."""
+    rcfg = cfg.get("resolve") or {}
+    if not rcfg.get("youtube_music", True):
+        return {}
+    today = date.today()
+    cache = _load_cache(today.isoformat())
+    retry_days = int(rcfg.get("retry_misses_days", 7) or 0)
+    retry_before = (today - timedelta(days=retry_days)).isoformat() if retry_days else None
+    length = length_bounds(cfg)
+    out: dict[str, tuple[str, str | None]] = {}
+    for it in items:
+        if it.youtube:
+            out[it.key] = (AUDIO if is_audio(it.youtube) else VIDEO, it.youtube.get("videoId"))
+            continue
+        row = cache.get(it.key)
+        if row is None:
+            out[it.key] = (LOOKUP, None)
+            continue
+        not_these = set((avoid or {}).get(it.key) or ()) | set(row.get("not") or ())
+        if _row_action(row, it, not_these, length, retry_before) != USE:
+            out[it.key] = (LOOKUP, None)
+            continue
+        yt = row["yt"]
+        if not yt:
+            out[it.key] = (MISS, None)
+        elif not length_ok(yt.get("duration"), length):
+            out[it.key] = (MISS, yt.get("videoId"))          # stamped as looked up once more: a song that is simply long
+        elif is_audio(yt):
+            out[it.key] = (AUDIO, yt.get("videoId"))
+        else:
+            out[it.key] = (VIDEO, yt.get("videoId"))
+    return out
+
+
 def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, avoid: dict[str, set[str]] | None = None) -> None:
     """Give every item without a video its YouTube Music match, from the cache or a bounded number of lookups.
     `avoid` maps item keys to the uploads the curator flagged as the wrong video (learn.wrong_videos): a cached row
@@ -504,7 +575,7 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     today = date.today()
     today_s = today.isoformat()
     keep_days = int(rcfg.get("cache_keep_days", 120))
-    cache: dict[str, Any] = {k: _entry(v, today_s) for k, v in read_json(YT_CACHE, {}).items()}
+    cache: dict[str, Any] = _load_cache(today_s)
     deadline = deadline or Deadline(None)
     budget = int(rcfg.get("max_lookups_per_run", 400))
     heal_budget = int(rcfg.get("audio_heals_per_run", 150))   # hits that are not the audio track: re-checked for a counterpart, a batch a run
@@ -539,19 +610,20 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
         # what this track must not resolve to: today's flags from the ratings file, and any the row already remembers
         not_these = set((avoid or {}).get(key) or ()) | set((row or {}).get("not") or ())
         if row is not None:
-            old = row.get("v") != CACHE_VERSION
-            if row["yt"] and not plausible(it, row["yt"]):
+            action = _row_action(row, it, not_these, length, retry_before)
+            can_look = looked < budget and not deadline.expired
+            if action == STALE:
                 stale += 1                       # the old resolver landed on another song by the same artist
                 del cache[key]
-            elif row["yt"] and row["yt"].get("videoId") in not_these:
+            elif action == FLAGGED:
                 flagged += 1                     # the curator said this video is not the song: look again without it
                 del cache[key]
-            elif row["yt"] and not row.get("len") and not length_ok(row["yt"].get("duration"), length) and looked < budget and not deadline.expired:
+            elif action == RELOOK and can_look:
                 relooked += 1                    # a hit outside the song-length range from before the range was known: once more, in case a
                 del cache[key]                   # shorter or longer upload exists (the new row is stamped, so a song that is simply long stays put)
-            elif row["yt"] is None and old and browse_id(it):
+            elif action == OLD_MISS:
                 del cache[key]                   # a miss from before releases were opened by id
-            elif row["yt"] is None and retry_before is not None and (row.get("at") or "") < retry_before and looked < budget and not deadline.expired:
+            elif action == RETRY and can_look:
                 retried += 1                     # a miss older than retry_misses_days: the audio track may have arrived since
                 del cache[key]
             else:
