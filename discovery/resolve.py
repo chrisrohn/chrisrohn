@@ -3,8 +3,11 @@
 A release that already carries its YouTube Music browse id (artist watch) is opened directly; other releases are
 searched by title and the matching track is taken (title track first, else the first track); tracks are searched
 directly. A result is only accepted when both the artist and the title agree with the item — landing on *another*
-song by the same artist is worse than no result, because the card would play the wrong thing. Cached rows are
-re-checked against the same rule, so rows written by an older, looser resolver heal themselves.
+song by the same artist is worse than no result, because the card would play the wrong thing — and a track that
+names a remix ("Song (Monsieur Adi Remix)") is accepted only on an upload that credits that remix, never on the
+original (`remix_agrees`: the original is the recording the library most likely already holds, and a card that
+plays it is a card the curator skips). Cached rows are re-checked against the same rules, so rows written by an
+older, looser resolver heal themselves.
 Audio first: YouTube Music lists most songs twice, as the audio-only track (videoType MUSIC_VIDEO_TYPE_ATV, the one
 the playlists want) and as the official video (OMV). Search hits prefer the audio track, and a video hit — from a
 search or an album page alike — is swapped for its audio counterpart through the watch playlist, which pairs the
@@ -17,10 +20,12 @@ mix), a cached hit outside the range is looked up once more in case a shorter or
 whose only upload is outside the range is dropped by the feed and the catalog after resolution (`drop_by_length`).
 A video the curator flagged on the site as the wrong one (≠, data/ratings.json) is refused for that track from then
 on: the cached row is redone without it, and the row remembers the refusal ("not") so the flag outlives the rating.
-The video side too: once a card plays its audio track, the watch playlist is asked (once, then again every
-`videos.recheck_days` while there is none) which official video YouTube Music pairs with it, `videos.feed_lookups_per_run`
-a run, and the id travels with the card as `youtube.video` — so a song kept on the site brings its video to the
-Video tab, where it is reviewed for the music-video playlist (discovery/videos.py does the same for the library).
+The video side too: once a card plays its audio track, its official video is looked for (`find_video`: the pair the
+watch playlist names — YouTube Music answers with it for a few uploads only, 8 of 4,564 asked by 2026-09-18 — then
+a video search that refuses anything titled as the audio side), once, then again every `videos.recheck_days` while
+there is none, `videos.feed_lookups_per_run` a run; the id travels with the card as `youtube.video`, so a song kept
+on the site brings its video to the Video tab, where it is reviewed for the music-video playlist
+(discovery/videos.py does the same for the library and the play history).
 Results are cached in data/cache/youtube.json. `cached_states` reads that cache without a request, so the feed can
 tell before it picks its candidates which items are already cards, which are waiting on a heal or a retry, and which
 still need a lookup — the day's candidate slots and its lookup budget then go to items that can become cards today.
@@ -32,6 +37,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from .models import Item
+from .util import _REMIX_RE as _NAMED_REMIX_RE
 from .util import CACHE_DIR, Deadline, log, norm, norm_track, read_json, write_json
 
 YT_CACHE = CACHE_DIR / "youtube.json"
@@ -40,6 +46,7 @@ ATV = "MUSIC_VIDEO_TYPE_ATV"      # audio-only track
 OMV = "MUSIC_VIDEO_TYPE_OMV"      # the official music video
 _EDITION_RE = re.compile(r"\b(deluxe|special|expanded|anniversary|remaster(ed)?|edition|collector|bonus|live|remixes)\b", re.I)
 FLUSH_EVERY = 25    # lookups between cache writes, so a killed job keeps what it already found
+VIDEO_FINDER = 2    # how a card's video side was looked for: 1 the watch-playlist pair alone, 2 the pair and then a video search (find_video)
 DEFAULT_MIN_LENGTH = "1:55"   # anything shorter is an interlude, a skit, an intro
 DEFAULT_MAX_LENGTH = "9:31"   # anything longer is a DJ mix, a full side, an ambient piece
 LENGTH_BONUS = 0.7            # a hit inside the length range over one outside it (more than the audio-over-video preference)
@@ -99,6 +106,37 @@ def version_mismatch(item_title: str | None, cand_title: str | None, cand_album:
     have = _markers(item_title)
     got = _markers(cand_title, qualifiers_only=True) | _album_markers(cand_album)
     return bool(got - have)
+
+
+# a "(<who> Remix)" tail names another hand on the recording; these words in the <who> slot name a version of the
+# artist's own take (a radio edit, an extended mix), which is the record itself and needs no remix on the candidate
+_GENERIC_VERSION = frozenset({"radio", "extended", "original", "club", "album", "single", "acoustic", "live", "instrumental", "dub", "vocal", "short", "long",
+                              "full", "vinyl", "main", "12", "7", "edit", "alternate", "alternative", "stereo", "mono", "bonus", "demo", "remastered",
+                              "piano", "clean", "explicit", "tv", "video", "special", "us", "uk", "french", "english", "spanish", "german", "italian",
+                              "japanese", "unplugged", "new", "old", "the", "a", "version", "mix", "remix", "re", "recorded", "reprise", "slow", "fast"})
+
+
+def named_remixer(title: str | None) -> str | None:
+    """The act a title's remix tail credits ("Song (Monsieur Adi Remix)" → "Monsieur Adi"; "Song - Yuksek Remix" too), or
+    None for the artist's own versions ("(Radio Edit)", "(Extended Mix)", "(Original Mix)") and for a plain title."""
+    m = _NAMED_REMIX_RE.search(str(title or ""))
+    if not m:
+        return None
+    who = m.group("who").strip(" -–—")
+    words = [w for w in norm(who).split() if w]
+    return who if words and not all(w in _GENERIC_VERSION for w in words) else None
+
+
+def remix_agrees(item_title: str | None, cand_title: str | None, cand_album: str | None = None) -> bool:
+    """An item that names a remix is that remix: the candidate's title (or the album it sits on) must credit the same
+    remixer, or the card would play the original — the song the library most likely already holds. An item with no
+    named remixer agrees with anything (version_mismatch keeps the live and remix takes away from it)."""
+    who = named_remixer(item_title)
+    if not who:
+        return True
+    hay = set(norm(f"{cand_title or ''} {cand_album or ''}").split())
+    words = [w for w in norm(who).split() if w not in _GENERIC_VERSION]
+    return bool(words) and all(w in hay for w in words)
 
 
 def _core(s: str | None) -> str:
@@ -197,6 +235,8 @@ def _pick(results: list[dict], artist: str, title: str | None, avoid: set[str] |
         album_name = album.get("name") if isinstance(album, dict) else None
         if version_mismatch(title, r.get("title"), album_name):
             continue                                                                       # a live / acoustic / karaoke / remix take is another recording
+        if not remix_agrees(title, r.get("title"), album_name):
+            continue                                                                       # the item is a named remix: the original is not it
         score = (2.0 if artist_ok else 0.0) + (1.5 if title_ok else 0.0) + (0.3 if r.get("resultType") == "song" else 0.0)
         vt = r.get("videoType")
         score += 0.6 if vt == ATV else (-0.3 if vt == "MUSIC_VIDEO_TYPE_UGC" else 0.0)     # the audio track over the video, both over an upload
@@ -315,13 +355,76 @@ def video_side(yt, video_id: str) -> dict[str, Any] | None:
     return _sides(_watch(yt, video_id), video_id)[2]
 
 
-def attach_video(yt, found: dict[str, Any]) -> bool:
-    """Record the video side of a resolved hit on it (`video`, `videoKind`; `video` None when there is none), asking
-    the watch playlist unless the hit already knows it. Returns False when the request failed (nothing recorded)."""
+# An upload that is a picture of the song, not a video of it: "(Official Audio)", a visualiser, a lyric video, an
+# art track, a full album stream. The bare word "audio" counts only in a title's tail ("Song (Audio)", "Song | Audio").
+_AUDIO_ONLY_STRONG = re.compile(r"\b(official\s+audio|audio\s+only|visuali[sz]er|lyric\s+video|lyrics\s+video|art\s*track|static\s+(?:image|video)|pseudo\s*video|full\s+album|album\s+stream|audio\s+stream|\d{4}\s+remaster(?:ed)?\s+audio)\b", re.I)
+_AUDIO_ONLY_TAIL = re.compile(r"^\s*(?:hq\s+|hd\s+|official\s+)?(?:audio|lyrics?|visuali[sz]er|instrumental)\s*$", re.I)
+_TAIL_PARTS = re.compile(r"[\(\[]([^\)\]]*)[\)\]]|\s[-–—|]\s+([^\(\)\[\]|]+?)\s*(?=[\(\[|]|$)")
+VIDEO_KINDS = (OMV, "MUSIC_VIDEO_TYPE_UGC")   # what a video upload is typed as; OFFICIAL_SOURCE_MUSIC is the audio side under another name
+
+
+def audio_only_title(title: str | None) -> bool:
+    """True for an upload whose title says it is the audio, not a video: "Song (Official Audio)", "Song | Visualizer",
+    "Song (Lyric Video)". A song simply called "Audio" is not caught: the bare word counts only in a title's tail."""
+    t = str(title or "")
+    if _AUDIO_ONLY_STRONG.search(t):
+        return True
+    return any(_AUDIO_ONLY_TAIL.match(a if a is not None else b or "") for a, b in _TAIL_PARTS.findall(t))
+
+
+def is_music_video(row: dict | None) -> bool:
+    """An upload the Video tab may list: typed as a video (the official video, or an upload) and not titled as the
+    audio side. An unlabelled upload passes on its title alone."""
+    if not row or not row.get("videoId"):
+        return False
+    vt = row.get("videoType")
+    if vt and vt not in VIDEO_KINDS:
+        return False
+    return not audio_only_title(row.get("title"))
+
+
+def search_video(yt, artist: str, title: str, avoid: set[str] | None = None) -> dict[str, Any] | None:
+    """The official video of a song by a search (filter "videos"): the artist and the title must agree, an upload
+    titled as the audio side is never it, the official video beats an upload. None when nothing fits; raises when
+    the request fails, so a caller never mistakes an outage for "no video"."""
+    res = yt.search(f"{artist} {title}", filter="videos", limit=6)
+    best, best_score = None, 0.0
+    for r in res or []:
+        if r.get("resultType") not in ("video", "song") or not r.get("videoId") or (avoid and r["videoId"] in avoid):
+            continue
+        vt = r.get("videoType")
+        if vt and vt not in VIDEO_KINDS:
+            continue
+        if not artist_agrees(artist, [x.get("name") for x in (r.get("artists") or [])]) or not titles_agree(title, r.get("title"), artist):
+            continue
+        if audio_only_title(r.get("title")) or version_mismatch(title, r.get("title")) or not remix_agrees(title, r.get("title")):
+            continue
+        score = 2.0 + (1.0 if vt == OMV else 0.0) + (0.3 if r.get("resultType") == "video" else 0.0)
+        if score > best_score:
+            best, best_score = r, score
+    return {"videoId": best["videoId"], "videoType": best.get("videoType") or "MUSIC_VIDEO_TYPE_UGC", "title": best.get("title"), "via": "search"} if best else None
+
+
+def find_video(yt, video_id: str, artist: str | None = None, title: str | None = None, *, search: bool = True) -> dict[str, Any] | None:
+    """The video paired with an upload: what the watch playlist says first (one cheap request; YouTube Music
+    answers with the pair for a few uploads only), then, given the artist and the title, a video search
+    (`search_video`). None when neither finds one; raises when a request fails."""
+    side = video_side(yt, video_id)
+    if side and is_music_video(side):
+        return side
+    if not search or not artist or not title:
+        return None
+    return search_video(yt, artist, title)
+
+
+def attach_video(yt, found: dict[str, Any], artist: str | None = None, title: str | None = None) -> bool:
+    """Record the video side of a resolved hit on it (`video`, `videoKind`; `video` None when there is none): the pair
+    the watch playlist names, else a video search by the artist and the title when they are given. Returns False
+    when a request failed (nothing recorded)."""
     if found.get("video"):
         return True
     try:
-        side = video_side(yt, found["videoId"])
+        side = find_video(yt, found["videoId"], artist, title)
     except Exception as exc:  # noqa: BLE001
         log.debug("video side of %s failed: %s", found.get("videoId"), exc)
         return False
@@ -408,6 +511,8 @@ def plausible(it: Item, yt: dict | None) -> bool:
         return False
     if yt.get("artists") and not artist_agrees(it.artist, yt.get("artists")):
         return False
+    if it.remixer and not remix_agrees(it.display_title, yt.get("title"), yt.get("album")):
+        return False                       # a remix card that would play the original: the row is redone (see _row_action → STALE)
     if titles_agree(it.title, yt.get("title"), it.artist):
         return True
     if it.kind == "release" or it.release:
@@ -596,11 +701,12 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
         write_json(YT_CACHE, prune_cache(cache, today, keep_days), compact=True)
 
     def video_due(row: dict, yt_row: dict) -> bool:
-        """An audio hit whose video side was never asked, or asked long enough ago while there was none."""
+        """An audio hit whose video side was never asked, asked through the pair alone (a row without the finder's
+        version stamp, from before the search existed), or asked long enough ago while there was none."""
         if not is_audio(yt_row) or yt_row.get("video"):
             return False
         asked = row.get("vid")
-        return not asked or "video" not in yt_row or (video_before is not None and asked < video_before)
+        return not asked or "video" not in yt_row or row.get("vhow") != VIDEO_FINDER or (video_before is not None and asked < video_before)
 
     for it in items:
         if it.youtube:
@@ -643,13 +749,13 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
                         row["audio"] = today_s
                         row["v"] = CACHE_VERSION
                         if "video" in it.youtube:          # the same answer named the video side: no second request
-                            row["vid"] = today_s
+                            row["vid"], row["vhow"] = today_s, VIDEO_FINDER
                         if healed % FLUSH_EVERY == 0:
                             flush()
                     if video_due(row, it.youtube) and videos < video_budget and not deadline.expired:
                         videos += 1
-                        if attach_video(yt, it.youtube):
-                            row["vid"] = today_s
+                        if attach_video(yt, it.youtube, it.artist, it.display_title):
+                            row["vid"], row["vhow"] = today_s, VIDEO_FINDER
                         if videos % FLUSH_EVERY == 0:
                             flush()
                 continue
@@ -681,11 +787,11 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
             # a fresh audio hit is asked for its video side straight away; a hit whose lookup already went through the
             # watch playlist (a swapped video, an unlabelled audio track) knows it, with or without a video
             if "video" in found:
-                cache[key]["vid"] = today_s
+                cache[key]["vid"], cache[key]["vhow"] = today_s, VIDEO_FINDER
             elif video_due(cache[key], found) and videos < video_budget and not deadline.expired:
                 videos += 1
-                if attach_video(yt, found):
-                    cache[key]["vid"] = today_s
+                if attach_video(yt, found, it.artist, it.display_title):
+                    cache[key]["vid"], cache[key]["vhow"] = today_s, VIDEO_FINDER
         if looked % FLUSH_EVERY == 0:
             flush()
     flush()

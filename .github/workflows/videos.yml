@@ -1,13 +1,15 @@
 name: Videos
 
 # Builds the Video tab's list (site/data/videos.json: the official videos of the songs the year playlists hold,
-# discovery/videos.py) and publishes the site. Its own job, after Concerts, so the watch-playlist lookups get a full
-# 45 minutes (a 26,000-row library is asked a batch a day and cached for good). Nothing here writes to your YouTube
-# Music playlists: only an approval pressed on the site's Video tab does that, and only into the music-video playlist.
+# discovery/videos.py) and publishes the site. Its own job, twice a day, so the video lookups get a full 45 minutes
+# each time (a 27,000-row library is asked in the order it matters — the picks, then the most played on Last.fm —
+# a batch a run and cached for good). Nothing here writes to your YouTube Music playlists: only an approval pressed
+# on the site's Video tab does that, and only into the music-video playlist.
 
 on:
   schedule:
     - cron: "51 19 * * *"      # 15:51 New York in summer: two hours after Concerts, never overlapping it
+    - cron: "41 1 * * *"       # 21:41 New York in summer: the evening batch, long before Discover's first slot
   workflow_dispatch:
 
 concurrency:

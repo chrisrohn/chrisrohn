@@ -44,7 +44,8 @@ export async function rate(id, decision, year) {
   year = year || yearOf(it);
   const needsYouTube = decision === "up" || (decision === "down" && skipsInYouTube());
   const wasPlaying = state.playingId === id && playerActive(); const idx = state.order.indexOf(id);
-  const base = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, sources: it.sources || [], tags: it.tags || [], at: Date.now() };
+  // the card's sources, tags and how the profile knew the act travel with the rating: the personal ranking learns from them
+  const base = { decision, year, videoId: vid, artist: it.artist, title: it.display_title || it.title, sources: it.sources || [], tags: it.tags || [], match_kind: it.match_kind || null, affinity: it.affinity ?? null, at: Date.now() };
   if (needsYouTube && !state.online) {
     // no network: remember the decision, hide the card, file it when the connection is back (see replayQueued)
     state.rated[id] = { ...base, queued: true, pending: true }; state.lastRated = id; persist(); render(); moveOn(id, idx, wasPlaying);

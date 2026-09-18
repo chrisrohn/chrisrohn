@@ -193,6 +193,12 @@ sources:
     enabled: true
     days: 90                 # look back (max 90)
     min_listen_count: 0
+    # Which profile artists a release may be by: the acts you play and the acts in your playlists, with at least
+    # this affinity (0.1 ≈ two or three songs in the playlists). Every kind matched until 2026-09-18, and the
+    # releases by similar artists, genre artists and one-song library acts were kept 5–8% of the time against 27%
+    # for the rest — two thirds of a day's cards, for a handful of keeps. Releases that carry your tags still pass.
+    kinds: [direct, saved]
+    min_affinity: 0.1
   musicbrainz_tags:
     enabled: true
     days: 10
@@ -206,8 +212,11 @@ sources:
   deezer:
     enabled: true
     days: 45                 # look back for the editorial feeds (default 45; else listenbrainz_fresh.days); your artists' albums use the backfill window
-    top_artists: 400         # check the newest albums of your top N profile artists (of the kinds below, by affinity)
-    kinds: [direct, similar, genre]   # which profile artists count: the acts you play, their associates, the genre acts
+    top_artists: 500         # check the newest albums of your top N profile artists (of the kinds below, by affinity)
+    # which profile artists count: the acts you play, the acts in your playlists, their associates. The playlist acts
+    # were not watched before 2026-09-18, and they keep as well as the acts you play (42% with a few songs in the
+    # library); the genre acts (Last.fm's top of a tag) were kept 5% of the time and are left to the tag matching
+    kinds: [direct, saved, similar]
     related_per_artist: 0    # set >0 to also pull related artists' newest releases (slower)
     editorial_genres:        # Deezer editorial "new releases" feeds by genre id
       - 85    # Alternative
@@ -218,9 +227,9 @@ sources:
   # Every release from this year and the backfill window is returned on every run; the feed decides what is fresh.
   ytmusic_artists:
     enabled: true
-    top_artists: 500          # checked per run (about 0.3 s each), rotating through the pool so everyone comes round every three days
-    pool: 1500                # the strongest N profile artists of the kinds below, by affinity
-    kinds: [direct, similar, genre]
+    top_artists: 700          # checked per run (about 0.3 s each), rotating through the pool so everyone comes round every few days
+    pool: 2500                # the strongest N profile artists of the kinds below, by affinity (≈1,200 you play, 950 from the playlists, 300 similar)
+    kinds: [direct, saved, similar]
   # Curator / session channels on YouTube (no record labels: the feed follows artists and genres, not imprints).
   # Free RSS per channel; wrong handles show up in ⚙ feed health.
   youtube_channels:
@@ -275,7 +284,7 @@ sources:
     days: 60                 # first-release-date window when backfill is off (default 60; else listenbrainz_fresh.days)
     top_artists: 80
     pool: 1500
-    kinds: [direct, similar, genre]
+    kinds: [direct, saved]   # only artists with a MusicBrainz id are asked; a playlist act has one when the profile found it
     limit: 40                # release groups per artist query
   rss:
     enabled: true
@@ -355,12 +364,14 @@ ranking:
   max_per_artist: 3
   max_unknown_per_source: 30
   repeat_penalty: 2.0
-  explore_slots: 8
+  explore_slots: 5         # acts the profile does not know were kept 10% of the time from the top of the list (2026-09-18)
+  # The base weights are set from the keep rates measured on 2026-09-18 (3,800 rated cards); learn.py then keeps
+  # each kind of act honest from what you keep, banded by affinity (weights.learned below).
   weights:
-    affinity: 4.0          # direct artist match (Last.fm / seeds: you play them)
-    saved: 2.0             # artist only known from the year playlists (in your library, never scrobbled)
-    similar: 2.5           # similar-artist match
-    genre: 2.0             # a Last.fm genre artist (top of a tag you play; see profile.genre_top_tags)
+    affinity: 4.0          # direct artist match (Last.fm / seeds: you play them): kept 39% with a high affinity, 21% with a low one
+    saved: 3.0             # artist only known from the year playlists (in your library, never scrobbled): kept 42% with a few songs there
+    similar: 1.2           # similar-artist match: kept 8%
+    genre: 0.6             # a Last.fm genre artist (top of a tag you play; see profile.genre_top_tags): kept 5%
     tags: 1.2              # summed matched tag weights
     source_count: 0.6      # each additional source that surfaced the same track
     freshness: 1.0         # decays over `freshness_days`
@@ -368,7 +379,7 @@ ranking:
     listens: 0.4           # log10(listen_count) from ListenBrainz
     learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
     explore: 1.0           # the exploration bonus for sources / tags / artists with little history (learn.explore)
-    novelty: 0.5           # an artist the profile does not know, vouched for by an editorial feed or two sources
+    novelty: 0.3           # an artist the profile does not know, vouched for by an editorial feed or two sources
   freshness_days: 60       # a release this many days old has spent its freshness bonus (the sources look back ~90 days)
   undated_freshness: 0.2   # share of the freshness weight for an item nobody dates; below anything released this month
   # What counts as the current timeframe: a release (or sighting) dated within this many days, plus everything from
@@ -388,14 +399,20 @@ ranking:
 # the fresh window happens to yield.
 backfill:
   years: 3                 # 0 turns backfill off (the sources fall back to their own `days`)
-  target: 300              # playable current cards the day should hold before anything older is used
+  # The last three years are part of every day, not only a thin one: at least `min` older cards join the day whenever
+  # the artist watch has that many playable and unrated (on 2026-09-18 those cards were kept 35–40% of the time,
+  # this year's 19%), and more, up to `max`, when the current timeframe holds fewer than `target` playable cards.
+  min: 120
+  target: 300              # playable current cards the day should hold before more than `min` older ones are used
   max: 200                 # the most older cards one day may carry: even a thin day stays a third current music
   candidates: 600          # the best older candidates carried into resolution (the rest wait for another day)
 
 # ---------- Learning from outcomes (discovery/learn.py) ----------
 # No API quota involved: what each day's feed showed (site/data/history/) is compared with what reached the year
 # playlists (kept) or the Skipped playlist (skipped, only when skips are filed on YouTube). Sources, blogs, tags and
-# artists get a keep rate against the overall rate, added to the score as a bounded log2 ratio.
+# artists get a keep rate against the overall rate, added to the score as a bounded log2 ratio — and so does each
+# kind of act (you play them, in your playlists, similar, genre, unknown), banded by affinity, so the base weights
+# above never have to carry what your keeps already say.
 # Skips reach the build two ways: the Skipped playlist (when skips_in_youtube is on) and data/ratings.json, which the
 # site pushes from the browser when a GitHub token is set in ⚙ (every keep and skip, no YouTube quota).
 learn:
@@ -409,21 +426,21 @@ learn:
   explore: 0.4           # UCB exploration: explore · sqrt(ln N / (n + 1)) per feature, so the unfamiliar gets a look
   explore_max: 0.6       # … capped here, so a complete unknown never outranks a proven favourite on novelty alone
 
-# ---------- The catalog: infill for earlier years (discovery/catalog.py) ----------
-# Runs after the feed in the daily job and publishes site/data/catalog.json for the Catalog tab. Candidates are your
-# own Last.fm history (most-played and loved tracks not yet in a playlist) plus the top tracks of the artists you
-# play and of their similar artists; the candidate snapshot is refreshed weekly, YouTube resolution and year
-# verification proceed in daily batches on the feed's caches, so the catalog grows over a couple of weeks.
+# ---------- The catalog: the whole play history, reviewed (discovery/catalog.py) ----------
+# Its own workflow (Catalog, twice a day) publishes site/data/catalog.json for the Catalog tab. The candidates are
+# every track the station has ever played on Last.fm (user.getTopTracks over `overall`, every page: one row a track
+# with its play count), flagged when loved and dated by the scrobble log (first and last played), minus what the
+# year playlists and the Skipped playlist hold. The snapshot is refreshed weekly; YouTube resolution (the exact
+# edition: a remix resolves to that remix or not at all) and year verification proceed in daily batches on the
+# feed's caches, the most played first, so the tab fills in over a few weeks and then keeps pace with the station.
+# Until 2026-09-18 the catalog also carried your artists' and their neighbours' hits and put loved tracks first;
+# of 914 such cards rated, 15 were kept.
 catalog:
   enabled: true
   refresh_days: 7
-  top_tracks: 3000          # user.getTopTracks, overall (1000 per request)
-  loved_tracks: 2000
-  artists_top_n: 150        # your top artists by affinity …
-  per_artist: 8             # … and this many of each one's top tracks
-  similar_top_n: 100        # the strongest similar artists (adjacent to what you play) …
-  per_similar: 5
-  max_items: 2000           # candidates carried into resolution, by score
+  history_tracks: 0         # user.getTopTracks, overall, 1000 a request; 0 = every track ever played
+  loved_tracks: 0           # user.getLovedTracks; 0 = all (a flag and a small bonus, not a list of its own)
+  max_items: 2500           # the most cards the tab is given (by score); the rest wait until those are rated
   in_daily: false           # true = also run at the end of the daily feed job; the Catalog workflow is its own job
   time_budget_minutes: 35   # wall clock for the lookups in the Catalog workflow (it times out at 45)
   job_budget_minutes: 40    # when run inside the daily job: never past this point of that job
@@ -431,11 +448,19 @@ catalog:
   max_year_lookups_per_run: 800
   year_chain: fast          # fast = ListenBrainz/MusicBrainz + Deezer, then the YouTube Music album year; full = + Discogs + iTunes
   tag_lookups_per_run: 300  # artists whose Last.fm tags get fetched per run (cached for good afterwards)
-  loved_bonus: 1.5
+  # The scrobble log (user.getRecentTracks, 200 plays a page): walked from the newest play down, this many pages a
+  # run inside `scrobble_minutes`, until the whole log is read, then kept up to date. It dates every card ("last
+  # played Mar 2024"), sorts the tab by last or first played, and a track it has not reached yet is simply older.
+  scrobble_dates: true
+  scrobble_pages_per_run: 300
+  scrobble_minutes: 6
+  loved_bonus: 1.0
   weights:                  # overrides of ranking.weights for the catalog: plays count for a lot, freshness for nothing
-    listens: 2.0
+    listens: 2.0            # × log10(plays)
+    recent_play: 1.0        # a track last played today earns this, fading to nothing eight years back
     freshness: 0.0
     editorial: 0.0
+    source_count: 0.0
 
 resolve:
   youtube_music: true
@@ -485,15 +510,17 @@ resolve:
 # The year playlists hold audio tracks; many of those songs also have an official video, which YouTube Music pairs
 # with the audio track (the watch playlist lists both sides). The Video tab on the site reviews those videos one by
 # one, and an approved one is added to `youtube_music.videos_playlist_id`, the single music-video playlist.
-# Two sources feed the tab: every row of every year playlist (this job asks the watch playlist for each audio
-# track's video, `lookups_per_run` a run, cached for good in data/cache/videos.json — a 26,000-row library takes a
-# few weeks to work through, then only new rows are asked), and the day's feed (the resolver asks each card's video
-# side as it resolves it, `feed_lookups_per_run` a run, so a song kept on the site brings its video to the tab the
-# same day). Rows already in the video playlist, or decided on the tab (data/ratings.json → `videos`), are left
-# out. Nothing here spends YouTube API quota; the report is site/data/videos.json.
+# Two sources feed the tab: every row of every year playlist (this job finds each audio track's video — the pair
+# the watch playlist names, then a video search that refuses anything titled as the audio side — `lookups_per_run`
+# a run, the picks first and then the most played on Last.fm, cached for good in data/cache/videos.json: a
+# 27,000-row library takes a few weeks to work through, then only new rows are asked), and the day's feed (the
+# resolver finds each card's video the same way as it resolves it, `feed_lookups_per_run` a run, so a song kept on
+# the site brings its video to the tab the same day). Rows already in the video playlist, or decided on the tab
+# (data/ratings.json → `videos`), are left out. Nothing here spends YouTube API quota; the report is
+# site/data/videos.json.
 videos:
   enabled: true
-  lookups_per_run: 1500        # playlist rows asked for their video side in the Videos workflow (≈0.3 s each)
+  lookups_per_run: 1500        # playlist rows asked for their video in the Videos workflow (about a second each: the time budget is the real limit)
   feed_lookups_per_run: 400    # feed / catalog cards asked as the resolver runs (the rest wait for the next build)
   recheck_days: 90             # a song with no video yet is asked again after this (videos get paired later)
   time_budget_minutes: 35      # wall clock for the Videos workflow (it times out at 45)

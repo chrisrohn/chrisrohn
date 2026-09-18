@@ -6,10 +6,10 @@ export interface FeedItem {
   release?: string | null; release_type?: string | null; release_date?: string | null; date_kind?: string;
   tags?: string[]; sources?: string[]; links?: Record<string, string | string[]>; artwork?: string | null; editorial?: boolean;
   year?: number | null; year_source?: string | null; year_confidence?: string | null; year_evidence?: string[]; original_year?: number | null;
-  youtube?: YouTubeMatch | null; score: number; reasons?: string[]; matched_artist?: string | null; match_kind?: string | null; first_seen?: string | null;
+  youtube?: YouTubeMatch | null; score: number; reasons?: string[]; matched_artist?: string | null; match_kind?: string | null; affinity?: number | null; first_seen?: string | null;
   backfill?: boolean;   // an older release the build pulled in because the current timeframe was thin
   _pick?: boolean; _year?: string | number | null; _skipped?: boolean;
-  plays?: number; loved?: boolean;   // catalog items: Last.fm play count, loved track
+  plays?: number; loved?: boolean; first_played?: string | null; last_played?: string | null;   // catalog items: Last.fm play count, loved track, when the station first and last played it
   _concert?: boolean;   // a concert row's most popular song (concerts.js): playable, never rated
   _video?: VideoRow;    // a Video tab card (videos.js): plays the video itself; ▲︎/▼︎ approve it into the music-video playlist or pass
 }
@@ -30,9 +30,10 @@ export interface Concerts {
   artists_total?: number; artists_checked?: number; artists_with_shows?: number; sources?: string[];
   health?: Record<string, { ok: boolean; error?: string; [k: string]: any }>; count: number; events: ConcertEvent[]; artists: Record<string, ConcertArtist>;
 }
-export interface Catalog { generated_at: string; candidates: number; count: number; undated: number; pending?: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; audio?: { audio: number; video: number; unknown: number }; items: FeedItem[] }
+export interface Catalog { generated_at: string; candidates: number; count: number; playable?: number; undated: number; pending?: number; sources: string[]; years: Record<string, { playlist: number; candidates: number }>; audio?: { audio: number; video: number; unknown: number };
+  history?: { fetched_at?: string | null; tracks: number; scrobbles?: number | null; dated?: number; walked_back_to?: string | null; complete?: boolean }; items: FeedItem[] }
 export interface LearnedRow { n: number; k: number; rate: number; adj: number }
-export interface LearnedSummary { outcomes: number; kept: number; skipped: number; keep_rate: number; since?: string | null; sources: Record<string, LearnedRow>; tags: Record<string, LearnedRow> }
+export interface LearnedSummary { outcomes: number; kept: number; skipped: number; keep_rate: number; since?: string | null; sources: Record<string, LearnedRow>; tags: Record<string, LearnedRow>; kinds?: Record<string, LearnedRow> }
 export interface Feed {
   generated_at: string; station: string; site_name?: string; count: number; new_today: number; years?: number[];
   google?: { client_id?: string; curator_hashes?: string[]; curators?: string[]; guests?: boolean; guest_playlist_title_pattern?: string };
@@ -55,7 +56,7 @@ export interface Rated {
   decision: "up" | "down" | "wrong" | "seen" | "undone"; at: number; year?: number | string; videoId?: string; artist?: string; title?: string;
   playlistItemId?: string; playlistId?: string; pending?: boolean; local?: boolean; duplicate?: boolean;
   queued?: boolean;   // made offline: filed on YouTube the next time the browser is online
-  sources?: string[]; tags?: string[];   // what the card carried when it was rated: the personal ranking and the stats learn from these
+  sources?: string[]; tags?: string[]; match_kind?: string | null; affinity?: number | null;   // what the card carried when it was rated: the personal ranking and the stats learn from these
 }
 export interface Auth { email?: string; name?: string; picture?: string; hash?: string; access_token?: string; expires_at: number }
 /** A playlist row that will not play here: found greyed out by the build's scan (data/unavailable.json) or dead by the tab's audit. */
@@ -70,9 +71,10 @@ export interface VideoRow {
   video: string; kind?: string | null; own?: boolean;   // the video's id and kind; own: the playlist row itself is the video
   videoId: string; year: string; years?: string[]; playlistId?: string | null; position?: number | null;
   artist: string; title: string; album?: string | null;
+  plays?: number; pick?: boolean; via?: string;          // Last.fm plays of the song, one of the picks, how the video was found (pair or search)
   from?: "library" | "feed"; id?: string; at?: number;   // where it came from; a kept card's id and when it was kept
 }
-export interface Videos { generated_at: string; checked_at?: string | null; playlist_id: string; count: number; pending: number; no_video?: number; in_playlist?: number; decided?: number; looked_up?: number; rows: VideoRow[] }
+export interface Videos { generated_at: string; checked_at?: string | null; playlist_id: string; count: number; pending: number; no_video?: number; in_playlist?: number; decided?: number; looked_up?: number; order?: string; rows: VideoRow[] }
 /** A decision on the Video tab (id:videos): approved (added to the music-video playlist), passed, or undone. */
 export interface VideoMark { decision: "up" | "down" | "undone"; at: number; artist?: string; title?: string; year?: string | null; videoId?: string | null; playlistItemId?: string; playlistId?: string; pending?: boolean; local?: boolean; duplicate?: boolean }
 /** One finding of the playability audit (audit.js), kept on this device. */

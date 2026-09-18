@@ -10,19 +10,33 @@ import { state, items, hiddenBy } from "./state.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 /** @typedef {{n: number, k: number, rate: number, adj: number}} Row */
-/** @typedef {{outcomes: number, kept: number, skipped: number, passed: number, wrong: number, keep_rate: number, sources: Record<string, Row>, tags: Record<string, Row>, artists: Record<string, Row>}} Learned */
+/** @typedef {{outcomes: number, kept: number, skipped: number, passed: number, wrong: number, keep_rate: number, sources: Record<string, Row>, tags: Record<string, Row>, artists: Record<string, Row>, kinds: Record<string, Row>}} Learned */
+/** @typedef {"sources" | "tags" | "artists" | "kinds"} Family */
 
 export const PERSONAL_WEIGHT = 1.0;
 const GRACE_DAYS = 3, PASS_WEIGHT = 0.35, PRIOR = 8, MIN_EXPOSURES = 3, CAP = 1.5;
 
 import { norm } from "./dom.js";
-/** @param {{sources?: string[], tags?: string[], artist?: string}} o */
+/** @type {Family[]} */
+const FAMILIES = ["sources", "tags", "artists", "kinds"];
+/** What each kind of act is called on a card: how the profile knows the artist (discovery/learn.py KIND_LABELS). @type {Record<string, string>} */
+export const KIND_LABELS = { direct: "acts you play", saved: "acts in your playlists", similar: "similar acts", genre: "genre acts", none: "acts the profile does not know" };
+/** The artist-kind features of a card, as learn.py bands them: the kind, and the kind with its affinity band ("saved·mid").
+ * A rating from before the kind travelled with it (undefined) teaches nothing about kinds. @param {string | null | undefined} kind @param {number | null | undefined} affinity */
+export function kindBand(kind, affinity) {
+  if (kind === undefined) return [];
+  const k = kind || "none";
+  if (k === "none" || affinity == null || !Number.isFinite(Number(affinity))) return [k];
+  const a = Number(affinity);
+  return [k, `${k}·${a >= 0.3 ? "high" : a >= 0.1 ? "mid" : "low"}`];
+}
+/** @param {{sources?: string[], tags?: string[], artist?: string, match_kind?: string | null, affinity?: number | null}} o */
 function features(o) {
   const sources = (o.sources || []).filter(Boolean);
   const fams = [...new Set(sources.map(s => s.split(":")[0]))];
   // blogs and radio stations are judged one by one (rss:Stereogum), the catalogue sources as a family (deezer)
   const per = sources.filter(s => s.includes(":")).concat(fams.filter(f => !sources.some(s => s.startsWith(f + ":"))));
-  return { sources: per, tags: (o.tags || []).map(norm).filter(Boolean), artists: o.artist ? [norm(o.artist)] : [] };
+  return { sources: per, tags: (o.tags || []).map(norm).filter(Boolean), artists: o.artist ? [norm(o.artist)] : [], kinds: kindBand(o.match_kind, o.affinity) };
 }
 
 /** @type {{version: string, learned: Learned} | null} */
@@ -33,20 +47,20 @@ const perItem = new Map();
 export function invalidateRank() { cache = null; perItem.clear(); }
 
 /** Every outcome this account knows: kept / skipped from the ratings, pass for tracks left unrated for a few days. */
-/** @typedef {{verdict: "kept" | "skipped" | "pass", sources: string[], tags: string[], artist: string}} Outcome */
+/** @typedef {{verdict: "kept" | "skipped" | "pass", sources: string[], tags: string[], artist: string, match_kind?: string | null, affinity?: number | null}} Outcome */
 /** @returns {Outcome[]} */
 function outcomes() {
   /** @type {Outcome[]} */ const out = [];
   for (const r of Object.values(state.rated)) {
     // a wrong-video flag judged the pairing, not the song: it teaches nothing about sources, tags or the artist
     if (!r || r.decision === "undone" || r.decision === "seen" || r.decision === "wrong") continue;
-    out.push({ verdict: r.decision === "up" ? "kept" : "skipped", sources: r.sources || [], tags: r.tags || [], artist: r.artist || "" });
+    out.push({ verdict: r.decision === "up" ? "kept" : "skipped", sources: r.sources || [], tags: r.tags || [], artist: r.artist || "", match_kind: r.match_kind, affinity: r.affinity });
   }
   const today = state.feed?.generated_at ? new Date(state.feed.generated_at) : new Date();
   const cutoff = new Date(today.getTime() - GRACE_DAYS * 86400e3).toISOString().slice(0, 10);
   // only what was on screen can have been passed over: the feed is in build order, the shortlist is its top
   const shown = Math.max(Number(state.settings.shortlistSize) || 60, 80);
-  for (const it of items().slice(0, shown)) if (!hiddenBy(it) && it.first_seen && it.first_seen <= cutoff) out.push({ verdict: "pass", sources: it.sources || [], tags: it.tags || [], artist: it.artist });
+  for (const it of items().slice(0, shown)) if (!hiddenBy(it) && it.first_seen && it.first_seen <= cutoff) out.push({ verdict: "pass", sources: it.sources || [], tags: it.tags || [], artist: it.artist, match_kind: it.match_kind || null, affinity: it.affinity ?? null });
   return out;
 }
 
@@ -60,16 +74,16 @@ export function learnLocal() {
   const kAll = outs.filter(o => o.verdict === "kept").length;
   /** @type {Learned} */
   const learned = { outcomes: outs.length, kept: kAll, skipped: outs.filter(o => o.verdict === "skipped").length, passed: outs.filter(o => o.verdict === "pass").length,
-    wrong: Object.values(state.rated).filter(r => r && r.decision === "wrong").length, keep_rate: 0, sources: {}, tags: {}, artists: {} };
+    wrong: Object.values(state.rated).filter(r => r && r.decision === "wrong").length, keep_rate: 0, sources: {}, tags: {}, artists: {}, kinds: {} };
   if (nAll > 0 && (kAll + learned.skipped) > 0) {
     const base = (kAll + 1) / (nAll + 2); learned.keep_rate = base;
-    /** @type {Record<"sources" | "tags" | "artists", Record<string, number[]>>} */
-    const counts = { sources: {}, tags: {}, artists: {} };
+    /** @type {Record<Family, Record<string, number[]>>} */
+    const counts = { sources: {}, tags: {}, artists: {}, kinds: {} };
     for (const o of outs) {
       const w = weight[o.verdict], k = o.verdict === "kept" ? 1 : 0;
-      for (const kind of /** @type {const} */ (["sources", "tags", "artists"])) for (const name of features(o)[kind]) { const row = counts[kind][name] || (counts[kind][name] = [0, 0, 0]); row[0] += w; row[1] += k; row[2] += 1; }
+      for (const kind of FAMILIES) for (const name of features(o)[kind]) { const row = counts[kind][name] || (counts[kind][name] = [0, 0, 0]); row[0] += w; row[1] += k; row[2] += 1; }
     }
-    for (const kind of /** @type {const} */ (["sources", "tags", "artists"])) for (const [name, [n, k, shown]] of Object.entries(counts[kind])) {
+    for (const kind of FAMILIES) for (const [name, [n, k, shown]] of Object.entries(counts[kind])) {
       const rate = (k + PRIOR * base) / (n + PRIOR);
       learned[kind][name] = { n: shown, k, rate, adj: shown >= MIN_EXPOSURES ? Math.max(-CAP, Math.min(CAP, Math.log2(rate / base))) : 0 };
     }
@@ -86,8 +100,8 @@ export function personal(it) {
   /** @type {{adj: number, why: string[]}} */
   const res = { adj: 0, why: [] };
   if (learned.keep_rate) {
-    const f = features({ sources: it.sources, tags: it.tags, artist: it.artist });
-    for (const kind of /** @type {const} */ (["sources", "tags", "artists"])) {
+    const f = features({ sources: it.sources, tags: it.tags, artist: it.artist, match_kind: it.match_kind || null, affinity: it.affinity ?? null });
+    for (const kind of FAMILIES) {
       const table = learned[kind]; const names = f[kind].filter(n => table[n] && table[n].adj);
       if (!names.length) continue;
       res.adj += names.reduce((a, n) => a + table[n].adj, 0) / names.length;
@@ -96,6 +110,7 @@ export function personal(it) {
       const label = best.includes(":") ? best.split(":").slice(1).join(":") : best;
       if (kind === "sources") res.why.push(row.adj > 0 ? `you keep ${pct}% from ${label}` : `you rarely keep ${label}`);
       else if (kind === "tags") res.why.push(row.adj > 0 ? `you keep ${pct}% of ${label}` : `you rarely keep ${label}`);
+      else if (kind === "kinds") { const what = KIND_LABELS[best.split("·")[0]] || best; res.why.push(row.adj > 0 ? `you keep ${pct}% of ${what}` : `you keep only ${pct}% of ${what}`); }
       else res.why.push(row.adj > 0 ? `you keep ${row.k} of ${row.n} by them` : `passed on them ${row.n} times`);
     }
     res.adj = Math.max(-CAP, Math.min(CAP, res.adj));

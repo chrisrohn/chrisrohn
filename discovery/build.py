@@ -1,9 +1,10 @@
 """Assemble the daily feed: run sources → merge → score → resolve → write site/data/feed.json + feed.xml + history.
 
 The list is built from the current timeframe first (`ranking.fresh_days`): releases and sightings dated within it,
-and undated releases from this year. When that leaves fewer than `backfill.target` unrated cards, the best older
-releases the artist-watch sources found (back to `backfill.years`) fill the gap, up to `backfill.max` a day, each
-marked as backfill and filed into its own year. Nothing that ranks below the score floor is ever used to fill.
+and undated releases from this year. The best older releases the artist-watch sources found (back to
+`backfill.years`) then join it: `backfill.min` of them every day they exist, and more up to `backfill.max` when the
+current timeframe leaves fewer than `backfill.target` unrated cards — each marked as backfill and filed into its
+own year. Nothing that ranks below the score floor is ever used to fill.
 
 Every card plays: a song is a card only once it has its YouTube Music audio track (`resolve.is_audio`). A song with
 no match, a video-only match, or an upload whose kind is not known yet is left out of the day and tried again on a
@@ -312,17 +313,20 @@ def split_fresh(items: list[Item], cfg: dict, today: date | None = None) -> tupl
 
 
 def fill_from_backfill(items: list[Item], cfg: dict) -> tuple[list[Item], dict]:
-    """After resolution: keep every current item, then, when fewer than `backfill.target` of them can be played, the
-    best playable older ones up to `backfill.max`, each with a "filling in from <year>" reason. Returns the list
-    (fresh first, then the fill, in score order) and the counts for the log and the payload. Playable means the
-    audio track (every card in the day is, by the time this runs)."""
+    """After resolution: keep every current item, then the best playable older ones — at least `backfill.min` of
+    them whenever that many exist (the last few years of your artists' catalogues are part of every day, not only
+    a thin one: on 2026-09-18 those older cards were kept at 35–40% against 19% for this year's), and more up to
+    `backfill.max` when fewer than `backfill.target` current cards can be played — each with a "filling in from
+    <year>" reason. Returns the list (fresh first, then the fill, in score order) and the counts for the log and
+    the payload. Playable means the audio track (every card in the day is, by the time this runs)."""
     bcfg = cfg.get("backfill") or {}
     fresh = [i for i in items if not i.backfill]
     older = [i for i in items if i.backfill and is_audio(i.youtube)]
     supply = sum(1 for i in fresh if is_audio(i.youtube))
     target = int(bcfg.get("target", 0) or 0)
     cap = int(bcfg.get("max", 0) or 0)
-    take = older[: max(0, min(cap, target - supply))] if backfill_years(cfg) else []
+    floor = int(bcfg.get("min", 0) or 0)
+    take = older[: max(0, min(cap, max(floor, target - supply)))] if backfill_years(cfg) else []
     for it in take:
         y = release_year(it)
         it.reasons.append(f"filling in from {y}" if y else "filling in from an earlier year")
@@ -355,7 +359,7 @@ def _write_history(today_s: str, items: list[Item], keep_days: int = 90) -> None
     """One file per build: the ids, plus the per-item facts learn.py needs later (source, tags, artist, video), and
     the rank and score each had, so a pass is only counted for what was on screen and the score can be calibrated."""
     hist = SITE_DATA_DIR / "history"
-    rows = [{"id": i.key, "v": (i.youtube or {}).get("videoId"), "a": i.artist, "s": i.sources, "t": i.tags, "r": n + 1, "sc": round(i.score, 2), "y": i.year, "m": i.match_kind}
+    rows = [{"id": i.key, "v": (i.youtube or {}).get("videoId"), "a": i.artist, "s": i.sources, "t": i.tags, "r": n + 1, "sc": round(i.score, 2), "y": i.year, "m": i.match_kind, "af": i.affinity}
             for n, i in enumerate(items)]
     write_json(hist / f"{today_s}.json", {"date": today_s, "ids": [i.key for i in items], "items": rows}, compact=True)
     cutoff = (date.today() - timedelta(days=keep_days)).isoformat()

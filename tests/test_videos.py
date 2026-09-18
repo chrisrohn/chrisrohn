@@ -113,8 +113,8 @@ def test_the_resolver_records_each_cards_video_side(monkeypatch):
     old = Item(artist="Old", title="Row", kind="track"); waiting = Item(artist="Wait", title="Row", kind="track")
     again = Item(artist="Again", title="Row", kind="track"); fourth = Item(artist="Fourth", title="Row", kind="track")
     cache[old.key] = {"seen": fresh, "yt": {"videoId": "aud2", "title": "Row", "artists": ["Old"], "videoType": ATV}, "v": resolve.CACHE_VERSION}
-    cache[waiting.key] = {"seen": fresh, "yt": {"videoId": "aud3", "title": "Row", "artists": ["Wait"], "videoType": ATV, "video": None}, "v": resolve.CACHE_VERSION, "vid": fresh}
-    cache[again.key] = {"seen": fresh, "yt": {"videoId": "aud1", "title": "Row", "artists": ["Again"], "videoType": ATV, "video": None}, "v": resolve.CACHE_VERSION, "vid": stale}
+    cache[waiting.key] = {"seen": fresh, "yt": {"videoId": "aud3", "title": "Row", "artists": ["Wait"], "videoType": ATV, "video": None}, "v": resolve.CACHE_VERSION, "vid": fresh, "vhow": resolve.VIDEO_FINDER}
+    cache[again.key] = {"seen": fresh, "yt": {"videoId": "aud1", "title": "Row", "artists": ["Again"], "videoType": ATV, "video": None}, "v": resolve.CACHE_VERSION, "vid": stale, "vhow": resolve.VIDEO_FINDER}
     cache[fourth.key] = {"seen": fresh, "yt": {"videoId": "aud2", "title": "Row", "artists": ["Fourth"], "videoType": ATV}, "v": resolve.CACHE_VERSION}
     util.write_json(resolve.YT_CACHE, cache)
     yt.watched.clear()
@@ -170,7 +170,7 @@ def test_the_video_list_is_built_from_the_playlist_scan(monkeypatch):
     assert [r["year"] for r in report["rows"]] == ["2026", "2026"]
     assert util.read_json(videos.REPORT, {})["count"] == 2
     cache = util.read_json(videos.CACHE, {})
-    assert cache["aud1"]["video"] == {"videoId": "vid1", "videoType": OMV} and cache["aud2"]["video"]["videoId"] == "vid2" and "aud3" not in cache
+    assert cache["aud1"]["video"] == {"videoId": "vid1", "videoType": OMV, "title": "Song (Official Video)"} and cache["aud2"]["video"]["videoId"] == "vid2" and "aud3" not in cache
 
     # the next run reuses the cache and gets to the rest; a song with no video is remembered as such
     yt.watched.clear(); cfg["videos"]["lookups_per_run"] = 10
@@ -235,3 +235,69 @@ def test_the_feed_names_the_video_playlist_and_counts_the_cards_that_know_their_
     by = {i["title"]: i for i in payload["items"]}
     assert by["One"]["youtube"]["video"] == "vid1" and "video" not in by["Three"]["youtube"]
     assert cfg["ranking"]["max_items"] == 500                                       # the day's list: 500 songs to review
+
+
+class SearchYT(FakeYT):
+    """A YouTube Music that names no pair for anyone (as it does for nearly every audio track) but answers a video
+    search: the official video for some songs, an "(Official Audio)" upload for another, nothing for the rest."""
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.searched = []
+
+    def get_watch_playlist(self, videoId=None, limit=1, **kw):
+        self.watched.append(videoId)
+        return {"tracks": [{"videoId": videoId, "videoType": ATV}]}
+
+    def search(self, q, filter=None, limit=None):
+        self.searched.append((q, filter))
+        artist, title = q.split(" ", 1)
+        hit = lambda vid, t, kind=OMV: {"resultType": "video", "videoId": vid, "title": f"{artist} - {t}", "artists": [{"name": artist}], "videoType": kind}  # noqa: E731
+        if filter != "videos":
+            return []
+        if title == "One":
+            return [hit("one-audio", "One (Official Audio)"), hit("one-fan", "One", "MUSIC_VIDEO_TYPE_UGC"), hit("one-video", "One (Official Video)")]
+        if title == "Two":
+            return [hit("two-audio", "Two (Official Audio)")]
+        if title == "Four":
+            return [hit("four-live", "Four (Live at KEXP)"), hit("four-other", "Four Seasons")]
+        return []
+
+
+def test_the_video_list_walks_the_library_most_played_first_and_never_lists_audio(monkeypatch):
+    """The rows are asked in the order they matter — the picks first, then by Last.fm plays — each through the pair
+    and then a video search; an "(Official Audio)" upload is never a video, whether searched or filed as the row
+    itself; the old pair-only cache is redone; the report says how it is ordered."""
+    yt = SearchYT()
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=lambda **kw: yt))
+    cfg = _cfg()
+    cfg["youtube_music"]["videos_playlist_id"] = "PLVIDS"
+    cfg["videos"] = {**cfg["videos"], "lookups_per_run": 3, "recheck_days": 30}
+    entries = [
+        {"year": "2026", "playlistId": "PL2026", "position": 0, "videoId": "aud1", "artist": "Band", "title": "One", "videoType": ATV},
+        {"year": "2026", "playlistId": "PL2026", "position": 1, "videoId": "aud2", "artist": "Band", "title": "Two", "videoType": ATV},              # only an "official audio" upload
+        {"year": "2024", "playlistId": "PL2024", "position": 5, "videoId": "aud3", "artist": "Band", "title": "Three", "videoType": ATV},
+        {"year": "2023", "playlistId": "PL2023", "position": 9, "videoId": "aud4", "artist": "Band", "title": "Four", "videoType": ATV},             # a pick; only a live take and another song
+        {"year": "2022", "playlistId": "PL2022", "position": 2, "videoId": "own-audio", "artist": "Band", "title": "Five (Official Audio)", "videoType": OMV},   # filed as a video that is the audio
+        {"year": "2021", "playlistId": "PL2021", "position": 3, "videoId": "own-video", "artist": "Band", "title": "Six (Official Video)", "videoType": OMV},
+    ]
+    plays = {videos.history_key("Band", "Three"): 300, videos.history_key("Band", "One"): 120, videos.history_key("Band", "Two"): 50}
+    profile = {"youtube": {"entries": entries, "checked_at": "2026-09-18T00:00:00+00:00"}, "picks": [{"videoId": "aud4", "artist": "Band", "title": "Four"}]}
+    ordered = videos.order_entries(entries, profile["picks"], plays)
+    assert [e["videoId"] for e in ordered] == ["aud4", "aud3", "aud1", "aud2", "own-audio", "own-video"] and ordered[0]["pick"] and ordered[1]["plays"] == 300
+    # a v1 cache row (the pair alone) said "no video" for One: it is asked again, this time with the search
+    util.write_json(videos.CACHE, {"aud1": {"seen": "2026-09-10", "at": "2026-09-10", "video": None, "v": 1}})
+    report = videos.build_videos(cfg, profile=profile, plays=plays)
+    assert yt.watched == ["aud4", "aud3", "aud1"] and [q for q, f in yt.searched] == ["Band Four", "Band Three", "Band One"]   # three a run, in that order
+    rows = {r["video"]: r for r in report["rows"]}
+    assert set(rows) == {"one-video", "own-video"}                                       # the official video, never the audio upload or the fan copy
+    assert rows["one-video"]["videoId"] == "aud1" and rows["one-video"]["kind"] == OMV and rows["one-video"]["via"] == "search" and rows["one-video"]["plays"] == 120
+    assert rows["own-video"]["own"] is True and "own-audio" not in rows
+    assert report["no_video"] == 2 and report["pending"] == 2 and report["looked_up"] == 3 and report["order"].startswith("picks first")
+    cache = util.read_json(videos.CACHE, {})
+    assert cache["aud1"]["video"] == {"videoId": "one-video", "videoType": OMV, "title": "Band - One (Official Video)", "via": "search"} and cache["aud1"]["v"] == 2
+    assert cache["aud4"]["video"] is None and cache["aud3"]["video"] is None
+    # the next run reaches the rest: Two's only upload is the audio, and the row filed as an audio upload is searched like any other
+    yt.watched.clear(); yt.searched.clear()
+    report = videos.build_videos(cfg, profile=profile, plays=plays)
+    assert yt.watched == ["aud2", "own-audio"] and [q for q, f in yt.searched] == ["Band Two", "Band Five (Official Audio)"]
+    assert report["pending"] == 0 and report["no_video"] == 4 and {r["video"] for r in report["rows"]} == {"one-video", "own-video"}
