@@ -5,10 +5,12 @@ import { sourceLabel } from "./feed.js";
 import { state } from "./state.js";
 import { $, esc } from "./dom.js";
 import { isCurator } from "./auth.js";
-import { learnLocal, keepsByWeek } from "./rank.js";
+import { learnLocal, keepsByWeek, KIND_LABELS } from "./rank.js";
 
 /** @typedef {import("./types").LearnedRow} LearnedRow */
 
+/** "saved·mid" → "acts in your playlists · mid". @param {string} name */
+const kindLabel = name => { const [k, band] = name.split("·"); return (KIND_LABELS[k] || k) + (band ? ` · ${band}` : ""); };
 /** @param {string} label @param {number} value @param {number} max @param {string} [note] */
 const bar = (label, value, max, note = "") => `<div class="stat-row"><span class="stat-k">${esc(label)}</span><span class="stat-bar"><i style="width:${max ? Math.round(100 * value / max) : 0}%"></i></span><span class="stat-v">${esc(note || String(value))}</span></div>`;
 /** Keep-rate rows for sources or tags, most-seen first, with the rate as the bar. @param {Record<string, LearnedRow>} table @param {number} top */
@@ -27,6 +29,7 @@ export function openStats() {
        <h3>Keeps and skips by week</h3>${weeks.map(w => bar(w.label, w.kept + w.skipped, maxW, w.kept + w.skipped + w.wrong ? `${w.kept} kept · ${w.skipped} skipped${w.wrong ? ` · ${w.wrong} wrong video` : ""}` : "—")).join("")}
        <h3>Keep rate by source</h3>${rates(mine.sources, 12, sourceLabel)}
        <h3>Keep rate by tag</h3>${rates(mine.tags)}
+       <h3>Keep rate by kind of act</h3><p class="muted">How the profile knew the artist, with its affinity band (high / mid / low).</p>${rates(mine.kinds || {}, 12, kindLabel)}
        ${topArtists.length ? `<h3>Most kept artists</h3>${topArtists.map(([n, r]) => bar(n, r.k, topArtists[0][1].k, `${r.k} of ${r.n}`)).join("")}` : ""}`
     : `<p class="muted">Sign in as a curator to see what this account keeps and skips.</p>`;
   const a = state.feed?.youtube?.audio; const cat = state.catalog?.audio;
@@ -34,7 +37,7 @@ export function openStats() {
   const b = state.feed?.learned;
   const build = b && b.outcomes
     ? `<p class="muted">Since ${esc(b.since || "?")} the build has watched ${b.outcomes} tracks it showed: ${b.kept} reached a year playlist, ${b.skipped} the Skipped playlist, base keep rate ${Math.round(b.keep_rate * 100)}%. Sources and tags below move tomorrow's scores (bounded, see <code>learn</code> in config.yaml).</p>
-       <h3>Keep rate by source (build)</h3>${rates(b.sources, 12, sourceLabel)}<h3>Keep rate by tag (build)</h3>${rates(b.tags)}`
+       <h3>Keep rate by source (build)</h3>${rates(b.sources, 12, sourceLabel)}<h3>Keep rate by tag (build)</h3>${rates(b.tags)}${b.kinds ? `<h3>Keep rate by kind of act (build)</h3>${rates(b.kinds, 12, kindLabel)}` : ""}`
     : `<p class="muted">The daily build starts learning from the playlists once the feed has a few days of history behind it (tracks shown three or more days ago that did or did not reach a playlist). Nothing to show yet.</p>`;
   $("#stats-body").innerHTML = `<h3>This account</h3>${acct}<h3>The daily build</h3>${plays}${build}`;
   $("#stats").showModal();

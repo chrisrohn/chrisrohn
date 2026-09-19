@@ -140,17 +140,22 @@ video** stops listing a row you want as it is. The album a song names is opened 
 states and its playlist, which is what the "full release" link and the year fallback come from.
 
 **The video side, on its own tab:** the year playlists hold audio tracks, and this stays so — the Feed, the Catalog,
-Picks and Cleanup never show or file a video. YouTube Music pairs most audio tracks with an official video (the same
-watch playlist that pairs a video with its audio track names the video for an audio track), and the **Video** tab
+Picks and Cleanup never show or file a video. Most songs also have an official video on YouTube, and the **Video** tab
 (curators only) is the one place those are reviewed. Two things put a video there: a song **kept** on the Feed or
 the Catalog whose card knows its video side — the resolver asks YouTube Music for it as it resolves each card
 (`videos.feed_lookups_per_run` a run, once, then again every `videos.recheck_days` while there is none; the id
 travels in feed.json as `youtube.video`, and a swapped video hit already knows it), so a Keep brings the video to
 the tab the same day, and the Keep toast says so — and every song in every year playlist that has a video: the
-**Videos** workflow (its own job, 15:51 ET, `discovery/videos.py`) walks the profile's playlist scan, asks the
-watch playlist for each audio row's video (`videos.lookups_per_run` a run, ≈0.3 s each, cached for good in
-`data/cache/videos.json`, so a 26,000-row library is done in a few weeks and then only new rows are asked), counts
-a row that is itself a video as it stands, reads the music-video playlist (public, no quota) to leave out what it
+**Videos** workflow (its own job, 15:51 and 21:41 ET, `discovery/videos.py`) walks the profile's playlist scan in
+the order it matters — the picks (the newest songs kept) first, then by how often the station has played the song
+on Last.fm (the catalog's history snapshot) — and finds each row's video with `resolve.find_video`: the pair the
+watch playlist names (YouTube Music named it for 10 rows in 11,209 by 2026-09-18, which is why the tab sat empty for
+days), then a video search that keeps the official video or a real upload and refuses anything titled as the audio
+side — "(Official Audio)", a visualiser, a lyric video, an art track (`resolve.audio_only_title`; the one time the
+tab filled, that is what it listed) — `videos.lookups_per_run` a run, about a second each, cached for good in
+`data/cache/videos.json` (rows from the pair-only days are asked again), so a 27,000-row library is done in a few
+weeks and then only new rows are asked; it counts a row that is itself a video as it stands when it is a music video
+by the same rule, reads the music-video playlist (public, no quota) to leave out what it
 already holds, leaves out what the tab decided (`data/ratings.json` → `videos`), and writes one row per video
 (however many years hold the song) to `site/data/videos.json`; the daily job rewrites the same report from the cache
 at its end (`videos.in_daily`), so a decision made on the tab is out of the list the next morning. On the tab: ▶
@@ -256,8 +261,12 @@ session that the playlist's owner approved in that browser.
   itself is up to `ranking.max_items` (500) songs, ranked by score.
 - **Video** tab: the official videos of the songs you keep and of everything the year playlists already hold, each
   played in place and either added to the music-video playlist (`▲︎ add`, the one playlist videos go to) or passed
-  (free). Only a kept song's video comes here from the feed; the year playlists themselves stay audio. See *The
-  video side* above.
+  (free). The library is walked in the order it matters — your picks (the newest songs kept) first, then by how
+  often the station has played the song on Last.fm — and every video is found through `resolve.find_video`: the
+  pair YouTube Music names for the audio track (named for 10 rows in 11,209 by 2026-09-18, which is why the tab sat
+  empty), then a video search that keeps the official video and refuses an upload titled as the audio side (an
+  "(Official Audio)" upload, a visualiser, a lyric video: what the tab listed the one time it filled). Only a kept
+  song's video comes here from the feed; the year playlists themselves stay audio. See *The video side* above.
 - **It learns from you, without API quota.** Every keep and skip remembers the card's sources, blogs, tags and artist.
   The site works out a keep rate for each against your overall rate and nudges the scores (the number on the card
   hovers to show `build score ± learned`), so a blog you keep from floats up and one you skip through sinks; tracks
@@ -266,6 +275,10 @@ session that the playlist's owner approved in that browser.
   three days later anything that reached a year playlist counts as kept, the Skipped playlist as skipped (only when
   skips are filed on YouTube), the rest as a weak pass — `discovery/learn.py`, tuned under `learn:` in config.yaml
   and weighted by `ranking.weights.learned`. Cards say why: "you keep 71% from KEXP", "you rarely keep hip hop".
+  The kind of act counts too — how the profile knows the artist (you play them, in your playlists, similar, genre,
+  unknown), banded by affinity — because no fixed weight holds what the keeps say: on 2026-09-18 the acts you play
+  kept at 32%, an act with ten songs in the playlists at 42%, one with a single song at 5%, similar acts at 8%
+  and genre acts at 5%. The base weights in `ranking.weights` are set from the same numbers.
 - **Skipped** tab: what you thumbed down or flagged as the wrong video from this feed, newest first, with **restore**
   (an Undo that no longer needs the toast; a skip filed on YouTube costs 50 units to take back). **Stats** (⚙ → *Stats*): keeps and skips by week,
   keep rate by source and tag, most-kept artists, and what the build has learned so far.
@@ -273,9 +286,11 @@ session that the playlist's owner approved in that browser.
   copies its own address (`/?t=<id>`), which opens the site on that card; the RSS items carry the same link.
 - A video YouTube refuses to embed here (removed, or the owner blocks embedding) is remembered for a month: the card
   stays, marked *no embed*, and autoplay steps over it.
-- **Thin days fill themselves.** The day is built from the current timeframe first: this year's releases, plus
-  anything dated within `ranking.fresh_days`, plus what nobody dates. When that leaves fewer than `backfill.target`
-  playable cards, the best releases the artist watch found in the last `backfill.years` years fill the gap (at most
+- **The last three years are part of every day.** The day is built from the current timeframe first: this year's
+  releases, plus anything dated within `ranking.fresh_days`, plus what nobody dates. Then at least `backfill.min`
+  of the best releases the artist watch found in the last `backfill.years` years join it whenever that many are
+  playable and unrated (on 2026-09-18 those cards were kept 35–40% of the time against 19% for this year's), and
+  when the current timeframe leaves fewer than `backfill.target` playable cards more of them fill the gap (at most
   `backfill.max` a day). They carry a *filling in from &lt;year&gt;* note, their year badge says *· filling in*, and
   each files into its own year playlist, so a quiet week works through the back catalogue of the artists and genres
   you follow instead of showing you 130 cards. Nothing older than that window is ever pulled into the feed — that is
@@ -298,21 +313,27 @@ session that the playlist's owner approved in that browser.
   day's slots filled up with yesterday's answers (on 2026-09-15, 1,160 candidates held 163 lookups: the rest were
   cached videos, misses and songs already filed) and the lookup budget went unspent while thousands of fresh
   sightings waited below the cut.
-- **Catalog** tab — filling the earlier years. The daily job also builds `site/data/catalog.json` from your own
-  Last.fm history: the tracks you have played most and the ones you loved but never filed, then the top tracks of
-  the artists you play and of their similar artists (what is adjacent). Anything a year playlist or the Skipped
-  playlist already holds is hidden; the rest is resolved on YouTube Music and given a verified release year by the
-  **Catalog** workflow (its own daily job, five hours after Discover, with a full 45 minutes), so the tab fills in
-  over a couple of weeks and then keeps pace with your listening. A track is published only once its year lookup
-  has run: the year select says how many are still "being dated". The catalog's chain is the fast one (ListenBrainz,
-  MusicBrainz, Deezer, then the year YouTube Music states for the album; no Discogs or iTunes), and a card that still
-  has no year offers **find year** — a one-tap MusicBrainz lookup from the browser that fills the year select — and
-  a Discogs search link.
+- **Catalog** tab — the station's whole play history, reviewed. `site/data/catalog.json` is every track
+  `station.lastfm_user` has ever scrobbled (the whole of `user.getTopTracks` over *overall*, one row a track with
+  its play count, refreshed weekly), flagged when loved, and dated by the scrobble log (`user.getRecentTracks`,
+  walked newest to oldest `catalog.scrobble_pages_per_run` pages a run until the whole log is read, then kept up to
+  date), so each card says "412 plays · last played Mar 2024". Anything a year playlist or the Skipped playlist
+  already holds is hidden; the rest is resolved on YouTube Music — the exact edition: "Song (X Remix)" resolves to
+  that remix or is not a card, never to the original the library most likely holds — and given a verified release
+  year by the **Catalog** workflow (its own job, twice a day, with a full 45 minutes each), the most played first,
+  so the tab fills in over a few weeks and then keeps pace with the station. A track is published only once its
+  year lookup has run: the year select says how many are still "being dated", and how far back the scrobble log has
+  been read. The catalog's chain is the fast one (ListenBrainz, MusicBrainz, Deezer, then the year YouTube Music
+  states for the album; no Discogs or iTunes), and a card that still has no year offers **find year** — a one-tap
+  MusicBrainz lookup from the browser that fills the year select — and a Discogs search link.
   The year select shows every playlist year with how many tracks it holds and how many candidates wait, so the
-  thin years are easy to work through; each Keep files into the verified year (or asks when none was found). Plays,
-  loved, your keeps and skips all rank it; the shortlist, search, source chips and the phone deck work as in the
-  feed. Tuning is under `catalog:` in config.yaml (candidate counts, per-run lookup budgets, its share of the job's
-  time after the feed). Nothing here spends YouTube API quota; the Last.fm key is the only one it needs.
+  thin years are easy to work through; each Keep files into the verified year (or asks when none was found). Sort by
+  score (plays, how recently it was played, loved, your keeps and skips), most played, last played, first played,
+  year or artist; the shortlist, search, source chips and the phone deck work as in the feed. Tuning is under
+  `catalog:` in config.yaml (`max_items` the most cards the tab is given, per-run lookup budgets, the scrobble
+  walk's pages and minutes). Nothing here spends YouTube API quota; the Last.fm key is the only one it needs.
+  Until 2026-09-18 the catalog also carried your artists' and their neighbours' best-known tracks and put loved
+  tracks first; of 914 such cards rated, 15 were kept, so the history is the catalog.
 - **Concerts** tab — who is playing near Detroit. The **Concerts** workflow (its own job, 13:33 ET) takes every
   artist played on Indie Discotheque in the last year — the Last.fm 12-month chart of `station.lastfm_user`, plus
   anyone filed into this year's playlist (`concerts.playlist_years`) — and draws their shows from six listings, each
@@ -390,7 +411,7 @@ All in `discovery/config.yaml → sources`, each with an `enabled` switch. Per-f
 
 | Source | What it finds | Needs |
 |---|---|---|
-| `listenbrainz_fresh` | every release MusicBrainz knows from the last N days, filtered by your artists/tags | nothing |
+| `listenbrainz_fresh` | every release MusicBrainz knows from the last N days, by the acts you play or keep (`kinds`, `min_affinity`) or carrying your tags | nothing |
 | `musicbrainz_tags` | recent releases tagged with your genres, from artists you've never heard of | nothing |
 | `ytmusic_artists` | singles/albums of your profile artists straight from YouTube Music (the old Release Radar) | nothing |
 | `musicbrainz_artists` | release groups of your profile artists, by MusicBrainz artist id | nothing |
@@ -403,9 +424,11 @@ All in `discovery/config.yaml → sources`, each with an `enabled` switch. Per-f
 | `spotify` | off; Spotify's API is no longer viable | Premium + dev app |
 
 The three artist-watch sources (`ytmusic_artists`, `deezer`, `musicbrainz_artists`) share one pool: the profile
-artists of the `kinds` each lists — `direct` (you play them), `similar` (their neighbours on Last.fm and
-ListenBrainz) and `genre` (the acts Last.fm ranks highest under the genres you play). That pool is what the feed is
-made of; no source watches record labels.
+artists of the `kinds` each lists — `direct` (you play them), `saved` (in your year playlists, never scrobbled),
+`similar` (their neighbours on Last.fm and ListenBrainz) and `genre` (the acts Last.fm ranks highest under the
+genres you play). Since 2026-09-18 the watches cover the playlist acts (kept as well as the acts you play) and leave
+the genre acts to the tag matching (kept 5% of the time). That pool is what the feed is made of; no source watches
+record labels.
 
 ## Tuning
 
@@ -417,10 +440,16 @@ Everything lives in `discovery/config.yaml`:
   many each contributes; `genre_top_tags` / `genre_artists_per_tag` / `genre_weight` — how many genres seed artists
   from Last.fm's tag charts, how deep, and how much that counts. Together these set how big the pool the artist
   watch rotates through is (⚙ and the feed's header line both show the counts).
-- `backfill` — how the thin days are filled: `years` how far back the artist watch reaches (0 turns it off),
-  `target` how many playable current cards a day should hold before anything older is used, `max` the most older
-  cards one day may carry, `candidates` how many are carried into YouTube resolution. Older cards say
-  "filling in from &lt;year&gt;" and file into their own year.
+- `backfill` — the last few years in the day: `years` how far back the artist watch reaches (0 turns it off),
+  `min` how many older cards join every day they exist, `target` how many playable current cards a day should hold
+  before more older ones are used, `max` the most older cards one day may carry, `candidates` how many are carried
+  into YouTube resolution. Older cards say "filling in from &lt;year&gt;" and file into their own year.
+- `sources.listenbrainz_fresh.kinds` / `min_affinity` — which profile acts a ListenBrainz fresh release may be by
+  (the acts you play and the playlist acts with a few songs there; the rest need a tag hit).
+- `catalog` — the history's review: `history_tracks` (0 = every track ever played), `max_items` (the most cards the
+  tab is given), `scrobble_pages_per_run` / `scrobble_minutes` (the scrobble walk), `weights.recent_play`,
+  `loved_bonus`, the lookup budgets.
+- `videos.lookups_per_run` — playlist rows asked for their video a run, the picks and the most played first.
 - `resolve.audio_heals_per_run` / `audio_recheck_days` — how many cards that still play a video are asked for their
   audio track a run, and how often each is asked again.
 - `videos` — the Video tab's list: `lookups_per_run` playlist rows asked for their video side in the Videos
@@ -457,7 +486,7 @@ pip install --require-hashes -r discovery/requirements.lock   # exact versions, 
 export LASTFM_API_KEY=...
 python -m discovery profile      # once, then every few days automatically
 python -m discovery build        # writes site/data/feed.json + site/feed.xml
-python -m discovery catalog      # writes site/data/catalog.json (the earlier years, from Last.fm history)
+python -m discovery catalog      # writes site/data/catalog.json (the whole Last.fm play history, reviewed)
 python -m discovery concerts     # writes site/data/concerts.json (shows near Detroit by the artists played this year)
 npm install && npm run serve     # builds dist/ from site/src and serves it at http://localhost:8000
 

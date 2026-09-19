@@ -861,7 +861,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
     payload = build.build_feed(_cfg())
     hist = util.read_json(sandbox / "site" / "data" / "history" / f"{today.isoformat()}.json", {})
     assert hist["ids"] == [payload["items"][0]["id"]]
-    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"], "r": 1, "sc": payload["items"][0]["score"], "y": None, "m": "direct"}
+    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"], "r": 1, "sc": payload["items"][0]["score"], "y": None, "m": "direct", "af": 1.0}
     assert payload["learned"]["outcomes"] == 0 and payload["learned"]["sources"] == {}
     rss = (sandbox / "site" / "feed.xml").read_text()
     assert "<pubDate>" in rss and "<lastBuildDate>" in rss and 'media:thumbnail url="https://i/x.jpg"' in rss
@@ -905,7 +905,10 @@ def test_headlines_become_cards_only_when_they_are_about_a_song():
     assert looks_like_news("Modeselektor Dublin DJ set announced") and not looks_like_news("Blister Sunrise")
 
 
-def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox):
+def test_catalog_reviews_the_whole_play_history(monkeypatch, sandbox):
+    """The catalog is every track the station has ever played on Last.fm (the whole of user.getTopTracks), loved ones
+    flagged, dated by the scrobble log, minus what the playlists hold; the most played first, the tab given at most
+    `max_items`; the snapshot is refreshed weekly and the scrobble walk resumes where it stopped."""
     from discovery import catalog
     from discovery import profile as prof
 
@@ -918,21 +921,34 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
     monkeypatch.setattr(catalog, "STATE_PATH", sandbox / "data" / "catalog_state.json")
     monkeypatch.setattr(catalog, "TAGS_CACHE", sandbox / "data" / "cache" / "artist_tags.json")
     monkeypatch.setenv("LASTFM_API_KEY", "k")
+    monkeypatch.setattr(catalog.time, "time", lambda: 1_700_000_000)
     calls = []
+    # the scrobble log, newest first: Fire twice, the rest once; a play of Moving On lands after the first walk
+    LOG = [(1_690_000_000, "Jungle", "Fire"), (1_680_000_000, "Roosevelt", "Moving On"), (1_600_000_000, "Jungle", "Fire (feat. Nobody)"),
+           (1_500_000_000, "Parcels", "Overnight"), (1_400_000_000, "Jungle", "Back On 74")]
+    LATE = [(1_699_000_000, "Roosevelt", "Moving On")]
 
     class FakeLastFm:
         def __init__(self, http, key): self.key = key
         enabled = True
-        def top_tracks(self, user, limit, period="overall"):
-            calls.append("top")
+        page_size = 2
+        late = False
+        def top_tracks(self, user, limit=0, period="overall"):
+            calls.append(("top", limit))
             return [{"name": "Back On 74", "artist": {"name": "Jungle"}, "playcount": "300", "url": "https://last.fm/1"},   # already filed → hidden
                     {"name": "Fire", "artist": {"name": "Jungle"}, "playcount": "120", "url": "https://last.fm/2"},
                     {"name": "Lovers", "artist": {"name": "Roosevelt"}, "playcount": "90"},                               # skipped → hidden
-                    {"name": "Moving On", "artist": {"name": "Roosevelt"}, "playcount": "40", "url": "javascript:x"}]
-        def loved_tracks(self, user, limit):
-            return [{"name": "Fire", "artist": {"name": "Jungle"}}, {"name": "Overnight", "artist": {"name": "Parcels"}}]
-        def artist_top_tracks(self, artist, limit):
-            return [{"name": f"{artist} Hit", "artist": {"name": artist}}] if artist in ("Jungle", "Parcels") else []
+                    {"name": "Moving On", "artist": {"name": "Roosevelt"}, "playcount": "40", "url": "javascript:x"},
+                    {"name": "Overnight", "artist": {"name": "Parcels"}, "playcount": "12"}]
+        def loved_tracks(self, user, limit=0):
+            calls.append(("loved", limit))
+            return [{"name": "Fire", "artist": {"name": "Jungle"}}, {"name": "Never Played", "artist": {"name": "Parcels"}}]
+        def recent_tracks(self, user, *, from_uts=None, to_uts=None, page=1, limit=200):
+            calls.append(("recent", from_uts, to_uts))
+            log = sorted(LOG + (LATE if self.late else []), reverse=True)
+            rows = [t for t in log if (from_uts is None or t[0] > from_uts) and (to_uts is None or t[0] <= to_uts)]
+            rows = rows[(page - 1) * self.page_size: page * self.page_size]
+            return ([{"date": {"uts": str(u)}, "artist": {"#text": a}, "name": n} for u, a, n in rows], {"total": str(len(log)), "totalPages": "9"})
         def top_tags(self, artist):
             return [{"name": "Nu Disco", "count": 100}, {"name": "rare", "count": 3}]
     monkeypatch.setattr(catalog, "LastFm", FakeLastFm)
@@ -940,7 +956,7 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
     def fake_resolve(items, cfg, deadline=None, avoid=None):
         assert cfg["resolve"]["max_lookups_per_run"] == 800
         for it in items:
-            if it.title != "Parcels Hit":
+            if it.title != "Never Played":
                 it.youtube = {"videoId": "v-" + util.norm(it.title), "title": it.title, "artists": [it.artist], "thumbnail": "https://i/x.jpg", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     monkeypatch.setattr(catalog, "resolve_all", fake_resolve)
 
@@ -957,24 +973,56 @@ def test_catalog_infills_earlier_years_from_lastfm_history(monkeypatch, sandbox)
         def save(self): pass
     monkeypatch.setattr(catalog, "Http", NoNet)
 
-    payload = catalog.build_catalog(_cfg(), deadline_minutes=5)
+    cfg = _cfg(); cfg["catalog"] = {**cfg["catalog"], "scrobble_pages_per_run": 2}
+    payload = catalog.build_catalog(cfg, deadline_minutes=5)
     titles = {(i["artist"], i["title"]) for i in payload["items"]}
     assert ("Jungle", "Back On 74") not in titles and ("Roosevelt", "Lovers") not in titles   # a playlist or the Skipped playlist already has them
-    assert ("Parcels", "Parcels Hit") not in titles                                           # no YouTube match: nothing to file
-    assert {("Jungle", "Fire"), ("Roosevelt", "Moving On"), ("Jungle", "Jungle Hit")} <= titles
+    assert ("Parcels", "Never Played") not in titles                                          # no YouTube match: nothing to file
     assert ("Parcels", "Overnight") not in titles and payload["pending"] == 1
+    assert titles == {("Jungle", "Fire"), ("Roosevelt", "Moving On")}
+    assert calls[:2] == [("top", 0), ("loved", 0)]                                            # every page of the history, every loved track
     fire = next(i for i in payload["items"] if i["title"] == "Fire")
     assert fire["plays"] == 120 and fire["loved"] is True and "120 plays" in fire["reasons"] and "loved on Last.fm" in fire["reasons"]
-    assert sorted(fire["sources"]) == ["lastfm:loved", "lastfm:top tracks"] and fire["tags"] == ["nu disco"] and fire["links"] == {"last.fm": "https://last.fm/2"}
+    assert fire["sources"] == ["lastfm:history", "lastfm:loved"] and fire["tags"] == ["nu disco"] and fire["links"] == {"last.fm": "https://last.fm/2"}
     assert fire["year"] == 2016 and fire["release_date"] is None and "listen_count" not in fire and "blurb" not in fire
+    # the scrobble walk: two pages a run, newest first — four plays read, the oldest waits for a later run; a play of
+    # "Fire (feat. Nobody)" is a play of Fire
+    assert fire["first_played"] == "2020-09-13" and fire["last_played"] == "2023-07-22" and "last played Jul 2023" in fire["reasons"]
+    moving = next(i for i in payload["items"] if i["title"] == "Moving On")
+    assert moving["last_played"] == "2023-03-28" and moving["plays"] == 40
     assert payload["items"][0]["title"] == "Fire"                                             # most played + loved ranks first
-    assert payload["years"]["2016"] == {"playlist": 3, "candidates": 2} and payload["years"]["2023"]["playlist"] == 1
-    assert payload["undated"] == 1 and payload["sources"] == ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"]
+    assert payload["years"]["2016"] == {"playlist": 3, "candidates": 1} and payload["years"]["2023"]["playlist"] == 1
+    assert payload["undated"] == 1 and payload["sources"] == ["lastfm:history", "lastfm:loved"]
+    assert payload["history"] == {"fetched_at": payload["history"]["fetched_at"], "tracks": 6, "scrobbles": 5, "dated": 2, "walked_back_to": "2017-07-14", "complete": False}
     state = util.read_json(sandbox / "data" / "catalog_state.json", {})
-    assert state["fetched_at"] and len(state["candidates"]) == 8 and set(state["first_seen"]) == {i["id"] for i in payload["items"]}
-    # a fresh snapshot is reused: Last.fm is not asked again for a week
-    catalog.build_catalog(_cfg(), deadline_minutes=5)
-    assert calls == ["top"]
+    assert state["fetched_at"] and len(state["candidates"]) == 6 and set(state["first_seen"]) == {i["id"] for i in payload["items"]}
+    sc = state["scrobbles"]
+    assert sc["newest"] == 1_690_000_000 and sc["oldest"] == 1_500_000_000 and not sc["complete"] and sc["gap"] is None
+    assert [c for c in calls if c[0] == "recent"] == [("recent", None, None), ("recent", None, 1_679_999_999)]
+
+    # the next run: a fresh snapshot is reused (Last.fm is not asked for the lists again for a week); the walk first
+    # closes the gap since the newest play it knows, then goes on down; a play in the gap moves "last played"
+    calls.clear(); FakeLastFm.late = True
+    payload = catalog.build_catalog(cfg, deadline_minutes=5)
+    assert not [c for c in calls if c[0] in ("top", "loved")]
+    assert [c for c in calls if c[0] == "recent"] == [("recent", 1_690_000_001, 1_700_000_000), ("recent", 1_690_000_001, 1_698_999_999)]
+    moving = next(i for i in payload["items"] if i["title"] == "Moving On")
+    assert moving["last_played"] == "2023-11-03" and moving["first_played"] == "2023-03-28"
+    sc = util.read_json(sandbox / "data" / "catalog_state.json", {})["scrobbles"]
+    assert sc["newest"] == 1_699_000_000 and sc["gap"] is None and sc["oldest"] == 1_500_000_000
+    # a third run with nothing new since: the walk goes on down, reaches the beginning of the log and says so
+    calls.clear(); monkeypatch.setattr(catalog.time, "time", lambda: 1_698_999_999)
+    cfg["catalog"]["scrobble_pages_per_run"] = 3
+    payload = catalog.build_catalog(cfg, deadline_minutes=5)
+    assert [c for c in calls if c[0] == "recent"] == [("recent", None, 1_499_999_999), ("recent", None, 1_399_999_999)]
+    sc = util.read_json(sandbox / "data" / "catalog_state.json", {})["scrobbles"]
+    assert sc["complete"] and sc["oldest"] == 1_400_000_000 and payload["history"]["complete"] and payload["history"]["walked_back_to"] == "2014-05-13"
+    # the tab is given at most max_items, the best first; the rest wait
+    cfg["catalog"]["max_items"] = 1
+    payload = catalog.build_catalog(cfg, deadline_minutes=5)
+    assert payload["count"] == 1 and payload["playable"] == 2 and payload["items"][0]["title"] == "Fire"
+    # the history's plays, keyed like the cards, for the Videos workflow
+    assert catalog.history_plays(util.read_json(sandbox / "data" / "catalog_state.json", {}))[catalog.history_key("Jungle", "Fire feat. Nobody")] == 120
 
 
 def test_resolver_prefers_the_audio_track_and_the_original_issue():
@@ -1241,13 +1289,13 @@ def test_resolve_all_redoes_a_flagged_video_and_remembers_the_refusal(monkeypatc
     util.write_json(resolve.YT_CACHE, {it.key: {"seen": "2026-09-01", "yt": bad, "v": resolve.CACHE_VERSION}})
     # the curator flagged vbad on the site: the cached row is redone, and the next-best upload takes its place
     resolve.resolve_all([it], _cfg(), avoid={it.key: {"vbad"}})
-    assert it.youtube["videoId"] == "vgood" and FakeYT.calls == 1
+    assert it.youtube["videoId"] == "vgood" and FakeYT.calls == 2      # the songs search, then the video search for the card's video side
     cache = util.read_json(resolve.YT_CACHE, {})
     assert cache[it.key]["yt"]["videoId"] == "vgood" and cache[it.key]["not"] == ["vbad"]
     # the refusal lives on the row: a later run without the ratings file still never goes back to vbad
     again = Item(artist="Jungle", title="Keep Moving", kind="track")
     resolve.resolve_all([again], _cfg())
-    assert again.youtube["videoId"] == "vgood" and FakeYT.calls == 1
+    assert again.youtube["videoId"] == "vgood" and FakeYT.calls == 2
     # with every upload flagged there is nothing left to play: the row says so and is not retried every day
     class OnlyBad(FakeYT):
         def search(self, q, filter=None, limit=None):
@@ -1255,7 +1303,7 @@ def test_resolve_all_redoes_a_flagged_video_and_remembers_the_refusal(monkeypatc
             return [{"resultType": "song", "title": "Keep Moving", "artists": [{"name": "Jungle"}], "videoId": "vbad", "videoType": resolve.ATV}] if filter == "songs" else []
     monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=OnlyBad))
     resolve.resolve_all([again := Item(artist="Jungle", title="Keep Moving", kind="track")], _cfg(), avoid={again.key: {"vgood"}})
-    assert again.youtube is None and FakeYT.calls == 3   # songs, then videos
+    assert again.youtube is None and FakeYT.calls == 4   # songs, then videos (the track search's second try)
     assert util.read_json(resolve.YT_CACHE, {})[again.key]["not"] == ["vbad", "vgood"]
 
 
@@ -1856,3 +1904,114 @@ def test_build_picks_candidates_with_the_cache_in_hand(monkeypatch, sandbox):
     assert sum(t.startswith("Fresh") for t in titles) == 3                         # 4 live slots: the cached audio hit and three lookups
     ids = {i["title"] for i in payload["items"]}
     assert ids == {"Cached Audio", "Fresh 0", "Fresh 1", "Fresh 2"}
+
+
+def test_remix_cards_resolve_to_the_remix_or_nothing(monkeypatch, sandbox):
+    """"Song (X Remix)" is the remix: the resolver refuses the original (the recording the library most likely holds),
+    a cached row that sits on the original is redone, and the artist's own versions ("(Radio Edit)") ask for nothing."""
+    import sys
+    import types
+
+    from discovery import resolve
+
+    assert resolve.named_remixer("Brooklyn Baby (Monsieur Adi Remix)") == "Monsieur Adi" and resolve.named_remixer("Song - Yuksek Remix") == "Yuksek"
+    assert resolve.named_remixer("Song (Radio Edit)") is None and resolve.named_remixer("Song (Original Mix)") is None and resolve.named_remixer("Song") is None
+    assert resolve.remix_agrees("Brooklyn Baby (Monsieur Adi Remix)", "Brooklyn Baby (Monsieur Adi Remix)")
+    assert resolve.remix_agrees("Brooklyn Baby (Monsieur Adi Remix)", "Brooklyn Baby", "Brooklyn Baby (Monsieur Adi Remixes)")   # the album names the remix
+    assert not resolve.remix_agrees("Brooklyn Baby (Monsieur Adi Remix)", "Brooklyn Baby", "Ultraviolence")
+    assert not resolve.remix_agrees("Brooklyn Baby (Monsieur Adi Remix)", "Brooklyn Baby (Cedric Gervais Remix)")             # another remix is another track
+    assert resolve.remix_agrees("Song (Radio Edit)", "Song") and resolve.remix_agrees("Song", "Song (X Remix)")                  # version_mismatch judges the second
+    original = {"resultType": "song", "videoId": "orig", "title": "Brooklyn Baby", "artists": [{"name": "Lana Del Rey"}], "album": {"name": "Ultraviolence"}, "videoType": resolve.ATV, "duration": "5:52"}
+    remix = {"resultType": "song", "videoId": "rmx", "title": "Brooklyn Baby (Monsieur Adi Remix)", "artists": [{"name": "Lana Del Rey"}], "album": {"name": "Brooklyn Baby (Remixes)"}, "videoType": resolve.ATV, "duration": "4:52"}
+    assert resolve._pick([original, remix], "Lana Del Rey", "Brooklyn Baby (Monsieur Adi Remix)")["videoId"] == "rmx"
+    assert resolve._pick([original], "Lana Del Rey", "Brooklyn Baby (Monsieur Adi Remix)") is None
+    assert resolve._pick([original, remix], "Lana Del Rey", "Brooklyn Baby")["videoId"] == "orig"
+    it = Item(artist="Lana Del Rey", title="Brooklyn Baby (Monsieur Adi Remix)", kind="track").normalize_credit()
+    assert it.remixer == "Monsieur Adi" and it.title == "Brooklyn Baby"
+    assert not resolve.plausible(it, {"videoId": "orig", "title": "Brooklyn Baby", "artists": ["Lana Del Rey"], "album": "Ultraviolence"})
+    assert resolve.plausible(it, {"videoId": "rmx", "title": "Brooklyn Baby (Monsieur Adi Remix)", "artists": ["Lana Del Rey"]})
+
+    class FakeYT:
+        searches = []
+        def search(self, q, filter=None, limit=None):
+            FakeYT.searches.append((q, filter))
+            return [original, remix] if filter == "songs" else []
+        def get_watch_playlist(self, **kw): return {"tracks": []}
+        def get_album(self, bid): return {}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    # a row the old resolver wrote on the original is stale: redone, and the remix takes its place
+    util.write_json(resolve.YT_CACHE, {it.key: {"seen": "2026-09-01", "yt": {"videoId": "orig", "title": "Brooklyn Baby", "artists": ["Lana Del Rey"], "album": "Ultraviolence", "videoType": resolve.ATV}, "v": resolve.CACHE_VERSION}})
+    resolve.resolve_all([it], _cfg())
+    assert it.youtube["videoId"] == "rmx" and FakeYT.searches[0] == ("Lana Del Rey Brooklyn Baby (Monsieur Adi Remix)", "songs")
+    assert util.read_json(resolve.YT_CACHE, {})[it.key]["yt"]["videoId"] == "rmx"
+
+
+def test_learner_rates_each_kind_of_act(tmp_path):
+    """Keep rates by how the profile knows the act (direct / saved / similar / genre / none), banded by affinity, move
+    the score like a source or a tag would; the kinds take no exploration bonus; the summary carries them."""
+    from discovery import learn
+
+    assert learn.kind_band("direct", 0.5) == ["direct", "direct·high"] and learn.kind_band("saved", 0.15) == ["saved", "saved·mid"]
+    assert learn.kind_band("similar", 0.05) == ["similar", "similar·low"] and learn.kind_band(None, None) == ["none"] and learn.kind_band("genre", None) == ["genre"]
+    today = date.today()
+    shown = (today - timedelta(days=5)).isoformat()
+    outs = []
+    for n in range(20):
+        outs.append({"id": f"d{n}", "s": ["ytmusic"], "t": [], "a": f"Act {n}", "m": "direct", "af": 0.5, "shown": shown, "verdict": "kept" if n < 8 else "skipped"})
+        outs.append({"id": f"s{n}", "s": ["ytmusic"], "t": [], "a": f"Sim {n}", "m": "similar", "af": 0.2, "shown": shown, "verdict": "kept" if n < 1 else "skipped"})
+    learned = learn.learn(outs, {"learn": {"prior": 2, "min_exposures": 3}}, today=today)
+    assert learned["kinds"]["direct·high"]["n"] == 20 and learned["kinds"]["direct·high"]["k"] == 8
+    assert learned["kinds"]["similar"]["adj"] < -0.8 < 0 < learned["kinds"]["direct"]["adj"]
+    adj, why = learn.adjustment(learned, ["ytmusic"], [], "Someone Else", "similar", 0.2)
+    assert adj < 0 and any(w.startswith("you keep only") and "similar acts" in w for w in why)
+    up, why = learn.adjustment(learned, ["ytmusic"], [], "Someone Else", "direct", 0.5)
+    assert up > adj and any("acts you play" in w for w in why)
+    none, _ = learn.adjustment(learned, ["ytmusic"], [], "Someone Else")            # an act the profile does not know: no kind history yet, the source alone
+    assert adj < none < up
+    assert learn.exploration(learned, ["ytmusic"], [], "Someone Else") == learn.exploration(learned, ["ytmusic"], [], "Someone Else")
+    assert "genre" not in learned["kinds"] and learn.public_summary(learned)["kinds"]["direct"]["n"] == 20
+
+
+def test_listenbrainz_follows_only_the_acts_that_pay_off():
+    """ListenBrainz's fresh releases are kept for the acts you play and the acts in your playlists above a minimum
+    affinity; a similar or genre artist's release, or a one-song library act's, needs a tag hit."""
+    from discovery.sources import listenbrainz as lb
+
+    profile = {**PROFILE, "artists": {**PROFILE["artists"], "one song": {"name": "One Song", "affinity": 0.07, "kind": "saved", "mbid": None, "via": []},
+                                       "many songs": {"name": "Many Songs", "affinity": 0.2, "kind": "saved", "mbid": None, "via": []}}}
+    rel = lambda a, mb, tags=None: {"artist_credit_name": a, "release_name": f"{a} EP", "artist_mbids": [mb], "release_date": date.today().isoformat(),  # noqa: E731
+                                    "release_group_primary_type": "EP", "release_tags": tags or []}
+    payload = {"payload": {"releases": [rel("Jungle", "m-jungle"), rel("Parcels", "x"), rel("TOPS", "y"), rel("One Song", "z"), rel("Many Songs", "w"), rel("Parcels", "x2", ["nu-disco"])]}}
+
+    class FakeHttp:
+        def get(self, url, **kw): return payload
+
+    cfg = _cfg()
+    got = {i.artist for i in lb.fetch(cfg, profile, FakeHttp())}
+    assert got == {"Jungle", "Many Songs", "Parcels"}                                # Parcels only by its tagged release
+    assert sum(1 for i in lb.fetch(cfg, profile, FakeHttp()) if i.artist == "Parcels") == 1
+    cfg["sources"]["listenbrainz_fresh"] = {**cfg["sources"]["listenbrainz_fresh"], "kinds": ["direct", "saved", "similar", "genre"], "min_affinity": 0}
+    assert {i.artist for i in lb.fetch(cfg, profile, FakeHttp())} == {"Jungle", "Parcels", "TOPS", "One Song", "Many Songs"}
+    assert lb.wanted(profile, "Jungle & Parcels", [], {"direct"}, 0.5) and not lb.wanted(profile, "Nobody", ["nope"], {"direct", "saved"}, 0)
+
+
+def test_backfill_min_makes_the_last_years_a_daily_fixture():
+    """`backfill.min` older cards join the day whenever they exist, however rich the current timeframe; above the
+    target nothing more is used, and with min 0 the fill is what it was."""
+    from discovery.build import fill_from_backfill
+
+    def card(n, back=False):
+        it = Item(artist=f"A{n}", title=f"T{n}", kind="track", backfill=back)
+        it.youtube = {"videoId": f"v{n}", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
+        it.stated_year = 2024 if back else 2026
+        return it
+    fresh = [card(n) for n in range(6)]
+    older = [card(10 + n, True) for n in range(4)]
+    cfg = {"backfill": {"years": 3, "target": 2, "max": 3, "min": 2}}
+    items, counts = fill_from_backfill(fresh + older, cfg)
+    assert counts == {"fresh_playable": 6, "older": 4, "used": 2} and [i.artist for i in items if i.backfill] == ["A10", "A11"]
+    assert "filling in from 2024" in items[-1].reasons
+    cfg["backfill"]["min"] = 0
+    assert fill_from_backfill(fresh + older, cfg)[1]["used"] == 0
+    cfg["backfill"]["target"] = 10                                                      # a thin day: the gap, up to max
+    assert fill_from_backfill(fresh + older, cfg)[1]["used"] == 3

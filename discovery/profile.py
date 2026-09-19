@@ -50,12 +50,14 @@ class LastFm:
     def enabled(self) -> bool:
         return bool(self.key)
 
-    def call(self, method: str, **params: Any) -> dict:
+    def call(self, method: str, *, cache: bool = True, **params: Any) -> dict:
+        """One Last.fm request as JSON; {} on any failure (logged). `cache=False` for pages that would only bloat
+        the HTTP cache (the scrobble log)."""
         if not self.key:
             return {}
         params.update({"method": method, "api_key": self.key, "format": "json"})
         try:
-            data = self.http.get(LASTFM_API, params=params)
+            data = self.http.get(LASTFM_API, params=params, cache=cache)
         except Exception as exc:  # noqa: BLE001
             log.warning("last.fm %s failed: %s", method, exc)
             return {}
@@ -82,11 +84,13 @@ class LastFm:
             page += 1
         return out[:limit] if limit > 0 else out
 
-    def _paged(self, method: str, outer: str, inner: str, limit: int, **params: Any) -> list[dict]:
+    def _paged(self, method: str, outer: str, inner: str, limit: int, *, cache: bool = True, **params: Any) -> list[dict]:
+        """Every row of a paged list, 1000 a request; `limit` <= 0 = every page Last.fm reports."""
         out: list[dict] = []
         page = 1
-        while len(out) < limit:
-            data = self.call(method, limit=min(1000, limit - len(out)), page=page, **params)
+        while limit <= 0 or len(out) < limit:
+            per = 1000 if limit <= 0 else min(1000, limit - len(out))
+            data = self.call(method, cache=cache, limit=per, page=page, **params)
             rows = (data.get(outer) or {}).get(inner) or []
             if not rows:
                 break
@@ -95,14 +99,29 @@ class LastFm:
             if page >= int(attrs.get("totalPages", 1) or 1):
                 break
             page += 1
-        return out[:limit]
+        return out[:limit] if limit > 0 else out
 
-    def top_tracks(self, user: str, limit: int, period: str = "overall") -> list[dict]:
-        """The tracks this user has played most, with play counts (the catalog's first source)."""
-        return self._paged("user.gettoptracks", "toptracks", "track", limit, user=user, period=period)
+    def top_tracks(self, user: str, limit: int = 0, period: str = "overall") -> list[dict]:
+        """The tracks this user has played, most played first, with play counts; `limit` <= 0 = every track ever
+        scrobbled (the catalog: user.getTopTracks over `overall` is the whole play history, one row a track)."""
+        return self._paged("user.gettoptracks", "toptracks", "track", limit, cache=limit > 0, user=user, period=period)
 
-    def loved_tracks(self, user: str, limit: int) -> list[dict]:
-        return self._paged("user.getlovedtracks", "lovedtracks", "track", limit, user=user)
+    def loved_tracks(self, user: str, limit: int = 0) -> list[dict]:
+        return self._paged("user.getlovedtracks", "lovedtracks", "track", limit, cache=limit > 0, user=user)
+
+    def recent_tracks(self, user: str, *, from_uts: int | None = None, to_uts: int | None = None, page: int = 1, limit: int = 200) -> tuple[list[dict], dict]:
+        """One page of the scrobble log (user.getRecentTracks, newest first, 200 a page at most), between the two
+        Unix times when given, with the page's "@attr" (total, totalPages). Never cached: the log is walked once.
+        A "now playing" row carries no date and is left out."""
+        extra: dict[str, Any] = {}
+        if from_uts is not None:
+            extra["from"] = int(from_uts)
+        if to_uts is not None:
+            extra["to"] = int(to_uts)
+        data = self.call("user.getrecenttracks", cache=False, user=user, limit=min(200, max(1, int(limit))), page=max(1, int(page)), **extra)
+        rt = data.get("recenttracks") or {}
+        rows = [t for t in (rt.get("track") or []) if isinstance(t, dict) and (t.get("date") or {}).get("uts")]
+        return rows, dict(rt.get("@attr") or {})
 
     def artist_top_tracks(self, artist: str, limit: int) -> list[dict]:
         data = self.call("artist.gettoptracks", artist=artist, limit=limit, autocorrect=1)

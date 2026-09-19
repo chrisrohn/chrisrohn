@@ -12,8 +12,11 @@ anywhere counts as a weak pass (`pass_weight`), because a track the curator neve
 they rejected. "Reached the screen" means it ranked within `shown_rank` of that day's build: the site shows a
 shortlist, so a source that emits 900 tracks a day is not punished for the 850 nobody ever saw.
 
-Each source, tag and artist then gets a smoothed keep rate against the overall keep rate, expressed as a bounded
-log2 ratio that score.py adds to the score. Old outcomes fade with a half-life (`half_life_days`) so last season's
+Each source, tag, artist and artist kind then gets a smoothed keep rate against the overall keep rate, expressed as
+a bounded log2 ratio that score.py adds to the score. The artist kind is how the profile knows the act — `direct`
+(you play them), `saved` (in your playlists), `similar`, `genre`, or `none` — banded by affinity (`kind_band`):
+on 2026-09-18 the acts you play kept at 32%, similar artists at 8% and genre acts at 5%, while an act with ten
+songs in the playlists kept at 42% and one with a single song at 5%, and no fixed weight can hold all of that. Old outcomes fade with a half-life (`half_life_days`) so last season's
 taste does not outweigh this month's. Features with few sightings get an exploration bonus (`explore`, a UCB-style
 term that shrinks with every sighting) so an unfamiliar blog or a brand-new artist gets a fair look before the
 keep rate has anything to say. With no history yet every adjustment is 0 and ranking is exactly what it was.
@@ -123,12 +126,32 @@ def outcomes(rows: dict[str, dict], saved: dict, *, shown_rank: int | None = Non
     return out
 
 
+KIND_BANDS = ((0.3, "high"), (0.1, "mid"), (0.0, "low"))   # a profile affinity, banded: "direct·high" is an act you play a lot
+KIND_LABELS = {"direct": "acts you play", "saved": "acts in your playlists", "similar": "similar acts", "genre": "genre acts", "none": "acts the profile does not know"}
+FAMILIES = ("sources", "tags", "artists", "kinds")
+
+
+def kind_band(kind: str | None, affinity: float | None) -> list[str]:
+    """The artist-kind features of an item: the kind itself, and the kind with its affinity band when one is known
+    ("saved", "saved·mid"); an act the profile does not know is "none"."""
+    k = kind or "none"
+    if k == "none" or affinity is None:
+        return [k]
+    try:
+        a = float(affinity)
+    except (TypeError, ValueError):
+        return [k]
+    band = next(b for t, b in KIND_BANDS if a >= t)
+    return [k, f"{k}·{band}"]
+
+
 def _features(o: dict) -> dict[str, list[str]]:
     sources = [s for s in (o.get("s") or []) if s]
     fams = sorted({s.split(":")[0] for s in sources})
     # blogs and radio stations are judged one by one (rss:Stereogum), the catalogue sources as a family (deezer)
     per = [s for s in sources if ":" in s] + [f for f in fams if not any(s.startswith(f + ":") for s in sources)]
-    return {"sources": per, "tags": [norm(t) for t in (o.get("t") or []) if t], "artists": [norm(o.get("a"))] if o.get("a") else []}
+    return {"sources": per, "tags": [norm(t) for t in (o.get("t") or []) if t], "artists": [norm(o.get("a"))] if o.get("a") else [],
+            "kinds": kind_band(o.get("m"), o.get("af"))}
 
 
 def learn(outs: list[dict], cfg: dict | None = None, *, today: date | None = None) -> dict:
@@ -154,9 +177,9 @@ def learn(outs: list[dict], cfg: dict | None = None, *, today: date | None = Non
     n_all = sum(weight[o["verdict"]] * decay(o) for o in outs)
     k_all = sum(decay(o) for o in outs if o["verdict"] == "kept")
     if n_all <= 0:
-        return {"outcomes": 0, "keep_rate": 0.0, "sources": {}, "tags": {}, "artists": {}}
+        return {"outcomes": 0, "keep_rate": 0.0, "sources": {}, "tags": {}, "artists": {}, "kinds": {}}
     base = (k_all + 1.0) / (n_all + 2.0)
-    counts: dict[str, dict[str, list[float]]] = {"sources": {}, "tags": {}, "artists": {}}
+    counts: dict[str, dict[str, list[float]]] = {f: {} for f in FAMILIES}
     for o in outs:
         d = decay(o)
         w = weight[o["verdict"]] * d
@@ -171,7 +194,7 @@ def learn(outs: list[dict], cfg: dict | None = None, *, today: date | None = Non
     result: dict = {"outcomes": len(outs), "cap": cap, "kept": sum(1 for o in outs if o["verdict"] == "kept"), "skipped": sum(1 for o in outs if o["verdict"] == "skipped"),
                     "keep_rate": round(base, 4), "since": min((o["shown"] for o in outs), default=None), "half_life_days": half_life,
                     "explore": float(c.get("explore") or 0), "explore_max": float(c.get("explore_max") or 0),
-                    "sources": {}, "tags": {}, "artists": {}}
+                    "sources": {}, "tags": {}, "artists": {}, "kinds": {}}
     for kind, table in counts.items():
         for name, (n, k, shown, raw_k) in table.items():
             rate = (k + prior * base) / (n + prior)
@@ -192,7 +215,8 @@ def learn_from_history(profile: dict, cfg: dict, history_dir: Path, *, today: da
 
 def exploration(learned: dict | None, sources: list[str], tags: list[str], artist: str) -> float:
     """A UCB-style bonus for what the curator has barely been shown: `explore · sqrt(ln N / (n + 1))` per feature,
-    averaged within each family and across the families, capped at `explore_max`. Zero until there is history."""
+    averaged within each family and across the families, capped at `explore_max`. Zero until there is history.
+    The artist kinds take no part: there are five of them and every one is seen daily."""
     if not learned or not learned.get("outcomes"):
         return 0.0
     c = float(learned.get("explore") or 0)
@@ -203,7 +227,7 @@ def exploration(learned: dict | None, sources: list[str], tags: list[str], artis
     f = _features({"s": sources, "t": tags, "a": artist})
     parts: list[float] = []
     for kind, names in f.items():
-        if not names:
+        if not names or kind == "kinds":
             continue
         table = learned.get(kind) or {}
         vals = [c * math.sqrt(big_n / (float((table.get(n) or {}).get("n", 0)) + 1.0)) for n in names]
@@ -213,12 +237,13 @@ def exploration(learned: dict | None, sources: list[str], tags: list[str], artis
     return round(min(cap, sum(parts) / len(parts)), 3)
 
 
-def adjustment(learned: dict | None, sources: list[str], tags: list[str], artist: str) -> tuple[float, list[str]]:
-    """The learned bonus (or penalty) for one item, with the reasons a card can show."""
+def adjustment(learned: dict | None, sources: list[str], tags: list[str], artist: str, kind: str | None = None, affinity: float | None = None) -> tuple[float, list[str]]:
+    """The learned bonus (or penalty) for one item, with the reasons a card can show. `kind` and `affinity` are how
+    the profile knows the act (score.py's match), so the keep rate of that kind of act counts too."""
     if not learned or not learned.get("outcomes"):
         return 0.0, []
     cap = float(learned.get("cap") or DEFAULTS["max_adjust"])
-    f = _features({"s": sources, "t": tags, "a": artist})
+    f = _features({"s": sources, "t": tags, "a": artist, "m": kind, "af": affinity})
     total = 0.0
     reasons: list[str] = []
     for kind, names in f.items():
@@ -236,6 +261,9 @@ def adjustment(learned: dict | None, sources: list[str], tags: list[str], artist
                 reasons.append(f"you keep {pct}% from {label.split(':', 1)[-1]}" if best["adj"] > 0 else f"you rarely keep {label.split(':', 1)[-1]}")
             elif kind == "tags":
                 reasons.append(f"you keep {pct}% of {label}" if best["adj"] > 0 else f"you rarely keep {label}")
+            elif kind == "kinds":
+                what = KIND_LABELS.get(label.split("·")[0], label)
+                reasons.append(f"you keep {pct}% of {what}" if best["adj"] > 0 else f"you keep only {pct}% of {what}")
             else:
                 reasons.append(f"you keep {best['k']} of {best['n']} by them" if best["adj"] > 0 else f"passed on them {best['n']} times")
     return max(-cap, min(cap, total)), reasons
@@ -249,4 +277,5 @@ def public_summary(learned: dict, *, top: int = 40) -> dict:
     return {"outcomes": learned.get("outcomes", 0), "kept": learned.get("kept", 0), "skipped": learned.get("skipped", 0),
             "keep_rate": learned.get("keep_rate", 0.0), "since": learned.get("since"),
             "sources": trim(learned.get("sources") or {}, lambda kv: -kv[1]["n"]),
-            "tags": trim(learned.get("tags") or {}, lambda kv: -kv[1]["n"])}
+            "tags": trim(learned.get("tags") or {}, lambda kv: -kv[1]["n"]),
+            "kinds": trim(learned.get("kinds") or {}, lambda kv: -kv[1]["n"])}

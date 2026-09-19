@@ -103,7 +103,9 @@ export async function loadCatalog(force = false) {
 export function fillCatalogYears() {
   const sel = $("#cat-year"); const cat = state.catalog; if (!sel || !cat) return;
   const years = Object.entries(cat.years || {}).sort((a, b) => Number(b[0]) - Number(a[0]));
-  sel.innerHTML = `<option value="">all years · ${cat.count} candidates${cat.pending ? ` · ${cat.pending} more being dated` : ""}</option>` + (cat.undated ? `<option value="?">year unknown · ${cat.undated}</option>` : "") +
+  const h = cat.history;
+  const hist = h ? ` · history: ${h.tracks} tracks${h.walked_back_to ? `, plays read back to ${h.complete ? "the start" : h.walked_back_to}` : ""}` : "";
+  sel.innerHTML = `<option value="">all years · ${cat.count} candidates${cat.playable && cat.playable > cat.count ? ` of ${cat.playable}` : ""}${cat.pending ? ` · ${cat.pending} more being dated` : ""}${hist}</option>` + (cat.undated ? `<option value="?">year unknown · ${cat.undated}</option>` : "") +
     years.map(([y, v]) => `<option value="${y}"${v.candidates ? "" : " disabled"}>${y} · ${v.playlist} in playlist · ${v.candidates} here</option>`).join("");
   sel.value = state.filters.catYear || "";
   if (sel.value !== (state.filters.catYear || "")) { state.filters.catYear = ""; sel.value = ""; }
@@ -191,7 +193,7 @@ function watchForToday() {
 function fillYears() { const f = state.feed; state._years = (f?.years && f.years.length) ? f.years : range(new Date().getFullYear(), 1979); }
 /** @type {Record<string, string>} */
 const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "YouTube Music", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify", reddit: "Reddit", apple: "Apple Music",
-  "lastfm:top tracks": "Most played", "lastfm:loved": "Loved", "lastfm:artist top": "Your artists' hits", "lastfm:similar top": "Similar artists' hits" };
+  "lastfm:history": "Play history", "lastfm:top tracks": "Most played", "lastfm:loved": "Loved", "lastfm:artist top": "Your artists' hits", "lastfm:similar top": "Similar artists' hits" };
 /** A source as the site names it: the family's full name ("ytmusic" → "YouTube Music", never an abbreviation of a
  * trademark), a named feed by its own name ("rss:Gorilla vs. Bear" → "Gorilla vs. Bear"). @param {string} s */
 export function sourceLabel(s) { const [k, ...rest] = String(s).split(":"); return SOURCE_LABELS[s] || rest.join(":") || SOURCE_LABELS[k] || k; }
@@ -338,6 +340,9 @@ function listFor(view) {
     const ccmp = {
       score: (a, b) => scoreOf(b) - scoreOf(a) || b.score - a.score,
       plays: (a, b) => (b.plays || 0) - (a.plays || 0) || scoreOf(b) - scoreOf(a),
+      // a track the scrobble walk has not reached yet is older than any it has: it sorts last (first played: unknown last too)
+      last: (a, b) => String(b.last_played || "").localeCompare(String(a.last_played || "")) || (b.plays || 0) - (a.plays || 0),
+      first: (a, b) => String(b.first_played || "").localeCompare(String(a.first_played || "")) || (b.plays || 0) - (a.plays || 0),
       year: (a, b) => (b.year || 0) - (a.year || 0) || scoreOf(b) - scoreOf(a),
       artist: (a, b) => a.artist.localeCompare(b.artist),
     };

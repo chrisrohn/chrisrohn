@@ -1,12 +1,14 @@
 name: Catalog
 
-# Builds the catalog (site/data/catalog.json: candidates for the earlier years, from Last.fm history) and publishes
-# the site. Its own job, a few hours after Discover, so the lookups get a full 45 minutes instead of the feed's
-# leftovers. Nothing here writes to your YouTube Music playlists: only a thumb pressed on the site does that.
+# Builds the catalog (site/data/catalog.json: the whole Last.fm play history, reviewed song by song) and publishes
+# the site. Its own job, twice a day, so the lookups get a full 45 minutes each time instead of the feed's leftovers:
+# a history of tens of thousands of tracks is resolved and dated a batch a run. Nothing here writes to your YouTube
+# Music playlists: only a thumb pressed on the site does that.
 
 on:
   schedule:
     - cron: "15 15 * * *"      # 11:15 New York in summer: five hours after Discover, never overlapping it
+    - cron: "15 21 * * *"      # 17:15 New York in summer: after Videos, before the evening
   workflow_dispatch:
 
 concurrency:

@@ -114,11 +114,11 @@ const yearsOf = r => (r.years && r.years.length ? r.years : [r.year]).filter(Boo
 function asItem(r) {
   const years = yearsOf(r);
   const where = r.from === "feed" ? `kept here${r.at ? " " + relTime(new Date(r.at)) : ""}` : years.length ? `in ${years.map(y => titleFor(y)).join(", ")}` : "";
-  const reasons = [r.own ? "the playlist row itself is the video" : "", where, r.position != null && r.position >= 0 ? `#${r.position + 1}` : ""].filter(Boolean);
+  const reasons = [r.pick ? "one of your picks" : "", r.plays ? `${r.plays} plays on Last.fm` : "", r.own ? "the playlist row itself is the video" : "", where, r.position != null && r.position >= 0 ? `#${r.position + 1}` : ""].filter(Boolean);
   /** @type {Record<string, string>} */ const links = {};
   if (r.videoId && r.videoId !== r.video) links["audio track"] = `https://music.youtube.com/watch?v=${r.videoId}`;
   return { id: videoItemId(r.video), artist: r.artist, title: r.title, display_title: r.title, release: r.album || null, release_type: KIND[r.kind || ""] || (r.own ? "filed as the video" : "video"), release_date: null,
-    sources: [r.from === "feed" ? "videos:kept here" : "videos:year playlists"], tags: [], reasons, links, score: 0,
+    sources: [r.from === "feed" ? "videos:kept here" : r.pick ? "videos:your picks" : "videos:year playlists"], tags: [], reasons, links, score: 0,
     youtube: { videoId: r.video, thumbnail: `https://i.ytimg.com/vi/${r.video}/mqdefault.jpg` }, artwork: null,
     year: years.length ? Number(years[0]) : null, year_source: years.length ? "youtube" : "unknown", year_confidence: "low", _video: r };
 }
@@ -126,22 +126,24 @@ function asItem(r) {
 export const videosCount = () => (isCurator() ? (videosLoaded() ? videoRows().length : null) : 0);
 
 function filters() {
-  return { from: ($("#vid-source") || {}).value || "", year: ($("#vid-year") || {}).value || "", sort: ($("#vid-sort") || {}).value || "year", q: (($("#vid-q") || {}).value || "").trim().toLowerCase() };
+  return { from: ($("#vid-source") || {}).value || "", year: ($("#vid-year") || {}).value || "", sort: ($("#vid-sort") || {}).value || "plays", q: (($("#vid-q") || {}).value || "").trim().toLowerCase() };
 }
 /** @returns {VideoRow[]} */
 function filteredRows() {
   const f = filters();
   let list = videoRows();
-  if (f.from) list = list.filter(r => r.from === f.from);
+  if (f.from === "picks") list = list.filter(r => r.pick); else if (f.from) list = list.filter(r => r.from === f.from);
   if (f.year) list = list.filter(r => (r.years || [r.year]).includes(f.year));
   if (f.q) list = list.filter(r => `${r.artist} ${r.title} ${r.album || ""}`.toLowerCase().includes(f.q));
   /** @type {Record<string, (a: VideoRow, b: VideoRow) => number>} */
   const by = {
+    // the order the build asks in: the picks first, then the most played on Last.fm, then the newest
+    plays: (a, b) => Number(!!b.pick) - Number(!!a.pick) || (b.plays || 0) - (a.plays || 0) || (b.at || 0) - (a.at || 0) || (b.year || "").localeCompare(a.year || "") || (b.position ?? 0) - (a.position ?? 0) || a.artist.localeCompare(b.artist),
     year: (a, b) => (b.year || "").localeCompare(a.year || "") || (b.at || 0) - (a.at || 0) || (a.position ?? 0) - (b.position ?? 0) || a.artist.localeCompare(b.artist),
     kept: (a, b) => (b.at || 0) - (a.at || 0) || (b.year || "").localeCompare(a.year || "") || a.artist.localeCompare(b.artist),
     artist: (a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title),
   };
-  return list.slice().sort(by[f.sort] || by.year);
+  return list.slice().sort(by[f.sort] || by.plays);
 }
 /** The tab's rows under the current filters as cards, in order: the deck's pages and the player's queue (visibleItems() in
  * feed.js hands these out for the Video tab). Empty until the report is in, as the list is. @returns {FeedItem[]} */
