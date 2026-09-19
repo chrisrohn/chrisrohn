@@ -162,7 +162,7 @@ main { padding: 20px 20px calc(var(--player-h, 0px) + 40px); max-width: 1200px; 
 .match.direct { color: var(--up); }
 .match.similar { color: var(--blue); }
 .match.saved { color: var(--accent-ink); }
-.match.genre { color: var(--blue); opacity: .8; }
+.match.genre { color: var(--blue); font-style: italic; }   /* full ink: at .8 opacity the blue fell to 3.95:1 on the light paper (axe, WCAG AA wants 4.5) */
 .title { font-size: 15px; margin-top: 2px; }
 .line3 { color: var(--muted); font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .reasons { color: var(--muted); font-size: 11px; margin-top: 4px; }
