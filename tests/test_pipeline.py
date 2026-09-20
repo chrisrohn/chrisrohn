@@ -919,9 +919,13 @@ def test_catalog_reviews_the_whole_play_history(monkeypatch, sandbox):
     util.write_json(prof.PROFILE_PATH, profile)
     monkeypatch.setattr(catalog, "CATALOG_PATH", sandbox / "site" / "data" / "catalog.json")
     monkeypatch.setattr(catalog, "STATE_PATH", sandbox / "data" / "catalog_state.json")
+    monkeypatch.setattr(catalog, "HISTORY_PATH", sandbox / "data" / "catalog_history.json")
+    monkeypatch.setattr(catalog, "SCROBBLES_PATH", sandbox / "data" / "catalog_scrobbles.json")
     monkeypatch.setattr(catalog, "TAGS_CACHE", sandbox / "data" / "cache" / "artist_tags.json")
     monkeypatch.setenv("LASTFM_API_KEY", "k")
     monkeypatch.setattr(catalog.time, "time", lambda: 1_700_000_000)
+    # the old catalog's snapshot in catalog_state.json is not a history: it is dropped, not read
+    util.write_json(sandbox / "data" / "catalog_state.json", {"fetched_at": "2026-09-13T00:00:00+00:00", "candidates": [{"artist": "Kendrick Lamar", "title": "HUMBLE.", "sources": ["lastfm:artist top"], "plays": 0}], "first_seen": {}})
     calls = []
     # the scrobble log, newest first: Fire twice, the rest once; a play of Moving On lands after the first walk
     LOG = [(1_690_000_000, "Jungle", "Fire"), (1_680_000_000, "Roosevelt", "Moving On"), (1_600_000_000, "Jungle", "Fire (feat. Nobody)"),
@@ -983,7 +987,8 @@ def test_catalog_reviews_the_whole_play_history(monkeypatch, sandbox):
     assert calls[:2] == [("top", 0), ("loved", 0)]                                            # every page of the history, every loved track
     fire = next(i for i in payload["items"] if i["title"] == "Fire")
     assert fire["plays"] == 120 and fire["loved"] is True and "120 plays" in fire["reasons"] and "loved on Last.fm" in fire["reasons"]
-    assert fire["sources"] == ["lastfm:history", "lastfm:loved"] and fire["tags"] == ["nu disco"] and fire["links"] == {"last.fm": "https://last.fm/2"}
+    assert fire["sources"] == ["lastfm:history", "lastfm:loved"] and fire["tags"] == ["nu disco"] and fire["links"] == {"last.fm": "https://www.last.fm/music/Jungle/_/Fire"}
+    assert not any(i["artist"] == "Kendrick Lamar" for i in payload["items"])
     assert fire["year"] == 2016 and fire["release_date"] is None and "listen_count" not in fire and "blurb" not in fire
     # the scrobble walk: two pages a run, newest first — four plays read, the oldest waits for a later run; a play of
     # "Fire (feat. Nobody)" is a play of Fire
@@ -993,10 +998,12 @@ def test_catalog_reviews_the_whole_play_history(monkeypatch, sandbox):
     assert payload["items"][0]["title"] == "Fire"                                             # most played + loved ranks first
     assert payload["years"]["2016"] == {"playlist": 3, "candidates": 1} and payload["years"]["2023"]["playlist"] == 1
     assert payload["undated"] == 1 and payload["sources"] == ["lastfm:history", "lastfm:loved"]
-    assert payload["history"] == {"fetched_at": payload["history"]["fetched_at"], "tracks": 6, "scrobbles": 5, "dated": 2, "walked_back_to": "2017-07-14", "complete": False}
+    assert payload["history"] == {"fetched_at": payload["history"]["fetched_at"], "tracks": 6, "to_review": 4, "waiting": 0, "scrobbles": 5, "dated": 2, "walked_back_to": "2017-07-14", "complete": False}
     state = util.read_json(sandbox / "data" / "catalog_state.json", {})
-    assert state["fetched_at"] and len(state["candidates"]) == 6 and set(state["first_seen"]) == {i["id"] for i in payload["items"]}
-    sc = state["scrobbles"]
+    assert set(state) == {"first_seen"} and set(state["first_seen"]) == {i["id"] for i in payload["items"]}
+    history = catalog.load_history(sandbox / "data" / "catalog_history.json")
+    assert history["fetched_at"] and len(history["rows"]) == 6 and history["rows"][0] == ["Jungle", "Back On 74", 300, False] and history["rows"][1][3] is True
+    sc = util.read_json(sandbox / "data" / "catalog_scrobbles.json", {})["scrobbles"]
     assert sc["newest"] == 1_690_000_000 and sc["oldest"] == 1_500_000_000 and not sc["complete"] and sc["gap"] is None
     assert [c for c in calls if c[0] == "recent"] == [("recent", None, None), ("recent", None, 1_679_999_999)]
 
@@ -1008,21 +1015,25 @@ def test_catalog_reviews_the_whole_play_history(monkeypatch, sandbox):
     assert [c for c in calls if c[0] == "recent"] == [("recent", 1_690_000_001, 1_700_000_000), ("recent", 1_690_000_001, 1_698_999_999)]
     moving = next(i for i in payload["items"] if i["title"] == "Moving On")
     assert moving["last_played"] == "2023-11-03" and moving["first_played"] == "2023-03-28"
-    sc = util.read_json(sandbox / "data" / "catalog_state.json", {})["scrobbles"]
+    sc = util.read_json(sandbox / "data" / "catalog_scrobbles.json", {})["scrobbles"]
     assert sc["newest"] == 1_699_000_000 and sc["gap"] is None and sc["oldest"] == 1_500_000_000
     # a third run with nothing new since: the walk goes on down, reaches the beginning of the log and says so
     calls.clear(); monkeypatch.setattr(catalog.time, "time", lambda: 1_698_999_999)
     cfg["catalog"]["scrobble_pages_per_run"] = 3
     payload = catalog.build_catalog(cfg, deadline_minutes=5)
     assert [c for c in calls if c[0] == "recent"] == [("recent", None, 1_499_999_999), ("recent", None, 1_399_999_999)]
-    sc = util.read_json(sandbox / "data" / "catalog_state.json", {})["scrobbles"]
+    sc = util.read_json(sandbox / "data" / "catalog_scrobbles.json", {})["scrobbles"]
     assert sc["complete"] and sc["oldest"] == 1_400_000_000 and payload["history"]["complete"] and payload["history"]["walked_back_to"] == "2014-05-13"
     # the tab is given at most max_items, the best first; the rest wait
     cfg["catalog"]["max_items"] = 1
     payload = catalog.build_catalog(cfg, deadline_minutes=5)
     assert payload["count"] == 1 and payload["playable"] == 2 and payload["items"][0]["title"] == "Fire"
     # the history's plays, keyed like the cards, for the Videos workflow
-    assert catalog.history_plays(util.read_json(sandbox / "data" / "catalog_state.json", {}))[catalog.history_key("Jungle", "Fire feat. Nobody")] == 120
+    assert catalog.history_plays(catalog.load_history(sandbox / "data" / "catalog_history.json"))[catalog.history_key("Jungle", "Fire feat. Nobody")] == 120
+    # the frontier: only the cached rows and the next few lookups are carried through a run; the rest wait
+    cfg["catalog"]["lookup_frontier"] = 1; cfg["catalog"]["max_items"] = 10
+    payload = catalog.build_catalog(cfg, deadline_minutes=5)
+    assert payload["history"]["waiting"] == 3 and payload["count"] == 1
 
 
 def test_resolver_prefers_the_audio_track_and_the_original_issue():
