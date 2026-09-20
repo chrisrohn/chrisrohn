@@ -430,7 +430,8 @@ learn:
 # Its own workflow (Catalog, twice a day) publishes site/data/catalog.json for the Catalog tab. The candidates are
 # every track the station has ever played on Last.fm (user.getTopTracks over `overall`, every page: one row a track
 # with its play count), flagged when loved and dated by the scrobble log (first and last played), minus what the
-# year playlists and the Skipped playlist hold. The snapshot is refreshed weekly; YouTube resolution (the exact
+# year playlists and the Skipped playlist hold. The snapshot (data/catalog_history.json) is refreshed
+# weekly, the scrobble walk lives in data/catalog_scrobbles.json; YouTube resolution (the exact
 # edition: a remix resolves to that remix or not at all) and year verification proceed in daily batches on the
 # feed's caches, the most played first, so the tab fills in over a few weeks and then keeps pace with the station.
 # Until 2026-09-18 the catalog also carried your artists' and their neighbours' hits and put loved tracks first;
@@ -452,8 +453,11 @@ catalog:
   # run inside `scrobble_minutes`, until the whole log is read, then kept up to date. It dates every card ("last
   # played Mar 2024"), sorts the tab by last or first played, and a track it has not reached yet is simply older.
   scrobble_dates: true
-  scrobble_pages_per_run: 300
-  scrobble_minutes: 6
+  scrobble_pages_per_run: 600
+  scrobble_minutes: 8
+  # A run carries every history row the resolver's cache already pairs with an upload, plus this many rows still to
+  # look up (the most played first); the rest of a history of a couple of hundred thousand tracks waits its turn.
+  lookup_frontier: 2400
   loved_bonus: 1.0
   weights:                  # overrides of ranking.weights for the catalog: plays count for a lot, freshness for nothing
     listens: 2.0            # × log10(plays)
