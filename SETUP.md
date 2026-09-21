@@ -419,6 +419,9 @@ All in `discovery/config.yaml → sources`, each with an `enabled` switch. Per-f
 | `bandcamp` | newest releases per Bandcamp tag | nothing |
 | `deezer` | newest albums of your profile artists + editorial new releases | nothing |
 | `radio` | recent KEXP plays (API) and SomaFM channel logs, profile-matched | nothing |
+| `nts` | the tracklists of the newest episodes of NTS shows, profile-matched | show aliases |
+| `difm` | DI.FM channel play logs (AudioAddict API), profile-matched | channel keys |
+| `mixcloud` | tracklists of the newest Mixcloud uploads of radio shows (Beats In Space first), profile-matched | Mixcloud users |
 | `listenbrainz_playlists` | ListenBrainz Weekly Exploration / Weekly Jams (collaborative filtering) | a ListenBrainz username with your Last.fm history imported |
 | `rss` | 40+ blogs and radio shows; `Artist – "Song"` and `Artist shares new single "Song"` headlines become cards, news never does (`discovery/headlines.py`) | nothing |
 | `spotify` | off; Spotify's API is no longer viable | Premium + dev app |

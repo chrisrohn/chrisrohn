@@ -503,6 +503,87 @@ def test_nts_tracklists(sandbox):
     assert HEALTH["radio:NTS gone"]["ok"] is False and "down" in HEALTH["radio:NTS gone"]["error"]
 
 
+def test_difm_track_history(sandbox):
+    from discovery.sources import HEALTH, difm
+
+    started = int(datetime.combine(TODAY - timedelta(days=1), datetime.min.time(), tzinfo=UTC).timestamp()) + 3600
+
+    def route(url, kw):
+        if url == difm.CHANNELS:
+            assert kw["cache"] is True
+            return [{"id": 12, "key": "indiedance", "name": "Indie Dance"}, {"id": 34, "key": "nudisco", "name": "Nu Disco"}, {"id": 56, "key": "electropop", "name": "Electropop"}]
+        if url == difm.HISTORY.format(id=12):
+            assert kw["cache"] is False
+            return [
+                {"type": "track", "display_artist": "Jungle", "display_title": "Keep Moving", "started": started},
+                {"type": "ad", "track": "Advertisement", "started": started},
+                {"type": "track", "track": "Roosevelt - Lovers", "started": started},              # the older single-field shape
+                {"type": "track", "artist": {"name": "Nobody"}, "title": "x", "started": started},
+                {"type": "track", "display_artist": "Jungle", "display_title": "Keep Moving", "started": started - 60},   # a repeat
+            ]
+        if url == difm.HISTORY.format(id=34):
+            raise RuntimeError("down")
+        raise AssertionError(url)
+
+    cfg = _cfg(); cfg["sources"]["difm"]["channels"] = ["indiedance", "nudisco", "nosuch"]
+    out = difm.fetch(cfg, PROFILE, Recorder(route))
+    assert [(i.artist, i.title, i.sources[0]) for i in out] == [("Jungle", "Keep Moving", "radio:DI.FM indiedance"), ("Roosevelt", "Lovers", "radio:DI.FM indiedance")]
+    k = out[0]
+    assert k.editorial and k.date_kind == "sighting" and k.release_date == TODAY - timedelta(days=1) and k.links == {"di.fm": "https://www.di.fm/indiedance"}
+    assert HEALTH["radio:DI.FM indiedance"] == {"ok": True, "entries": 4, "kept": 2, "error": None}
+    assert HEALTH["radio:DI.FM nudisco"]["ok"] is False and "down" in HEALTH["radio:DI.FM nudisco"]["error"]
+    assert HEALTH["radio:DI.FM nosuch"]["ok"] is False and "nosuch" in HEALTH["radio:DI.FM nosuch"]["error"]
+
+
+def test_difm_channel_list_down_fails_every_channel(sandbox):
+    from discovery.sources import HEALTH, difm
+
+    def route(url, kw):
+        raise RuntimeError("offline")
+
+    cfg = _cfg(); cfg["sources"]["difm"]["channels"] = ["indiedance", "nudisco"]
+    assert difm.fetch(cfg, PROFILE, Recorder(route)) == []
+    assert HEALTH["radio:DI.FM indiedance"]["ok"] is False and HEALTH["radio:DI.FM nudisco"]["ok"] is False
+
+
+def test_mixcloud_tracklists(sandbox):
+    from discovery.sources import HEALTH, mixcloud
+
+    fresh = (TODAY - timedelta(days=3)).isoformat()
+
+    def route(url, kw):
+        if url == "https://api.mixcloud.com/bisradio/cloudcasts/":
+            assert kw["params"] == {"limit": 3}
+            return {"data": [
+                {"key": "/bisradio/bis-1200/", "url": "https://www.mixcloud.com/bisradio/bis-1200/", "name": "Beats In Space #1200 with Jungle", "created_time": f"{fresh}T04:00:00Z"},
+                {"key": "/bisradio/bis-1199/", "url": "https://www.mixcloud.com/bisradio/bis-1199/", "name": "BIS #1199", "created_time": f"{fresh}T03:00:00Z",
+                 "sections": [{"section_type": "track", "track": {"name": "Lovers", "artist": {"name": "Roosevelt"}}}, {"section_type": "chapter", "chapter": "Part 2"}]},
+                {"key": "/bisradio/bis-old/", "created_time": "2020-01-01T00:00:00Z", "sections": [{"section_type": "track", "track": {"name": "Old", "artist": {"name": "Jungle"}}}]},
+            ]}
+        if url == "https://api.mixcloud.com/bisradio/bis-1200/":
+            return {"sections": [], "description": "Tracklist:\n01. Jungle - Keep Moving (Caiola)\n02. Nobody - Whatever\nhttps://beatsinspace.net/playlists/1200/\nRoosevelt & Jungle – Duet\nThanks for listening!"}
+        if url == "https://api.mixcloud.com/gone/cloudcasts/":
+            raise RuntimeError("down")
+        raise AssertionError(url)
+
+    cfg = _cfg(); cfg["sources"]["mixcloud"]["shows"] = [{"name": "Beats In Space", "user": "bisradio"}, "gone"]
+    out = mixcloud.fetch(cfg, PROFILE, Recorder(route))
+    assert [(i.artist, i.title, i.sources[0]) for i in out] == [("Jungle", "Keep Moving (Caiola)", "radio:Beats In Space"), ("Roosevelt & Jungle", "Duet", "radio:Beats In Space"), ("Roosevelt", "Lovers", "radio:Beats In Space")]
+    k = out[0]
+    assert k.editorial and k.date_kind == "sighting" and k.release_date == TODAY - timedelta(days=3) and k.blurb == "Beats In Space #1200 with Jungle"
+    assert k.links == {"mixcloud": "https://www.mixcloud.com/bisradio/bis-1200/"}
+    assert HEALTH["radio:Beats In Space"] == {"ok": True, "entries": 4, "kept": 3, "error": None}
+    assert HEALTH["radio:gone"]["ok"] is False and "down" in HEALTH["radio:gone"]["error"]
+
+
+def test_mixcloud_description_lines():
+    from discovery.sources.mixcloud import description_tracks
+
+    text = "Beats In Space 1200\n1. Jungle - Keep Moving\n2) Roosevelt – Lovers [Extended]\n- Parcels — Free\n[12:30] TOPS - Petals\nsee https://beatsinspace.net/playlists/1200/ - all of it\nmail me@example.com - now\nJust a sentence with no dash\nTracklist -\n"
+    assert description_tracks(text) == [("Jungle", "Keep Moving"), ("Roosevelt", "Lovers [Extended]"), ("Parcels", "Free"), ("TOPS", "Petals")]
+    assert description_tracks(None) == []
+
+
 def test_reddit_link_posts(sandbox):
     from discovery.sources import HEALTH, reddit
 
@@ -608,8 +689,8 @@ def test_new_sources_are_registered_and_enabled():
     # no source watches record labels any more: the feed follows artists and the genres they sit in
     assert "musicbrainz_labels" not in SOURCE_MODULES and "musicbrainz_labels" not in cfg["sources"]
     assert not (ROOT / "discovery" / "sources" / "labels.py").exists()
-    for key in ("apple_music", "musicbrainz_artists", "nts", "reddit"):
+    for key in ("apple_music", "musicbrainz_artists", "nts", "reddit", "difm", "mixcloud"):
         assert key in SOURCE_MODULES and cfg["sources"][key]["enabled"] is True
         assert callable(__import__(f"discovery.sources.{SOURCE_MODULES[key]}", fromlist=["fetch"]).fetch)
-    assert {"nts", "reddit", "apple_music"} <= PER_FEED_HEALTH
+    assert {"nts", "reddit", "apple_music", "difm", "mixcloud"} <= PER_FEED_HEALTH
     assert Item(artist="a", title="b").youtube is None
