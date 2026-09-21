@@ -261,6 +261,21 @@ sources:
     # aliases that 404 are dropped rather than retried daily: balearic-breakfast, charlie-bones, the-do-you-show
     # (2026-09-08). Check the alias in the nts.live/shows/<alias> URL before adding one back.
     shows: [moxie, bullion]
+  # DI.FM channel play logs (AudioAddict's public API, no key): the recent plays of each channel, profile-matched like
+  # SomaFM. Channel keys from di.fm URLs, e.g. di.fm/indiedance; a key the network does not list shows up in ⚙ →
+  # feed health. Every play is a sighting dated by its airtime.
+  difm:
+    enabled: true
+    channels: [indiedance, nudisco, electropop, synthwave]
+  # Mixcloud tracklists: the newest uploads of the shows below (the user from the mixcloud.com/<user> URL), the tracks
+  # the uploader filed (or the "Artist - Title" lines of the description). Beats In Space (Tim Sweeney, WNYU) posts
+  # every episode as bisradio. Only plays by profile artists are kept, as sightings dated by the upload.
+  mixcloud:
+    enabled: true
+    days: 14                 # uploads older than this are skipped (default 14; else listenbrainz_fresh.days)
+    episodes_per_show: 3
+    shows:
+      - { name: "Beats In Space", user: bisradio }
   # Music subreddits: "Artist - Song [genre] (year)" link posts to YouTube / Bandcamp / SoundCloud / Spotify.
   reddit:
     enabled: true
