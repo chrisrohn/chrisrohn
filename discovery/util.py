@@ -262,7 +262,9 @@ def parse_date(value: Any) -> date | None:
 
 _PUNCT_RE = re.compile(r"[^\w\s]")
 _SPACE_RE = re.compile(r"\s+")
-_FEAT_RE = re.compile(r"\s*[\(\[]?\s*(feat\.?|ft\.?|featuring|with)\s+[^\)\]]*[\)\]]?\s*$", re.I)
+# A featured credit at the end of a title. "feat." / "ft." / "featuring" mean it anywhere; a bare "with" only inside
+# brackets ("Song (with B)", Spotify's spelling) — unbracketed it is title text ("Dancing With Myself"), not a credit.
+_FEAT_RE = re.compile(r"\s*(?:[\(\[]?\s*(?:feat\.?|ft\.?|featuring)|[\(\[]\s*with)\s+[^\)\]]*[\)\]]?\s*$", re.I)
 _SUFFIX_RE = re.compile(
     r"\s*[\(\[\-–—]\s*(official|radio edit|single version|album version|(\d{4} )?remaster(ed)?( \d{4})?|remastered version|"
     r"explicit|clean|mono|stereo|lyric video|official (music )?video|audio|visualizer|hq|hd|"
@@ -317,7 +319,9 @@ def split_artists(credit: str | None, *, strict: bool = False) -> list[str]:
     return [p.strip() for p in parts if p and p.strip()]
 
 
-_FEAT_ANY_RE = re.compile(r"\s*[\(\[]?\s*\b(?:feat\.?|ft\.?|featuring|with)\s+(?P<who>[^\)\]\(\[]+?)\s*[\)\]]?\s*(?=[\(\[]|$)", re.I)
+# Featured credits anywhere in a title: "Song feat. B", "Song (feat. B) (X Remix)", "Song (with B)". A bare "with" is a
+# credit only when bracketed — "Hamburger With Pickles And Onions" is a title, not "Hamburger feat. Pickles & Onions".
+_FEAT_ANY_RE = re.compile(r"\s*(?:[\(\[]?\s*\b(?:feat\.?|ft\.?|featuring)|[\(\[]\s*with)\s+(?P<who>[^\)\]\(\[]+?)\s*[\)\]]?\s*(?=[\(\[]|$)", re.I)
 _REMIX_RE = re.compile(
     r"\s*[\(\[\-–—]\s*(?P<who>[^\(\)\[\]]+?)\s+(?P<kind>remix|rework|re-work|edit|re-edit|dub|bootleg|flip|refix|rerub|version|mix|remake|vip)\s*[\)\]]?\s*$",
     re.I,
