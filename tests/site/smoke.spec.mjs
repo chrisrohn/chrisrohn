@@ -1284,8 +1284,14 @@ test("the Video tab: kept songs' videos and the library's, played in place, adde
   await page.route("**/data/feed.json", async r => {
     const j = await (await r.fetch()).json();
     Object.assign(j.youtube, { videos_playlist_id: "PLVIDS", videos: { with_video: 2, no_video: 1, pending: 0 } });
-    // the kept song and an unkept one both know their video; only the kept one belongs on the tab
-    for (const it of j.items) { if (it.id === kept.id) Object.assign(it.youtube, { video: "keptv000000", videoKind: "MUSIC_VIDEO_TYPE_OMV" }); if (it.id === unkept.id) Object.assign(it.youtube, { video: "unkeptv0000", videoKind: "MUSIC_VIDEO_TYPE_OMV" }); }
+    // the kept song and an unkept one both know their video; only the kept one belongs on the tab. The kept song
+    // without one is made so here: the committed feed decides which cards come first, and the build may already
+    // have found that card's video (it did on 2026-09-21), which is the case the pill must not count.
+    for (const it of j.items) {
+      if (it.id === kept.id) Object.assign(it.youtube, { video: "keptv000000", videoKind: "MUSIC_VIDEO_TYPE_OMV" });
+      if (it.id === unkept.id) Object.assign(it.youtube, { video: "unkeptv0000", videoKind: "MUSIC_VIDEO_TYPE_OMV" });
+      if (it.id === keptNoVideo.id) { delete it.youtube.video; delete it.youtube.videoKind; }
+    }
     await r.fulfill({ json: j });
   });
   await page.route("**/data/videos.json", r => r.fulfill({ json: report }));
