@@ -48,6 +48,8 @@ def test_norm_and_parse():
     assert util.norm_track("Lovers (2016 Remaster) [Deluxe]") == "lovers"
     assert util.norm_track("Lovers - Remastered 2026") == "lovers"
     assert util.norm_track("Lovers (Club Remix)") == "lovers club remix"   # a remix is a different recording
+    assert util.norm_track("Lovers (with Someone)") == util.norm_track("Lovers feat. Someone") == "lovers"   # a bracketed "with" is a credit
+    assert util.norm_track("Dancing With Myself") == "dancing with myself"                                # a bare "with" is the title
     assert util.split_artists("Jungle & Roosevelt feat. Nao") == ["Jungle", "Roosevelt", "Nao"]
     assert util.split_artists("Belle and Sebastian with Kid x Ray") == ["Belle", "Sebastian", "Kid", "Ray"]
     assert util.split_artists("Belle and Sebastian with Kid x Ray", strict=True) == ["Belle and Sebastian with Kid x Ray"]
@@ -426,6 +428,13 @@ def test_rohn_standard_notation():
         ("Jungle", "Keep Moving (feat. Nao) [Purple Disco Machine Remix]"): "Jungle - Keep Moving feat. Nao (Purple Disco Machine Remix)",
         ("Jungle", "Keep Moving (Poolside Rework)"): "Jungle - Keep Moving (Poolside Rework)",
         ("Jungle", "Keep Moving (Extended Mix)"): "Jungle - Keep Moving (Extended Mix)",
+        ("Jungle", "Keep Moving (with Nao)"): "Jungle - Keep Moving feat. Nao",                       # Spotify's spelling of a feature
+        ("Jungle", "Keep Moving [with Nao] (Roosevelt Remix)"): "Jungle - Keep Moving feat. Nao (Roosevelt Remix)",
+        # a bare "with" is part of the song's name, never a featured artist
+        ("Billy Idol", "Dancing With Myself"): "Billy Idol - Dancing With Myself",
+        ("Cake", "Hamburger With Pickles And Onions"): "Cake - Hamburger With Pickles And Onions",
+        ("Cake", "Hamburger With Pickles And Onions (Roosevelt Remix)"): "Cake - Hamburger With Pickles And Onions (Roosevelt Remix)",
+        ("Cake", "Hamburger With Pickles And Onions feat. Nao"): "Cake - Hamburger With Pickles And Onions feat. Nao",
     }
     for (artist, title), want in cases.items():
         p = parse_credit(artist, title)
