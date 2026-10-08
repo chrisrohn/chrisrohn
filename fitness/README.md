@@ -2,8 +2,9 @@
 
 Your Garmin Venu Sq wellness data and your full Strava history, turned into one private page: a daily
 **train / easy / rest call**, your own **sleep score**, a **readiness** score against your own normal, the
-**fitness / fatigue / form** model, and a day-by-day **Iceman Cometh taper plan** (Nov 7, 2026) that re-optimizes
-every time it's built.
+**fitness / fatigue / form** model, and a day-by-day **season plan** that re-optimizes every time it's built.
+The plan runs through the Iceman Cometh (Nov 7, 2026) and a Zwift / MyWoosh trainer winter (Dec 1 – Feb 28) to
+Barry-Roubaix (Apr 17, 2027), with the 100k and 50k compared side by side.
 
 ```bash
 python -m fitness demo --open        # see it with a synthetic athlete first; no accounts needed
@@ -29,6 +30,35 @@ never exposes those numbers. This site uses overnight stress in its place.
 
 The **Data** section of the page shows how many of the last 30 days actually came through for each signal.
 
+## Races and the trainer season
+
+Races live in [`config.toml`](config.toml) as `[[races]]` blocks. Each one has a date, a kind (`mtb` or `gravel`,
+which picks the session library), the race-morning form band, and words that find past editions in your history.
+`every = "3rd Sat Apr"` rolls a race to next year's date once it's past. Each race has one or more distance
+`options`, each with its own expected race time, target fitness (CTL), longest training ride and taper range.
+
+Barry-Roubaix is set up with two options. Its "100k" is the **Killer, 62 mi / ~4,000 ft**, and the closest thing
+to a "50k" is the **Thriller, 36 mi / ~2,200 ft**. The organizer also runs the 18-mi Chiller and the 100-mi Psycho
+Killer. `distance = "100k"` is the option today's call follows. The page has a button for each option and
+compares them on projected race-morning fitness against target and on peak training week. It also tells you
+whether the longer one is realistic, and to decide by the day the outdoor build starts (Mar 1).
+
+The `[indoor]` window (Dec 1 – Feb 28 every year, Feb 29 included in leap years) shapes both the plan and the
+history:
+
+- **The plan.** Inside the window every session is a trainer workout written for ERG mode: sweet spot, tempo,
+  threshold and over-unders, with VO2 and 30/30s added in February. Long rides are capped at
+  `indoor.long_ride_h`, best done as a group ride or event. A ramp FTP test is scheduled on the first hard day of
+  December and again in February. Every 4th week is an easy week. The indoor base adds at most
+  `plan.base_ramp` CTL a week, then the outdoor build in March adds at most `plan.max_ramp`. Between Iceman and
+  Dec 1 there's a recovery week, then transition: strength twice a week and unstructured riding.
+- **The history.** Rides recorded as Strava *Virtual Ride*, flagged *trainer*, or with Zwift / MyWoosh in the
+  name count as indoor. They get their own color in the weekly-hours chart, and the Training section shows the
+  season's rides, hours, average power and how your best-effort FTP moved.
+- **FTP.** Zwift and MyWoosh send trainer power, so with an FTP set, those rides are scored from power. Leave
+  `ftp = 0` and the site estimates FTP from your best 20–90 minute power ride of the last year. After each ramp
+  test, put the real number in `config.toml`.
+
 ## Setup (once, about 10 minutes)
 
 ```bash
@@ -44,10 +74,11 @@ pip install -r fitness/requirements.txt
    mobile app does.
 2. **Strava history.** On strava.com go to *Settings → My Account → Download or Delete Your Account → Request your archive*.
    When the zip arrives: `python -m fitness import-strava ~/Downloads/export_12345.zip`.
-3. **Strava ongoing (optional).** Create an app at <https://www.strava.com/settings/api> with
+3. **Strava ongoing.** Create an app at <https://www.strava.com/settings/api> with
    *Authorization Callback Domain* `localhost`, then
    `STRAVA_CLIENT_ID=… STRAVA_CLIENT_SECRET=… python -m fitness login strava`.
-   You only need this for rides recorded on something other than the Garmin, such as a bike computer or phone.
+   This is how your Zwift and MyWoosh rides arrive, with their power. If you also record a trainer ride on the
+   watch, the two copies are merged into one: the watch's heart rate plus the trainer's power.
 4. `python -m fitness sync` (the first run backfills `sync.history_days` of Garmin data, about 2 requests a day),
    then `python -m fitness build --open`.
 5. Set `max_hr`, `lthr` and, if you have a power meter, `ftp` in [`config.toml`](config.toml). Any value you leave
@@ -88,16 +119,21 @@ are git-ignored.
   come off when form is below −10 or the load ratio is above 1.3. When resting HR is ≥ 2 SD high together with
   elevated respiration or stress, the day becomes an **illness watch** with a rest call.
   Thresholds: ≥ 75 key session · 60–74 train as planned · 45–59 easy · < 45 rest.
-- **Race plan.** It simulates every taper from 6 to 14 days long, with volume cut to 35–65%. The build adds CTL
-  at up to `plan.max_ramp` per week. A fast-decay taper keeps intensity and frequency while volume drops
+- **Season plan.** Each stretch to a race goes through the phases recovery → transition → indoor base → outdoor
+  build → taper, and each week's load steers toward that race option's `target_ctl`. For every race the planner
+  simulates each taper length in the option's `taper_days` range, with volume cut to 35–65%. A fast-decay taper
+  keeps intensity and frequency while volume drops
   ([Bosquet et al. 2007](https://pubmed.ncbi.nlm.nih.gov/17762369/);
   [Mujika & Padilla 2003](https://pubmed.ncbi.nlm.nih.gov/12840640/)). The plan kept is the one that reaches race
-  morning inside `race.target_tsb` with the most fitness. Readiness can only ever make a planned day *easier*.
+  morning inside the race's `target_tsb` with the most fitness. Readiness can only ever make a planned day
+  *easier*. If a race card shows fitness short of target, the ramp limits won't allow more in the time left. Lower
+  `target_ctl`, raise `base_ramp` / `max_ramp`, or pick the shorter option.
 - **Insights.** Spearman correlations over your own history, such as training load vs. that night's sleep, late
   workouts vs. sleep, and steps or stress vs. sleep. An insight only appears with 30 or more paired days and
   |ρ| ≥ 0.2, and it's reported as the difference between the top quartile and the rest.
-- **Past editions.** Any ride whose name contains a `race.match` word (default "iceman") shows up next to the
-  fitness and form you had that morning, so you can compare this year's projection with last year's start line.
+- **Past editions.** A ride whose name contains one of the race's `match` words, within a week of that year's race
+  date, counts as an edition. Each one shows the fitness and form you had that morning, so you can compare this
+  year's projection with last year's start line.
 
 ## Checking RestOrTrain against this
 
@@ -113,7 +149,7 @@ legs actually felt on the bike.
 | `garmin.py`, `strava.py` | sync, sign-in and parsers (raw responses are kept in SQLite, so fixing a parser never needs a re-download) |
 | `activities.py` | sport mapping and the Garmin↔Strava duplicate merge |
 | `metrics.py` | load, PMC, sleep score, readiness, recommendation, insights (pure functions) |
-| `plan.py` | race taper optimizer and session library |
+| `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` |
 | `site/` | the page template, styles and SVG charts (no dependencies, works offline) |
 | `demo.py` | the synthetic athlete |

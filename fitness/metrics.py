@@ -29,8 +29,21 @@ def thresholds(cfg: dict, acts: list[dict], days: dict[str, dict], today: date) 
     rhrs = [d["rhr"] for k, d in days.items() if d.get("rhr") and k >= (today - timedelta(days=30)).isoformat()]
     rest = a["resting_hr"] or (statistics.median(rhrs) if rhrs else 55)
     lthr = a["lthr"] or round(0.89 * max_hr)
-    return {"max_hr": max_hr, "rest_hr": rest, "lthr": lthr, "ftp": a["ftp"], "sex": a["sex"],
-            "estimated": [k for k, v in (("max_hr", a["max_hr"]), ("resting_hr", a["resting_hr"]), ("lthr", a["lthr"])) if not v]}
+    ftp = a["ftp"] or estimate_ftp(acts, today)
+    return {"max_hr": max_hr, "rest_hr": rest, "lthr": lthr, "ftp": ftp, "sex": a["sex"],
+            "estimated": [k for k, v in (("max_hr", a["max_hr"]), ("resting_hr", a["resting_hr"]), ("lthr", a["lthr"]), ("ftp", a["ftp"])) if not v and (k != "ftp" or ftp)]}
+
+
+def estimate_ftp(acts: list[dict], today: date, days: int = 365) -> int:
+    """Best normalized power over a hard 20-90 min ride in the last year (so last winter's trainer rides count in the fall), scaled to an hour: NP for 20 min
+    ≈ 105% of FTP, for 60+ min ≈ FTP. A floor, not a test: the plan books ramp tests on the trainer to replace it."""
+    since = (today - timedelta(days=days)).isoformat()
+    best = 0.0
+    for a in acts:
+        minutes = a.get("moving_s", 0) / 60
+        if a["group"] == "ride" and a.get("np") and 20 <= minutes <= 90 and a["start"][:10] >= since:
+            best = max(best, a["np"] * (0.95 + 0.05 * min(1.0, (minutes - 20) / 40)))
+    return round(best)
 
 
 def trimp(minutes: float, avg_hr: float, th: dict) -> float:
@@ -48,7 +61,7 @@ def session_load(act: dict, th: dict) -> tuple[float, str]:
         return round(hours * intensity * intensity * 100, 1), "power"
     if act.get("avg_hr") and act["avg_hr"] > th["rest_hr"] + 10:
         return round(trimp(hours * 60, act["avg_hr"], th) / trimp(60, th["lthr"], th) * 100, 1), "hr"
-    intensity = DURATION_IF.get(act["group"], 0.6)
+    intensity = 0.72 if act.get("indoor") and act["group"] == "ride" else DURATION_IF.get(act["group"], 0.6)
     return round(hours * intensity * intensity * 100, 1), "duration"
 
 

@@ -1,5 +1,6 @@
-"""Synthetic athlete for `python -m fitness demo`: a year of Venu Sq-shaped wellness and rides, two past Icemen, and
-Strava twins of the Garmin rides so the merge is exercised. Seeded, so the demo page is the same every run."""
+"""Synthetic athlete for `python -m fitness demo`: two years of Venu Sq-shaped wellness and rides, Zwift / MyWoosh
+winters (Strava-only virtual rides with power), two past Icemen and Barry-Roubaix Killers, and Strava twins of the
+Garmin rides so the merge is exercised. Seeded, so the demo page is the same every run."""
 from __future__ import annotations
 
 import math
@@ -20,7 +21,19 @@ def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
         planned = [0, 70, 45, 65, 25, 120, 55][dow] * season * rnd.uniform(0.7, 1.25)
         ride = dow != 0 and rnd.random() > 0.12
         load = 0.0
-        if ride:
+        winter = d.month in (12, 1, 2)
+        if ride and winter:
+            ftp = 228 + 22 * min(1.0, ((d - date(d.year if d.month == 12 else d.year - 1, 12, 1)).days) / 90)
+            hours = min(2.5, planned / 62)
+            intensity = rnd.uniform(0.68, 0.9) if dow in (1, 3) else rnd.uniform(0.6, 0.72)
+            start = datetime.combine(d, datetime.min.time()) + timedelta(hours=rnd.choice([6, 17.5, 18.5, 19.5]))
+            app = rnd.choice(["Zwift - Watopia", "Zwift - Makuri Islands", "MyWoosh - Belgium", "MyWoosh - Abu Dhabi"])
+            store.put_activity(activity(id=f"strava:z{d.toordinal()}", source="strava", start=start, kind="VirtualRide", name=f"{app} workout",
+                                        duration_s=hours * 3600, moving_s=hours * 3600, distance_m=hours * 31000, elev_m=hours * 250,
+                                        avg_hr=round(118 + 50 * intensity), max_hr=round(150 + 40 * intensity), avg_power=round(ftp * intensity * 0.95),
+                                        np=round(ftp * intensity)))
+            load = hours * intensity ** 2 * 100
+        elif ride:
             hours = planned / 55
             kind = "mountain_biking" if dow in (5, 6) and rnd.random() > 0.3 else "road_biking"
             start = datetime.combine(d, datetime.min.time()) + timedelta(hours=rnd.choice([6.5, 7, 12, 17.5, 18, 19.5]))
@@ -38,11 +51,12 @@ def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
                             name=rnd.choice(["Sandy two-track grind", "Vasa loop", "Lunch ride", "Evening spin"]))
                 store.put_activity(twin)
             load = planned
+        late_today = ride and start.hour >= 17
         fitness += (load - fitness) / 42
         fatigue += (load - fatigue) / 7
         strain = max(0.0, fatigue - fitness)
         total = rnd.gauss(7.4, 0.5) * 3600 - strain * 150 - (2700 if late else 0)
-        late = ride and start.hour >= 17
+        late = late_today
         total = max(4.5 * 3600, total)
         deep = total * rnd.uniform(0.13, 0.24)
         rem = total * rnd.uniform(0.17, 0.27)
@@ -65,4 +79,11 @@ def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
             store.put_activity(activity(id=f"garmin:iceman{year}", source="garmin", start=start, kind="mountain_biking",
                                         name=f"Bell's Iceman Cometh Challenge {year}", duration_s=mins * 60 + 90, moving_s=mins * 60,
                                         distance_m=48900, elev_m=575, avg_hr=163, max_hr=181))
+    for year, mins in ((today.year - 1, 232), (today.year, 219)):
+        race = date(year, 4, 1) + timedelta(days=(5 - date(year, 4, 1).weekday()) % 7 + 14)   # 3rd Saturday of April
+        if race < today:
+            start = datetime.combine(race, datetime.min.time()) + timedelta(hours=9)
+            store.put_activity(activity(id=f"garmin:barry{year}", source="garmin", start=start, kind="gravel_cycling",
+                                        name=f"Barry-Roubaix Killer {year}", duration_s=mins * 60 + 120, moving_s=mins * 60,
+                                        distance_m=99800, elev_m=1220, avg_hr=158, max_hr=179))
     store.commit()

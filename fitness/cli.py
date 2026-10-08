@@ -20,7 +20,7 @@ def _build(cfg: dict, db: Path, out: Path | None = None, today: date | None = No
 
 
 def _print_today(data: dict) -> None:
-    now, race = data["now"], data["race"]
+    now, plan = data["now"], data["plan"]
     rec, ready, form = now["recommendation"], now["readiness"], now["form"]
     print(f"\n  {rec['title']}\n  {rec['detail']}\n")
     if ready:
@@ -31,9 +31,8 @@ def _print_today(data: dict) -> None:
         print(f"  Sleep {now['sleep']['score']} ({now['sleep']['label']}), {now['sleep']['hours']:.1f} h")
     if form.get("ctl") is not None:
         print(f"  Fitness {form['ctl']:.0f} · fatigue {form['atl']:.0f} · form {form['tsb']:+.0f}")
-    if race["days_out"] is not None and race["days_out"] >= 0:
-        plan = data["plan"]
-        print(f"  {race['name']}: {race['days_out']} days" + (f" · projected race-morning form {plan['race_tsb']:+.0f}, fitness {plan['race_ctl']:.0f}" if plan else ""))
+    for race in (plan or {}).get("races", []):
+        print(f"  {race['name']} ({race['label']}): {race['days_out']} days · race morning fitness {race['race_ctl']:.0f} (target {race['target_ctl']}), form {race['race_tsb']:+.0f}")
     print()
 
 

@@ -12,7 +12,7 @@ tracks, and approvals land in the matching `<year> | Indie Discotheque` playlist
 - Site: [chrisrohn.com](https://chrisrohn.com) · RSS: [chrisrohn.com/feed.xml](https://chrisrohn.com/feed.xml)
 - How it works and how to set it up: [SETUP.md](SETUP.md)
 - Pipeline: [`discovery/`](discovery) · Site: [`site/`](site) · Workflows: [`.github/workflows/`](.github/workflows)
-- Also here: [`fitness/`](fitness), a private training & recovery dashboard (Garmin Venu Sq + Strava → sleep score, readiness, fitness/form, race taper plan) that runs locally; its data and built page are never committed
+- Also here: [`fitness/`](fitness), a private training & recovery dashboard (Garmin Venu Sq + Strava → sleep score, readiness, fitness/form, a season plan from Iceman through a Zwift / MyWoosh winter to Barry-Roubaix) that runs locally; its data and built page are never committed
 - A quiet day is not a short day: when the current timeframe has too little to show, the feed reaches back through
   the last few years of those same artists' catalogues, marks each card *filling in from &lt;year&gt;* and files it
   into its own year

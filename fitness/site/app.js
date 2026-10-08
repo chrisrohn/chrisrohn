@@ -20,7 +20,7 @@
   const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—";
   const dur = s => { const m = Math.round((s || 0) / 60); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${m} min`; };
   const hrs = h => h == null ? "—" : `${Math.floor(h)}h${String(Math.round((h % 1) * 60)).padStart(2, "0")}`;
-  const dist = m => units === "mi" ? `${(m / 1609.344).toFixed(1)} mi` : `${(m / 1000).toFixed(1)} km`;
+  const dist = m => { const v = units === "mi" ? m / 1609.344 : m / 1000; return `${v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1)} ${units}`; };
   const elev = m => units === "mi" ? `${Math.round(m * 3.28084).toLocaleString()} ft` : `${Math.round(m).toLocaleString()} m`;
   const speed = kph => kph == null ? "—" : units === "mi" ? `${(kph / 1.609344).toFixed(1)} mph` : `${kph.toFixed(1)} km/h`;
   const signed = v => v == null ? "—" : (Math.round(v) > 0 ? "+" : Math.round(v) < 0 ? "−" : "") + Math.abs(Math.round(v));
@@ -104,6 +104,11 @@
         const inside = Y(cfg.ref.lo) - Y(cfg.ref.hi) > 16;   // label inside the band when it fits, else just under it
         const tx = el("text", { x: xa + 4, y: inside ? Y(cfg.ref.lo) - 5 : Y(cfg.ref.lo) + 13, "text-anchor": "start", class: "marker-label" });
         tx.textContent = cfg.ref.label; svg.appendChild(tx);
+      }
+      for (const b of cfg.xbands || []) {
+        const xa = left + slot * b.from, xb = left + slot * (b.to + 1);
+        svg.appendChild(el("rect", { x: xa, width: Math.max(1, xb - xa), y: top, height: ih }, `fill:${b.color};fill-opacity:var(--wash)`));
+        const tx = el("text", { x: xa + 4, y: top + ih - 6, "text-anchor": "start", class: "marker-label" }); tx.textContent = b.label; svg.appendChild(tx);
       }
       if (cfg.band) {
         let d = "", run = [];
@@ -200,7 +205,31 @@
   }
 
   // ── page ────────────────────────────────────────────────────────────────────────────────────────────────
-  const now = D.now, race = D.race, plan = D.plan, form = now.form || {};
+  const now = D.now, form = now.form || {};
+  const ORDER = ["rest", "easy", "moderate", "hard"];
+  // the plan for the distances picked on the page (a race's option buttons); the build ships every alternative
+  const planFor = (name, key) => {
+    const base = D.plan && D.plan.races.find(r => r.name === name);
+    return base && base.option === key ? D.plan : D.variants[`${name}|${key}`] || null;
+  };
+  const activePlan = () => {
+    if (!D.plan) return null;
+    for (const r of D.plan.races) {
+      const pick = ls.get(`fitness-option:${r.name}`);
+      if (pick && pick !== r.option && D.variants[`${r.name}|${pick}`]) return D.variants[`${r.name}|${pick}`];
+    }
+    return D.plan;
+  };
+  let plan = activePlan();
+  // mirrors metrics.recommend: the plan's session is the default, readiness can only make it easier
+  const todayCall = day => {
+    const base = now.base_call;
+    if (!day) return base;
+    if (ORDER.includes(base.level) && ORDER.indexOf(base.level) < ORDER.indexOf(day.level)) return { ...base, detail: `Planned: ${day.session}. Readiness says scale it back — ${base.detail}` };
+    const m = day.minutes || 0;
+    return { level: day.level, title: day.title, detail: day.session + (m >= 60 ? ` — about ${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : m ? ` — about ${m} min` : "") };
+  };
+  const shortName = name => name.replace(/^Bell's /, "").replace(/ Cometh Challenge$/, "");
   const LEVEL = { hard: "Go hard", moderate: "Train", easy: "Easy", rest: "Rest", unknown: "Waiting for data" };
   const formWord = t => t == null ? "" : t > 15 ? "very fresh" : t > 5 ? "fresh" : t > -10 ? "neutral" : t > -30 ? "productive fatigue" : "overreaching";
   const tile = (k, v, unit, d, tone) => `<div class="tile"><span class="k">${esc(k)}</span><span class="v num">${v}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="d">${tone ? `<span class="tag ${tone}">${tone === "good" ? "▲" : "▼"}</span> ` : ""}${d}</span></div>`;
@@ -208,17 +237,72 @@
   const SLEEP_PARTS = { duration: "Duration", deep: "Deep sleep", rem: "REM sleep", continuity: "Continuity", calm: "Overnight calm" };
   const meters = (obj, names) => `<div class="meters">${Object.entries(obj).map(([k, v]) => `<div class="meter"><span>${esc(names[k] || k)}</span><span class="track"><span class="fill" style="display:block;width:${Math.max(2, v)}%"></span></span><b class="num">${v}</b></div>`).join("")}</div>`;
 
+  const chipFor = d => `<span class="phase ${d.phase}">${esc(d.phase)}</span>${d.indoor ? ' <span class="phase indoor">trainer</span>' : ""}`;
+
+  function compareOptions(r) {
+    const rows = r.options.map(o => {
+      const p = planFor(r.name, o.key), rr = p && p.races.find(x => x.name === r.name);
+      return rr ? { o, rr, pct: rr.race_ctl / rr.target_ctl } : null;
+    }).filter(Boolean);
+    if (rows.length < 2) return "";
+    const longest = rows.reduce((a, b) => (a.rr.km >= b.rr.km ? a : b));
+    const build = longest.rr.build_start ? fmtD(longest.rr.build_start) : "the outdoor build";
+    const verdict = longest.pct >= 0.95 ? `On track for the ${esc(longest.o.label)} if the trainer weeks happen.`
+      : longest.pct >= 0.85 ? `The ${esc(longest.o.label)} is within reach but tight. Decide by ${build}, when the outdoor build starts: if the trainer winter slips, drop down.`
+      : `The shorter distance fits the fitness the calendar allows; the ${esc(longest.o.label)} would be a survival ride.`;
+    return `<div class="advice"><b>Which distance?</b> ${rows.map(x => `${esc(x.o.label)}: race-morning fitness <b>${r0(x.rr.race_ctl)}</b> of ${x.rr.target_ctl} (${Math.round(x.pct * 100)}%), peak week ${x.rr.peak_week_h ?? "—"} h`).join(" · ")}. ${verdict}</div>`;
+  }
+
+  function raceCard(r) {
+    const eds = D.editions[r.name] || [];
+    const best = eds.length ? eds.reduce((a, b) => (a.moving_s < b.moving_s ? a : b)) : null;
+    const pct = Math.round(r.race_ctl / r.target_ctl * 100);
+    const km = r.km ? (units === "mi" ? `${Math.round(r.km / 1.609)} mi` : `${r.km} km`) : "";
+    return `<div class="racecard">
+      <div class="head"><h3 class="rname">${esc(r.name)}</h3><span class="sub">${fmtDow(r.date)}, ${r.date.slice(0, 4)} · ${r.days_out} days</span></div>
+      ${r.options.length > 1 ? `<div class="opts" role="group" aria-label="${esc(r.name)} distance">${r.options.map(o => `<button type="button" class="chip opt" data-race="${esc(r.name)}" data-opt="${esc(o.key)}" aria-pressed="${o.key === r.option}">${esc(o.label)}</button>`).join("")}</div>` : ""}
+      <div class="kpis"><span>${km ? `<b>${km}</b>` : ""}${r.climbing_ft ? ` · <b>${elev(r.climbing_ft / 3.28084)}</b> climbing` : ""} · ~${hrs(r.hours)} race</span>
+        <span>Taper <b>${r.taper_days} days</b> at <b>${Math.round(r.volume_floor * 100)}%</b> volume</span></div>
+      <div class="kpis"><span>Race morning: fitness <b>${r0(r.race_ctl)}</b> of ${r.target_ctl} <span class="tag ${pct >= 95 ? "good" : "bad"}">${pct >= 95 ? "▲" : "▼"} ${pct}%</span></span>
+        <span>form <b>${signed(r.race_tsb)}</b> <span class="tag ${r.in_band ? "good" : "bad"}">${r.in_band ? "▲ in band" : "▼ off"}</span> ${signed(r.target_tsb[0])} to ${signed(r.target_tsb[1])}</span></div>
+      ${r.options.length > 1 ? compareOptions(r) : ""}
+      ${best ? `<p class="sub">Best edition: ${best.date.slice(0, 4)}, ${dur(best.moving_s)} (${speed(best.speed_kph)}), started at fitness <b>${r0(best.ctl)}</b>, form <b>${signed(best.tsb)}</b>.</p>
+      <details class="table"><summary>${eds.length} past edition${eds.length === 1 ? "" : "s"}</summary><div class="scroll"><table class="tbl"><thead><tr><th>Date</th><th class="r">Time</th><th class="r">Speed</th><th class="r">Avg HR</th><th class="r">Fitness</th><th class="r">Form</th></tr></thead><tbody>
+        ${eds.map(e => `<tr><td>${fmtD(e.date)}, ${e.date.slice(0, 4)}</td><td class="r">${dur(e.moving_s)}</td><td class="r">${speed(e.speed_kph)}</td><td class="r">${r0(e.avg_hr)}</td><td class="r">${r0(e.ctl)}</td><td class="r">${signed(e.tsb)}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+    </div>`;
+  }
+
+  function seasonHTML() {
+    if (!plan) return `<section id="season" class="card"><div class="head"><h2>Season</h2></div><p class="empty">Add a race under [[races]] in fitness/config.toml to get a plan.</p></section>`;
+    const first = plan.races[0], raceIdx = plan.days.findIndex(d => d.phase === "race");
+    const shown = plan.days.slice(0, first.days_out <= 21 ? raceIdx + 1 : 14);
+    return `<section id="season" class="card">
+      <div class="head"><h2>Season</h2><span class="sub">${plan.races.length} race${plan.races.length === 1 ? "" : "s"} · plan through ${fmtD(plan.races[plan.races.length - 1].date)}, ${plan.races[plan.races.length - 1].date.slice(0, 4)}</span></div>
+      <div class="grid">${plan.races.map(raceCard).join("")}</div>
+      <h3 style="margin-top:16px">${shown.length > 14 ? `Every day to ${esc(shortName(first.name))}` : "Next two weeks"}</h3>
+      <div class="scrollx"><table class="tbl"><thead><tr><th>Day</th><th>Session</th><th class="r">Time</th><th class="r hide-sm">TSS</th><th class="r">Form</th></tr></thead><tbody>
+        ${shown.map((d, i) => `<tr class="${i === 0 ? "today" : ""} ${d.phase === "race" ? "race" : ""}"><td class="num nowrap">${fmtDow(d.date)}<br>${chipFor(d)}</td>
+          <td><b>${esc(d.title)}</b><br><span class="sub">${esc(d.session)}</span></td><td class="r">${d.minutes ? dur(d.minutes * 60) : "—"}</td><td class="r hide-sm">${d.load || "—"}</td><td class="r">${signed(d.tsb)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="sub" style="margin-top:8px">Readiness can only make a day easier: on a red morning take the easy option and the plan recalculates from what you actually did at the next build.</p>
+      <h3 style="margin-top:16px">Projected fitness</h3><div id="c-season"></div>
+      <details class="table" open><summary>Week by week</summary><div class="scroll tall"><table class="tbl"><thead><tr><th>Week of</th><th>Phase</th><th class="r">Hours</th><th class="r hide-sm">TSS</th><th>Key days</th><th class="r">Fitness</th></tr></thead><tbody>
+        ${plan.weeks.map(w => `<tr class="${w.race ? "race" : ""}"><td class="num nowrap">${fmtD(w.week)}</td><td class="nowrap"><span class="phase ${w.phase}">${esc(w.phase)}</span>${w.indoor ? ' <span class="phase indoor">trainer</span>' : ""}${w.recovery_week ? ' <span class="phase recovery">easy week</span>' : ""}</td>
+          <td class="r">${w.hours}</td><td class="r hide-sm">${r0(w.load)}</td><td class="sub">${w.race ? `<b>${esc(w.race)}</b> · ` : ""}${esc([...new Set(w.keys.filter(k => !k.startsWith("Race day")))].join(", ")) || "—"}</td><td class="r">${r0(w.ctl)}</td></tr>`).join("")}
+      </tbody></table></div></details>
+    </section>`;
+  }
+
   function render() {
-    const rd = now.readiness, rec = now.recommendation, sl = now.sleep;
+    const rd = now.readiness, sl = now.sleep, pToday = plan && plan.days[0], rec = todayCall(pToday), next = plan && plan.races[0];
     const last7 = D.readiness.slice(-8, -1).map(r => r.score);
     const rAvg = mean(last7);
     const html = [];
 
     // today
-    const pToday = plan && plan.days[0];
     html.push(`<section id="today" class="hero">
       <div class="card call">
-        <span class="sub">Today · ${fmtDow(D.today)}${race.days_out != null && race.days_out >= 0 ? ` · ${esc(race.name)} in ${race.days_out} day${race.days_out === 1 ? "" : "s"}` : ""}</span>
+        <span class="sub">Today · ${fmtDow(D.today)}${next ? ` · ${esc(shortName(next.name))} in ${next.days_out} day${next.days_out === 1 ? "" : "s"}` : ""}${pToday && pToday.indoor ? " · trainer season" : ""}</span>
         <span class="badge ${esc(rec.level)}"><i></i>${esc(LEVEL[rec.level] || rec.level)}</span>
         <div class="title">${esc(rec.title)}</div>
         <p class="detail">${esc(rec.detail)}</p>
@@ -240,30 +324,12 @@
       </div>
     </section>`);
 
-    // race
-    if (race.date) {
-      const pastIdx = plan ? plan.days.findIndex(d => d.phase === "taper") : -1;
-      const best = D.editions.length ? D.editions.reduce((a, b) => (a.moving_s < b.moving_s ? a : b)) : null;
-      html.push(`<section id="race" class="card">
-        <div class="head"><h2>${esc(race.name)}</h2><span class="sub">${fmtDow(race.date)}${race.days_out >= 0 ? ` · ${race.days_out} days out` : " · done"}</span></div>
-        <div class="kpis">
-          ${race.distance_mi ? `<span>Course <b>${units === "mi" ? `${race.distance_mi} mi` : `${Math.round(race.distance_mi * 1.609)} km`}</b> · <b>${elev(race.climbing_ft / 3.28084)}</b> climbing</span>` : ""}
-          ${plan ? `<span>Taper <b>${plan.taper_days} days</b> at <b>${Math.round(plan.volume_floor * 100)}%</b> volume${pastIdx > 0 ? `, from ${fmtD(plan.days[pastIdx].date)}` : ""}</span>
-          <span>Race morning: fitness <b>${r0(plan.race_ctl)}</b>, form <b>${signed(plan.race_tsb)}</b> <span class="tag ${plan.in_band ? "good" : "bad"}">${plan.in_band ? "▲ in" : "▼ outside"}</span> target ${signed(plan.target_tsb[0])} to ${signed(plan.target_tsb[1])}</span>` : ""}
-          ${best && plan ? `<span>Your best Iceman (${best.date.slice(0, 4)}, ${dur(best.moving_s)}) started at fitness <b>${r0(best.ctl)}</b>, form <b>${signed(best.tsb)}</b></span>` : ""}
-        </div>
-        ${plan ? `<div class="scrollx"><table class="tbl"><thead><tr><th>Day</th><th>Session</th><th class="r">Time</th><th class="r hide-sm">TSS</th><th class="r">Form</th></tr></thead><tbody>
-          ${plan.days.map((d, i) => `<tr class="${i === 0 ? "today" : ""} ${d.phase === "race" ? "race" : ""}"><td class="num nowrap">${fmtDow(d.date)}<br><span class="phase ${d.phase}">${d.phase}</span></td>
-            <td><b>${esc(d.title)}</b><br><span class="sub">${esc(d.session)}</span></td><td class="r">${d.minutes ? dur(d.minutes * 60) : "—"}</td><td class="r hide-sm">${d.load || "—"}</td><td class="r">${signed(d.tsb)}</td></tr>`).join("")}
-          </tbody></table></div>
-          <p class="sub" style="margin-top:8px">Readiness can only make a day easier: on a red morning take the easy option and let the plan recalculate tomorrow. The plan re-optimizes every build from what you actually did.</p>` : `<p class="empty">The day-by-day plan appears inside 10 weeks of race day.</p>`}
-        ${D.editions.length ? `<h3 style="margin-top:16px">Past editions</h3><div class="scrollx"><table class="tbl"><thead><tr><th>Date</th><th class="r">Time</th><th class="r">Speed</th><th class="r">Avg HR</th><th class="r">Fitness</th><th class="r">Form</th></tr></thead><tbody>
-          ${D.editions.map(e => `<tr><td>${fmtD(e.date)}, ${e.date.slice(0, 4)}</td><td class="r">${dur(e.moving_s)}</td><td class="r">${speed(e.speed_kph)}</td><td class="r">${r0(e.avg_hr)}</td><td class="r">${r0(e.ctl)}</td><td class="r">${signed(e.tsb)}</td></tr>`).join("")}</tbody></table></div>` : ""}
-      </section>`);
-    }
+    // season
+    html.push(seasonHTML());
+
 
     // load
-    html.push(`<section id="load" class="card"><div class="head"><h2>Fitness, fatigue &amp; form</h2><span class="sub">last ${D.pmc.length} days${plan ? " + plan to race day" : ""}</span></div>
+    html.push(`<section id="load" class="card"><div class="head"><h2>Fitness, fatigue &amp; form</h2><span class="sub">last ${D.pmc.length} days${next ? ` + plan to ${esc(shortName(next.name))}` : ""}</span></div>
       <div id="c-pmc"></div><h3 style="margin-top:14px">Form (TSB)</h3><div id="c-tsb"></div></section>`);
 
     // sleep
@@ -291,12 +357,13 @@
     const zt = z ? z.seconds.reduce((a, b) => a + b, 0) : 0;
     const zp = z ? z.seconds.map(s => s / zt * 100) : [];
     html.push(`<section id="training" class="card"><div class="head"><h2>Training</h2><span class="sub">${D.ytd.rides} rides this year · ${D.ytd.hours} h · ${dist(D.ytd.km * 1000)} · ${elev(D.ytd.elev_m)}</span></div>
+      ${D.indoor ? `<div class="kpis"><span>Trainer season ${fmtD(D.indoor.start)} – ${fmtD(D.indoor.end)}${D.indoor.current ? " (on now)" : ""}: <b>${D.indoor.rides}</b> rides · <b>${D.indoor.hours} h</b>${D.indoor.avg_np ? ` · avg NP <b>${D.indoor.avg_np} W</b>` : ""}${D.indoor.ftp_start && D.indoor.ftp_end ? ` · best-effort FTP <b>${D.indoor.ftp_start} → ${D.indoor.ftp_end} W</b>` : ""}${D.indoor.outdoor_rides ? ` · ${D.indoor.outdoor_rides} outdoor` : ""}</span></div>` : ""}
       <div class="grid"><div><h3>Weekly hours</h3><div id="c-weeks"></div></div>
       <div><h3>Heart-rate zones, last ${z ? z.days : 28} days</h3>${z ? `<div class="zones" role="img" aria-label="Time in zones">${zp.map((p, i) => `<div style="flex:${p};background:var(--z${i + 1})" title="Zone ${i + 1}: ${p.toFixed(0)}%"></div>`).join("")}</div>
         <div class="zones-key">${zp.map((p, i) => `<span><i class="sw" style="background:var(--z${i + 1})"></i>Z${i + 1} ${p.toFixed(0)}% · ${dur(z.seconds[i])}</span>`).join("")}</div>
         <p class="sub" style="margin-top:8px">${zp[0] + zp[1] >= 75 ? "Mostly easy, with the hard work concentrated: a polarized/pyramidal mix that suits a 2-hour race." : zp[2] > 25 ? "A lot of Zone 3: the 'grey zone' tires you without the stimulus of real intervals. Make easy days easier." : "A balanced mix."}</p>` : `<p class="empty">Time in zones comes from Garmin-recorded activities.</p>`}</div></div>
       <h3 style="margin-top:14px">Recent activities</h3><div class="scrollx"><table class="tbl"><thead><tr><th>When</th><th>Activity</th><th class="r">Time</th><th class="r">Distance</th><th class="r">Climb</th><th class="r">Avg HR</th><th class="r">TSS</th></tr></thead><tbody>
-      ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
+      ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}${a.indoor ? " · trainer" : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
       </tbody></table></div><p class="sub" style="margin-top:6px">* no heart rate: estimated from duration.</p></section>`);
 
     // insights
@@ -319,13 +386,15 @@
   }
 
   function charts() {
-    // PMC with projection
-    const hist = D.pmc, future = plan ? plan.days.slice(1) : [];
+    // PMC with projection to the next race
+    const next = plan && plan.races[0];
+    const hist = D.pmc, firstRace = plan ? plan.days.findIndex(d => d.phase === "race") : -1;
+    const future = plan ? plan.days.slice(1, firstRace + 1) : [];
     const x = hist.map(r => r.date).concat(future.map(d => d.date));
     const todayIdx = hist.length - 1;
     const proj = (key) => hist.map(r => r[key]).concat(future.map(d => d[key]));
     const marks = [{ at: todayIdx, label: "today" }];
-    if (plan) marks.push({ at: x.length - 1, label: "race" });
+    if (next) marks.push({ at: x.length - 1, label: shortName(next.name) });
     const tooltipPlan = i => { const p = i > todayIdx ? future[i - todayIdx - 1] : null; return p ? [["Planned", `${p.title} · ${p.load || 0} TSS`]] : []; };
     chart(document.getElementById("c-pmc"), {
       label: "Daily training load with fitness and fatigue", x, height: 260, marks, dashFrom: plan ? todayIdx : null, extra: tooltipPlan,
@@ -335,12 +404,34 @@
         { name: "Fatigue (ATL)", type: "line", color: "var(--s2)", values: proj("atl") },
       ],
     });
-    const tgt = race.target_tsb;
     chart(document.getElementById("c-tsb"), {
       label: "Form, training stress balance", x, height: 170, marks, zero: true, dashFrom: plan ? todayIdx : null, extra: tooltipPlan,
-      ref: plan ? { lo: tgt[0], hi: tgt[1], from: Math.max(0, x.length - 15), label: "race-day target", color: "var(--s3)" } : null,
+      ref: next ? { lo: next.target_tsb[0], hi: next.target_tsb[1], from: Math.max(0, x.length - 15), label: "race-day target", color: "var(--s3)" } : null,
       series: [{ name: "Form (TSB)", type: "line", color: "var(--s1)", values: proj("tsb"), fmt: signed }],
     });
+
+    // the season: 60 days behind, every planned day ahead, trainer windows shaded
+    if (plan) {
+      const back = hist.slice(-60), ahead = plan.days.slice(1);
+      const sx = back.map(r => r.date).concat(ahead.map(d => d.date));
+      const now0 = back.length - 1;
+      const xb = [];
+      ahead.forEach((d, i) => {
+        const at = now0 + 1 + i, last = xb[xb.length - 1];
+        if (d.indoor) { if (last && last.to === at - 1) last.to = at; else xb.push({ from: at, to: at, label: "trainer", color: "var(--s4)" }); }
+      });
+      const smarks = [{ at: now0, label: "today" }].concat(plan.races.map(r => ({ at: sx.indexOf(r.date), label: shortName(r.name) })));
+      const sp = key => back.map(r => r[key]).concat(ahead.map(d => d[key]));
+      chart(document.getElementById("c-season"), {
+        label: "Projected fitness and fatigue through the season", x: sx, height: 240, marks: smarks, xbands: xb, dashFrom: now0,
+        extra: i => { const d = i > now0 ? ahead[i - now0 - 1] : null; return d ? [["Phase", d.phase + (d.indoor ? " · trainer" : "")], ["Planned", `${d.title} · ${d.load || 0} TSS`]] : []; },
+        series: [
+          { name: "Fitness (CTL)", type: "line", color: "var(--s1)", values: sp("ctl") },
+          { name: "Fatigue (ATL)", type: "line", color: "var(--s2)", values: sp("atl") },
+        ],
+      });
+    }
+
 
     // sleep
     const S = D.sleep, sx = S.map(s => s.date);
@@ -387,8 +478,9 @@
       extra: i => [["Distance", dist(W[i].km * 1000)], ["Climbing", elev(W[i].elev_m)], ["Load", `${r0(W[i].load)} TSS`]],
       series: [
         { name: "Ride", type: "bar", stack: true, color: "var(--s1)", values: W.map(w => w.ride), fmt: hrs },
-        { name: "Run", type: "bar", stack: true, color: "var(--s2)", values: W.map(w => w.run), fmt: hrs },
-        { name: "Other", type: "bar", stack: true, color: "var(--s3)", values: W.map(w => w.other), fmt: hrs },
+        { name: "Trainer", type: "bar", stack: true, color: "var(--s2)", values: W.map(w => w.indoor), fmt: hrs },
+        { name: "Run", type: "bar", stack: true, color: "var(--s3)", values: W.map(w => w.run), fmt: hrs },
+        { name: "Other", type: "bar", stack: true, color: "var(--s4)", values: W.map(w => w.other), fmt: hrs },
       ],
     });
   }
@@ -404,6 +496,15 @@
   });
   unitBtn.addEventListener("click", () => { units = units === "mi" ? "km" : "mi"; ls.set("fitness-units", units); unitBtn.textContent = units; render(); });
   unitBtn.textContent = units;
+  app.addEventListener("click", e => {
+    const b = e.target instanceof Element ? e.target.closest("button.opt") : null;
+    if (!b) return;
+    ls.set(`fitness-option:${b.dataset.race}`, b.dataset.opt);
+    plan = activePlan();
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  });
   paintTheme();
   render();
 })();

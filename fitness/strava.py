@@ -93,7 +93,7 @@ def parse_api(a: dict) -> dict:
         kind=a.get("sport_type") or a.get("type") or "Workout", name=a.get("name") or "", duration_s=a.get("elapsed_time") or 0,
         moving_s=a.get("moving_time"), distance_m=a.get("distance"), elev_m=a.get("total_elevation_gain"), avg_hr=a.get("average_heartrate"),
         max_hr=a.get("max_heartrate"), avg_power=a.get("average_watts") if a.get("device_watts") else None,
-        np=a.get("weighted_average_watts") if a.get("device_watts") else None, kj=a.get("kilojoules"), suffer_score=a.get("suffer_score"),
+        np=a.get("weighted_average_watts") if a.get("device_watts") else None, kj=a.get("kilojoules"), suffer_score=a.get("suffer_score"), trainer=a.get("trainer"),
     )
 
 

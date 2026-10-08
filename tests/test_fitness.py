@@ -14,8 +14,9 @@ sys.path.insert(0, str(ROOT))
 from fitness import build, config, demo  # noqa: E402
 from fitness import metrics as m  # noqa: E402
 from fitness.activities import activity, classify, merge  # noqa: E402
+from fitness.config import nth_weekday, race_dates  # noqa: E402
 from fitness.garmin import parse_activity, parse_day  # noqa: E402
-from fitness.plan import plan_race, roles  # noqa: E402
+from fitness.plan import in_indoor, roles, season, upcoming  # noqa: E402
 from fitness.store import Store  # noqa: E402
 from fitness.strava import parse_api, parse_export  # noqa: E402
 
@@ -27,9 +28,32 @@ def cfg():
     return config.load()
 
 
-def test_config_loads_race(cfg):
-    assert cfg["race"]["date"] == date(2026, 11, 7)
+def test_config_loads_races(cfg):
+    names = [r["name"] for r in cfg["races"]]
+    assert "Barry-Roubaix" in names and any("Iceman" in n for n in names)
+    barry = next(r for r in cfg["races"] if r["name"] == "Barry-Roubaix")
+    assert barry["date"] == date(2027, 4, 17) and set(barry["options"]) == {"100k", "50k"} and barry["distance"] == "100k"
     assert len(cfg["plan"]["weekly_pattern"]) == 7
+
+
+def test_legacy_single_race_config(tmp_path):
+    path = tmp_path / "c.toml"
+    path.write_text('[race]\nname = "Old"\ndate = 2026-11-07\ndistance_mi = 30\ntarget_tsb = [10, 20]\n')
+    cfg = config.load(path)
+    assert cfg["races"][0]["name"] == "Old" and cfg["races"][0]["options"]["race"]["km"] == 48
+
+
+def test_nth_weekday_and_rollover():
+    assert nth_weekday("3rd Sat Apr", 2027) == date(2027, 4, 17)
+    assert nth_weekday("1st Sat Nov", 2026) == date(2026, 11, 7)
+    race = {"date": date(2026, 4, 18), "every": "3rd Sat Apr"}
+    assert race_dates(race, date(2026, 10, 8)) == (date(2026, 4, 18), date(2027, 4, 17))
+    assert race_dates({"date": date(2026, 4, 18), "every": ""}, date(2026, 10, 8)) == (date(2026, 4, 18), date(2026, 4, 18))
+
+
+def test_indoor_window_wraps_the_new_year_and_leap_day(cfg):
+    assert in_indoor(date(2026, 12, 1), cfg) and in_indoor(date(2027, 1, 15), cfg) and in_indoor(date(2028, 2, 29), cfg)
+    assert not in_indoor(date(2026, 11, 30), cfg) and not in_indoor(date(2027, 3, 1), cfg)
 
 
 def test_hr_tss_is_100_for_an_hour_at_threshold():
@@ -115,12 +139,53 @@ def test_roles_from_pattern():
     assert roles([0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9]) == ["rest", "key", "endurance", "key", "easy", "long", "endurance"]
 
 
-def test_plan_lands_in_target_band(cfg):
-    p = plan_race(date(2026, 10, 8), date(2026, 11, 7), 45.0, 50.0, cfg)
-    assert p["days"][-1]["phase"] == "race" and p["days"][-2]["phase"] == "openers"
-    assert p["in_band"], p["race_tsb"]
-    assert cfg["plan"]["taper_days"][0] <= p["taper_days"] <= cfg["plan"]["taper_days"][1]
-    assert plan_race(date(2026, 11, 8), date(2026, 11, 7), 45, 50, cfg) is None
+def test_season_plans_both_races(cfg):
+    p = season(date(2026, 10, 8), 45.0, 50.0, cfg)
+    iceman, barry = p["races"]
+    assert iceman["date"] == "2026-11-07" and barry["date"] == "2027-04-17" and barry["option"] == "100k"
+    assert iceman["in_band"] and barry["in_band"], (iceman["race_tsb"], barry["race_tsb"])
+    by_date = {d["date"]: d for d in p["days"]}
+    assert by_date["2026-11-07"]["phase"] == "race" and by_date["2026-11-06"]["phase"] == "openers"
+    assert by_date["2026-11-10"]["phase"] == "recovery"                       # the week after Iceman
+    assert by_date["2026-11-20"]["phase"] == "transition"
+    assert by_date["2027-01-12"]["phase"] == "base" and by_date["2027-01-12"]["indoor"]
+    assert by_date["2027-03-09"]["phase"] == "build" and not by_date["2027-03-09"]["indoor"]
+    assert by_date["2027-04-17"]["title"].startswith("Race day — Barry-Roubaix (Killer")
+    indoor = [d for d in p["days"] if d["indoor"]]
+    assert indoor and all(d["date"][5:] >= "12-01" or d["date"][5:] <= "02-29" for d in indoor)
+    assert any(d["title"] == "FTP ramp test" and d["date"].startswith("2026-12") for d in indoor)
+    assert any(d["title"] == "FTP ramp test" and d["date"].startswith("2027-02") for d in indoor)
+    assert all(d["minutes"] <= cfg["indoor"]["long_ride_h"] * 60 + 5 for d in indoor)   # no 4-hour trainer rides
+    assert any(w["recovery_week"] and w["phase"] == "base" for w in p["weeks"])
+    assert barry["build_start"] == "2027-03-01" and barry["peak_week_h"] > 0
+
+
+def test_season_distance_choice(cfg):
+    long = season(date(2026, 10, 8), 45.0, 50.0, cfg)["races"][1]
+    short = season(date(2026, 10, 8), 45.0, 50.0, cfg, choices={"Barry-Roubaix": "50k"})["races"][1]
+    assert short["option"] == "50k" and short["label"].startswith("Thriller")
+    assert short["target_ctl"] < long["target_ctl"] and short["peak_week_h"] < long["peak_week_h"]
+    assert upcoming(cfg, date(2026, 10, 8), {"Barry-Roubaix": "nonsense"})[0][1]["option"] == "100k"
+
+
+def test_season_none_without_races(cfg):
+    assert season(date(2026, 10, 8), 45, 50, {**cfg, "races": []}) is None
+
+
+def test_indoor_detection():
+    z = activity(id="s", source="strava", start=datetime(2027, 1, 5, 18), kind="Ride", name="Zwift - Watopia", duration_s=3600)
+    w = activity(id="w", source="strava", start=datetime(2027, 1, 5, 18), kind="Ride", name="MyWoosh - Belgium", duration_s=3600)
+    v = activity(id="v", source="strava", start=datetime(2027, 1, 5, 18), kind="VirtualRide", duration_s=3600)
+    t = activity(id="t", source="strava", start=datetime(2027, 1, 5, 18), kind="Ride", duration_s=3600, trainer=True)
+    o = activity(id="o", source="strava", start=datetime(2027, 1, 5, 18), kind="GravelRide", duration_s=3600)
+    assert z["indoor"] and w["indoor"] and v["indoor"] and t["indoor"] and not o["indoor"] and "trainer" not in t
+
+
+def test_estimate_ftp_from_trainer_rides():
+    acts = [activity(id=f"s{i}", source="strava", start=datetime(2027, 1, 5 + i, 18), kind="VirtualRide", duration_s=m_ * 60, np=np_)
+            for i, (m_, np_) in enumerate([(20, 260), (60, 240), (120, 300), (10, 400)])]
+    assert m.estimate_ftp(acts, date(2027, 2, 1)) == 247   # 20 min × 0.95 vs 60 min × 1.0; the 2 h and 10 min rides don't count
+    assert m.thresholds({"athlete": {**config.DEFAULTS["athlete"]}}, acts, {}, date(2027, 2, 1))["ftp"] == 247
 
 
 def test_classify():
@@ -133,7 +198,7 @@ def test_merge_garmin_and_strava_twins():
     g = activity(id="garmin:1", source="garmin", start=datetime(2026, 9, 1, 8), kind="mountain_biking", name="Kalkaska Mountain Biking", duration_s=3600)
     s = activity(id="strava:9", source="strava", start=datetime(2026, 9, 1, 8, 1), kind="MountainBikeRide", name="Vasa loop", duration_s=3500, np=210)
     other = activity(id="strava:10", source="strava", start=datetime(2026, 9, 2, 8), kind="Ride", duration_s=3600)
-    out = merge([s, g, other])
+    out = merge([other, s, g])   # a Strava-only ride listed first used to crash the merge
     assert [a["id"] for a in out] == ["garmin:1", "strava:10"]
     assert out[0]["np"] == 210 and out[0]["name"] == "Vasa loop" and out[0]["links"] == {"strava": "strava:9"}
 
@@ -173,11 +238,14 @@ def test_parse_strava_export_duplicate_headers():
 def test_build_end_to_end(tmp_path, cfg):
     today = date(2026, 10, 8)
     with Store(tmp_path / "d.db") as store:
-        demo.populate(store, today, days=200)
+        demo.populate(store, today, days=330)   # reaches back into last winter's trainer season
         data = build.assemble(cfg, store.days(), store.activities(), today)
-    assert data["now"]["readiness"] and data["plan"]["days"][-1]["date"] == "2026-11-07"
+    assert data["now"]["readiness"] and data["plan"]["days"][-1]["date"] == "2027-04-17"
     assert len(data["sleep"]) == build.SLEEP_DAYS and len(data["weeks"]) == build.WEEKS
     assert {c["field"] for c in data["coverage"]} >= {"Garmin Sleep Score", "Overnight HRV (ms)"}
+    assert set(data["variants"]) == {"Barry-Roubaix|50k"} and data["now"]["base_call"]["level"] in ("hard", "moderate", "easy", "rest")
+    assert data["indoor"]["rides"] > 0 and data["indoor"]["avg_np"]
+    assert [e["date"][:4] for e in data["editions"]["Barry-Roubaix"]] == ["2025", "2026"]
     out = build.render(data, tmp_path / "index.html")
     html = out.read_text()
     assert "/*__APP__*/" not in html and "__DATA__" not in html

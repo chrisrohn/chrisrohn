@@ -9,8 +9,8 @@ from pathlib import Path
 
 from fitness import metrics as m
 from fitness.activities import merge
-from fitness.config import DIST_DIR, SITE_DIR
-from fitness.plan import plan_race
+from fitness.config import DIST_DIR, SITE_DIR, nth_weekday
+from fitness.plan import in_indoor, season
 
 CHART_DAYS, SLEEP_DAYS, WEEKS = 180, 90, 16
 
@@ -42,12 +42,15 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
             ready[k] = r
 
     t, y = _iso(today), _iso(today - timedelta(days=1))
-    race_cfg = cfg["race"]
-    race_date = race_cfg.get("date")
-    plan = None
-    if race_date:
-        state = by_day.get(y, {"ctl": 0, "atl": 0})
-        plan = plan_race(today, race_date, state["ctl"], state["atl"], cfg, done_today=load.get(t, 0))
+    state = by_day.get(y, {"ctl": 0, "atl": 0})
+    plan = season(today, state["ctl"], state["atl"], cfg, done_today=load.get(t, 0))
+    # every other distance option of every race, so the page can compare "100k or 50k?" side by side
+    variants = {}
+    if plan:
+        for r in plan["races"]:
+            for o in r["options"]:
+                if o["key"] != r["option"]:
+                    variants[f"{r['name']}|{o['key']}"] = season(today, state["ctl"], state["atl"], cfg, load.get(t, 0), {r["name"]: o["key"]})
     plan_today = plan["days"][0] if plan else None
     ready_today = ready.get(t)
     rec = m.recommend(ready_today, plan_today)
@@ -91,14 +94,19 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     weeks = _weeks(acts, today)
     pairs = _pairs(days, acts, load, sleep, ready)
 
-    match = [w.lower() for w in race_cfg.get("match", [])]
-    editions = []
-    for a in acts:
-        if match and any(w in a["name"].lower() for w in match) and a["group"] == "ride":
-            r = by_day.get(a["start"][:10], {})
-            editions.append({"date": a["start"][:10], "name": a["name"], "moving_s": a["moving_s"], "distance_m": a["distance_m"],
-                             "elev_m": a["elev_m"], "avg_hr": a["avg_hr"], "ctl": r.get("ctl"), "tsb": r.get("tsb"),
-                             "speed_kph": round(a["distance_m"] / a["moving_s"] * 3.6, 1) if a["moving_s"] else None})
+    editions = {}
+    for race in cfg["races"]:
+        match = [w.lower() for w in race.get("match", [])]
+        rows_e = []
+        for a in acts:
+            day = date.fromisoformat(a["start"][:10])
+            near = not race["every"] or abs((day - nth_weekday(race["every"], day.year)).days) <= 7   # skips recon rides and watch parties
+            if match and any(w in a["name"].lower() for w in match) and near and a["group"] == "ride" and not a.get("indoor"):
+                r = by_day.get(a["start"][:10], {})
+                rows_e.append({"date": a["start"][:10], "name": a["name"], "moving_s": a["moving_s"], "distance_m": a["distance_m"],
+                               "elev_m": a["elev_m"], "avg_hr": a["avg_hr"], "np": a.get("np"), "ctl": r.get("ctl"), "tsb": r.get("tsb"),
+                               "speed_kph": round(a["distance_m"] / a["moving_s"] * 3.6, 1) if a["moving_s"] else None})
+        editions[race["name"]] = rows_e
 
     zones = [0.0] * 5
     for a in acts:
@@ -106,17 +114,18 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
             zones = [z + (v or 0) for z, v in zip(zones, a["hr_zones"], strict=True)]
 
     ytd = [a for a in acts if a["start"][:4] == str(today.year) and a["group"] == "ride"]
+    indoor = _indoor_season(acts, cfg, today)
     coverage = _coverage(days, today)
 
     return {
         "generated": datetime.now().isoformat(timespec="minutes"), "today": t, "athlete": th, "need_hours": need,
-        "race": {"name": race_cfg["name"], "date": race_date.isoformat() if race_date else None, "distance_mi": race_cfg["distance_mi"],
-                 "climbing_ft": race_cfg["climbing_ft"], "days_out": (race_date - today).days if race_date else None, "target_tsb": race_cfg["target_tsb"]},
-        "now": {"readiness": ready_today, "recommendation": rec, "sleep": sleep.get(t), "form": form_now,
+        "now": {"readiness": ready_today, "recommendation": rec, "base_call": m.recommend(ready_today, None), "sleep": sleep.get(t), "form": form_now,
                 "sleep_debt": round(debt, 1) if debt is not None else None, "regularity_min": round(regularity) if regularity is not None else None,
                 "last_night": (days.get(t) or {}).get("sleep")},
         "pmc": [r for r in rows if r["date"] >= chart_from],
         "plan": plan,
+        "variants": variants,
+        "indoor": indoor,
         "sleep": sleep_rows,
         "markers": markers,
         "readiness": [{"date": k, "score": v["score"]} for k, v in sorted(ready.items()) if k >= sleep_from],
@@ -136,18 +145,44 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
 def _weeks(acts: list[dict], today: date) -> list[dict]:
     monday = today - timedelta(days=today.weekday())
     starts = [monday - timedelta(weeks=i) for i in range(WEEKS - 1, -1, -1)]
-    out = {_iso(s): {"week": _iso(s), "ride": 0.0, "run": 0.0, "other": 0.0, "km": 0.0, "elev_m": 0.0, "load": 0.0} for s in starts}
+    out = {_iso(s): {"week": _iso(s), "ride": 0.0, "indoor": 0.0, "run": 0.0, "other": 0.0, "km": 0.0, "elev_m": 0.0, "load": 0.0} for s in starts}
     for a in acts:
         d = date.fromisoformat(a["start"][:10])
         k = _iso(d - timedelta(days=d.weekday()))
         if k not in out:
             continue
         w = out[k]
-        w[a["group"] if a["group"] in ("ride", "run") else "other"] += a["moving_s"] / 3600
+        bucket = ("indoor" if a.get("indoor") else "ride") if a["group"] == "ride" else a["group"] if a["group"] == "run" else "other"
+        w[bucket] += a["moving_s"] / 3600
         w["km"] += a["distance_m"] / 1000
         w["elev_m"] += a["elev_m"]
         w["load"] += a["load"]
     return [{k: round(v, 2) if isinstance(v, float) else v for k, v in w.items()} for w in out.values()]
+
+
+def _indoor_season(acts: list[dict], cfg: dict, today: date) -> dict | None:
+    """The trainer season under way, or the last one: rides, hours, load and power, and how the FTP moved."""
+    if not cfg["indoor"].get("start"):
+        return None
+    d = today
+    while not in_indoor(d, cfg) and (today - d).days < 370:
+        d -= timedelta(days=1)
+    if not in_indoor(d, cfg):
+        return None
+    start = d
+    while in_indoor(start - timedelta(days=1), cfg):
+        start -= timedelta(days=1)
+    end = d
+    while in_indoor(end + timedelta(days=1), cfg):
+        end += timedelta(days=1)
+    rides = [a for a in acts if a["group"] == "ride" and a.get("indoor") and _iso(start) <= a["start"][:10] <= _iso(end)]
+    outdoor = [a for a in acts if a["group"] == "ride" and not a.get("indoor") and _iso(start) <= a["start"][:10] <= _iso(end)]
+    nps = [a["np"] for a in rides if a.get("np")]
+    return {"start": _iso(start), "end": _iso(end), "current": in_indoor(today, cfg), "rides": len(rides), "outdoor_rides": len(outdoor),
+            "hours": round(sum(a["moving_s"] for a in rides) / 3600, 1), "load": round(sum(a["load"] for a in rides)),
+            "avg_np": round(sum(nps) / len(nps)) if nps else None, "with_power": len(nps),
+            "ftp_start": m.estimate_ftp([a for a in rides if a["start"][:10] < _iso(start + timedelta(days=30))], start + timedelta(days=30), 30) or None,
+            "ftp_end": m.estimate_ftp(rides, min(end, today), 30) or None}
 
 
 def _pairs(days, acts, load, sleep, ready) -> dict[str, list[tuple[float, float]]]:

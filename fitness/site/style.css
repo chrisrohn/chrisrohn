@@ -140,6 +140,17 @@ details.table .scroll { max-height: 260px; overflow: auto; margin-top: 6px; }
 .phase { font-size: .7rem; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--ring); color: var(--ink-2); white-space: nowrap; }
 .phase.taper { border-color: var(--s1); color: var(--s1); }
 .phase.openers, .phase.race { border-color: var(--s2); color: var(--ink); }
+.phase.base, .phase.build { color: var(--ink); }
+.phase.indoor { border-color: var(--s4); color: var(--ink); }
+.phase.recovery, .phase.transition { color: var(--muted); }
+.racecard { border: 1px solid var(--ring); border-radius: 12px; padding: 12px; background: var(--raised); display: grid; gap: 8px; align-content: start; min-width: 0; }
+.racecard .head { margin-bottom: 0; }
+.racecard .kpis { margin-bottom: 0; }
+.rname { color: var(--ink); font-size: 1rem; }
+.opts { display: flex; gap: 6px; flex-wrap: wrap; }
+button.chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.advice { font-size: .85rem; color: var(--ink-2); border-left: 3px solid var(--s1); padding-left: 10px; }
+details.table .scroll.tall { max-height: 420px; }
 
 .zones { display: flex; gap: 2px; height: 22px; border-radius: 6px; overflow: hidden; margin: 6px 0; }
 .zones div { min-width: 2px; }
