@@ -22,7 +22,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.10.0",
     "globals": "^17.12.0",
-    "html-validate": "^11.15.0",
+    "html-validate": "^11.16.2",
     "typescript": "^7.0.2"
   },
   "engines": {
