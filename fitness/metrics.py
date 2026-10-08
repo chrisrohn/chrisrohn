@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 CTL_DAYS, ATL_DAYS = 42, 7
@@ -309,3 +310,117 @@ def insights(pairs: dict[str, list[tuple[float, float]]], min_n: int = 30) -> li
         out.append({"key": key, "rho": round(rho, 2), "n": len(rows), "diff": round(diff, 1),
                     "text": f"{lead} {direction} {outcome} by {abs(diff):.0f} {unit} on average ({statistics.mean(hi):.0f} vs {statistics.mean(lo):.0f}; ρ = {rho:+.2f}, n = {len(rows)})."})
     return sorted(out, key=lambda r: -abs(r["rho"]))
+
+
+# ── commuting ─────────────────────────────────────────────────────────────────────────────────────────────
+
+COMMUTE_HOURS = ((5, 10), (14, 20))   # a ride that starts in one of these windows on a weekday can be a commute
+
+
+def mark_commutes(acts: list[dict], cfg: dict) -> None:
+    """Flag commutes: Strava's commute tick, or an outdoor weekday ride of about the commute's length that starts at
+    commuting hours. Each gets its leg: "in" (morning) or "home"."""
+    c = cfg["commute"]
+    km = c.get("km_each_way") or 0
+    for a in acts:
+        start = datetime.fromisoformat(a["start"])
+        looks = (bool(km) and a["group"] == "ride" and not a.get("indoor") and start.weekday() < 5
+                 and abs(a["distance_m"] / 1000 - km) <= 0.25 * km and any(lo <= start.hour < hi for lo, hi in COMMUTE_HOURS))
+        if a.get("commute") or (c.get("enabled") and looks):
+            a["commute"] = True
+            a["leg"] = "in" if start.hour < 12 else "home"
+
+
+def _fit(xs: list[float], ys: list[float]) -> list[float] | None:
+    """Least-squares line y = a + b·x, or None when the points can't support one."""
+    if len(xs) < 6 or statistics.pstdev(xs) < 0.5:
+        return None
+    mx, my = statistics.mean(xs), statistics.mean(ys)
+    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / sum((x - mx) ** 2 for x in xs)
+    return [round(my - b * mx, 2), round(b, 3)]
+
+
+def commute_profile(acts: list[dict], cfg: dict, today: date) -> dict | None:
+    """What your commute costs and how it's trending, learned from the commutes you've ridden; config defaults until
+    there are enough of them. Efficiency (km/h per 100 bpm) on the same flat route is a free weekly aerobic test."""
+    c = cfg["commute"]
+    if not c.get("enabled") or not c.get("km_each_way"):
+        return None
+    since = (today - timedelta(days=365)).isoformat()
+    rides = [a for a in acts if a.get("commute") and a["start"][:10] >= since and a["moving_s"] > 0]
+    km = c["km_each_way"]
+    legs = {}
+    for leg in ("in", "home"):
+        mine = [a for a in rides if a.get("leg") == leg]
+        with_hr = [a for a in mine if a.get("avg_hr")]
+        recent = [a for a in with_hr if a["start"][:10] >= (today - timedelta(days=120)).isoformat()]
+        minutes = statistics.median([a["moving_s"] / 60 for a in mine]) if len(mine) >= 3 else km / 26 * 60
+        load = statistics.median([a["load"] for a in with_hr]) if len(with_hr) >= 3 else round(minutes / 60 * 50)
+        legs[leg] = {
+            "minutes": round(minutes), "load": round(load), "rides": len(mine),
+            "hr": round(statistics.median([a["avg_hr"] for a in with_hr])) if len(with_hr) >= 3 else None,
+            "speed": round(statistics.median([a["distance_m"] / a["moving_s"] * 3.6 for a in mine]), 1) if len(mine) >= 3 else 26.0,
+            "model": _fit([a["distance_m"] / a["moving_s"] * 3.6 for a in recent], [a["avg_hr"] for a in recent]),   # HR expected at a speed
+        }
+    series = sorted(({"date": a["start"][:10], "leg": a["leg"], "speed": round(a["distance_m"] / a["moving_s"] * 3.6, 1), "hr": a["avg_hr"],
+                      "ef": round(a["distance_m"] / a["moving_s"] * 3.6 / a["avg_hr"] * 100, 2)} for a in rides if a.get("avg_hr")), key=lambda r: r["date"])
+    weeks = defaultdict(int)
+    for a in rides:
+        d = date.fromisoformat(a["start"][:10])
+        weeks[(d - timedelta(days=d.weekday())).isoformat()] += 1
+    last8 = [weeks.get((today - timedelta(days=today.weekday() + 7 * i)).isoformat(), 0) / 2 for i in range(1, 9)]   # round trips
+    trend = None
+    if len(series) >= 12:
+        recent = [r["ef"] for r in series[-6:]]
+        earlier = [r["ef"] for r in series[:-6][-30:]]
+        if earlier:
+            trend = round((statistics.median(recent) / statistics.median(earlier) - 1) * 100, 1)
+    year = [a for a in rides if a["start"][:4] == str(today.year)]
+    return {"km": km, "climb_m": c["climb_m"], "legs": legs, "series": series, "per_week_8": round(statistics.mean(last8), 1), "ef_trend_pct": trend,
+            "year": {"legs": len(year), "km": round(sum(a["distance_m"] for a in year) / 1000), "hours": round(sum(a["moving_s"] for a in year) / 3600, 1)}}
+
+
+def zone_bpm(th: dict, lo: float, hi: float) -> str:
+    return f"under {round(th['lthr'] * hi / 100)} bpm" if lo <= 0 else f"{round(th['lthr'] * lo / 100)}–{round(th['lthr'] * hi / 100)} bpm"
+
+
+def commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: dict, profile: dict | None, th: dict) -> dict | None:
+    """This morning's commute decision and how to ride it. The plan proposes; readiness can only make it easier."""
+    if not profile:
+        return None
+    dow = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][today.weekday()]
+    if dow not in cfg["commute"]["days"]:
+        return None
+    legs = profile["legs"]
+    planned = plan_today.get("commute") if plan_today else None
+    role = plan_today.get("role") if plan_today else None
+    score = ready["score"] if ready else None
+    z1, z2 = zone_bpm(th, 0, 81), zone_bpm(th, 81, 89)
+    tin, thome = legs["in"]["minutes"], legs["home"]["minutes"]
+    fuel = "Breakfast before you leave; something with carbs and protein at work; a snack (30–40 g carbs) mid-afternoon before the ride home."
+    easy = {"verdict": "easy", "title": "Ride in — easy both ways",
+            "detail": f"Z1 the whole way, {z1}, about {tin} min in and {thome} min home. Spin, don't push; no intervals today.", "fuel": fuel}
+    if ready and ready.get("illness"):
+        return {"verdict": "skip", "title": "Leave the bike at home", "detail": "Resting HR and breathing rate say you may be fighting something off. Drive or take the bus; 60 km won't help.", "fuel": ""}
+    if score is not None and score < 45:
+        return {"verdict": "skip", "title": "Leave the bike at home", "detail": f"Readiness {score}: recovery is the job today. If you must ride, Z1 only ({z1}) both ways.", "fuel": ""}
+    if not planned:
+        if role in ("rest", "race", "openers"):
+            return {"verdict": "skip", "title": "Not a bike day", "detail": "The plan has you resting today; driving keeps the week's load where the plan needs it.", "fuel": ""}
+        if score is not None and score >= 60:
+            return {**easy, "verdict": "optional", "title": "Not a planned commute — optional, easy",
+                    "detail": f"If you want to ride in anyway: Z1 both ways ({z1}), and treat it as that day's whole session — no extra workout tonight."}
+        return {"verdict": "skip", "title": "Not a planned commute", "detail": "Keep this one in the car; the plan's commute days carry the week's volume.", "fuel": ""}
+    if score is not None and score < 60:
+        return {**easy, "detail": f"Readiness {score} is below your norm, so the planned {planned} commute becomes an easy one: Z1 both ways ({z1}), no intervals."}
+    if planned == "easy":
+        return easy
+    if planned == "endurance":
+        return {"verdict": "ride", "title": "Ride in — steady Z2 both ways",
+                "detail": f"Z2, {z2}, about {tin} min in and {thome} min home. Even effort, no surges at lights; the ride home's {profile['climb_m'][1]} m is gentle — keep HR in range on it.",
+                "fuel": fuel}
+    workout = plan_today.get("commute_workout", "intervals")
+    check = " If the first 15 minutes home feel heavy — ride mode flags HR running 6+ bpm over your usual for the speed — skip them and ride it easy." if score is None or score < 75 else ""
+    return {"verdict": "ride", "title": "Ride in easy, workout on the way home",
+            "detail": f"In: Z1–Z2, {zone_bpm(th, 0, 85)}, arrive fresh. Home: 10 min easy, then {workout} on the flattest open stretch, the rest Z2.{check}",
+            "fuel": fuel}

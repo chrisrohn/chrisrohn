@@ -128,3 +128,29 @@ def steps_for(key: tuple[str, int] | None, title: str, minutes: int, race_hours:
         cut = len(out) - 1 if out and out[-1]["name"] == "Cool-down" else len(out)
         out.insert(cut, filler)
     return out
+
+
+def commute_legs(mode: str, workout: str | None, legs: dict) -> list[dict]:
+    """A commute day as two sessions for ride mode: the ride in and the ride home, each paced for the day's job.
+    Both carry check=True: ride mode compares your HR with what you usually need for that speed on that leg."""
+    m_in, m_home = legs["in"]["minutes"], legs["home"]["minutes"]
+    z_in = "z1" if mode in ("easy", "workout") else "z2"
+    ride_in = [step("Ride in", m_in, z_in, "Arrive fresh: spin, don't push" if z_in == "z1" else "Steady Z2; no surges at the lights")]
+    if mode == "workout" and workout:
+        work = _commute_work(workout)
+        done = 10 + sum(s["min"] for s in work)
+        home = [step("Settle in", 10, "z2", "Easy for 10 min; if HR runs high for the speed, skip the intervals")] + work + [step("Ride home", max(5, m_home - done), "z2")]
+    else:
+        home = [step("Ride home", m_home, "z1" if mode == "easy" else "z2", "Easy all the way" if mode == "easy" else "Steady Z2, gentle on the climb")]
+    return [{"leg": "in", "title": "Commute in", "minutes": m_in, "steps": ride_in, "check": True},
+            {"leg": "home", "title": "Commute home", "minutes": m_home, "steps": home, "check": True}]
+
+
+def _commute_work(text: str) -> list[dict]:
+    if text.startswith("2 × 15"):
+        return reps(2, "Sweet spot", 15, "ss", 5, "z2")
+    if text.startswith("30 min"):
+        return [step("Tempo", 30, "tempo", "Steady; flattest open stretch")]
+    if text.startswith("3 × 8"):
+        return reps(3, "Threshold", 8, "thr", 4, "z2")
+    return reps(3, "Race effort", 10, "race", 5, "z2")

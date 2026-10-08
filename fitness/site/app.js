@@ -229,6 +229,8 @@
   const todayCall = day => {
     const base = now.base_call;
     if (!day) return base;
+    const c = D.commute && D.commute.today;
+    if (day.commute && c) return { level: { skip: "rest", easy: "easy", optional: "easy" }[c.verdict] || day.level, title: c.title, detail: c.detail };   // same rule as the build
     if (ORDER.includes(base.level) && ORDER.indexOf(base.level) < ORDER.indexOf(day.level)) return { ...base, detail: `Planned: ${day.session}. Readiness says scale it back — ${base.detail.charAt(0).toLowerCase()}${base.detail.slice(1)}` };
     const m = day.minutes || 0;
     return { level: day.level, title: day.title, detail: day.session + (m >= 60 ? ` — about ${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : m ? ` — about ${m} min` : "") };
@@ -278,6 +280,30 @@
     </div>`;
   }
 
+  function commuteBlock() {
+    const c = D.commute && D.commute.today;
+    if (!c) return "";
+    const headline = pToday0() && pToday0().commute;   // on a planned commute day the call above already is the commute
+    const mark = { ride: "▲", easy: "■", optional: "□", skip: "▼" }[c.verdict] || "■";
+    return `<div class="commute-call ${esc(c.verdict)}"><span class="label">Bike commute</span>
+      ${headline ? "" : `<p><b>${mark} ${esc(c.title)}.</b> ${esc(c.detail)}</p>`}
+      ${c.fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
+  }
+  const pToday0 = () => plan && plan.days[0];
+
+  function commuteHTML() {
+    const c = D.commute;
+    if (!c) return "";
+    const L = c.legs, sp = kph => speed(kph);
+    const trend = c.ef_trend_pct == null ? "" : c.ef_trend_pct >= 1.5 ? `Your last six commutes are <b>${c.ef_trend_pct}% more efficient</b> than the ones before: more speed for the same heartbeats, which is aerobic fitness arriving.`
+      : c.ef_trend_pct <= -3 ? `Your last six commutes are <b>${Math.abs(c.ef_trend_pct)}% less efficient</b> than usual. Wind does that for a ride or two; for a week, it's fatigue: check the recovery markers.`
+      : "Commute efficiency is steady.";
+    return `<h3 class="mt-6">Bike commute</h3>
+      <div class="kpis"><span>This year <b>${Math.round(c.year.legs / 2)}</b> round trips · <b>${dist(c.year.km * 1000)}</b> · <b>${c.year.hours} h</b></span><span>Last 8 weeks <b>${c.per_week_8}</b> a week</span>
+        <span>In <b>${L.in.minutes} min</b> at ${sp(L.in.speed)}${L.in.hr ? `, ${L.in.hr} bpm` : ""}</span><span>Home <b>${L.home.minutes} min</b> at ${sp(L.home.speed)}${L.home.hr ? `, ${L.home.hr} bpm` : ""}</span></div>
+      ${c.series.length >= 6 ? `<p class="sub">Same route, same terrain: speed per heartbeat on it is a free fitness test every commute. ${trend}</p><div id="c-commute" class="mt-3"></div>` : `<p class="empty">Efficiency tracking starts after a handful of commutes with heart rate.</p>`}`;
+  }
+
   function seasonHTML() {
     if (!plan) return `<section id="season" class="card"><div class="head"><h2>Season</h2></div><p class="empty">Add a race under [[races]] in fitness/config.toml to get a plan.</p></section>`;
     const first = plan.races[0], raceIdx = plan.days.findIndex(d => d.phase === "race");
@@ -287,14 +313,14 @@
       <div class="grid">${plan.races.map(raceCard).join("")}</div>
       <h3 class="mt-6">${shown.length > 14 ? `Every day to ${esc(shortName(first.name))}` : "Next two weeks"}</h3>
       <div class="scrollx"><table class="tbl plan"><thead><tr><th>Day</th><th>Session</th><th class="r">Time</th><th class="r hide-sm">TSS</th><th class="r">Form</th></tr></thead><tbody>
-        ${shown.map((d, i) => `<tr class="${i === 0 ? "today" : ""} ${d.phase === "race" ? "race" : ""}"><td class="num nowrap">${fmtDow(d.date)}${chipFor(d, shown[i - 1])}</td>
+        ${shown.map((d, i) => `<tr class="${i === 0 ? "today" : ""} ${d.phase === "race" ? "race" : ""}"><td class="num nowrap">${fmtDow(d.date)}${chipFor(d, shown[i - 1])}${d.commute ? `${chipFor(d, shown[i - 1]) ? "" : "<br>"}<span class="phase commute">commute</span>` : ""}</td>
           <td><b>${esc(d.title)}</b><br><span class="sub">${esc(d.session)}</span></td><td class="r">${d.minutes ? dur(d.minutes * 60) : "—"}</td><td class="r hide-sm">${d.load || "—"}</td><td class="r">${signed(d.tsb)}</td></tr>`).join("")}
       </tbody></table></div>
       <p class="sub mt-3">Readiness can only make a day easier: on a red morning take the easy option and the plan recalculates from what you actually did at the next build.</p>
       <h3 class="mt-6">Projected fitness</h3><div id="c-season"></div>
       <details class="table" open><summary>Week by week</summary><div class="scroll tall"><table class="tbl"><thead><tr><th>Week of</th><th>Phase</th><th class="r">Hours</th><th class="r hide-sm">TSS</th><th class="hide-sm">Key days</th><th class="r">Fitness</th></tr></thead><tbody>
         ${plan.weeks.map(w => `<tr class="${w.race ? "race" : ""}"><td class="num nowrap">${fmtD(w.week)}</td><td class="nowrap"><span class="phase ${w.phase}">${esc(w.phase)}</span>${w.indoor ? ' <span class="phase indoor">trainer</span>' : ""}${w.recovery_week ? ' <span class="phase recovery">easy week</span>' : ""}</td>
-          <td class="r">${w.hours}</td><td class="r hide-sm">${r0(w.load)}</td><td class="sub hide-sm">${w.race ? `<b>${esc(w.race)}</b> · ` : ""}${esc([...new Set(w.keys.filter(k => !k.startsWith("Race day")))].join(", ")) || "—"}</td><td class="r">${r0(w.ctl)}</td></tr>`).join("")}
+          <td class="r">${w.hours}</td><td class="r hide-sm">${r0(w.load)}</td><td class="sub hide-sm">${w.race ? `<b>${esc(w.race)}</b> · ` : ""}${esc([...new Set(w.keys.filter(k => !k.startsWith("Race day")))].join(", ")) || "—"}${w.commutes ? ` · ${w.commutes} commute${w.commutes === 1 ? "" : "s"}` : ""}</td><td class="r">${r0(w.ctl)}</td></tr>`).join("")}
       </tbody></table></div></details>
     </section>`;
   }
@@ -315,6 +341,7 @@
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
         ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${plan ? `<p class="sub">Next: ${plan.days.slice(1, 4).map(d => `<b>${DOW[asDate(d.date).getDay()]}</b> ${esc(d.title.toLowerCase())}${d.minutes ? ` ${dur(d.minutes * 60)}` : ""}`).join(" · ")}</p>` : ""}
+        ${commuteBlock()}
         ${D.ride_qr ? `<details class="phone"><summary>Ride mode on your phone</summary><div class="qr">
           <div class="qrimg" role="img" aria-label="QR code that opens ride mode with this week's sessions">${D.ride_qr}</div>
           <p class="sub">Scan with the phone on your bars, or <button type="button" class="chip" id="copy-ride">copy the link</button>. It opens chrisrohn.com/fitness/ride.html with your HR zones and the next 7 days of sessions; the phone keeps them, so rescan after a rebuild when the plan changes. Your data rides in the link's #fragment, which never reaches the server.</p>
@@ -372,8 +399,9 @@
       <div><h3>Heart-rate zones, last ${z ? z.days : 28} days</h3>${z ? `<div class="zones" role="img" aria-label="Time in zones">${zp.map((p, i) => `<div style="flex:${p};background:var(--z${i + 1})" title="Zone ${i + 1}: ${p.toFixed(0)}%"></div>`).join("")}</div>
         <div class="zones-key">${zp.map((p, i) => `<span><b><i class="sw" style="background:var(--z${i + 1})"></i>Z${i + 1}</b>${p.toFixed(0)}%<br>${dur(z.seconds[i])}</span>`).join("")}</div>
         <p class="sub mt-3">${zp[0] + zp[1] >= 75 ? "Mostly easy, with the hard work concentrated: a polarized/pyramidal mix that suits a 2-hour race." : zp[2] > 25 ? "A lot of Zone 3: the 'grey zone' tires you without the stimulus of real intervals. Make easy days easier." : "A balanced mix."}</p>` : `<p class="empty">Time in zones comes from Garmin-recorded activities.</p>`}</div></div>
+      ${commuteHTML()}
       <h3 class="mt-6">Recent activities</h3><div class="scrollx"><table class="tbl"><thead><tr><th>When</th><th>Activity</th><th class="r">Time</th><th class="r">Distance</th><th class="r hide-sm">Climb</th><th class="r hide-sm">Avg HR</th><th class="r">TSS</th></tr></thead><tbody>
-      ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}${a.indoor ? " · trainer" : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r hide-sm">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r hide-sm">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
+      ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}${a.indoor ? " · trainer" : ""}${a.commute ? ` · commute ${a.leg === "home" ? "home" : "in"}` : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r hide-sm">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r hide-sm">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
       </tbody></table></div>${D.recent.some(a => a.load_src === "duration") ? `<p class="sub mt-3">* No heart rate: load estimated from duration.</p>` : ""}</section>`);
 
     // insights
@@ -488,11 +516,31 @@
       extra: i => [["Distance", dist(W[i].km * 1000)], ["Climbing", elev(W[i].elev_m)], ["Load", `${r0(W[i].load)} TSS`]],
       series: [
         { name: "Ride", type: "bar", stack: true, color: "var(--s1)", values: W.map(w => w.ride), fmt: hrs },
-        { name: "Trainer", type: "bar", stack: true, color: "var(--s2)", values: W.map(w => w.indoor), fmt: hrs },
-        { name: "Run", type: "bar", stack: true, color: "var(--s3)", values: W.map(w => w.run), fmt: hrs },
+        { name: "Commute", type: "bar", stack: true, color: "var(--s2)", values: W.map(w => w.commute), fmt: hrs },
+        { name: "Trainer", type: "bar", stack: true, color: "var(--s3)", values: W.map(w => w.indoor), fmt: hrs },
         { name: "Other", type: "bar", stack: true, color: "var(--s4)", values: W.map(w => w.other), fmt: hrs },
       ],
     });
+
+    // commute efficiency: speed per 100 bpm, rolling median of each leg's last five
+    const C = D.commute;
+    if (C && C.series.length >= 6 && document.getElementById("c-commute")) {
+      const dates = [...new Set(C.series.map(r => r.date))];
+      const roll = leg => dates.map(dt => {
+        const prior = C.series.filter(r => r.leg === leg && r.date <= dt).slice(-5).map(r => r.ef);
+        if (prior.length < 3) return null;
+        const v = prior.slice().sort((a, b) => a - b)[Math.floor(prior.length / 2)];
+        return units === "mi" ? +(v / 1.609344).toFixed(2) : v;
+      });
+      chart(document.getElementById("c-commute"), {
+        label: "Commute efficiency, speed per 100 heartbeats per minute", x: dates, height: 180, xName: "Commute",
+        yFmt: v => v.toFixed(1),
+        series: [
+          { name: `Ride in (${units === "mi" ? "mph" : "km/h"} per 100 bpm)`, type: "line", color: "var(--s1)", values: roll("in"), fmt: v => v.toFixed(2), endDot: true },
+          { name: "Ride home", type: "line", color: "var(--s2)", values: roll("home"), fmt: v => v.toFixed(2), endDot: true },
+        ],
+      });
+    }
   }
 
   // ── controls ────────────────────────────────────────────────────────────────────────────────────────────

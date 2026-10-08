@@ -75,6 +75,8 @@ def merge(acts: list[dict]) -> list[dict]:
             out.append(dict(a))
             continue
         twin.setdefault("links", {})[a["source"]] = a["id"]
+        if a.get("commute"):
+            twin["commute"] = True
         for key in ("avg_power", "np", "kj", "suffer_score"):
             if not twin.get(key) and a.get(key):
                 twin[key] = a[key]

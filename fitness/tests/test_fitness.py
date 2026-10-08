@@ -281,7 +281,8 @@ def test_ride_page_and_link(tmp_path, cfg):
         data = build.assemble(cfg, store.days(), store.activities(), today)
     ride = data["ride"]
     assert ride["units"] == data["units"] == "imperial"
-    assert ride["lthr"] and 1 <= len(ride["days"]) <= 7 and ride["days"][0]["date"] == "2026-10-08" and ride["days"][0]["steps"]
+    assert ride["lthr"] and 1 <= len({d["date"] for d in ride["days"]}) <= 7 and ride["days"][0]["date"] == "2026-10-08" and ride["days"][0]["steps"]
+    assert [d["title"] for d in ride["days"][:2]] == ["Commute in", "Commute home"] and ride["days"][0]["check"] and ride["commute"]["in"]
     build.render(data, tmp_path / "index.html", cfg)
     page = (tmp_path / "ride.html").read_text()
     assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' in page
@@ -294,3 +295,82 @@ def test_ride_page_and_link(tmp_path, cfg):
     assert build.ride_link({**cfg, "ride": {**cfg["ride"], "url": ""}}, ride, "ride.html") == "ride.html"
     page = build.ride_page(None)
     assert "__CSP__" not in page and "script-src 'sha256-" in page and "__RIDE_DATA__" not in page
+
+
+# ── commuting ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def _commute(day: date, hour: float, km: float = 30.2, flag: bool | None = None, hr: float = 135, speed: float = 27.0, kind: str = "road_biking"):
+    start = datetime.combine(day, datetime.min.time()) + timedelta(hours=hour)
+    return activity(id=f"x{day}{hour}{km}", source="strava" if flag else "garmin", start=start, kind=kind, duration_s=km / speed * 3600,
+                    distance_m=km * 1000, avg_hr=hr, commute=flag)
+
+
+def test_commute_detection(cfg):
+    tue = date(2026, 9, 15)
+    acts = [_commute(tue, 7), _commute(tue, 16.75), _commute(tue + timedelta(days=4), 9),       # Sat: not a commute
+            _commute(tue, 12), _commute(tue, 7.5, km=60), _commute(tue, 22, flag=True)]          # noon, too long; Strava's flag wins
+    m.mark_commutes(acts, cfg)
+    assert [a.get("commute", False) for a in acts] == [True, True, False, False, False, True]
+    assert acts[0]["leg"] == "in" and acts[1]["leg"] == "home"
+
+
+def test_commute_profile_learns_cost_and_hr_at_speed(cfg):
+    acts = []
+    for i in range(20):
+        day = date(2026, 6, 2) + timedelta(days=7 * (i // 2) + (i % 2) * 2)
+        sp = 25 + (i % 5)
+        acts += [_commute(day, 7, speed=sp, hr=100 + 1.5 * sp), _commute(day, 17, speed=sp - 1, hr=104 + 1.5 * (sp - 1))]
+    m.mark_commutes(acts, cfg)
+    th = {**TH, "lthr": 165}
+    for a in acts:
+        a["load"], a["load_src"] = m.session_load(a, th)
+    prof = m.commute_profile(acts, cfg, date(2026, 10, 8))
+    a, b = prof["legs"]["in"]["model"]
+    assert b == pytest.approx(1.5, abs=0.01) and a == pytest.approx(100, abs=0.5)
+    assert prof["legs"]["in"]["rides"] == 20 and prof["legs"]["home"]["load"] > 0 and len(prof["series"]) == 40
+
+
+def test_commute_profile_defaults_without_history(cfg):
+    prof = m.commute_profile([], cfg, date(2026, 10, 8))
+    assert prof["legs"]["in"]["minutes"] == round(30 / 26 * 60) and prof["legs"]["in"]["model"] is None
+    assert m.commute_profile([], {**cfg, "commute": {**cfg["commute"], "enabled": False}}, date(2026, 10, 8)) is None
+
+
+def test_planner_books_commutes_inside_the_week(cfg):
+    p = season(date(2026, 10, 8), 45.0, 50.0, cfg)
+    days = {d["date"]: d for d in p["days"]}
+    lo, hi = cfg["commute"]["per_week"]
+    allowed = {"mon", "tue", "wed", "thu", "fri"} & set(cfg["commute"]["days"])
+    for w in p["weeks"]:
+        assert w["commutes"] <= hi
+        if w["phase"] == "build" and w["days"] == 7:
+            assert w["commutes"] >= lo
+    for d in p["days"]:
+        if d["commute"]:
+            dt = date.fromisoformat(d["date"])
+            assert ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][dt.weekday()] in allowed
+            assert not d["indoor"] and d["phase"] not in ("race", "openers", "base")
+            assert (date(2026, 11, 7) - dt).days >= 3 or dt > date(2026, 11, 7)
+            if d["phase"] == "taper":
+                assert d["commute"] == "easy"
+    first = next(d for d in p["days"] if d["commute"])
+    assert first["legs"] and [leg["leg"] for leg in first["legs"]] == ["in", "home"] and all(leg["check"] for leg in first["legs"])
+    assert days["2027-01-12"]["commute"] is None                       # no commuting through the trainer winter
+    winter = season(date(2026, 10, 8), 45.0, 50.0, {**cfg, "commute": {**cfg["commute"], "winter": True}})
+    assert any(d["commute"] for d in winter["days"] if d["date"].startswith("2027-01"))
+
+
+def test_commute_call(cfg):
+    prof = m.commute_profile([], cfg, date(2026, 10, 8))
+    th = {**TH, "lthr": 165}
+    thu = date(2026, 10, 8)
+    planned = {"role": "commute", "commute": "workout", "commute_workout": "2 × 15 min sweet spot", "level": "hard"}
+    ok = {"score": 82, "illness": False}
+    assert m.commute_call(ok, planned, thu, cfg, prof, th)["verdict"] == "ride"
+    assert m.commute_call({"score": 55, "illness": False}, planned, thu, cfg, prof, th)["verdict"] == "easy"
+    assert m.commute_call({"score": 40, "illness": False}, planned, thu, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call({"score": 80, "illness": True}, planned, thu, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call(ok, {"role": "rest"}, thu, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call(ok, {"role": "endurance"}, thu, cfg, prof, th)["verdict"] == "optional"
+    assert m.commute_call(ok, planned, date(2026, 10, 10), cfg, prof, th) is None   # Saturday: not a commute day
+    assert "under 134 bpm" in m.commute_call({"score": 55, "illness": False}, planned, thu, cfg, prof, th)["detail"]

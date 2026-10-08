@@ -59,6 +59,45 @@ history:
   `ftp = 0` and the site estimates FTP from your best 20–90 minute power ride of the last year. After each ramp
   test, put the real number in `config.toml`.
 
+## Bike commuting
+
+Your 30 km each-way commute is weekday training, so the plan builds it in instead of stacking it on top. Set it up
+under `[commute]` in `config.toml`: distance, climbing, the days you can ride (most preferred first), and how many
+commute days a week you want at least and at most (default 1–3).
+
+**How the plan uses it.** Each week the planner checks the load it wants on each commute-able day against what a
+round trip actually costs you. The cost is learned from your past commutes: about 110–130 TSS and 2¼ hours. It books
+the best-fitting days, and the commute replaces that day's session, so it never comes on top of it:
+
+| The day's job in the plan | How the commute is ridden |
+|---|---|
+| Key session | **Commute + workout:** in easy (Z1–Z2); home with a flat-road workout (2 × 15 sweet spot, 30 min tempo, 3 × 8 threshold, or race-pace blocks for gravel), the rest Z2 |
+| Endurance | **Endurance commute:** Z2 both ways, steady, no surges at the lights |
+| Easy, taper, recovery week | **Easy commute:** Z1 both ways, soft-pedal, arrive fresh |
+| Rest, openers, race, last 2 days before a race | Leave the bike |
+| Trainer season (Dec–Feb) | Leave the bike, unless `winter = true` |
+
+**The morning call.** On a commute day the dashboard's call *is* the commute, and readiness can only make it
+easier:
+- ≥ 75: as planned.
+- 60–74: as planned, but on a workout day you decide on the ride home (see the check below).
+- 45–59: easy both ways, no intervals.
+- Below 45, or an illness flag: leave the bike.
+
+On a non-commute weekday it says whether an optional easy commute makes sense. Each call gives the heart-rate
+ranges for each leg in bpm, the expected time, and a fueling plan for the day: breakfast, food at work, and an
+afternoon snack before the ride home.
+
+**Your commute as a fitness test.** A ride is counted as a commute if Strava's commute box is ticked, or if it's a
+weekday ride of about the commute's length starting at 5–10 am or 2–8 pm. Same route and terrain every time makes
+it a free, repeated test. The Training section charts speed per 100 bpm for each direction and tells you when it
+moves: rising means aerobic fitness, and a drop that lasts a week means fatigue.
+
+**The in-ride check.** Ride mode has *Commute in* and *Commute home* sessions. After 8 minutes it compares your last
+5 minutes of heart rate with what you usually need for that speed on that leg, using a line fitted to your past
+commutes. At 6+ bpm high it shows (and says) *running hot: keep it easy, skip the intervals*. That's the honest
+answer to "should I do the workout on the way home?". At 4+ bpm low it tells you it's a good day for the work.
+
 ## Ride mode: live data on the phone on your bars
 
 **Your Venu Sq can't send live data to a phone.** It broadcasts heart rate over ANT+ only. iPhones have no ANT+

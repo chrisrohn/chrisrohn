@@ -209,6 +209,25 @@
     say(`${s.name}. ${Math.round(s.min) >= 1 ? `${Math.round(s.min)} minute${Math.round(s.min) === 1 ? "" : "s"}` : `${Math.round(s.min * 60)} seconds`}. ${s.cue && s.cue.includes("feel") ? "By feel." : `Heart rate ${tgt}.`}`);
     if (!manual) { beep(s.zone === "z1" || s.zone === "z2" ? 660 : 990, 220, 2); buzz([200, 100, 200]); }
   }
+  // ── commute check: same route every time, so HR at a given speed is a daily fitness reading ─────────────
+  // After 8 minutes, the last 5 minutes' average HR is compared with what this leg usually costs at that speed
+  // (a line fitted to your past commutes). 6+ bpm high: fatigue, illness or heat, so skip the intervals.
+  const samples = [];
+  let check = null, checkSaid = "";
+  function commuteCheck() {
+    const model = planned && planned.check && cfg.commute && cfg.commute[planned.leg];
+    if (!model || S.elapsed < 480) return null;
+    const recent = samples.filter(x => x.t > S.elapsed - 300);
+    if (recent.length < 120) return null;
+    const hr = recent.reduce((a, x) => a + x.hr, 0) / recent.length, kmh = recent.reduce((a, x) => a + x.kmh, 0) / recent.length;
+    let usual = null;
+    if (Array.isArray(model.model)) usual = model.model[0] + model.model[1] * kmh;
+    else if (model.hr && Math.abs(kmh - model.speed) < 1.5) usual = model.hr;
+    if (usual == null) return null;
+    const diff = hr - usual;
+    return { diff, kmh, verdict: diff >= 6 ? "hot" : diff <= -4 ? "fresh" : "normal" };
+  }
+
   function tick() {
     const now = Date.now(), dt = last ? Math.min(5, (now - last) / 1000) : 1;
     last = now;
@@ -221,6 +240,16 @@
         S.zones[zoneOf(live.hr) - 1] += dt; S.trimp += trimpRate(live.hr) * dt / 60;
       }
       if (live.cad && now - live.cadAt < 4000 && live.cad > 0) { S.cadSum += live.cad * dt; S.cadSecs += dt; }
+      if (live.hr && now - live.hrAt < 5000 && spd != null && spd > 3) {
+        samples.push({ t: S.elapsed, hr: live.hr, kmh: spd * 3.6 });
+        if (samples.length > 900) samples.shift();
+      }
+      check = commuteCheck();
+      if (check && check.verdict !== "normal" && checkSaid !== check.verdict) {
+        checkSaid = check.verdict;
+        say(check.verdict === "hot" ? "Heart rate is running high for this speed. Keep it easy today and skip the intervals." : "You're running fresh today: lower heart rate than usual for this speed.");
+        if (check.verdict === "hot") buzz([300, 120, 300]);
+      }
       if (steps.length && S.step < steps.length) {
         const s = steps[S.step], left = s.min * 60 - (S.elapsed - S.stepStart);
         const sec = Math.ceil(left);
@@ -255,7 +284,10 @@
       $("step-time").textContent = clock(left);
       $("step-target").innerHTML = s.lo > 0 ? `Target <b>${bpm(s.lo)}–${bpm(s.hi)}</b> bpm` : `Target <b>under ${bpm(s.hi)}</b> bpm`;
       $("step-bar").style.width = `${Math.min(100, elapsedInStep / (s.min * 60) * 100)}%`;
-      $("step-cue").textContent = nb(s.cue);
+      $("step-cue").textContent = check
+        ? `HR vs usual at ${speedTxt(check.kmh / 3.6)} ${unitS()}: ${check.diff >= 0 ? "+" : "−"}${Math.abs(Math.round(check.diff))} bpm · ${check.verdict === "hot" ? "running hot: keep it easy, skip the intervals" : check.verdict === "fresh" ? "fresh: a good day for the work" : "normal"}`
+        : nb(s.cue);
+      $("step-cue").classList.toggle("hot", !!check && check.verdict === "hot");
       const n = steps[S.step + 1];
       $("step-next").textContent = n ? `Next: ${n.name} · ${n.min >= 1 ? `${Math.round(n.min)} min` : `${Math.round(n.min * 60)} s`}` : "Last step";
       const byFeel = s.cue && s.cue.includes("by feel");
@@ -309,6 +341,7 @@
     startGps();
     if (!S.running) {
       Object.assign(S, { running: true, paused: false, elapsed: 0, moving: 0, dist: 0, step: 0, stepStart: 0, hrSum: 0, hrSecs: 0, hrMax: 0, zones: [0, 0, 0, 0, 0], trimp: 0, cadSum: 0, cadSecs: 0, fuelAt: 0, fuelDue: false });
+      samples.length = 0; check = null; checkSaid = "";
       if (steps.length) { const s = steps[0]; say(`${planned.title}. First, ${s.name}, ${Math.round(s.min)} minutes.`); }
       beep(880, 200, 2);
       wake();
@@ -334,6 +367,7 @@
       <div>Load (hrTSS)<b>${tss}${planned && planned.load ? ` / ${Math.round(+planned.load)}` : ""}</b></div><div>Avg cadence<b>${S.cadSecs ? Math.round(S.cadSum / S.cadSecs) : "—"}</b></div>
     </div><div class="zbar sumbar" style="grid-template-columns:${S.zones.map(z => `${Math.max(0.5, z / zt * 100)}fr`).join(" ")}"><span></span><span></span><span></span><span></span><span></span></div>
     <p class="note mt-2">${S.zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")}</p>
+    ${check ? `<p class="note">Commute check: HR ${check.diff >= 0 ? "+" : "−"}${Math.abs(Math.round(check.diff))} bpm against your usual for the speed (${check.verdict}).</p>` : ""}
     <p class="note">The watch or Strava keeps the official record; this summary isn't uploaded anywhere.</p>`;
     ls.set("fitness-ride-last", JSON.stringify({ ...S, endedAt: Date.now() }));
     ls.set("fitness-ride-state", null);

@@ -27,6 +27,9 @@ def _print_today(data: dict) -> None:
         print(f"  Readiness {ready['score']}/100" + ("  ⚠ illness watch" if ready["illness"] else ""))
         for r in ready["reasons"]:
             print(f"    {'+' if r['tone'] == 'good' else '−'} {r['text']}")
+    call = (data.get("commute") or {}).get("today")
+    if call:
+        print(f"  Commute: {call['title']}\n    {call['detail']}")
     if now["sleep"]:
         print(f"  Sleep {now['sleep']['score']} ({now['sleep']['label']}), {now['sleep']['hours']:.1f} h")
     if form.get("ctl") is not None:

@@ -73,6 +73,18 @@ target_ctl = 58
 long_ride_h = 2.75
 taper_days = [6, 10]
 
+# Bike commuting: the planner books 1–3 commute days a week into the plan (they're your weekday volume, not extra),
+# picks how to ride each one from that day's job in the week, and the dashboard makes a ride / ride easy / leave-the-
+# bike call every morning from readiness. Past commutes (Strava's commute flag, or a weekday ride of about this length
+# at commuting hours) become a running fitness test: same route, so speed per heartbeat shows aerobic fitness.
+[commute]
+enabled = true
+km_each_way = 30
+climb_m = [10, 50]        # gain riding in, riding home
+days = ["tue", "thu", "wed", "mon", "fri"]   # the days you can commute, most preferred first
+per_week = [1, 3]         # fewest and most commute days a week the planner will book
+winter = false            # true = keep commuting through the [indoor] trainer season
+
 # Ride mode (dist/ride.html): the phone on your bars shows live HR from a Bluetooth strap, GPS speed and the
 # day's session as timed steps. Phones need it served over HTTPS; see README → Ride mode.
 [ride]

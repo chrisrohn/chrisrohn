@@ -27,6 +27,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
+    m.mark_commutes(acts, cfg)
     for a in acts:
         a["load"], a["load_src"] = m.session_load(a, th)
         a["end"] = (datetime.fromisoformat(a["start"]) + timedelta(seconds=a["duration_s"])).isoformat()
@@ -46,6 +47,8 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
             ready[k] = r
 
     t, y = _iso(today), _iso(today - timedelta(days=1))
+    commute = m.commute_profile(acts, cfg, today)
+    cfg = {**cfg, "commute": {**cfg["commute"], "profile": commute}}   # the planner prices commutes from your own history
     state = by_day.get(y, {"ctl": 0, "atl": 0})
     plan = season(today, state["ctl"], state["atl"], cfg, done_today=load.get(t, 0))
     # every other distance option of every race, so the page can compare "100k or 50k?" side by side
@@ -58,6 +61,10 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     plan_today = plan["days"][0] if plan else None
     ready_today = ready.get(t)
     rec = m.recommend(ready_today, plan_today)
+    commute_today = m.commute_call(ready_today, plan_today, today, cfg, commute, th)
+    if commute_today and plan_today and plan_today.get("commute"):   # on a commute day the commute call is the day's call
+        level = {"skip": "rest", "easy": "easy", "optional": "easy"}.get(commute_today["verdict"], plan_today["level"])
+        rec = {"level": level, "title": commute_today["title"], "detail": commute_today["detail"]}
 
     # sleep debt and regularity over the last week / fortnight
     recent_nights = [days[_iso(today - timedelta(days=i))].get("sleep") for i in range(14) if _iso(today - timedelta(days=i)) in days]
@@ -137,12 +144,13 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "zones": {"seconds": zones, "days": 28} if any(zones) else None,
         "insights": m.insights(pairs),
         "editions": editions,
-        "recent": [{k: a.get(k) for k in ("start", "name", "kind", "group", "offroad", "moving_s", "distance_m", "elev_m", "avg_hr", "np", "load", "load_src")}
+        "recent": [{k: a.get(k) for k in ("start", "name", "kind", "group", "offroad", "indoor", "commute", "leg", "moving_s", "distance_m", "elev_m", "avg_hr", "np", "load", "load_src")}
                    for a in reversed(acts[-25:])],
         "ytd": {"rides": len(ytd), "hours": round(sum(a["moving_s"] for a in ytd) / 3600, 1), "km": round(sum(a["distance_m"] for a in ytd) / 1000),
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
         "coverage": coverage,
         "ride": ride_config(cfg, th, plan),
+        "commute": {**commute, "today": commute_today} if commute else None,
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
 
@@ -150,14 +158,14 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
 def _weeks(acts: list[dict], today: date) -> list[dict]:
     monday = today - timedelta(days=today.weekday())
     starts = [monday - timedelta(weeks=i) for i in range(WEEKS - 1, -1, -1)]
-    out = {_iso(s): {"week": _iso(s), "ride": 0.0, "indoor": 0.0, "run": 0.0, "other": 0.0, "km": 0.0, "elev_m": 0.0, "load": 0.0} for s in starts}
+    out = {_iso(s): {"week": _iso(s), "ride": 0.0, "commute": 0.0, "indoor": 0.0, "other": 0.0, "km": 0.0, "elev_m": 0.0, "load": 0.0} for s in starts}
     for a in acts:
         d = date.fromisoformat(a["start"][:10])
         k = _iso(d - timedelta(days=d.weekday()))
         if k not in out:
             continue
         w = out[k]
-        bucket = ("indoor" if a.get("indoor") else "ride") if a["group"] == "ride" else a["group"] if a["group"] == "run" else "other"
+        bucket = ("indoor" if a.get("indoor") else "commute" if a.get("commute") else "ride") if a["group"] == "ride" else "other"
         w[bucket] += a["moving_s"] / 3600
         w["km"] += a["distance_m"] / 1000
         w["elev_m"] += a["elev_m"]
@@ -240,11 +248,19 @@ def _coverage(days: dict[str, dict], today: date) -> list[dict]:
 
 def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
     """What ride mode needs, and nothing else: HR anchors and the next week of sessions with their steps."""
-    days = [{k: d[k] for k in ("date", "title", "session", "minutes", "load", "indoor", "steps")} for d in (plan or {}).get("days", []) if d.get("steps") is not None]
+    days = []
+    for d in (plan or {}).get("days", []):
+        if d.get("legs"):
+            days += [{"date": d["date"], "title": leg["title"], "session": d["session"], "minutes": leg["minutes"], "load": round(d["load"] / 2),
+                      "indoor": False, "steps": leg["steps"], "leg": leg["leg"], "check": True} for leg in d["legs"]]
+        elif d.get("steps") is not None:
+            days.append({k: d[k] for k in ("date", "title", "session", "minutes", "load", "indoor", "steps")})
+    prof = cfg["commute"].get("profile")
+    models = {leg: {"model": v["model"], "speed": v["speed"], "hr": v["hr"]} for leg, v in prof["legs"].items()} if prof else None
     nxt = (plan or {}).get("races", [{}])[0] if plan else {}
     return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "days": days,
             "race": {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None,
-            "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"]}
+            "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models}
 
 
 def ride_link(cfg: dict, ride: dict, local: str) -> str:

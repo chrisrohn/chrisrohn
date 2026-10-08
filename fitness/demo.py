@@ -22,6 +22,24 @@ def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
         ride = dow != 0 and rnd.random() > 0.12
         load = 0.0
         winter = d.month in (12, 1, 2)
+        commute_day = not winter and d.month >= 3 and (dow in (1, 3) or (dow == 2 and rnd.random() < 0.3)) and rnd.random() > 0.15
+        if commute_day:   # 30 km each way, flat; aerobic efficiency creeps up through the season
+            fit = (d.timetuple().tm_yday - 60) / 270
+            for leg, hour, base_speed, base_hr in (("in", 7.0, 26.5, 132), ("home", 16.75, 25.8, 136)):
+                speed = base_speed + 1.6 * fit + rnd.gauss(0, 0.7)
+                hours = 30.2 / speed
+                start = datetime.combine(d, datetime.min.time()) + timedelta(hours=hour + rnd.uniform(-0.25, 0.25))
+                hr = round(base_hr + (speed - base_speed - 1.6 * fit) * 2.2 + rnd.gauss(0, 2.5))
+                act = activity(id=f"garmin:c{leg}{d.toordinal()}", source="garmin", start=start, kind="road_biking", name=f"Commute {'in' if leg == 'in' else 'home'}",
+                               duration_s=hours * 3600 + 300, moving_s=hours * 3600, distance_m=30200, elev_m=10 if leg == "in" else 50, avg_hr=hr, max_hr=hr + 18)
+                store.put_activity(act)
+                store.put_activity(dict(act, id=f"strava:c{leg}{d.toordinal()}", source="strava", start=(start + timedelta(seconds=30)).isoformat(), commute=True,
+                                        name="Morning commute" if leg == "in" else "Ride home"))
+            load = 2 * 30.2 / 27 * 52
+            late_today = False
+            fitness += (load - fitness) / 42
+            fatigue += (load - fatigue) / 7
+            ride = False
         if ride and winter:
             ftp = 228 + 22 * min(1.0, ((d - date(d.year if d.month == 12 else d.year - 1, 12, 1)).days) / 90)
             hours = min(2.5, planned / 62)
@@ -51,9 +69,10 @@ def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
                             name=rnd.choice(["Sandy two-track grind", "Vasa loop", "Lunch ride", "Evening spin"]))
                 store.put_activity(twin)
             load = planned
-        late_today = ride and start.hour >= 17
-        fitness += (load - fitness) / 42
-        fatigue += (load - fatigue) / 7
+        if not commute_day:
+            late_today = ride and start.hour >= 17
+            fitness += (load - fitness) / 42
+            fatigue += (load - fatigue) / 7
         strain = max(0.0, fatigue - fitness)
         total = rnd.gauss(7.4, 0.5) * 3600 - strain * 150 - (2700 if late else 0)
         late = late_today

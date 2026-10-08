@@ -226,6 +226,10 @@ details.table .scroll { max-height: 264px; overflow: auto; margin-top: var(--sp-
 .phase.race { background: var(--accent); border-color: var(--accent); color: #ffffff; }
 .phase.indoor { background: var(--ink); color: var(--page); }
 .phase.recovery, .phase.transition { border-color: var(--hair); color: var(--ink-2); }
+.phase.commute { border-color: var(--s2); color: var(--s2); }
+.commute-call { display: grid; gap: var(--sp-1); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 60ch; }
+.commute-call .label { color: var(--s2); }
+.commute-call.skip .label { color: var(--accent-ink); }
 .phase + .phase { margin-left: var(--sp-1); }
 
 .racecard { border-top: var(--rule-minor) solid var(--ink); padding-top: var(--sp-2); display: grid; gap: var(--sp-3); align-content: start; min-width: 0; }

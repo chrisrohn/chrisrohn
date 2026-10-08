@@ -93,7 +93,7 @@ def parse_api(a: dict) -> dict:
         kind=a.get("sport_type") or a.get("type") or "Workout", name=a.get("name") or "", duration_s=a.get("elapsed_time") or 0,
         moving_s=a.get("moving_time"), distance_m=a.get("distance"), elev_m=a.get("total_elevation_gain"), avg_hr=a.get("average_heartrate"),
         max_hr=a.get("max_heartrate"), avg_power=a.get("average_watts") if a.get("device_watts") else None,
-        np=a.get("weighted_average_watts") if a.get("device_watts") else None, kj=a.get("kilojoules"), suffer_score=a.get("suffer_score"), trainer=a.get("trainer"),
+        np=a.get("weighted_average_watts") if a.get("device_watts") else None, kj=a.get("kilojoules"), suffer_score=a.get("suffer_score"), trainer=a.get("trainer"), commute=a.get("commute") or None,
     )
 
 
@@ -150,7 +150,7 @@ def parse_export(text: str, tz: str) -> list[tuple[dict, dict]]:
             distance_m=_num(rec.get("Distance")), elev_m=_num(rec.get("Elevation Gain")), avg_hr=_num(rec.get("Average Heart Rate")),
             max_hr=_num(rec.get("Max Heart Rate")), avg_power=watts if has_meter else None,
             np=_num(rec.get("Weighted Average Power")) if has_meter else None, calories=_num(rec.get("Calories")),
-            suffer_score=_num(rec.get("Relative Effort")),
+            suffer_score=_num(rec.get("Relative Effort")), commute=(rec.get("Commute") or "").lower() in ("true", "1") or None,
         ), rec))
     return out
 

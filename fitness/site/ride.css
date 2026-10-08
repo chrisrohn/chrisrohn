@@ -52,6 +52,7 @@ span.chip {
 .progress span { display: block; height: 100%; width: 0; background: var(--ink); transition: width .9s linear; }
 .cue { font-size: var(--fs-body); line-height: 1.4; min-height: 1.4em; margin-top: var(--sp-1); text-wrap: pretty; }
 .next { color: var(--ink-2); }
+.cue.hot { color: var(--accent-ink); font-weight: 700; }
 
 /* heart rate: the biggest thing on the screen */
 .hrcard { padding-top: var(--sp-2); display: grid; gap: var(--sp-2); }

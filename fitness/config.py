@@ -20,6 +20,7 @@ DEFAULTS: dict = {
     "plan": {"weekly_pattern": [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9], "max_ramp": 6, "base_ramp": 3},
     "sync": {"garmin_tokens": "~/.garminconnect", "history_days": 400, "resync_days": 3},
     "ride": {"url": "", "wheel_m": 2.29, "fuel_every_min": 20},
+    "commute": {"enabled": False, "km_each_way": 0, "climb_m": [0, 0], "days": ["tue", "thu", "wed", "mon", "fri"], "per_week": [1, 3], "winter": False},
 }
 OPTION_DEFAULTS = {"label": "", "km": 0, "climbing_ft": 0, "hours": 2.0, "target_ctl": 55, "long_ride_h": 3.0, "taper_days": [6, 14]}
 RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}}
