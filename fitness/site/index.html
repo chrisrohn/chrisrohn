@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <title>Training &amp; Recovery</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' fill='%23d6301f'/%3E%3Cpath d='M6 17h5l3-7 4 13 3-6h5' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <script>try { const t = localStorage.getItem("fitness-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <style>/*__STYLE__*/</style>
+</head>
+<body>
+  <header class="top">
+    <div class="bar">
+      <h1>Training &amp; Recovery</h1>
+      <nav aria-label="Sections">
+        <a href="#today">Today</a><a href="#season">Season</a><a href="#load">Load</a><a href="#sleep">Sleep</a>
+        <a href="#recovery">Recovery</a><a href="#training">Training</a><a href="#insights">Insights</a><a href="#device">Data</a>
+      </nav>
+      <div class="tools">
+        <a class="chip" id="ride-link" href="ride.html" hidden>Ride mode</a>
+        <div class="seg" role="group" aria-label="Units">
+          <button type="button" class="chip" data-units="mi" aria-pressed="true"><span class="long">Imperial</span><span class="short">mi</span></button><button type="button" class="chip" data-units="km" aria-pressed="false"><span class="long">Metric</span><span class="short">km</span></button>
+        </div>
+        <div class="seg" role="group" aria-label="Theme">
+          <button type="button" class="chip" data-theme-pick="light" aria-pressed="false"><span class="long">Light</span><span class="short" aria-hidden="true">☀</span><span class="sr">Light</span></button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false"><span class="long">Dark</span><span class="short" aria-hidden="true">☾</span><span class="sr">Dark</span></button>
+        </div>
+      </div>
+    </div>
+  </header>
+  <main id="app"></main>
+  <footer id="foot"></footer>
+  <script type="application/json" id="data">__DATA__</script>
+  <script>/*__APP__*/</script>
+</body>
+</html>

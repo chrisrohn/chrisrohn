@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Ride Mode</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' fill='%23111111'/%3E%3Cpath d='M6 17h5l3-7 4 13 3-6h5' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <script>try { const t = localStorage.getItem("fitness-theme"); document.documentElement.dataset.theme = t || "light"; } catch (e) { document.documentElement.dataset.theme = "light"; }</script>
+  <style>/*__STYLE__*/</style>
+  <style>/*__RIDE_STYLE__*/</style>
+</head>
+<body class="ride">
+  <header class="rbar">
+    <label class="day"><span class="sr">Session</span><select id="day"></select></label>
+    <button type="button" class="chip sensor" id="btn-hr" aria-label="Connect heart-rate sensor"><i></i>HR</button>
+    <button type="button" class="chip sensor" id="btn-csc" aria-label="Connect cadence, speed or power sensor"><i></i>Cad</button>
+    <span class="chip sensor" id="gps-chip"><i></i>GPS</span>
+    <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙</button>
+  </header>
+
+  <main class="rmain">
+    <h1 class="sr">Ride mode</h1>
+    <section class="stepcard" id="stepcard" aria-live="polite">
+      <div class="stepname" id="step-name">Free ride</div>
+      <div class="steptime num" id="step-time">—</div>
+      <div class="target" id="step-target"></div>
+      <div class="progress" aria-hidden="true"><span id="step-bar"></span></div>
+      <div class="cue" id="step-cue"></div>
+      <div class="next" id="step-next"></div>
+    </section>
+
+    <section class="hrcard" id="hrcard">
+      <div class="hrval num" id="hr">—</div>
+      <div class="hrmeta"><span class="zone" id="hr-zone">bpm</span><span class="status" id="hr-status"></span></div>
+      <div class="zbar" id="zbar" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><b id="zmark"></b></div>
+    </section>
+
+    <section class="rtiles">
+      <div class="rtile"><span class="k">Time</span><span class="v num" id="t-time">0:00</span></div>
+      <button type="button" class="rtile unit-flip" aria-label="Distance; tap to switch imperial / metric"><span class="k">Distance</span><span class="v num" id="t-dist">0.0</span></button>
+      <button type="button" class="rtile unit-flip" aria-label="Speed; tap to switch imperial / metric"><span class="k">Speed</span><span class="v num" id="t-speed">—</span></button>
+      <div class="rtile"><span class="k" id="t-cad-k">Cadence</span><span class="v num" id="t-cad">—</span></div>
+      <div class="rtile"><span class="k">Avg HR</span><span class="v num" id="t-avg">—</span></div>
+      <div class="rtile"><span class="k">Load</span><span class="v num" id="t-load">0</span></div>
+    </section>
+
+    <div class="fuel" id="fuel" hidden role="alert"><b>Eat &amp; drink</b><span id="fuel-text"></span><button type="button" class="chip" id="fuel-ok">Done</button></div>
+    <p class="note" id="note"></p>
+  </main>
+
+  <footer class="rfoot">
+    <button type="button" class="big go" id="btn-start">Start</button>
+    <button type="button" class="big" id="btn-skip" disabled aria-label="Next step">Next</button>
+    <button type="button" class="big end" id="btn-end" disabled>End</button>
+  </footer>
+
+  <dialog id="settings">
+    <form method="dialog" class="sform">
+      <h2>Ride settings</h2>
+      <label>Threshold HR (LTHR) <input id="s-lthr" type="number" inputmode="numeric" min="100" max="220"></label>
+      <label>Max HR <input id="s-max" type="number" inputmode="numeric" min="120" max="230"></label>
+      <label>Resting HR <input id="s-rest" type="number" inputmode="numeric" min="30" max="100"></label>
+      <label>Wheel circumference (m) <input id="s-wheel" type="number" inputmode="decimal" step="0.01" min="1.5" max="2.5"></label>
+      <label>Fuel reminder every (min, 0 = off) <input id="s-fuel" type="number" inputmode="numeric" min="0" max="60"></label>
+      <label class="row"><input id="s-voice" type="checkbox"> Spoken cues</label>
+      <div class="unitrow"><span>Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="chip" data-theme-pick="light" aria-pressed="true">Light</button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false">Dark</button></div></div>
+      <div class="unitrow"><span>Units</span><div class="seg" role="group" aria-label="Units"><button type="button" class="chip" data-units="mi" aria-pressed="true">Imperial</button><button type="button" class="chip" data-units="km" aria-pressed="false">Metric</button></div></div>
+      <div class="actions"><button type="submit" class="chip" value="cancel">Cancel</button><button type="submit" class="chip primary" value="save" id="s-save">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="summary">
+    <form method="dialog" class="sform">
+      <h2>Ride summary</h2>
+      <div id="sum-body"></div>
+      <div class="actions"><button type="submit" class="chip primary" value="close">Close</button></div>
+    </form>
+  </dialog>
+
+  <script type="application/json" id="ride-data">__RIDE_DATA__</script>
+  <script>/*__RIDE_APP__*/</script>
+</body>
+</html>

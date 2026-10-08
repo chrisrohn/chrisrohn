@@ -1,0 +1,5 @@
+# The repo's ruff settings, plus the test-file allowances the root config gives tests/.
+extend = "../pyproject.toml"
+
+[lint.per-file-ignores]
+"tests/*" = ["E702", "E402", "SIM", "UP031"]

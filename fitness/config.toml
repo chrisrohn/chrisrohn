@@ -1,0 +1,100 @@
+# Settings for the fitness insights site. Every 0 means "work it out from my data".
+
+[athlete]
+sex = "male"              # Banister TRIMP weighting: "male" or "female"
+max_hr = 0                # bpm; 0 = the second-highest max HR across your last two years of activities
+resting_hr = 0            # bpm; 0 = Garmin's 30-day median resting HR
+lthr = 0                  # lactate-threshold HR; 0 = 89% of max HR
+ftp = 0                   # watts; 0 = estimated from your best 20-90 min power rides (Zwift / MyWoosh count)
+sleep_need_hours = 8.0    # what your sleep score treats as a full night
+timezone = "America/Detroit"
+units = "imperial"        # "imperial" (mi, ft, mph) or "metric" (km, m, km/h): the default; each page's toggle remembers its own choice
+
+# The trainer season, every year: sessions in this window are written as Zwift / MyWoosh workouts, and rides
+# recorded there (Strava "Virtual Ride", or a name with one of the apps in it) are counted as indoor.
+[indoor]
+start = "12-01"           # month-day
+end = "02-28"             # inclusive; Feb 29 is included in leap years
+apps = ["zwift", "mywoosh"]
+long_ride_h = 2.5         # the longest trainer ride the plan will ask for
+
+[plan]
+# Relative load per weekday, Monday first. 0 = rest day; the largest value is the long ride.
+weekly_pattern = [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9]
+max_ramp = 6              # CTL points a week the outdoor build may add
+base_ramp = 3             # CTL points a week the indoor base may add (every 4th week is a recovery week)
+
+# Races, in any order. `every` rolls a race to next year's date once it's past (nth weekday of a month); fix
+# `date` when the organizer announces something different. `distance` is the option the plan is built for;
+# the page shows every option side by side.
+
+[[races]]
+name = "Bell's Iceman Cometh Challenge"
+date = 2026-11-07
+every = "1st Sat Nov"
+kind = "mtb"
+distance = "30mi"
+target_tsb = [10, 20]     # the form band to arrive in on race morning
+match = ["iceman"]        # activity-name words that mark earlier editions
+
+[races.options.30mi]
+label = "30 mi"
+km = 48
+climbing_ft = 1900
+hours = 2.25              # your expected finish time, for race-day load
+target_ctl = 55           # fitness to arrive with; the plan gets as close as the ramp limits allow
+long_ride_h = 3.0
+taper_days = [6, 14]
+
+[[races]]
+name = "Barry-Roubaix"
+date = 2027-04-17
+every = "3rd Sat Apr"     # moves earlier when that weekend is Easter: check barry-roubaix.com each winter
+kind = "gravel"
+distance = "100k"         # switch to "50k" if you drop down; the page compares both
+target_tsb = [5, 15]
+match = ["barry", "roubaix"]
+
+[races.options.100k]
+label = "Killer · 62 mi"
+km = 100
+climbing_ft = 4000
+hours = 3.75
+target_ctl = 70
+long_ride_h = 4.0
+taper_days = [8, 14]
+
+[races.options.50k]
+label = "Thriller · 36 mi"
+km = 58
+climbing_ft = 2200
+hours = 2.1
+target_ctl = 58
+long_ride_h = 2.75
+taper_days = [6, 10]
+
+# Bike commuting: the planner books 1–3 commute days a week into the plan (they're your weekday volume, not extra),
+# picks how to ride each one from that day's job in the week, and the dashboard makes a ride / ride easy / leave-the-
+# bike call every morning from readiness. Past commutes (Strava's commute flag, or a weekday ride of about this length
+# at commuting hours) become a running fitness test: same route, so speed per heartbeat shows aerobic fitness.
+[commute]
+enabled = true
+km_each_way = 30
+climb_m = [10, 50]        # gain riding in, riding home
+days = ["tue", "thu", "wed", "mon", "fri"]   # the days you can commute, most preferred first
+per_week = [1, 3]         # fewest and most commute days a week the planner will book
+winter = false            # true = keep commuting through the [indoor] trainer season
+
+# Ride mode (dist/ride.html): the phone on your bars shows live HR from a Bluetooth strap, GPS speed and the
+# day's session as timed steps. Phones need it served over HTTPS; see README → Ride mode.
+[ride]
+url = "https://chrisrohn.com/fitness/ride.html"   # the hosted page (built by build.mjs, data-free). The dashboard's Ride
+                                         # mode button and QR code open it with your zones and the week's sessions
+                                         # in the link's #fragment, which never reaches the server. "" = local copy
+wheel_m = 2.29            # wheel circumference for a speed sensor: 29 x 2.2 ≈ 2.30, 700 x 40c ≈ 2.21
+fuel_every_min = 20       # eat/drink reminder interval; 0 turns it off
+
+[sync]
+garmin_tokens = "~/.garminconnect"
+history_days = 400        # first Garmin sync reaches back this far
+resync_days = 3           # recent days fetched again every sync (sleep and body battery settle late)
