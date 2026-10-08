@@ -2,7 +2,7 @@
 
 Your Garmin Venu Sq wellness data and your full Strava history, turned into one private page: a daily
 **train / easy / rest call**, your own **sleep score**, a **readiness** score against your own normal, the
-**fitness / fatigue / form** model, and a day-by-day **season plan** that re-optimizes every time it's built.
+**fitness / fatigue / form** model, a phone **ride mode** with live HR and interval cues, and a day-by-day **season plan** that re-optimizes every time it's built.
 The plan runs through the Iceman Cometh (Nov 7, 2026) and a Zwift / MyWoosh trainer winter (Dec 1 – Feb 28) to
 Barry-Roubaix (Apr 17, 2027), with the 100k and 50k compared side by side.
 
@@ -58,6 +58,54 @@ history:
 - **FTP.** Zwift and MyWoosh send trainer power, so with an FTP set, those rides are scored from power. Leave
   `ftp = 0` and the site estimates FTP from your best 20–90 minute power ride of the last year. After each ramp
   test, put the real number in `config.toml`.
+
+## Ride mode: live data on the phone on your bars
+
+**Your Venu Sq can't send live data to a phone.** It broadcasts heart rate over ANT+ only. iPhones have no ANT+
+radio and few current Android phones do, and the Garmin Connect app doesn't show live workout data. So
+the phone needs its own sensor.
+
+- **Get a Bluetooth heart-rate sensor.** A chest strap is the most accurate: Polar H10, Garmin HRM-Dual or Wahoo
+  TICKR. An optical armband is more comfortable for a 4-hour Barry-Roubaix: Scosche Rhythm+ 2.0. Pick one that
+  does both Bluetooth and ANT+, so it also works with Zwift on any device. Without a power meter, HR is what your
+  training load is built on, and a wrist sensor reads poorly when you're gripping the bars on rough two-track.
+  A strap or armband improves every number on the dashboard, not just the live view.
+- **Optional: a Bluetooth speed/cadence sensor.** Wheel speed stays accurate under tree cover, where phone GPS
+  wanders (most of Iceman). Set your tire's circumference in `[ride] wheel_m`. A Bluetooth power meter works
+  too, if you ever get one.
+
+`python -m fitness build` writes **`dist/ride.html`**, and the dashboard header gets a **Ride mode** button.
+On the phone it shows:
+
+- **Live readings:** heart rate, with your zone and a marker on the zone bar; time, distance, speed (from the
+  wheel sensor, else GPS), cadence or power, average HR, and live load against the planned TSS.
+- **The day's session as timed steps.** For example: warm-up → VO2 1/5 at **166–176 bpm** → easy 3 min → …
+  - Each step shows a countdown, its target range from your threshold HR, and a status (▲ Push / On target /
+    ▼ Ease off). Efforts of 2 minutes or less say *by feel*, because HR lags them.
+  - Each step change gets beeps, a vibration (Android) and a spoken cue, with a 3-2-1 countdown before it.
+- **Practical touches:**
+  - **Fueling prompts** every 20 minutes after the first 20, with more carbs suggested on long days.
+  - **Screen kept awake.** Ride mode asks the phone to keep the screen on.
+  - **Survives a reload.** A reload or tab switch mid-ride restores the ride, paused.
+  - **Summary:** a ride summary with time in zones at the end.
+
+The watch keeps recording the official file, and ride mode uploads nothing.
+
+**Browser.** Android: Chrome. iPhone: Safari and iOS Chrome can't use Bluetooth sensors, so install the free
+**Bluefy** browser and open ride mode in it. GPS, steps and cues work in any browser. On iPhone, also set Auto-Lock
+to *Never* for rides, in case the browser ignores the keep-awake request.
+
+**It must load over HTTPS** (browsers only allow Bluetooth and GPS on secure pages). Two ways:
+
+1. **Host the data-free page.** Run `python -m fitness ride-page` to get `dist/public/ride.html`, which contains
+   none of your data. Put it on any HTTPS host: Cloudflare Pages (`npx wrangler pages deploy fitness/dist/public`),
+   GitHub Pages or Netlify. Set `[ride] url` to its address and rebuild. The dashboard's Ride mode button then
+   opens it with your zones and the week's sessions packed into the link's `#fragment`. The fragment is never
+   sent to the server, and the page keeps a copy, so it still works with no signal at the trailhead.
+2. **Serve it from home.** Use `tailscale serve --bg 8765` alongside `python -m fitness serve` and open
+   `https://<your-computer>.<tailnet>.ts.net/ride.html` on the phone. Load it before you roll out.
+
+A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen or bring a small battery pack.
 
 ## Setup (once, about 10 minutes)
 
@@ -151,7 +199,8 @@ legs actually felt on the bike.
 | `metrics.py` | load, PMC, sleep score, readiness, recommendation, insights (pure functions) |
 | `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` |
-| `site/` | the page template, styles and SVG charts (no dependencies, works offline) |
+| `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
+| `site/` | the dashboard and ride-mode pages, styles and SVG charts (no dependencies, works offline) |
 | `demo.py` | the synthetic athlete |
 
 Tests: `python -m pytest tests/test_fitness.py`. This is a personal analysis tool, not medical advice.

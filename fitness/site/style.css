@@ -57,7 +57,8 @@ button.chip {
   font: inherit; font-size: .8rem; color: var(--ink-2); background: var(--surface); border: 1px solid var(--ring);
   border-radius: 999px; padding: 4px 10px; cursor: pointer;
 }
-button.chip:hover { color: var(--ink); }
+button.chip:hover, a.chip:hover { color: var(--ink); }
+a.chip { font-size: .8rem; color: var(--ink); background: var(--surface); border: 1px solid var(--ring); border-radius: 999px; padding: 4px 10px; text-decoration: none; white-space: nowrap; }
 
 main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
 section { scroll-margin-top: 64px; }

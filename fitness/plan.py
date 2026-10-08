@@ -19,6 +19,7 @@ from datetime import date, timedelta
 
 from fitness.config import race_dates
 from fitness.metrics import ATL_DAYS, CTL_DAYS
+from fitness.workouts import steps_for
 
 KC, KA = 1 - math.exp(-1 / CTL_DAYS), 1 - math.exp(-1 / ATL_DAYS)
 FLOORS = (0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65)
@@ -28,6 +29,7 @@ INDOOR_RATE = 1.15                                # no coasting on a trainer: mo
 LEVEL = {"rest": "rest", "easy": "easy", "endurance": "moderate", "fun": "moderate", "strength": "moderate", "key": "hard", "long": "hard",
          "openers": "easy", "race": "hard"}
 HORIZON = 400
+STEP_DAYS = 7                                     # days that carry structured steps for ride mode
 
 SESSIONS = {
     "mtb": [
@@ -247,7 +249,8 @@ def _dress(rows: list[dict], races: list[dict], cfg: dict, done_today: float) ->
         d = r["date"]
         minutes = 0 if r["role"] in ("rest", "race") else int(round(r["load"] / r["rate"] * 60 / 5) * 5)
         title, session = _session(r, race, cfg, counters, ftp_tests)
-        out.append({"date": d.isoformat(), "phase": r["phase"], "role": r["role"], "indoor": r["indoor"], "recovery_week": r["recovery_week"],
+        steps = steps_for(r.get("key"), title, minutes, race["opt"]["hours"], race["opt"]["long_ride_h"]) if i < STEP_DAYS else None
+        out.append({"steps": steps,"date": d.isoformat(), "phase": r["phase"], "role": r["role"], "indoor": r["indoor"], "recovery_week": r["recovery_week"],
                     "race": r["race"], "load": 0 if r["role"] in ("rest", "race") else round(r["load"] / 5) * 5, "minutes": minutes,
                     "title": title, "session": session, "level": LEVEL[r["role"]],
                     "ctl": round(r["ctl"], 1), "atl": round(r["atl"], 1), "tsb": round(r["tsb"], 1),
@@ -302,9 +305,12 @@ def _session(r: dict, race: dict, cfg: dict, counters: Counter, ftp_tests: set[s
     elif phase == "taper":
         lib, name = SESSIONS["taper"], "taper"
     else:
-        lib, name = SESSIONS["gravel" if gravel else "mtb"], race["kind"]
-    session = lib[counters[name] % len(lib)]
+        name = "gravel" if gravel else "mtb"
+        lib = SESSIONS[name]
+    idx = counters[name] % len(lib)
+    session = lib[idx]
     counters[name] += 1
+    r["key"] = (name, idx)   # workouts.LIBRARY turns it into steps
     title = "Trainer workout" if indoor else "Taper sharpener" if phase == "taper" else "Key session"
     return title, (f"{apps}: " if indoor else "") + session
 

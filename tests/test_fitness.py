@@ -19,6 +19,7 @@ from fitness.garmin import parse_activity, parse_day  # noqa: E402
 from fitness.plan import in_indoor, roles, season, upcoming  # noqa: E402
 from fitness.store import Store  # noqa: E402
 from fitness.strava import parse_api, parse_export  # noqa: E402
+from fitness.workouts import LIBRARY, steps_for  # noqa: E402
 
 TH = {"max_hr": 185, "rest_hr": 50, "lthr": 165, "ftp": 0, "sex": "male"}
 
@@ -251,3 +252,39 @@ def test_build_end_to_end(tmp_path, cfg):
     assert "/*__APP__*/" not in html and "__DATA__" not in html
     payload = html.split('<script type="application/json" id="data">')[1].split("</script>")[0]
     assert json.loads(payload)["today"] == "2026-10-08"
+
+
+def test_every_library_session_has_steps(cfg):
+    from fitness.plan import SESSIONS
+    assert set(LIBRARY) == {(name, i) for name, lib in SESSIONS.items() for i in range(len(lib))}
+    for key, make in LIBRARY.items():
+        steps = make()
+        assert steps and all(s["min"] > 0 and 0 <= s["lo"] < s["hi"] for s in steps), key
+
+
+def test_steps_fill_to_planned_time():
+    st = steps_for(("mtb", 2), "Key session", 120)
+    assert round(sum(s["min"] for s in st)) == 120 and st[-1]["name"] == "Cool-down" and st[-2]["name"] == "Endurance"
+    assert [s["min"] for s in steps_for(None, "Recovery spin", 45)] == [45]
+    assert steps_for(None, "Rest", 0) == [] and steps_for(None, "Strength", 45) == []
+    race = steps_for(None, "Race day — Barry-Roubaix (Killer · 62 mi)", 0, race_hours=3.75)
+    assert race[-1]["min"] == 225 and "Eat" in race[-1]["cue"]
+    assert any("feel" in s["cue"] for s in steps_for(("indoor_late", 2), "Trainer workout", 70))   # 30/30s are ridden by feel
+
+
+def test_ride_page_and_link(tmp_path, cfg):
+    import base64
+    today = date(2026, 10, 8)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=120)
+        data = build.assemble(cfg, store.days(), store.activities(), today)
+    ride = data["ride"]
+    assert ride["lthr"] and 1 <= len(ride["days"]) <= 7 and ride["days"][0]["date"] == "2026-10-08" and ride["days"][0]["steps"]
+    build.render(data, tmp_path / "index.html", cfg)
+    page = (tmp_path / "ride.html").read_text()
+    assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' in page
+    assert 'ride.html' in (tmp_path / "index.html").read_text()
+    hosted = {**cfg, "ride": {**cfg["ride"], "url": "https://ride.example/ride.html"}}
+    link = build.ride_link(hosted, ride, "ride.html")
+    blob = link.split("#c=")[1]
+    assert json.loads(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4))) == ride

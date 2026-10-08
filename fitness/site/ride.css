@@ -1,0 +1,77 @@
+/* Ride mode: a phone on the bars. Big numbers, high contrast, thumb-sized buttons, nothing that needs reading twice. */
+body.ride { min-height: 100dvh; display: grid; grid-template-rows: auto 1fr auto; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.rbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--ring); }
+.rbar .day { flex: 1 1 auto; min-width: 0; }
+.rbar select { width: 100%; font: inherit; font-size: .85rem; color: var(--ink); background: var(--surface); border: 1px solid var(--ring); border-radius: 999px; padding: 6px 10px; }
+.chip.sensor { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chip.sensor i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.chip.sensor.on i { background: var(--good); }
+.chip.sensor.wait i { background: var(--warn); }
+.chip.sensor.off i { background: var(--crit); }
+.chip.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+
+.rmain { padding: 10px 12px; display: grid; gap: 10px; align-content: start; }
+.stepcard, .hrcard, .rtile { background: var(--surface); border: 1px solid var(--ring); border-radius: 16px; }
+.stepcard { padding: 12px 14px; display: grid; gap: 4px; }
+.stepname { font-size: 1.05rem; font-weight: 650; }
+.steptime { font-size: clamp(2.6rem, 14vw, 4.5rem); font-weight: 750; line-height: 1; letter-spacing: -.02em; }
+.target { font-size: 1.05rem; color: var(--ink-2); }
+.target b { color: var(--ink); }
+.progress { height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; margin-top: 4px; }
+.progress span { display: block; height: 100%; width: 0; background: var(--s1); border-radius: 4px; transition: width .9s linear; }
+.cue { font-size: .9rem; color: var(--ink-2); min-height: 1.2em; }
+.next { font-size: .85rem; color: var(--muted); }
+
+.hrcard { padding: 10px 14px 14px; display: grid; gap: 6px; }
+.hrval { font-size: clamp(4.5rem, 30vw, 8rem); font-weight: 800; line-height: .95; letter-spacing: -.03em; }
+.hrmeta { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 1.05rem; }
+.zone { color: var(--ink-2); font-weight: 600; }
+.status { font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
+.status::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: transparent; }
+.status.good::before { background: var(--good); }
+.status.up::before { background: var(--warn); }
+.status.down::before { background: var(--serious); }
+.status.feel::before { background: var(--muted); }
+.zbar { position: relative; display: grid; grid-template-columns: 21fr 9fr 4fr 6fr 12fr;   /* 60–112% of threshold HR */ gap: 2px; height: 10px; }
+.zbar span { border-radius: 3px; }
+.zbar span:nth-child(1) { background: var(--z1); } .zbar span:nth-child(2) { background: var(--z2); } .zbar span:nth-child(3) { background: var(--z3); }
+.zbar span:nth-child(4) { background: var(--z4); } .zbar span:nth-child(5) { background: var(--z5); }
+.zbar b { position: absolute; top: -4px; width: 4px; height: 18px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 2px var(--surface); left: 0; display: none; transform: translateX(-2px); }
+
+.rtiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.rtile { padding: 8px 10px; display: grid; gap: 2px; }
+.rtile .k { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+.rtile .v { font-size: clamp(1.3rem, 6.5vw, 2rem); font-weight: 700; line-height: 1.1; white-space: nowrap; }
+.rtile .v small { font-size: .55em; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+
+.fuel { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px; background: var(--raised); border: 2px solid var(--s4); font-size: 1rem; }
+.fuel b::before { content: "● "; color: var(--s4); }
+.fuel span { flex: 1 1 auto; color: var(--ink-2); }
+.note { font-size: .8rem; color: var(--muted); }
+
+.rfoot { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; padding: 10px 12px 14px; border-top: 1px solid var(--ring); background: var(--page); }
+button.big { font: inherit; font-size: 1.1rem; font-weight: 700; min-height: 60px; border-radius: 16px; border: 1px solid var(--ring); background: var(--surface); color: var(--ink); cursor: pointer; }
+button.big:disabled { opacity: .4; }
+button.big.go { background: var(--good); border-color: var(--good); color: #fff; }
+button.big.go.paused { background: var(--warn); border-color: var(--warn); color: #0b0b0b; }
+button.big.end { color: var(--crit); }
+
+dialog { border: 1px solid var(--ring); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 0; width: min(92vw, 420px); }
+dialog::backdrop { background: rgba(0, 0, 0, .55); }
+.sform { padding: 16px; display: grid; gap: 10px; }
+.sform label { display: grid; gap: 4px; font-size: .85rem; color: var(--ink-2); }
+.sform label.row { display: flex; align-items: center; gap: 8px; }
+.sform input[type=number] { font: inherit; font-size: 1rem; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--ring); background: var(--raised); color: var(--ink); }
+.sform .actions { display: flex; justify-content: flex-end; gap: 8px; margin: 6px 0 0; padding: 0; }
+.sum { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; font-size: .9rem; }
+.sum b { display: block; font-size: 1.3rem; }
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .rmain { grid-template-columns: 1fr 1fr; }
+  .rtiles { grid-column: 1 / -1; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .hrval { font-size: clamp(3.5rem, 16vh, 6rem); }
+  .steptime { font-size: clamp(2.2rem, 12vh, 3.5rem); }
+}
+.fuel[hidden] { display: none; }
+span.chip { font-size: .8rem; color: var(--ink-2); background: var(--surface); border: 1px solid var(--ring); border-radius: 999px; padding: 4px 10px; }

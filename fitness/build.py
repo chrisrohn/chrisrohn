@@ -1,6 +1,7 @@
 """Turns the store into the site: one self-contained dist/index.html with the numbers inlined (no server, no CDN)."""
 from __future__ import annotations
 
+import base64
 import json
 import statistics
 from collections import defaultdict
@@ -138,6 +139,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "ytd": {"rides": len(ytd), "hours": round(sum(a["moving_s"] for a in ytd) / 3600, 1), "km": round(sum(a["distance_m"] for a in ytd) / 1000),
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
         "coverage": coverage,
+        "ride": ride_config(cfg, th, plan),
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
 
@@ -233,8 +235,50 @@ def _coverage(days: dict[str, dict], today: date) -> list[dict]:
     return [{"field": f, "days": n, "of": total, "device": dev, "note": note} for f, n, dev, note in checks]
 
 
-def render(data: dict, out: Path | None = None) -> Path:
+def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
+    """What ride mode needs, and nothing else: HR anchors and the next week of sessions with their steps."""
+    days = [{k: d[k] for k in ("date", "title", "session", "minutes", "load", "indoor", "steps")} for d in (plan or {}).get("days", []) if d.get("steps") is not None]
+    nxt = (plan or {}).get("races", [{}])[0] if plan else {}
+    return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "days": days,
+            "race": {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None,
+            "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"]}
+
+
+def ride_link(cfg: dict, ride: dict, local: str) -> str:
+    """The hosted ride page with the config in the #fragment (never sent to the server), or the local copy."""
+    if not cfg["ride"].get("url"):
+        return local
+    blob = base64.urlsafe_b64encode(json.dumps(ride, separators=(",", ":")).encode()).decode().rstrip("=")
+    return f"{cfg['ride']['url']}#c={blob}"
+
+
+def _inline(text: str, data: dict, token: str) -> str:
+    return text.replace(token, json.dumps(data, separators=(",", ":")).replace("</", "<\\/"))
+
+
+def ride_page(ride: dict | None) -> str:
+    page = (SITE_DIR / "ride.html").read_text()
+    page = (page.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
+                .replace("/*__RIDE_STYLE__*/", (SITE_DIR / "ride.css").read_text())
+                .replace("/*__RIDE_APP__*/", (SITE_DIR / "ride.js").read_text()))
+    return _inline(page, ride, "__RIDE_DATA__") if ride else page.replace("__RIDE_DATA__", "")
+
+
+def render_public_ride(out: Path | None = None) -> Path:
+    """ride.html with no data in it, safe to host anywhere: it gets zones and sessions from the #c= link."""
+    out = out or DIST_DIR / "public" / "ride.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(ride_page(None))
+    return out
+
+
+def render(data: dict, out: Path | None = None, cfg: dict | None = None) -> Path:
     out = out or DIST_DIR / "index.html"
+    ride_name = "ride.html" if out.name == "index.html" else f"{out.stem}-ride.html"
+    if data.get("ride"):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.with_name(ride_name).write_text(ride_page(data["ride"]))
+        data = {**data, "ride_href": ride_link(cfg, data["ride"], ride_name) if cfg else ride_name}
     html = (SITE_DIR / "index.html").read_text()
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = (html.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())

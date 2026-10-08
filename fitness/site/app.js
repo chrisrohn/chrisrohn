@@ -496,6 +496,7 @@
   });
   unitBtn.addEventListener("click", () => { units = units === "mi" ? "km" : "mi"; ls.set("fitness-units", units); unitBtn.textContent = units; render(); });
   unitBtn.textContent = units;
+  if (D.ride_href) { const rl = document.getElementById("ride-link"); rl.href = D.ride_href; rl.hidden = false; }
   app.addEventListener("click", e => {
     const b = e.target instanceof Element ? e.target.closest("button.opt") : null;
     if (!b) return;
