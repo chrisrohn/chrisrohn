@@ -30,7 +30,7 @@ jobs:
           cache: pip
           cache-dependency-path: discovery/requirements.lock
       - run: pip install --require-hashes -r discovery/requirements.lock && pip install ruff pytest
-      - run: ruff check discovery tests
+      - run: ruff check discovery fitness tests
       - run: python -m pytest tests
 
   site:

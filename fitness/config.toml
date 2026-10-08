@@ -1,0 +1,29 @@
+# Settings for the fitness insights site. Every 0 means "work it out from my data".
+
+[athlete]
+sex = "male"              # Banister TRIMP weighting: "male" or "female"
+max_hr = 0                # bpm; 0 = the second-highest max HR across your last two years of activities
+resting_hr = 0            # bpm; 0 = Garmin's 30-day median resting HR
+lthr = 0                  # lactate-threshold HR; 0 = 89% of max HR
+ftp = 0                   # watts; set it if you ride with a power meter and power-based TSS takes over
+sleep_need_hours = 8.0    # what your sleep score treats as a full night
+timezone = "America/Detroit"
+
+[race]
+name = "Bell's Iceman Cometh Challenge"
+date = 2026-11-07
+distance_mi = 30
+climbing_ft = 1900
+target_tsb = [10, 20]     # the form band to arrive in on race morning
+match = ["iceman"]        # activity-name words that mark earlier editions
+
+[plan]
+# Relative load per weekday, Monday first. 0 = rest day; the largest value is the long ride.
+weekly_pattern = [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9]
+max_ramp = 6              # CTL points a week the build phase may add
+taper_days = [6, 14]      # the planner tries every taper length in this range
+
+[sync]
+garmin_tokens = "~/.garminconnect"
+history_days = 400        # first Garmin sync reaches back this far
+resync_days = 3           # recent days fetched again every sync (sleep and body battery settle late)

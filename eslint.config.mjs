@@ -2,13 +2,14 @@ import js from "@eslint/js";
 import globals from "globals";
 
 export default [
-  { ignores: ["dist/**", "node_modules/**", "test-results/**", "site/data/**"] },
+  { ignores: ["dist/**", "fitness/dist/**", "node_modules/**", "test-results/**", "site/data/**"] },
   js.configs.recommended,
   {
     files: ["site/src/**/*.js"],
     languageOptions: { ecmaVersion: 2023, sourceType: "module", globals: { ...globals.browser, google: "readonly", YT: "readonly" } },
     rules: { "no-unused-vars": ["error", { args: "none", caughtErrors: "none" }], "no-empty": ["error", { allowEmptyCatch: true }], "prefer-const": "error", eqeqeq: ["error", "smart"] },
   },
+  { files: ["fitness/site/**/*.js"], languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: globals.browser } },   // the fitness dashboard, inlined into one page
   { files: ["site/sw.js"], languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: globals.serviceworker } },
   { files: ["site/theme.js"], languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: globals.browser } },   // the pre-paint theme switch, a classic script
   // the browser globals cover code handed to page.evaluate() in the smoke test and the screenshot script

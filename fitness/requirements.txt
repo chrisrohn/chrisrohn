@@ -1,0 +1,3 @@
+# Only the sync commands need these; the metrics, the build and the tests are standard library.
+garminconnect>=0.3.17
+requests>=2.32
