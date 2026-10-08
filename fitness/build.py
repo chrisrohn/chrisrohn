@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import re
 import statistics
+import zlib
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -245,11 +248,32 @@ def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
 
 
 def ride_link(cfg: dict, ride: dict, local: str) -> str:
-    """The hosted ride page with the config in the #fragment (never sent to the server), or the local copy."""
+    """The hosted ride page with the config deflated into the #fragment (never sent to the server; short enough for
+    a QR code), or the local copy when no hosted page is configured."""
     if not cfg["ride"].get("url"):
         return local
-    blob = base64.urlsafe_b64encode(json.dumps(ride, separators=(",", ":")).encode()).decode().rstrip("=")
-    return f"{cfg['ride']['url']}#c={blob}"
+    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
+    packed = packer.compress(json.dumps(ride, separators=(",", ":")).encode()) + packer.flush()
+    return f"{cfg['ride']['url']}#z={base64.urlsafe_b64encode(packed).decode().rstrip('=')}"
+
+
+def ride_qr(link: str) -> str | None:
+    """An inline SVG QR code of the ride link, for the phone's camera (needs the optional segno package)."""
+    if not link.startswith("https://"):
+        return None
+    try:
+        import segno
+    except ImportError:
+        return None
+    return segno.make(link, error="l", micro=False).svg_inline(scale=1, border=4, dark="#0b0b0b", light="#ffffff", omitsize=True)   # viewBox only: CSS sizes it
+
+
+def csp(html: str) -> str:
+    """Fill the page's Content-Security-Policy: only its own inline scripts (by hash) may run, nothing may load."""
+    hashes = [f"'sha256-{base64.b64encode(hashlib.sha256(m.group(1).encode()).digest()).decode()}'"
+              for m in re.finditer(r"<script(?![^>]*application/json)[^>]*>(.*?)</script>", html, re.S)]
+    policy = f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
+    return html.replace("__CSP__", policy)
 
 
 def _inline(text: str, data: dict, token: str) -> str:
@@ -261,7 +285,7 @@ def ride_page(ride: dict | None) -> str:
     page = (page.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
                 .replace("/*__RIDE_STYLE__*/", (SITE_DIR / "ride.css").read_text())
                 .replace("/*__RIDE_APP__*/", (SITE_DIR / "ride.js").read_text()))
-    return _inline(page, ride, "__RIDE_DATA__") if ride else page.replace("__RIDE_DATA__", "")
+    return csp(_inline(page, ride, "__RIDE_DATA__") if ride else page.replace("__RIDE_DATA__", ""))
 
 
 def render_public_ride(out: Path | None = None) -> Path:
@@ -278,7 +302,8 @@ def render(data: dict, out: Path | None = None, cfg: dict | None = None) -> Path
     if data.get("ride"):
         out.parent.mkdir(parents=True, exist_ok=True)
         out.with_name(ride_name).write_text(ride_page(data["ride"]))
-        data = {**data, "ride_href": ride_link(cfg, data["ride"], ride_name) if cfg else ride_name}
+        href = ride_link(cfg, data["ride"], ride_name) if cfg else ride_name
+        data = {**data, "ride_href": href, "ride_qr": ride_qr(href)}
     html = (SITE_DIR / "index.html").read_text()
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = (html.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())

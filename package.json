@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node build.mjs",
     "lint": "eslint && npm run lint:html",
-    "lint:html": "html-validate site/*.html",
+    "lint:html": "html-validate site/*.html fitness/site/*.html",
     "typecheck": "tsc -p tsconfig.json",
     "check": "npm run lint && npm run typecheck && npm run build",
     "test": "playwright test",

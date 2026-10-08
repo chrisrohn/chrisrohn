@@ -13,9 +13,6 @@ data/cache/feed_etags.json
 browser.json
 oauth.json
 .env
-# fitness: personal health data and the page built from it never leave this machine
-fitness/data/
-fitness/dist/
 
 node_modules/
 test-results/

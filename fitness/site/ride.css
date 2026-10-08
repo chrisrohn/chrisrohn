@@ -53,7 +53,7 @@ body.ride { min-height: 100dvh; display: grid; grid-template-rows: auto 1fr auto
 .rfoot { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; padding: 10px 12px 14px; border-top: 1px solid var(--ring); background: var(--page); }
 button.big { font: inherit; font-size: 1.1rem; font-weight: 700; min-height: 60px; border-radius: 16px; border: 1px solid var(--ring); background: var(--surface); color: var(--ink); cursor: pointer; }
 button.big:disabled { opacity: .4; }
-button.big.go { background: var(--good); border-color: var(--good); color: #fff; }
+button.big.go { background: var(--good); border-color: var(--good); color: #0b0b0b; }
 button.big.go.paused { background: var(--warn); border-color: var(--warn); color: #0b0b0b; }
 button.big.end { color: var(--crit); }
 

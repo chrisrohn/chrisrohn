@@ -309,6 +309,10 @@
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
         ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${plan ? `<p class="sub">Next: ${plan.days.slice(1, 4).map(d => `<b>${DOW[asDate(d.date).getDay()]}</b> ${esc(d.title.toLowerCase())}${d.minutes ? ` ${dur(d.minutes * 60)}` : ""}`).join(" · ")}</p>` : ""}
+        ${D.ride_qr ? `<details class="phone"><summary>Ride mode on your phone</summary><div class="qr">
+          <div class="qrimg" role="img" aria-label="QR code that opens ride mode with this week's sessions">${D.ride_qr}</div>
+          <p class="sub">Scan with the phone on your bars, or <button type="button" class="chip" id="copy-ride">copy the link</button>. It opens chrisrohn.com/fitness/ride.html with your HR zones and the next 7 days of sessions; the phone keeps them, so rescan after a rebuild when the plan changes. Your data rides in the link's #fragment, which never reaches the server.</p>
+        </div></details>` : ""}
         ${rd && rd.illness ? `<p class="sub"><b>Illness watch:</b> elevated resting HR plus breathing rate or overnight stress is the classic early sign of a cold. Rest beats a workout here.</p>` : ""}
       </div>
       <div class="card">
@@ -372,7 +376,7 @@
 
     // data
     const th = D.athlete;
-    html.push(`<section id="data" class="card"><div class="head"><h2>What the Venu Sq gives you</h2><span class="sub">last 30 days of data actually received</span></div>
+    html.push(`<section id="device" class="card"><div class="head"><h2>What the Venu Sq gives you</h2><span class="sub">last 30 days of data actually received</span></div>
       <div class="scrollx"><table class="tbl"><thead><tr><th>Signal</th><th class="r">Days</th><th>Hardware</th><th>Note</th></tr></thead><tbody>
       ${D.coverage.map(c => `<tr><td>${esc(c.field)}</td><td class="r">${c.days}/${c.of}</td><td>${esc(c.device)}</td><td class="sub">${esc(c.note)}</td></tr>`).join("")}</tbody></table></div>
       <div class="kpis" style="margin-top:12px"><span>Max HR <b>${th.max_hr}</b></span><span>Resting HR <b>${r0(th.rest_hr)}</b></span><span>LTHR <b>${th.lthr}</b></span><span>FTP <b>${th.ftp || "—"}</b></span>
@@ -497,6 +501,11 @@
   unitBtn.addEventListener("click", () => { units = units === "mi" ? "km" : "mi"; ls.set("fitness-units", units); unitBtn.textContent = units; render(); });
   unitBtn.textContent = units;
   if (D.ride_href) { const rl = document.getElementById("ride-link"); rl.href = D.ride_href; rl.hidden = false; }
+  app.addEventListener("click", e => {
+    if (!(e.target instanceof Element) || e.target.id !== "copy-ride") return;
+    const btn = e.target;
+    navigator.clipboard.writeText(D.ride_href).then(() => { btn.textContent = "copied"; }, () => { btn.textContent = "copy failed"; });
+  });
   app.addEventListener("click", e => {
     const b = e.target instanceof Element ? e.target.closest("button.opt") : null;
     if (!b) return;

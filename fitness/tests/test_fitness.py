@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]   # the repo root, so `import fitness` works from anywhere
 sys.path.insert(0, str(ROOT))
 
 from fitness import build, config, demo  # noqa: E402
@@ -274,6 +274,7 @@ def test_steps_fill_to_planned_time():
 
 def test_ride_page_and_link(tmp_path, cfg):
     import base64
+    import zlib
     today = date(2026, 10, 8)
     with Store(tmp_path / "d.db") as store:
         demo.populate(store, today, days=120)
@@ -284,7 +285,11 @@ def test_ride_page_and_link(tmp_path, cfg):
     page = (tmp_path / "ride.html").read_text()
     assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' in page
     assert 'ride.html' in (tmp_path / "index.html").read_text()
-    hosted = {**cfg, "ride": {**cfg["ride"], "url": "https://ride.example/ride.html"}}
-    link = build.ride_link(hosted, ride, "ride.html")
-    blob = link.split("#c=")[1]
-    assert json.loads(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4))) == ride
+    link = build.ride_link(cfg, ride, "ride.html")
+    assert link.startswith("https://chrisrohn.com/fitness/ride.html#z=")
+    blob = link.split("#z=")[1]
+    assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == ride
+    assert len(link) < 2400   # small enough for a QR code a phone camera reads off a laptop screen
+    assert build.ride_link({**cfg, "ride": {**cfg["ride"], "url": ""}}, ride, "ride.html") == "ride.html"
+    page = build.ride_page(None)
+    assert "__CSP__" not in page and "script-src 'sha256-" in page and "__RIDE_DATA__" not in page

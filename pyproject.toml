@@ -24,7 +24,6 @@ ignore = ["E501", "B007"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E702", "E402", "SIM", "UP031"]
-"fitness/plan.py" = ["E702"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

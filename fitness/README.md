@@ -95,15 +95,20 @@ The watch keeps recording the official file, and ride mode uploads nothing.
 **Bluefy** browser and open ride mode in it. GPS, steps and cues work in any browser. On iPhone, also set Auto-Lock
 to *Never* for rides, in case the browser ignores the keep-awake request.
 
-**It must load over HTTPS** (browsers only allow Bluetooth and GPS on secure pages). Two ways:
+**Where it lives: <https://chrisrohn.com/fitness/ride.html>.** The site build (`fitness/build-ride.mjs`, called from
+`build.mjs`) publishes it with the rest of chrisrohn.com. It's a data-free page: no zones, plan or history are
+in it, and it's `noindex`. A strict Content-Security-Policy lets only its own scripts run and nothing load,
+because it shares an origin with the music app. HTTPS is what phones require for Bluetooth and GPS.
 
-1. **Host the data-free page.** Run `python -m fitness ride-page` to get `dist/public/ride.html`, which contains
-   none of your data. Put it on any HTTPS host: Cloudflare Pages (`npx wrangler pages deploy fitness/dist/public`),
-   GitHub Pages or Netlify. Set `[ride] url` to its address and rebuild. The dashboard's Ride mode button then
-   opens it with your zones and the week's sessions packed into the link's `#fragment`. The fragment is never
-   sent to the server, and the page keeps a copy, so it still works with no signal at the trailhead.
-2. **Serve it from home.** Use `tailscale serve --bg 8765` alongside `python -m fitness serve` and open
-   `https://<your-computer>.<tailnet>.ts.net/ride.html` on the phone. Load it before you roll out.
+**Getting the week onto the phone:** open the dashboard, then **Today → Ride mode on your phone**, and scan the QR
+code. You can also tap **copy the link** and send it to yourself. The link carries your HR anchors and the next 7
+days of sessions, compressed into its `#fragment`, which browsers never send to a server. The phone keeps that
+plan, so the page works with no signal at the trailhead. Rescan when the plan changes. A link that won't decode
+is ignored, and the plan already on the phone stays.
+
+You can also host it elsewhere: `python -m fitness ride-page` writes a data-free copy to `dist/public/ride.html`.
+Put its address in `[ride] url`. To use the local copy with no hosting, set `url = ""` and serve it over Tailscale
+(`tailscale serve --bg 8765` alongside `python -m fitness serve`).
 
 A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen or bring a small battery pack.
 
@@ -198,9 +203,10 @@ legs actually felt on the bike.
 | `activities.py` | sport mapping and the Garmin↔Strava duplicate merge |
 | `metrics.py` | load, PMC, sleep score, readiness, recommendation, insights (pure functions) |
 | `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
-| `build.py` | assembles the numbers and inlines them into `dist/index.html` |
+| `build.py` | assembles the numbers and inlines them into `dist/index.html` and `dist/ride.html` |
+| `build-ride.mjs` | writes the public, data-free `chrisrohn.com/fitness/ride.html` during the site build |
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
 | `site/` | the dashboard and ride-mode pages, styles and SVG charts (no dependencies, works offline) |
 | `demo.py` | the synthetic athlete |
 
-Tests: `python -m pytest tests/test_fitness.py`. This is a personal analysis tool, not medical advice.
+Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted ride page: CSP, accessibility, link hand-off). CI runs both. This is a personal analysis tool, not medical advice.

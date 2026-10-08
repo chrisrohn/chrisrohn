@@ -75,8 +75,9 @@ taper_days = [6, 10]
 # Ride mode (dist/ride.html): the phone on your bars shows live HR from a Bluetooth strap, GPS speed and the
 # day's session as timed steps. Phones need it served over HTTPS; see README → Ride mode.
 [ride]
-url = ""                  # where you host ride.html (e.g. "https://ride.example.pages.dev/ride.html"); the dashboard's
-                          # Ride button then opens it with your zones and the week's sessions in the link
+url = "https://chrisrohn.com/fitness/ride.html"   # the hosted page (built by build.mjs, data-free). The dashboard's Ride
+                                         # mode button and QR code open it with your zones and the week's sessions
+                                         # in the link's #fragment, which never reaches the server. "" = local copy
 wheel_m = 2.29            # wheel circumference for a speed sensor: 29 x 2.2 ≈ 2.30, 700 x 40c ≈ 2.21
 fuel_every_min = 20       # eat/drink reminder interval; 0 turns it off
 

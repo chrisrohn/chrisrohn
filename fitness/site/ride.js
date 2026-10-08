@@ -2,18 +2,28 @@
 // Ride mode: live heart rate, cadence and power from Bluetooth sensors (Web Bluetooth), speed and distance from the
 // phone's GPS, and the day's planned session as timed steps with heart-rate targets, cues and fueling reminders.
 // The watch keeps recording the official file; nothing here is uploaded anywhere.
-(() => {
+(async () => {
   const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const ls = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private mode */ } },
   };
 
-  // ── config: #c=<base64url json> (a link from the dashboard) > inlined by the build > last one saved here ──
-  const decode = s => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0))));
+  // ── config: a link from the dashboard (#z= deflate-raw, or #c= plain; base64url JSON) > inlined by the build >
+  //    the last one saved on this phone. A fragment never reaches the server, and it's treated as untrusted text.
+  const bytes = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+  const inflate = async s => new Response(new Blob([bytes(s)]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
   let cfg = null;
-  const hash = new URLSearchParams(location.hash.slice(1)).get("c");
-  if (hash) { try { cfg = decode(hash); ls.set("fitness-ride-config", JSON.stringify(cfg)); history.replaceState(null, "", location.pathname); } catch { cfg = null; } }
+  const frag = new URLSearchParams(location.hash.slice(1));
+  if (frag.has("z") || frag.has("c")) {
+    try {
+      cfg = JSON.parse(frag.has("z") ? await inflate(frag.get("z")) : new TextDecoder().decode(bytes(frag.get("c"))));
+      if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.days)) throw new Error("not a ride plan");
+      ls.set("fitness-ride-config", JSON.stringify(cfg));
+    } catch { cfg = null; }
+    history.replaceState(null, "", location.pathname);
+  }
   if (!cfg) { try { const t = $("ride-data").textContent.trim(); if (t.startsWith("{")) cfg = JSON.parse(t); } catch { cfg = null; } }
   if (!cfg) { try { cfg = JSON.parse(ls.get("fitness-ride-config") || "null"); } catch { cfg = null; } }
   cfg = cfg || { lthr: 160, max_hr: 185, rest_hr: 55, sex: "male", days: [], wheel_m: 2.29, fuel_every_min: 20 };
@@ -40,7 +50,7 @@
   daySel.innerHTML = days.map((d, i) => {
     const dt = new Date(d.date + "T12:00:00");
     const label = d.date === iso(today) ? "Today" : `${DOW[dt.getDay()]} ${MON[dt.getMonth()]} ${dt.getDate()}`;
-    return `<option value="${i}">${label} · ${d.title.replace(/[<>&]/g, "")}${d.minutes ? ` · ${Math.round(d.minutes)} min` : ""}</option>`;
+    return `<option value="${i}">${label} · ${esc(d.title)}${d.minutes ? ` · ${Math.round(+d.minutes)} min` : ""}</option>`;
   }).join("") + `<option value="free">Free ride (no steps)</option>`;
   const todayIdx = days.findIndex(d => d.date === iso(today));
   daySel.value = todayIdx >= 0 ? String(todayIdx) : days.length && days[0].date > iso(today) ? "0" : "free";
@@ -256,7 +266,7 @@
     } else if (s) {
       $("step-name").textContent = planned ? planned.title : "Free ride";
       $("step-time").textContent = clock(steps.reduce((a, x) => a + x.min * 60, 0));
-      $("step-target").innerHTML = `${steps.length} step${steps.length === 1 ? "" : "s"} · first: <b>${s.name}</b>`;
+      $("step-target").innerHTML = `${steps.length} step${steps.length === 1 ? "" : "s"} · first: <b>${esc(s.name)}</b>`;
       $("step-cue").textContent = planned ? planned.session : "";
       $("step-next").textContent = "";
       $("step-bar").style.width = "0";
@@ -275,7 +285,7 @@
     $("t-cad").innerHTML = showPower ? `${live.power}<small>W</small>` : live.cad != null && now - live.cadAt < 4000 ? `${live.cad}<small>rpm</small>` : "—";
     $("t-avg").textContent = S.hrSecs ? Math.round(S.hrSum / S.hrSecs) : "—";
     const tss = S.trimp / trimpHour() * 100;
-    $("t-load").innerHTML = `${Math.round(tss)}${planned && planned.load ? `<small>/${planned.load}</small>` : ""}`;
+    $("t-load").innerHTML = `${Math.round(tss)}${planned && planned.load ? `<small>/${Math.round(+planned.load)}</small>` : ""}`;
     $("fuel").hidden = !S.fuelDue;
     if (S.fuelDue) $("fuel-text").textContent = fuelText();
 
@@ -316,7 +326,7 @@
       <div>Time<b>${clock(S.elapsed)}</b></div><div>Moving<b>${clock(S.moving)}</b></div>
       <div>Distance<b>${distTxt(S.dist)} ${unitD()}</b></div><div>Avg speed<b>${S.moving ? speedTxt(S.dist / S.moving) : "—"} ${unitS()}</b></div>
       <div>Avg HR<b>${S.hrSecs ? Math.round(S.hrSum / S.hrSecs) : "—"}</b></div><div>Max HR<b>${S.hrMax || "—"}</b></div>
-      <div>Load (hrTSS)<b>${tss}${planned && planned.load ? ` / ${planned.load}` : ""}</b></div><div>Avg cadence<b>${S.cadSecs ? Math.round(S.cadSum / S.cadSecs) : "—"}</b></div>
+      <div>Load (hrTSS)<b>${tss}${planned && planned.load ? ` / ${Math.round(+planned.load)}` : ""}</b></div><div>Avg cadence<b>${S.cadSecs ? Math.round(S.cadSum / S.cadSecs) : "—"}</b></div>
     </div><div class="zbar" style="margin-top:12px;grid-template-columns:${S.zones.map(z => `${Math.max(0.5, z / zt * 100)}fr`).join(" ")}"><span></span><span></span><span></span><span></span><span></span></div>
     <p class="note" style="margin-top:6px">${S.zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")}</p>
     <p class="note">The watch or Strava keeps the official record; this summary isn't uploaded anywhere.</p>`;
