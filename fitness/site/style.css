@@ -111,8 +111,11 @@ button.chip[aria-pressed="true"] { background: var(--ink); color: var(--page); }
 .seg { display: inline-flex; }
 .seg .chip + .chip { border-left: 0; }
 .seg .short { display: none; }
-@media (max-width: 400px) { .seg .long { display: none; } .seg .short { display: inline; } }
+.seg .long + .short + .sr { display: none; }
+@media (max-width: 400px) { .seg .long { display: none; } .seg .short { display: inline; } .seg .long + .short + .sr { display: inline; } }
 .tools .seg .chip[aria-pressed="true"] { background: var(--on-band); color: var(--band); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[data-theme-pick] .short { font-size: var(--fs-small); letter-spacing: 0; }   /* the ☀ ☾ glyphs, not the mi / km letters */
 
 /* ── the grid: twelve columns, 24px gutters, numbered sections under heavy rules ──────────────────────── */
 main { max-width: 1200px; margin: 0 auto; padding: var(--sp-6) var(--gutter) var(--sp-4); display: grid; gap: var(--sp-8); counter-reset: section; }

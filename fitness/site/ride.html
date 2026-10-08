@@ -68,6 +68,7 @@
       <label>Wheel circumference (m) <input id="s-wheel" type="number" inputmode="decimal" step="0.01" min="1.5" max="2.5"></label>
       <label>Fuel reminder every (min, 0 = off) <input id="s-fuel" type="number" inputmode="numeric" min="0" max="60"></label>
       <label class="row"><input id="s-voice" type="checkbox"> Spoken cues</label>
+      <div class="unitrow"><span>Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="chip" data-theme-pick="light" aria-pressed="true">Light</button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false">Dark</button></div></div>
       <div class="unitrow"><span>Units</span><div class="seg" role="group" aria-label="Units"><button type="button" class="chip" data-units="mi" aria-pressed="true">Imperial</button><button type="button" class="chip" data-units="km" aria-pressed="false">Metric</button></div></div>
       <div class="actions"><button type="submit" class="chip" value="cancel">Cancel</button><button type="submit" class="chip primary" value="save" id="s-save">Save</button></div>
     </form>

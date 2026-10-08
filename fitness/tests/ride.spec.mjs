@@ -69,6 +69,19 @@ test.describe("ride mode", () => {
     await expect(page.locator("#t-dist")).toContainText("mi");
   });
 
+  test("light / dark: paper by default, switches the moment it's tapped, and the choice sticks", async ({ page }) => {
+    await page.goto(link(PLAN));
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await page.click("#btn-settings");
+    await page.click('#settings [data-theme-pick="dark"]');
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator('#settings [data-theme-pick="dark"]')).toHaveAttribute("aria-pressed", "true");
+    const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(bg).toBe("rgb(20, 20, 20)");
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  });
+
   test("settings save under form-action 'none' and move the targets", async ({ page }) => {
     await page.goto(link(PLAN));
     await page.click("#btn-start");

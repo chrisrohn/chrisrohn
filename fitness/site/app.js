@@ -496,14 +496,13 @@
   }
 
   // ── controls ────────────────────────────────────────────────────────────────────────────────────────────
-  const themeBtn = document.getElementById("theme"), unitBtns = [...document.querySelectorAll("[data-units]")];
-  const order = [null, "light", "dark"];
-  const paintTheme = () => { const t = document.documentElement.dataset.theme; themeBtn.textContent = t === "light" ? "Light" : t === "dark" ? "Dark" : "Auto"; themeBtn.setAttribute("aria-label", `Theme: ${t || "auto"}`); };
-  themeBtn.addEventListener("click", () => {
-    const cur = document.documentElement.dataset.theme || null, next = order[(order.indexOf(cur) + 1) % 3];
-    if (next) document.documentElement.dataset.theme = next; else delete document.documentElement.dataset.theme;
-    ls.set("fitness-theme", next); paintTheme();
-  });
+  const unitBtns = [...document.querySelectorAll("[data-units]")];
+  // light / dark: follows the device until a button is pressed, then that choice sticks (shared with ride mode)
+  const themeBtns = [...document.querySelectorAll("[data-theme-pick]")], deviceDark = matchMedia("(prefers-color-scheme: dark)");
+  const effective = () => document.documentElement.dataset.theme || (deviceDark.matches ? "dark" : "light");
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === effective())));
+  for (const b of themeBtns) b.addEventListener("click", () => { document.documentElement.dataset.theme = b.dataset.themePick; ls.set("fitness-theme", b.dataset.themePick); paintTheme(); });
+  deviceDark.addEventListener("change", paintTheme);
   const paintUnits = () => unitBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.units === units)));
   for (const b of unitBtns) b.addEventListener("click", () => {
     if (b.dataset.units === units) return;

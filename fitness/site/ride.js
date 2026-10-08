@@ -366,6 +366,12 @@
   document.querySelectorAll(".unit-flip").forEach(t => t.addEventListener("click", () => { setUnits(!P.km); beep(990, 60); }));
   paintUnits();
 
+  // light / dark: light (paper) unless chosen otherwise; shared with the dashboard. Applies the moment it's tapped.
+  const themeBtns = [...document.querySelectorAll("[data-theme-pick]")];
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === (document.documentElement.dataset.theme || "light"))));
+  themeBtns.forEach(b => b.addEventListener("click", () => { document.documentElement.dataset.theme = b.dataset.themePick; ls.set("fitness-theme", b.dataset.themePick); paintTheme(); }));
+  paintTheme();
+
   planned = daySel.value === "free" ? null : days[+daySel.value] || null;
   steps = planned ? planned.steps : [];
   if (S.running) { note.textContent = "Ride restored after a reload — tap Resume."; startGps(); }
