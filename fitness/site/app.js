@@ -29,6 +29,7 @@
 
   // ── charts ──────────────────────────────────────────────────────────────────────────────────────────────
   const SVG = "http://www.w3.org/2000/svg";
+  const BAR_R = 0;   // square-ended bars: the 1978 Swiss-style data marks
   const el = (tag, attrs = {}, style = "") => {
     const n = document.createElementNS(SVG, tag);
     for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
@@ -102,7 +103,8 @@
         const from = cfg.ref.from ?? 0, xa = left + slot * from;
         svg.appendChild(el("rect", { x: xa, width: W - right - xa, y: Y(cfg.ref.hi), height: Math.max(0, Y(cfg.ref.lo) - Y(cfg.ref.hi)) }, `fill:${cfg.ref.color};fill-opacity:var(--wash)`));
         const inside = Y(cfg.ref.lo) - Y(cfg.ref.hi) > 16;   // label inside the band when it fits, else just under it
-        const tx = el("text", { x: xa + 4, y: inside ? Y(cfg.ref.lo) - 5 : Y(cfg.ref.lo) + 13, "text-anchor": "start", class: "marker-label" });
+        const flush = xa > left + iw * 0.6;                   // a band at the right edge: set the label flush right
+        const tx = el("text", { x: flush ? W - right - 4 : xa + 4, y: inside ? Y(cfg.ref.lo) - 5 : Y(cfg.ref.lo) + 13, "text-anchor": flush ? "end" : "start", class: "marker-label" });
         tx.textContent = cfg.ref.label; svg.appendChild(tx);
       }
       for (const b of cfg.xbands || []) {
@@ -122,7 +124,7 @@
       for (const s of cfg.series.filter(s => s.type === "bar" && !s.stack)) {
         for (let i = 0; i < n; i++) {
           const v = s.values[i]; if (!v) continue;
-          svg.appendChild(el("path", { d: barPath(X(i) - bw / 2, Y(v), base, bw, 4) }, `fill:${s.color}`));
+          svg.appendChild(el("path", { d: barPath(X(i) - bw / 2, Y(v), base, bw, BAR_R) }, `fill:${s.color}`));
         }
       }
       if (stacked.length) {
@@ -132,7 +134,7 @@
           parts.forEach((p, k) => {
             const yb = Y(acc) - (k ? 1 : 0), yt = Y(acc + p.v) + (k < parts.length - 1 ? 1 : 0);
             acc += p.v;
-            svg.appendChild(el("path", { d: k === parts.length - 1 ? barPath(X(i) - bw / 2, yt, yb, bw, 4) : `M${X(i) - bw / 2},${yb}V${yt}H${X(i) + bw / 2}V${yb}Z` }, `fill:${p.s.color}`));
+            svg.appendChild(el("path", { d: k === parts.length - 1 ? barPath(X(i) - bw / 2, yt, yb, bw, BAR_R) : `M${X(i) - bw / 2},${yb}V${yt}H${X(i) + bw / 2}V${yb}Z` }, `fill:${p.s.color}`));
           });
         }
       }
@@ -464,7 +466,7 @@
       const ser = mk.series, fmt = v => v == null ? "—" : `${(+v).toFixed(k === "resp" ? 1 : 0)}${mk.unit ? " " + mk.unit : ""}`;
       chart(document.getElementById(`c-m-${k}`), {
         label: `${mk.label} with normal range`, x: ser.map(r => r.date), height: 150,
-        band: { name: "Your normal", color: "var(--s1)", lo: ser.map(r => r.mean != null ? r.mean - r.sd : null), hi: ser.map(r => r.mean != null ? r.mean + r.sd : null), fmt },
+        band: { name: "Your normal", color: "var(--ink)", lo: ser.map(r => r.mean != null ? r.mean - r.sd : null), hi: ser.map(r => r.mean != null ? r.mean + r.sd : null), fmt },
         series: [{ name: mk.label, type: "line", color: "var(--s1)", values: ser.map(r => r.v), fmt, endDot: true, hideLegend: true }],
         yFmt: v => (k === "resp" ? v.toFixed(1) : String(Math.round(v))),
       });
