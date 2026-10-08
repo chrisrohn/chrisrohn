@@ -122,7 +122,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     coverage = _coverage(days, today)
 
     return {
-        "generated": datetime.now().isoformat(timespec="minutes"), "today": t, "athlete": th, "need_hours": need,
+        "generated": datetime.now().isoformat(timespec="minutes"), "today": t, "athlete": th, "need_hours": need, "units": cfg["athlete"]["units"],
         "now": {"readiness": ready_today, "recommendation": rec, "base_call": m.recommend(ready_today, None), "sleep": sleep.get(t), "form": form_now,
                 "sleep_debt": round(debt, 1) if debt is not None else None, "regularity_min": round(regularity) if regularity is not None else None,
                 "last_night": (days.get(t) or {}).get("sleep")},
@@ -244,7 +244,7 @@ def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
     nxt = (plan or {}).get("races", [{}])[0] if plan else {}
     return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "days": days,
             "race": {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None,
-            "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"]}
+            "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"]}
 
 
 def ride_link(cfg: dict, ride: dict, local: str) -> str:

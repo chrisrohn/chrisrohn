@@ -280,6 +280,7 @@ def test_ride_page_and_link(tmp_path, cfg):
         demo.populate(store, today, days=120)
         data = build.assemble(cfg, store.days(), store.activities(), today)
     ride = data["ride"]
+    assert ride["units"] == data["units"] == "imperial"
     assert ride["lthr"] and 1 <= len(ride["days"]) <= 7 and ride["days"][0]["date"] == "2026-10-08" and ride["days"][0]["steps"]
     build.render(data, tmp_path / "index.html", cfg)
     page = (tmp_path / "ride.html").read_text()

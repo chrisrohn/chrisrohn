@@ -243,7 +243,7 @@ def recommend(ready: dict | None, plan_today: dict | None = None) -> dict:
         order = ["rest", "easy", "moderate", "hard"]
         planned = plan_today["level"]
         if base["level"] in order and order.index(base["level"]) < order.index(planned):
-            base["detail"] = f"Planned: {plan_today['session']}. Readiness says scale it back — {base['detail']}"
+            base["detail"] = f"Planned: {plan_today['session']}. Readiness says scale it back — {base['detail'][:1].lower()}{base['detail'][1:]}"
         else:
             mins = plan_today.get("minutes") or 0
             took = f" — about {mins // 60}h{mins % 60:02d}" if mins >= 60 else f" — about {mins} min" if mins else ""

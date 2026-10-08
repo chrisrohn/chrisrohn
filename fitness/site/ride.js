@@ -4,6 +4,9 @@
 // The watch keeps recording the official file; nothing here is uploaded anywhere.
 (async () => {
   const $ = id => document.getElementById(id);
+  // keep figures with their units so a cue never breaks "3 / min" on a phone-width line
+  const nb = t => String(t ?? "").replace(/ × /g, "\u00a0×\u00a0").replace(/(\d) (?=(?:min|h|s|mi|km|ft|bpm|W|g|rpm|TSS|%)(?!\w))/g, "$1\u00a0")
+    .replace(/(RPE|Z\d|\+|−|~) (?=[\d(])/g, "$1\u00a0").replace(/(\d)–(?=\d)/g, "$1\u2060–\u2060");   // word joiners keep 88–93 whole
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const ls = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -30,7 +33,7 @@
   const prefs = (() => { try { return JSON.parse(ls.get("fitness-ride-prefs") || "{}"); } catch { return {}; } })();
   const P = {
     lthr: prefs.lthr || cfg.lthr, max: prefs.max || cfg.max_hr, rest: prefs.rest || cfg.rest_hr, wheel: prefs.wheel || cfg.wheel_m || 2.29,
-    fuel: prefs.fuel ?? cfg.fuel_every_min ?? 20, voice: prefs.voice ?? true, km: (ls.get("fitness-units") || "mi") === "km",
+    fuel: prefs.fuel ?? cfg.fuel_every_min ?? 20, voice: prefs.voice ?? true, km: (ls.get("fitness-units") || (cfg.units === "metric" ? "km" : "mi")) === "km",
   };
 
   // ── formatting ──────────────────────────────────────────────────────────────────────────────────────────
@@ -252,7 +255,7 @@
       $("step-time").textContent = clock(left);
       $("step-target").innerHTML = s.lo > 0 ? `Target <b>${bpm(s.lo)}–${bpm(s.hi)}</b> bpm` : `Target <b>under ${bpm(s.hi)}</b> bpm`;
       $("step-bar").style.width = `${Math.min(100, elapsedInStep / (s.min * 60) * 100)}%`;
-      $("step-cue").textContent = s.cue || "";
+      $("step-cue").textContent = nb(s.cue);
       const n = steps[S.step + 1];
       $("step-next").textContent = n ? `Next: ${n.name} · ${n.min >= 1 ? `${Math.round(n.min)} min` : `${Math.round(n.min * 60)} s`}` : "Last step";
       const byFeel = s.cue && s.cue.includes("by feel");
@@ -267,7 +270,7 @@
       $("step-name").textContent = planned ? planned.title : "Free ride";
       $("step-time").textContent = clock(steps.reduce((a, x) => a + x.min * 60, 0));
       $("step-target").innerHTML = `${steps.length} step${steps.length === 1 ? "" : "s"} · first: <b>${esc(s.name)}</b>`;
-      $("step-cue").textContent = planned ? planned.session : "";
+      $("step-cue").textContent = planned ? nb(planned.session) : "";
       $("step-next").textContent = "";
       $("step-bar").style.width = "0";
     } else {
@@ -280,7 +283,7 @@
     $("t-time").textContent = clock(S.elapsed);
     $("t-dist").innerHTML = `${distTxt(S.dist)}<small>${unitD()}</small>`;
     const spd = now - live.wheelAt < 5000 ? live.wheelSpeed : now - live.gpsAt < 8000 ? live.gpsSpeed : null;
-    $("t-speed").innerHTML = `${speedTxt(spd)}<small>${unitS()}</small>`;
+    $("t-speed").innerHTML = spd == null ? "—" : `${speedTxt(spd)}<small>${unitS()}</small>`;
     const showPower = now - live.powerAt < 4000;
     $("t-cad").innerHTML = showPower ? `${live.power}<small>W</small>` : live.cad != null && now - live.cadAt < 4000 ? `${live.cad}<small>rpm</small>` : "—";
     $("t-avg").textContent = S.hrSecs ? Math.round(S.hrSum / S.hrSecs) : "—";
@@ -295,6 +298,8 @@
     $("btn-skip").disabled = !S.running || !steps.length || S.step >= steps.length;
     $("btn-end").disabled = !S.running;
     daySel.disabled = S.running;
+    note.hidden = S.running && !S.paused;   // setup help is for before the ride, not on the bars
+    document.body.classList.toggle("riding", S.running && !S.paused);
   }
 
   // ── controls ────────────────────────────────────────────────────────────────────────────────────────────
@@ -327,8 +332,8 @@
       <div>Distance<b>${distTxt(S.dist)} ${unitD()}</b></div><div>Avg speed<b>${S.moving ? speedTxt(S.dist / S.moving) : "—"} ${unitS()}</b></div>
       <div>Avg HR<b>${S.hrSecs ? Math.round(S.hrSum / S.hrSecs) : "—"}</b></div><div>Max HR<b>${S.hrMax || "—"}</b></div>
       <div>Load (hrTSS)<b>${tss}${planned && planned.load ? ` / ${Math.round(+planned.load)}` : ""}</b></div><div>Avg cadence<b>${S.cadSecs ? Math.round(S.cadSum / S.cadSecs) : "—"}</b></div>
-    </div><div class="zbar" style="margin-top:12px;grid-template-columns:${S.zones.map(z => `${Math.max(0.5, z / zt * 100)}fr`).join(" ")}"><span></span><span></span><span></span><span></span><span></span></div>
-    <p class="note" style="margin-top:6px">${S.zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")}</p>
+    </div><div class="zbar sumbar" style="grid-template-columns:${S.zones.map(z => `${Math.max(0.5, z / zt * 100)}fr`).join(" ")}"><span></span><span></span><span></span><span></span><span></span></div>
+    <p class="note mt-2">${S.zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")}</p>
     <p class="note">The watch or Strava keeps the official record; this summary isn't uploaded anywhere.</p>`;
     ls.set("fitness-ride-last", JSON.stringify({ ...S, endedAt: Date.now() }));
     ls.set("fitness-ride-state", null);
@@ -341,18 +346,25 @@
   const dlg = $("settings");
   $("btn-settings").addEventListener("click", () => {
     $("s-lthr").value = P.lthr; $("s-max").value = P.max; $("s-rest").value = P.rest; $("s-wheel").value = P.wheel; $("s-fuel").value = P.fuel;
-    $("s-voice").checked = P.voice; $("s-km").checked = P.km;
+    $("s-voice").checked = P.voice; paintUnits();
     dlg.showModal();
   });
   dlg.addEventListener("close", () => {
     if (dlg.returnValue !== "save") return;
     const num = (id, d) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : d; };
     Object.assign(P, { lthr: num("s-lthr", P.lthr), max: num("s-max", P.max), rest: num("s-rest", P.rest), wheel: num("s-wheel", P.wheel), fuel: num("s-fuel", P.fuel),
-      voice: $("s-voice").checked, km: $("s-km").checked });
+      voice: $("s-voice").checked });
     ls.set("fitness-ride-prefs", JSON.stringify({ lthr: P.lthr, max: P.max, rest: P.rest, wheel: P.wheel, fuel: P.fuel, voice: P.voice }));
-    ls.set("fitness-units", P.km ? "km" : "mi");
     render();
   });
+
+  // imperial / metric: the segmented pair in settings, or a tap on the distance or speed reading mid-ride
+  const unitBtns = [...document.querySelectorAll("[data-units]")];
+  const paintUnits = () => unitBtns.forEach(b => b.setAttribute("aria-pressed", String((b.dataset.units === "km") === P.km)));
+  const setUnits = km => { P.km = km; ls.set("fitness-units", km ? "km" : "mi"); paintUnits(); render(); };
+  unitBtns.forEach(b => b.addEventListener("click", () => setUnits(b.dataset.units === "km")));
+  document.querySelectorAll(".unit-flip").forEach(t => t.addEventListener("click", () => { setUnits(!P.km); beep(990, 60); }));
+  paintUnits();
 
   planned = daySel.value === "free" ? null : days[+daySel.value] || null;
   steps = planned ? planned.steps : [];

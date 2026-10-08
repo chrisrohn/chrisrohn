@@ -42,8 +42,8 @@
 
     <section class="rtiles">
       <div class="rtile"><span class="k">Time</span><span class="v num" id="t-time">0:00</span></div>
-      <div class="rtile"><span class="k">Distance</span><span class="v num" id="t-dist">0.0</span></div>
-      <div class="rtile"><span class="k">Speed</span><span class="v num" id="t-speed">—</span></div>
+      <button type="button" class="rtile unit-flip" aria-label="Distance; tap to switch imperial / metric"><span class="k">Distance</span><span class="v num" id="t-dist">0.0</span></button>
+      <button type="button" class="rtile unit-flip" aria-label="Speed; tap to switch imperial / metric"><span class="k">Speed</span><span class="v num" id="t-speed">—</span></button>
       <div class="rtile"><span class="k" id="t-cad-k">Cadence</span><span class="v num" id="t-cad">—</span></div>
       <div class="rtile"><span class="k">Avg HR</span><span class="v num" id="t-avg">—</span></div>
       <div class="rtile"><span class="k">Load</span><span class="v num" id="t-load">0</span></div>
@@ -55,7 +55,7 @@
 
   <footer class="rfoot">
     <button type="button" class="big go" id="btn-start">Start</button>
-    <button type="button" class="big" id="btn-skip" disabled>Next step</button>
+    <button type="button" class="big" id="btn-skip" disabled aria-label="Next step">Next</button>
     <button type="button" class="big end" id="btn-end" disabled>End</button>
   </footer>
 
@@ -68,7 +68,7 @@
       <label>Wheel circumference (m) <input id="s-wheel" type="number" inputmode="decimal" step="0.01" min="1.5" max="2.5"></label>
       <label>Fuel reminder every (min, 0 = off) <input id="s-fuel" type="number" inputmode="numeric" min="0" max="60"></label>
       <label class="row"><input id="s-voice" type="checkbox"> Spoken cues</label>
-      <label class="row"><input id="s-km" type="checkbox"> Kilometres</label>
+      <div class="unitrow"><span>Units</span><div class="seg" role="group" aria-label="Units"><button type="button" class="chip" data-units="mi" aria-pressed="true">Imperial</button><button type="button" class="chip" data-units="km" aria-pressed="false">Metric</button></div></div>
       <div class="actions"><button type="submit" class="chip" value="cancel">Cancel</button><button type="submit" class="chip primary" value="save" id="s-save">Save</button></div>
     </form>
   </dialog>

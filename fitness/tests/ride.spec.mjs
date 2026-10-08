@@ -55,6 +55,20 @@ test.describe("ride mode", () => {
     expect(problems).toEqual([]);
   });
 
+  test("imperial / metric: the settings pair and a tap on the reading both switch, and the choice sticks", async ({ page }) => {
+    await page.goto(link(PLAN));
+    await expect(page.locator("#t-dist")).toContainText("mi");
+    await page.click("#btn-settings");
+    await page.click('#settings [data-units="km"]');
+    await expect(page.locator('#settings [data-units="km"]')).toHaveAttribute("aria-pressed", "true");
+    await page.click("#s-save");
+    await expect(page.locator("#t-dist")).toContainText("km");
+    await page.click(".unit-flip >> nth=0");
+    await expect(page.locator("#t-dist")).toContainText("mi");
+    await page.reload();
+    await expect(page.locator("#t-dist")).toContainText("mi");
+  });
+
   test("settings save under form-action 'none' and move the targets", async ({ page }) => {
     await page.goto(link(PLAN));
     await page.click("#btn-start");
