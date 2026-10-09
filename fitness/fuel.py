@@ -17,7 +17,10 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-CARBS_PER_KG = {"rest": 3.0, "easy": 4.0, "moderate": 5.0, "hard": 6.5, "long": 8.0, "race": 8.0, "load": 9.0}
+CARBS_PER_KG = {"rest": 3.0, "easy": 3.5, "moderate": 5.0, "hard": 6.0, "long": 7.0, "race": 8.0, "load": 8.0}
+FAT_PER_KG = 0.9                                    # what the Pudding, the Super Veggie and dinner add up to, roughly
+METS = {"easy": 6.0, "moderate": 7.5, "hard": 9.0, "race": 10.0}   # riding, by the session's intensity
+DAILY_LIFE = 1.35                                  # resting burn × this = a desk day without the ride
 PROTEIN_PER_KG = 1.8
 LABEL = {"rest": "Rest day", "easy": "Easy day", "moderate": "Training day", "hard": "Hard day", "long": "Long-ride day",
          "race": "Race day", "load": "Carb-load day"}
@@ -46,7 +49,8 @@ BREAKFAST_BLOCKS = "1 cup dry oats ≈ 54 g carbs, a banana ≈ 27 g, 1 tbsp hon
 
 
 def tier(day: dict | None) -> str:
-    """How hard a planned day is, for eating."""
+    """How hard a planned day is, for eating: the plan's intensity, then how long the riding is. (Not the training-load
+    number: two easy hours of commuting score like a hard session but don't eat like one.)"""
     if not day:
         return "rest"
     role, mins, load, level = day.get("role"), day.get("minutes") or 0, day.get("load") or 0, day.get("level")
@@ -54,13 +58,26 @@ def tier(day: dict | None) -> str:
         return "race"
     if role == "rest" or level == "rest" or mins == 0:
         return "rest"
-    if mins >= 150 or (role == "long" and mins >= 120):
+    if level == "easy":
+        return "moderate" if mins >= 120 else "easy"
+    if role == "long" or mins >= 150:
         return "long"
-    if level == "hard" or load >= 80:
+    if level == "hard":
         return "hard"
-    if level == "moderate" or load >= 40:
+    if level == "moderate":
         return "moderate"
-    return "easy"
+    return "hard" if load >= 80 else "moderate" if load >= 40 else "easy"
+
+
+def burn(t: str, minutes: float, body: dict, level: str | None = None) -> dict:
+    """Roughly what the day burns: resting (Mifflin-St Jeor from Garmin's weight, height and age; 22 kcal/kg without
+    them) × daily life, plus the riding (METs by kind of day × kg × hours)."""
+    kg = body["kg"]
+    sex = 5 if body.get("sex", "male") == "male" else -161
+    rest = 10 * kg + 6.25 * body["height_cm"] - 5 * body["age"] + sex if body.get("height_cm") and body.get("age") else 22 * kg
+    mets = METS["race"] if t == "race" else METS.get(level or "", METS["moderate"])
+    ride = mets * kg * minutes / 60 if t != "rest" else 0
+    return {"base": round(rest * DAILY_LIFE), "ride": round(ride), "total": round(rest * DAILY_LIFE + ride)}
 
 
 def on_bike_rate(minutes: float, race: bool = False) -> int:
@@ -172,7 +189,7 @@ def bottles(minutes: float, rate: int, drink: dict, cages: int = 2, bladder_l: f
     return {"servings": servings, "setup": setup, "sips": sips, "top_up": top_up, "sodium": round(drink["sodium"] * per_hour), "no_refill": no_refill}
 
 
-def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weight_kg: float | None) -> dict:
+def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weight_kg: float | None, body: dict | None = None) -> dict:
     """Meals for one day: targets, the Blueprint meals when they fit, and a vegetarian base for the rest."""
     n = cfg.get("nutrition", {})
     t, t_next = tier(day), tier(tomorrow)
@@ -183,9 +200,16 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
     commute = (day or {}).get("commute")
     ride_when = "commute" if commute else (n.get("weekday_ride", "evening") if weekday else "morning")
     rides = mins > 0 and t != "rest"
-    kg = weight_kg or None
+    body = body or ({"kg": weight_kg} if weight_kg else None)
+    kg = body["kg"] if body else None
     carb_target = CARBS_PER_KG[t] * kg if kg else None
     protein_target = PROTEIN_PER_KG * kg if kg else None
+    energy = burn(t, mins, body, (day or {}).get("level")) if kg else None
+    if energy and t not in ("race", "load"):
+        # no more carbohydrate than the day's burn has room for once protein and fat are in (race days and the day
+        # before are the deliberate exceptions: that's what filling the tank means)
+        room = (energy["total"] - protein_target * 4 - FAT_PER_KG * kg * 9) / 4
+        carb_target = max(CARBS_PER_KG["rest"] * kg, min(carb_target, room))
     pudding, veggie = RECIPES["pudding"], RECIPES[n.get("lunch", "veggie")]
     big = t in ("hard", "long", "race") or t_next == "long"
     meals: list[dict] = []
@@ -228,7 +252,7 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
             if t == "load" else "Refuel after the finish; the Super Veggie is back tomorrow.", c, 25, base(c, 25, low_fiber=True))
         if t == "load":
             c = 2 * kg if kg else 0
-            add("Afternoon", "Carb snacks every couple of hours: bagel, rice cakes with honey, bananas, juice, pretzels",
+            add("Snacks", "Carb snacks every couple of hours: bagel, rice cakes with honey, bananas, juice, pretzels",
                 "Topping up glycogen takes the whole day; one big dinner can't hold it all.", c, 0,
                 f"Vegetarian base: ~{_r10(c)} g carbs across the afternoon." if kg else "")
     else:
@@ -248,7 +272,7 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
         workout_home = commute == "workout"
         c = 40 if workout_home else 35
         lead = "the ride home" if commute else "riding"
-        add("Afternoon", f"60–90 min before {lead}: a banana or 3 dates, or rice cakes with honey",
+        add("Snack", f"60–90 min before {lead}: a banana or 3 dates, or rice cakes with honey",
             "The ride home carries the workout: start it fuelled." if workout_home else "Lunch was hours ago; top up so the session starts fuelled.",
             c, 0, f"Vegetarian base: ~{c} g fast carbs, little fat or fiber.")
     longest = mins / 2 if commute else mins          # a commute is two rides of about an hour, not one long one
@@ -266,11 +290,11 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
             on_bike, drink["protein"] * b["servings"])
     if t in ("hard", "long", "race"):
         if pudding_later:
-            add("After", "The Nutty Pudding, within an hour of finishing, with a banana",
+            add("After the ride", "The Nutty Pudding, within an hour of finishing, with a banana",
                 "Its protein and the banana's carbs start the repair; this is when its fat and fiber don't get in the way.",
                 pudding["carbs"] + BANANA, pudding["protein"] - COLLAGEN)
         else:
-            add("After", "Within an hour: a whey shake with fruit, or Greek yogurt with berries and honey",
+            add("After the ride", "Within an hour: a whey shake with fruit, or Greek yogurt with berries and honey",
                 "Protein and carbs early start the repair and refill the glycogen tomorrow's riding needs.",
                 40, SHAKE, base(40, SHAKE, kind="snack"))
 
@@ -308,25 +332,30 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
         add("Dinner", idea, f"Aim for about {CARBS_PER_KG[t]:g} g carbs and {PROTEIN_PER_KG:g} g protein per kg over the whole day.")
     if snack_c >= 15 or snack_p >= 10:
         if snack_c < 15:
-            add("Evening", "Greek yogurt or cottage cheese, plain or with a few berries",
+            add("Evening snack", "Greek yogurt or cottage cheese, plain or with a few berries",
                 "Protein the light dinner didn't carry; it also helps overnight repair.", 0, snack_p,
                 f"Vegetarian base: ~{_r10(snack_p)} g protein (1 cup Greek yogurt ≈ 23 g, 1 cup cottage cheese ≈ 25 g).")
         else:
-            add("Evening", "Greek yogurt with fruit and granola, or cottage cheese with berries and honey",
+            add("Evening snack", "Greek yogurt with fruit and granola, or cottage cheese with berries and honey",
                 "The day still owes more than one dinner can carry comfortably.", snack_c, snack_p, base(snack_c, snack_p, kind="snack"))
 
+    kcal = carb_target * 4 + protein_target * 4 + FAT_PER_KG * kg * 9 if kg else None
     return {"date": on.isoformat(), "tier": t, "label": LABEL[t], "weekday": weekday,
             "carbs_g": _r10(carb_target) if carb_target else None, "protein_g": _r10(protein_target) if protein_target else None,
+            "kcal": int(round(kcal / 50) * 50) if kcal else None, "burn": {k: int(round(v / 50) * 50) for k, v in energy.items()} if energy else None,
             "carbs_per_kg": CARBS_PER_KG[t], "protein_per_kg": PROTEIN_PER_KG, "meals": meals}
 
 
-def plan(days: list[dict], today: date, cfg: dict, weight_kg: float | None) -> dict | None:
+def plan(days: list[dict], today: date, cfg: dict, weight_kg: float | None, profile: dict | None = None) -> dict | None:
     """Today's and tomorrow's meals from the season plan's next days (today's entry already eased by readiness)."""
     if not days:
         return None
     by = {d["date"]: d for d in days}
+    p = profile or {}
+    body = {"kg": weight_kg, "height_cm": p.get("height_cm"), "age": today.year - p["birth_year"] if p.get("birth_year") else None,
+            "sex": cfg.get("athlete", {}).get("sex", "male")} if weight_kg else None
     d0, d1, d2 = (by.get((today + timedelta(days=i)).isoformat()) for i in range(3))
     return {"weight_kg": round(weight_kg, 1) if weight_kg else None,
-            "today": day_plan(d0, d1, today, cfg, weight_kg),
-            "tomorrow": day_plan(d1, d2, today + timedelta(days=1), cfg, weight_kg),
+            "today": day_plan(d0, d1, today, cfg, weight_kg, body),
+            "tomorrow": day_plan(d1, d2, today + timedelta(days=1), cfg, weight_kg, body),
             "recipes": {k: {f: v[f] for f in ("name", "kcal", "protein", "carbs", "fiber", "fat")} for k, v in RECIPES.items()}}

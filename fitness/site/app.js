@@ -299,7 +299,9 @@ window.startDashboard = D => {
     const F = D.fuel;
     if (!F || !F.today) return "";
     const T = F.today, N = F.tomorrow;
-    const targets = T.carbs_g ? `About <b>${T.carbs_g} g carbs</b> and <b>${T.protein_g} g protein</b> today (${T.carbs_per_kg} and ${T.protein_per_kg} g per kg at ${F.weight_kg} kg).`
+    const k = n => Math.round(n).toLocaleString();
+    const energy = T.kcal && T.burn ? ` That's about <b>${k(T.kcal)} kcal</b>, all meals and snacks together; today burns roughly ${k(T.burn.total)} (${k(T.burn.base)} living${T.burn.ride ? ` + ${k(T.burn.ride)} riding` : ""}).` : "";
+    const targets = T.carbs_g ? `About <b>${T.carbs_g} g carbs</b> and <b>${T.protein_g} g protein</b> today (${Math.round(T.carbs_g / F.weight_kg * 10) / 10} and ${T.protein_per_kg} g per kg at ${F.weight_kg} kg).${energy}`
       : `About ${T.carbs_per_kg} g carbs and ${T.protein_per_kg} g protein per kg of body weight today (add your weight in Garmin Connect for grams).`;
     return `<div class="fuel"><span class="label">Fuel · ${esc(T.label)}</span>
       <p class="sub">${targets}</p>

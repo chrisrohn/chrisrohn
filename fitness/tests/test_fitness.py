@@ -588,6 +588,20 @@ def test_fuel_tiers():
     assert tier(_fuel_day("easy", 45, 20, "easy")) == "easy" and tier(_fuel_day("endurance", 60, 50, "moderate")) == "moderate"
     assert tier(_fuel_day("key", 55, 65, "hard")) == "hard" and tier(_fuel_day("long", 180, 140, "hard")) == "long"
     assert tier(_fuel_day("race", 170, 220, "hard")) == "race"
+    # two easy hours of commuting score a high load but eat like a training day, not a hard one
+    assert tier(_fuel_day("commute", 139, 95, "easy", commute="easy")) == "moderate" and tier(_fuel_day("key", 60, 85)) == "hard"
+
+
+def test_fuel_targets_fit_the_days_burn(cfg):
+    from fitness.fuel import burn, day_plan
+    body = {"kg": 83.9, "height_cm": 183, "age": 45, "sex": "male"}
+    b = burn("moderate", 139, body, "easy")
+    assert 2300 < b["base"] < 2500 and 1100 < b["ride"] < 1250
+    commute = day_plan(_fuel_day("commute", 139, 95, "easy", commute="easy"), None, date(2026, 10, 9), cfg, 83.9, body)
+    assert commute["label"] == "Training day" and commute["carbs_g"] == 420 and commute["kcal"] < commute["burn"]["total"]
+    assert "After the ride" not in {m["slot"] for m in commute["meals"]}                       # no recovery shake after an easy commute
+    key = day_plan(_fuel_day("key", 60, 85, "hard"), None, date(2026, 10, 14), cfg, 83.9, body)
+    assert key["carbs_g"] * 4 + key["protein_g"] * 4 <= key["burn"]["total"]                     # capped by the burn, not just g/kg
 
 
 def test_fuel_blueprint_meals_when_they_fit_and_a_vegetarian_base_for_the_rest(cfg):
@@ -602,7 +616,7 @@ def test_fuel_blueprint_meals_when_they_fit_and_a_vegetarian_base_for_the_rest(c
     hard = day_plan(_fuel_day("commute", 135, 120, "hard", commute="workout", commute_workout="2 × 15 min"), None, date(2026, 10, 13), cfg, 78)
     slots = {m["slot"]: m["what"] for m in hard["meals"]}
     assert "banana" in slots["Breakfast"] and "45 min before you leave" in slots["Breakfast"]
-    assert "lentils" in slots["Lunch"] and "black rice" in slots["Lunch"] and "ride home" in slots["Afternoon"]
+    assert "lentils" in slots["Lunch"] and "black rice" in slots["Lunch"] and "ride home" in slots["Snack"]
     assert "On the bike" not in slots                                                    # two hour-long legs: no on-bike fuel needed
     sun = day_plan(_fuel_day("rest"), None, date(2026, 10, 18), cfg, 78)              # a rest Sunday still gets the Blueprint meals
     assert {m["slot"]: m["what"] for m in sun["meals"]}["Breakfast"].startswith("Nutty Pudding")
@@ -613,7 +627,7 @@ def test_fuel_race_eve_and_race_morning_drop_the_fiber(cfg):
     race = _fuel_day("race", 170, 220, "hard")
     eve = day_plan(_fuel_day("openers", 40, 30, "easy"), race, date(2026, 11, 6), cfg, 78)
     slots = {m["slot"]: m for m in eve["meals"]}
-    assert eve["tier"] == "load" and eve["carbs_g"] == 700 and "Not the Super Veggie" in slots["Lunch"]["why"]
+    assert eve["tier"] == "load" and eve["carbs_g"] == 620 and "Not the Super Veggie" in slots["Lunch"]["why"]
     assert "carb night" in slots["Dinner"]["what"] and "beans" not in slots["Dinner"]["base"]
     day = day_plan(race, None, date(2026, 11, 7), cfg, 78)
     slots = {m["slot"]: m for m in day["meals"]}
@@ -626,7 +640,7 @@ def test_fuel_weekend_long_ride_moves_the_pudding_after(cfg):
     sat = day_plan(_fuel_day("long", 180, 140, "hard"), None, date(2026, 10, 17), cfg, 78)
     slots = {m["slot"]: m["what"] for m in sat["meals"]}
     assert "2–3 h before" in slots["Breakfast"] and "75 g carbs an hour" in slots["On the bike"]
-    assert slots["After"].startswith("The Nutty Pudding") and slots["Lunch"].endswith("after the ride")
+    assert slots["After the ride"].startswith("The Nutty Pudding") and slots["Lunch"].endswith("after the ride")
     fri = day_plan(_fuel_day("easy", 45, 20, "easy"), _fuel_day("long", 180, 140, "hard"), date(2026, 10, 16), cfg, None)
     assert fri["carbs_g"] is None and "long ride starts here" in {m["slot"]: m["what"] for m in fri["meals"]}["Dinner"]
 
