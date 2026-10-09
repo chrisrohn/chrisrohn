@@ -116,7 +116,7 @@ test.describe("GitHub sync", () => {
     await signIn(page);
     await page.reload();
     await page.locator("#databar [data-action=connect-strava]").click();
-    await page.waitForURL(/strava\.com/);
+    await page.waitForURL(url => url.hostname === "www.strava.com");
     const auth = new URL(page.url());
     expect(Object.fromEntries(auth.searchParams)).toMatchObject({ client_id: "4242", response_type: "code", scope: "read,activity:read_all", state: "strava",
       redirect_uri: "http://127.0.0.1:8765/fitness/" });
