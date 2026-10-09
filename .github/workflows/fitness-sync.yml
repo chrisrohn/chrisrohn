@@ -15,11 +15,11 @@ on:
   workflow_call:
     inputs:
       action:
-        description: sync, connect-garmin or connect-strava
+        description: sync, connect-garmin, connect-strava, push-subscribe, push-test or service
         type: string
         default: sync
       code:
-        description: the Strava authorization code, for connect-strava
+        description: the Strava authorization code, the notification subscription, or the bike job done
         type: string
         default: ""
     secrets:

@@ -47,3 +47,24 @@ async function asset(req, key) {
   const fresh = fetch(req).then(res => { if (res.ok) cache.put(key, res.clone()); return res; }).catch(() => null);
   return hit || (await fresh) || Response.error();
 }
+
+// ── the morning notification: the sync pushes the day's call (encrypted end to end; see fitness/webpush.py) ──
+self.addEventListener("push", e => {
+  /** @type {{title?: string, body?: string, tag?: string, url?: string}} */
+  let m;
+  try { m = e.data ? e.data.json() : {}; } catch { m = { body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(m.title || "Training", {
+    body: m.body || "", tag: m.tag || "today", renotify: true, icon: "icons/icon-192.png",
+    data: { url: new URL(m.url || "./#today", self.registration.scope).href },
+  }));
+});
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || self.registration.scope;
+  e.waitUntil((async () => {
+    for (const c of await self.clients.matchAll({ type: "window", includeUncontrolled: true })) {
+      if (c.url.startsWith(self.registration.scope) && "focus" in c) { await c.focus(); return c.navigate(url).catch(() => null); }
+    }
+    return self.clients.openWindow(url);
+  })());
+});

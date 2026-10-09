@@ -24,8 +24,8 @@
     <div class="bar">
       <h1>Training &amp; Recovery</h1>
       <nav aria-label="Sections">
-        <a href="#today">Today</a><a href="#season">Season</a><a href="#load">Load</a><a href="#sleep">Sleep</a>
-        <a href="#recovery">Recovery</a><a href="#training">Training</a><a href="#insights">Insights</a><a href="#device">Data</a>
+        <a href="#today">Today</a><a href="#race">Race</a><a href="#season">Season</a><a href="#load">Load</a><a href="#sleep">Sleep</a>
+        <a href="#recovery">Recovery</a><a href="#training">Training</a><a href="#insights">Insights</a><a href="#bike">Bike</a><a href="#device">Data</a>
       </nav>
       <div class="tools">
         <button type="button" class="chip" id="install" hidden>Install</button>
@@ -53,6 +53,12 @@
       <p class="sub"><a id="cloud-new-token" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a token</a>: repository access <b>only that repository</b>; permissions <b>Actions: Read and write</b> and <b>Contents: Read-only</b>.</p>
       <div class="actions"><button type="button" class="chip" id="cloud-forget" hidden>Disconnect</button><button type="button" class="chip primary" id="cloud-save">Save and sync</button></div>
       <p id="cloud-error" class="error" role="alert"></p>
+      <section id="notify" hidden aria-labelledby="notify-title">
+        <h3 class="mt-3" id="notify-title">Morning notification</h3>
+        <p class="sub" id="notify-state">The day's call on your phone each morning, once last night's sleep is in: what to ride, readiness and the weather. Encrypted from the sync to this browser.</p>
+        <div class="actions"><button type="button" class="chip" id="notify-test" hidden>Send a test</button><button type="button" class="chip primary" id="notify-on">Turn on</button></div>
+        <p id="notify-error" class="error" role="alert"></p>
+      </section>
       <h3 class="mt-3">Or import by hand</h3>
       <label for="import-text" class="label">Phone link</label>
       <textarea id="import-text" rows="3" spellcheck="false" autocomplete="off" placeholder="https://chrisrohn.com/fitness/#d=…"></textarea>

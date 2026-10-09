@@ -198,7 +198,37 @@
     /** @type {HTMLInputElement} */ ($("cloud-token")).value = c ? c.token : "";
     $("cloud-forget").hidden = !c;
     $("cloud-new-token").setAttribute("href", TOKEN_URL);
+    paintNotify();
     dlg.showModal();
+  }
+
+  // ── the morning notification: this browser subscribes, and a "push-subscribe" run hands that to the sync ─────
+  const canPush = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && window.isSecureContext;
+  const b64u = s => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  async function paintNotify() {
+    const box = $("notify");
+    if (!box) return;
+    const key = status && status.push && status.push.key;
+    box.hidden = !(cloud() && key && canPush());
+    if (box.hidden) return;
+    $("notify-error").textContent = "";
+    let mine = null;
+    try { mine = await (await navigator.serviceWorker.ready).pushManager.getSubscription(); } catch { /* not yet registered */ }
+    const on = !!mine && Notification.permission === "granted" && status.push.devices > 0;
+    $("notify-on").hidden = on;
+    $("notify-test").hidden = !on;
+    if (on) $("notify-state").textContent = `On${status.push.devices > 1 ? ` for ${status.push.devices} devices` : ""}. The day's call arrives once last night's sleep is in, between 5 and 11 am${status.push.last ? `; last sent ${when(status.push.last)}` : ""}.`;
+    if (status.push.error) $("notify-error").textContent = status.push.error;
+  }
+  async function turnOnNotify() {
+    const err = $("notify-error");
+    try {
+      if (await Notification.requestPermission() !== "granted") throw new Error("Notifications are blocked for this site: allow them in Chrome's site settings (the icon left of the address), then try again.");
+      const reg = await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes(status.push.key) });
+      if (dlg) dlg.close();
+      job("push-subscribe", "Turning on the morning notification", { code: b64u(JSON.stringify(sub.toJSON())) });
+    } catch (e) { err.textContent = e.message || String(e); }
   }
   async function take(text) {
     try {
@@ -234,6 +264,8 @@
       if (f) take(await f.text());
     });
     $("cloud-save").addEventListener("click", saveCloud);
+    $("notify-on").addEventListener("click", turnOnNotify);
+    $("notify-test").addEventListener("click", () => { if (dlg) dlg.close(); job("push-test", "Sending a test notification"); });
     $("cloud-forget").addEventListener("click", () => { ls.set("fitness-cloud", null); location.reload(); });
   }
   document.addEventListener("click", e => {
@@ -245,11 +277,25 @@
     if (act === "connect-garmin") job("connect-garmin", "Signing in to Garmin. If Garmin emails you a code, enter it here", { askCode: true });
     if (act === "connect-strava") connectStrava();
     if (act === "send-code") sendCode();
+    if (act === "service") {
+      const label = /** @type {HTMLElement} */ (t).dataset.label || "that";
+      if (confirm(`Mark “${label}” done today?`)) job("service", `Logging: ${label.toLowerCase()}`, { code: /** @type {HTMLElement} */ (t).dataset.code || "" });
+    }
     if (act === "reload") location.reload();
     if (act === "forget") {
       e.preventDefault();
       if (confirm("Remove the dashboard data from this device?")) { ls.set("fitness-dashboard", null); ls.set("fitness-ride-config", null); location.reload(); }
     }
+  });
+  // Silca's numbers for a surface: a "service" run stores them with today's weight, so the app knows when to recalculate
+  document.addEventListener("submit", e => {
+    const f = e.target instanceof HTMLFormElement && e.target.dataset.form === "pressure" ? e.target : null;
+    if (!f) return;
+    e.preventDefault();
+    const v = id => /** @type {HTMLInputElement} */ ($(id)).value.trim();
+    const front = parseFloat(v("p-front")), rear = parseFloat(v("p-rear"));
+    if (!(front >= 5 && front <= 120 && rear >= 5 && rear <= 120)) { /** @type {HTMLInputElement} */ ($("p-front")).focus(); return; }
+    job("service", "Saving the tire pressures", { code: `pressure:${v("p-where")}:${front}/${rear}` });
   });
   document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.id === "garmin-code") { e.preventDefault(); sendCode(); } });
 
@@ -344,6 +390,7 @@
   window.addEventListener("DOMContentLoaded", async () => {
     const strava = stravaReturn();
     const got = await load();
+    if (cloud()) document.documentElement.dataset.cloud = "1";   // what needs the sync (Done, pressures) shows only with it
     if (!got) welcome();
     else {
       shown = got.D.generated;

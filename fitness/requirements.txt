@@ -1,4 +1,5 @@
 # Only the sync commands need these; the metrics, the build and the tests are standard library.
 garminconnect>=0.3.17
 requests>=2.32
+cryptography>=42     # the morning notification's Web Push encryption (fitness/webpush.py)
 segno>=1.6             # optional: the QR code that hands ride mode its week of sessions

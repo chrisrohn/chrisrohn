@@ -55,6 +55,13 @@ class Store:
     def activities(self) -> list[dict]:
         return [json.loads(v) for (v,) in self.db.execute("SELECT data FROM activities ORDER BY start")]
 
+    def reparse(self, source: str, parse) -> int:
+        """Re-normalize every stored activity from `source` from its raw record (a parser that learned a field)."""
+        rows = self.db.execute("SELECT raw FROM activities WHERE source = ? AND raw IS NOT NULL", (source,)).fetchall()
+        for (raw,) in rows:
+            self.put_activity(parse(json.loads(raw)), json.loads(raw))
+        return len(rows)
+
     def latest_start(self, source: str) -> str | None:
         return self.db.execute("SELECT MAX(start) FROM activities WHERE source = ?", (source,)).fetchone()[0]
 

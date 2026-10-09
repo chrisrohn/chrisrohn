@@ -39,15 +39,50 @@ The **Data** section of the page shows how many of the last 30 days actually cam
    when the phone app syncs it (opening Garmin Connect makes sure).
 2. **Open the app.** If the last sync is more than 45 minutes old it starts one by itself and reloads about a minute
    later with this morning's numbers. If last night still isn't in Garmin, the Today card says so, with a *Sync now*.
-3. **Read the call.** The Today card has:
+3. **Or don't open anything.** With the morning notification on (Settings → *Morning notification*), the call
+   arrives on its own once last night's sleep is in.
+4. **Read the call.** The Today card has:
    - **The call:** the plan's session (or the commute), eased by readiness when the morning says so, never made harder.
    - **Plan B:** what to do instead if it rains or the day runs short, so there's always a sensible option.
    - **The next 7 days:** tap any day for its session and its Plan B. Every sync rebuilds them from what you rode,
      slept and recovered: a missed day moves, a good week grows.
+   - **Weather:** on a commute day, each leg's weather, what to wear, lights, and the wind home. On other days, the
+     best window to ride today.
    - **Fuel:** today's meals around the riding.
 
 Work days are Monday to Friday except US federal holidays (`commute.holidays = "us-federal"`, `""` for none): no
 commute is ever booked or suggested on a weekend or a holiday.
+
+### Weather
+
+The sync fetches [Open-Meteo](https://open-meteo.com)'s forecast (free, no key) for where your commute starts, learned
+from your Garmin rides' start points. Only a point rounded to about 1 km leaves the sync, and coordinates never reach
+the phone. The forecast is cached for 50 minutes. `[weather] enabled = false` turns it off.
+
+- **The commute call** checks both legs at your usual departure times:
+  - thunderstorms, gusts of 60 km/h or more, or ice: leave the bike, and the session moves to the evening;
+  - rain: *your call*, with the Plan B;
+  - otherwise, what to wear for how it feels, lights when a leg is near dark, and the headwind home.
+- **Other days** get the best window to ride: in daylight, after work on weekdays, the driest, then the warmest.
+- **The planner** keeps the next 16 days' commutes off wet days. A long ride forecast into the rain swaps with a free,
+  dry neighboring day (Saturday's to Sunday).
+- **The 7-day list** shows each day's sky, high and low, and the chance of rain.
+
+### The morning notification
+
+Settings → *Morning notification* → **Turn on**. It works in Chrome without installing the app, so the Music app on
+the same site doesn't get in the way.
+
+- **What arrives:** the day's call, between 5 and 11 am, once last night's sleep is in (or from 9 am regardless).
+  One update follows if the call changes before 3 pm, for example when the forecast turns.
+- **Privacy:** the sync encrypts each message to your browser's key (RFC 8291, signed with VAPID, RFC 8292), so the
+  push service in between only ever carries ciphertext.
+- **Sending a test:** *Send a test* in the same place.
+
+### The week so far
+
+If you've already ridden a lot since Monday, the rest of the week shrinks (down to half) so the week lands on its
+target. A light start isn't crammed into the weekend. *Plan adjusted* says when this happens.
 
 ## Races and the trainer season
 
@@ -261,6 +296,43 @@ what changed under **Plan adjusted**:
   fitness you actually have, still capped at `max_ramp`, so the race-day target stays honest without a cram week.
 
 Recovery weeks, tapers and race weeks aren't rearranged: there, a missed session simply stays missed.
+
+## Race day
+
+The **Race** section covers each race in the next six weeks (the next one always):
+- the race-morning timeline, counted back from your wave's start (`start = "HH:MM"` in the race's config block;
+  10:00 until set), including a low-fiber carb breakfast (not the Nutty Pudding that day);
+- how to ride the start and the heart rate to settle at;
+- the bottles and gels for your expected time;
+- the forecast and what to wear, from 16 days out;
+- the bike checklist for the week before;
+- a pack list;
+- the key sessions still to come.
+
+## The bike
+
+The **Bike** section tracks the 2022 Cube Nuroad C:62 SL from the riding itself (`[bike]` in config.toml):
+
+| Job | When |
+|---|---|
+| Re-drip the chain (Silca Super Secret) | every 200 mi, and **right after any wet ride** (from the weather history) |
+| Clean the chain | every 800 mi |
+| Check chain wear | every 1,000 mi |
+| Charge the AXS battery | every 15 h of riding |
+| Top up tubeless sealant | every 90 days |
+| Check brake pads | every 1,000 mi; wet miles count double |
+| Inspect the tires | every 750 mi |
+| Bleed the brakes (DOT 5.1) | yearly |
+| Shifter batteries (CR2032) | every 2 years |
+| Full service | 3,000 mi or yearly |
+
+- **Trainer rides** count toward the chain and the AXS battery, not the tires or brakes (`trainer = true`).
+- **Done** logs a job (a `service` run). Until the first one, each job counts from the day it first appeared.
+- **Intervals** can be changed under `[bike.every]`.
+- **Tire pressure:** enter Silca's numbers per surface and per race. The app gives the total system weight to type
+  into Silca's calculator: you, plus the bike's 18.5 lb, plus 2.5 kg of bottles and tools. It tells you to run the
+  calculator again when your weight has moved 2 kg since you set them, or when a race is three weeks out with no
+  pressures.
 
 ## Fitted to your riding
 

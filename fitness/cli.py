@@ -7,16 +7,18 @@ import http.server
 import json
 import tempfile
 import webbrowser
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
-from fitness import build, config
+from fitness import bike, build, config, weather
 from fitness.store import Store
 
 
 def _build(cfg: dict, db: Path, out: Path | None = None, today: date | None = None) -> tuple[Path, dict]:
     with Store(db) as store:
-        data = build.assemble(cfg, store.days(), store.activities(), today or date.today(), json.loads(store.get("profile") or "null"))
+        forecast = weather.for_store(store, cfg, today or date.today(), datetime.now()) if cfg.get("weather", {}).get("enabled", True) else None
+        data = build.assemble(cfg, store.days(), store.activities(), today or date.today(), json.loads(store.get("profile") or "null"), weather=forecast,
+                              bike_state=bike.state(store, today or date.today()))
     return build.render(data, out, cfg), data
 
 
@@ -60,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=8765)
     sub.add_parser("ride-page", help="write a data-free ride.html to host over HTTPS (set [app] url to its folder)")
     cl = sub.add_parser("cloud", help="the GitHub Actions sync: connect, sync both services, write fitness-data.json + status.json")
-    cl.add_argument("--action", choices=["sync", "connect-garmin", "connect-strava"], default="sync")
+    cl.add_argument("--action", choices=["sync", "connect-garmin", "connect-strava", "push-subscribe", "push-test", "service"], default="sync")
     cl.add_argument("--code", default=None, help="Strava authorization code (default: $CODE)")
     cl.add_argument("--out", type=Path, default=Path("."), help="where the two files go (the state branch checkout)")
     cl.add_argument("--inbox", type=Path, default=None, help="a checkout of the private repository's main branch (its strava/ export)")

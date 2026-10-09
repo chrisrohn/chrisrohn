@@ -54,6 +54,7 @@ kind = "mtb"
 distance = "30mi"
 target_tsb = [10, 20]     # the form band to arrive in on race morning
 match = ["iceman"]        # activity-name words that mark earlier editions
+start = ""                # your wave's start time, "HH:MM": the race-day timeline counts back from it (10:00 until set)
 
 [races.options.30mi]
 label = "30 mi"
@@ -72,6 +73,7 @@ kind = "gravel"
 distance = "100k"         # switch to "50k" if you drop down; the page compares both
 target_tsb = [5, 15]
 match = ["barry", "roubaix"]
+start = ""                # your wave's start time, "HH:MM"
 
 [races.options.100k]
 label = "Killer · 62 mi"
@@ -102,6 +104,24 @@ climb_m = [10, 50]        # gain riding in, riding home
 days = ["tue", "thu", "wed", "mon", "fri"]   # the days you can commute, most preferred first
 per_week = [1, 3]         # fewest and most commute days a week the planner will book
 winter = false            # true = keep commuting through the [indoor] trainer season
+
+# The bike, for the upkeep reminders (fitness/bike.py) and Silca's pressure calculator. Distance and ride time come
+# from your rides; a wet ride (from the weather history) makes the chain due at once. Mark jobs done in the app.
+[bike]
+name = "Cube Nuroad C:62 SL (2022)"
+parts = "SRAM GX Eagle AXS 1×12 with Rival AXS levers · Rival hydraulic brakes · Newmen Evolution SL X.R.25 · WTB Riddler 45 tubeless · Silca Super Secret (drip)"
+tire = "WTB Riddler 45 (measure it: on a 25 mm rim it runs wider than printed)"
+rim = "Newmen Evolution SL X.R.25"
+trainer = true            # trainer rides on this bike count toward the chain and the AXS battery, not the tires or brakes
+
+[bike.every]              # miles between jobs (the rest are by riding hours or days: see fitness/bike.py ITEMS)
+drip = 200                # Silca Super Secret: re-drip about every 200 mi, and after every wet ride
+chain = 1000
+
+# Weather (Open-Meteo, free, no key) at your commute's ends, learned from where your Garmin rides start. Set lat / lon
+# only if you have no outdoor Garmin rides yet; enabled = false turns it off.
+[weather]
+enabled = true
 
 # The installable app: chrisrohn.com/fitness/ (dashboard + ride mode), built data-free by build.mjs. The dashboard's
 # "Phone app" panel hands your data to it in a link's #fragment, which never reaches the server, or as a data file.
