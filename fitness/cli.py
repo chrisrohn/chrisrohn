@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import functools
 import http.server
+import json
 import tempfile
 import webbrowser
 from datetime import date
@@ -58,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     sv = sub.add_parser("serve", help="serve fitness/dist on the local network (phone on the same Wi-Fi)")
     sv.add_argument("--port", type=int, default=8765)
     sub.add_parser("ride-page", help="write a data-free ride.html to host over HTTPS (set [app] url to its folder)")
+    cl = sub.add_parser("cloud", help="the GitHub Actions sync: connect, sync both services, write fitness-data.json + status.json")
+    cl.add_argument("--action", choices=["sync", "connect-garmin", "connect-strava"], default="sync")
+    cl.add_argument("--code", default=None, help="Strava authorization code (default: $CODE)")
+    cl.add_argument("--out", type=Path, default=Path("."), help="where the two files go (the state branch checkout)")
     dm = sub.add_parser("demo", help="build a demo page from a synthetic athlete")
     dm.add_argument("--open", action="store_true")
     args = p.parse_args(argv)
@@ -104,6 +109,13 @@ def main(argv: list[str] | None = None) -> int:
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(config.DIST_DIR))
         print(f"Serving {config.DIST_DIR} on http://0.0.0.0:{args.port}/ — private data: keep this on your own network. Ctrl-C stops.")
         http.server.ThreadingHTTPServer(("0.0.0.0", args.port), handler).serve_forever()
+    elif args.cmd == "cloud":
+        import os
+
+        from fitness import cloud
+        status = cloud.run(cfg, args.action, args.code if args.code is not None else os.environ.get("CODE", ""), args.out)
+        print(json.dumps(status, indent=2))
+        return 0 if status["ok"] else 1
     elif args.cmd == "demo":
         from fitness import demo
         with tempfile.TemporaryDirectory() as tmp:

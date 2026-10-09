@@ -43,15 +43,24 @@
   <main id="app"></main>
   <dialog id="import" aria-labelledby="import-title">
     <form method="dialog" class="sheet">
-      <h2 id="import-title">Import data</h2>
-      <p class="sub">Paste the phone link from the dashboard on your computer, or pick the data file you saved.</p>
+      <h2 id="import-title">Your data</h2>
+      <h3>Sync from GitHub</h3>
+      <p class="sub">Your private repository syncs Garmin and Strava on a schedule. This phone reads it with a token that can only see that repository.</p>
+      <label for="cloud-repo" class="label">Repository</label>
+      <input id="cloud-repo" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="you/training-data">
+      <label for="cloud-token" class="label">Token</label>
+      <input id="cloud-token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+      <p class="sub"><a id="cloud-new-token" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a token</a>: repository access <b>only that repository</b>; permissions <b>Actions: Read and write</b> and <b>Contents: Read-only</b>.</p>
+      <div class="actions"><button type="button" class="chip" id="cloud-forget" hidden>Disconnect</button><button type="button" class="chip primary" id="cloud-save">Save and sync</button></div>
+      <p id="cloud-error" class="error" role="alert"></p>
+      <h3 class="mt-3">Or import by hand</h3>
       <label for="import-text" class="label">Phone link</label>
-      <textarea id="import-text" rows="4" spellcheck="false" autocomplete="off" placeholder="https://chrisrohn.com/fitness/#d=…"></textarea>
+      <textarea id="import-text" rows="3" spellcheck="false" autocomplete="off" placeholder="https://chrisrohn.com/fitness/#d=…"></textarea>
       <div class="actions"><button type="button" class="chip" id="import-paste">Paste</button><button type="submit" class="chip primary" id="import-go">Import</button></div>
       <label for="import-file" class="label mt-3">Or a data file</label>
       <input id="import-file" type="file" accept=".json,application/json,text/plain">
       <p id="import-error" class="error" role="alert"></p>
-      <div class="actions"><button type="submit" class="chip" value="cancel">Close</button></div>
+      <div class="actions"><button type="button" class="chip" data-action="forget">Remove from this device</button><button type="submit" class="chip" value="cancel">Close</button></div>
     </form>
   </dialog>
   <footer id="foot"></footer>

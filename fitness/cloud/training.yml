@@ -1,0 +1,36 @@
+# Your private training-data repository's only workflow (.github/workflows/training.yml there). The work itself lives
+# in chrisrohn/chrisrohn's .github/workflows/fitness-sync.yml; this file only says when to run it and with which secrets.
+#
+# Secrets (Settings → Secrets and variables → Actions): STATE_KEY, GARMIN_EMAIL, GARMIN_PASSWORD, STRAVA_CLIENT_ID,
+# STRAVA_CLIENT_SECRET. The app at chrisrohn.com/fitness/ starts runs with its token: "Sync now", "Connect Garmin",
+# "Connect Strava", and "garmin-code 123456", which only carries the code Garmin emailed to the sign-in waiting for it.
+name: Training sync
+run-name: ${{ inputs.action == 'garmin-code' && format('garmin-code {0}', inputs.code) || inputs.action || 'sync' }}
+
+on:
+  schedule:
+    - cron: "17 10,13,17,23 * * *"   # 6:17, 9:17, 13:17, 19:17 in Michigan (EDT; an hour earlier in winter)
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [sync, connect-garmin, connect-strava, garmin-code]
+        default: sync
+      code:
+        description: The Strava or Garmin code (the app fills this in)
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  sync:
+    if: inputs.action != 'garmin-code'
+    uses: chrisrohn/chrisrohn/.github/workflows/fitness-sync.yml@main
+    with:
+      action: ${{ inputs.action || 'sync' }}
+      code: ${{ inputs.code }}
+    secrets: inherit

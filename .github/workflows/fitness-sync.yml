@@ -1,0 +1,115 @@
+name: Fitness sync
+
+# The training dashboard's sync, so nothing has to run on a computer: Garmin + Strava → fitness-data.json for the app at
+# chrisrohn.com/fitness/. It is called from a PRIVATE repository (the caller is fitness/cloud/training.yml) on a schedule
+# and from the app's buttons; it never runs here, so everything it prints and stores lands in that private repository.
+#
+# Between runs the caller's `state` branch holds three files, replaced in one commit each run (no history piles up):
+#   state.enc          the SQLite store and the Garmin / Strava sign-ins, encrypted with the STATE_KEY secret
+#   fitness-data.json  the dashboard's numbers, which the app downloads with its own read-only token
+#   status.json        what's connected, when it last ran, and what went wrong if anything did
+# A wrong STATE_KEY stops the run before anything is written, so the saved state is never overwritten with nothing.
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        description: sync, connect-garmin or connect-strava
+        type: string
+        default: sync
+      code:
+        description: the Strava authorization code, for connect-strava
+        type: string
+        default: ""
+    secrets:
+      STATE_KEY:
+        required: true
+      GARMIN_EMAIL:
+        required: false
+      GARMIN_PASSWORD:
+        required: false
+      STRAVA_CLIENT_ID:
+        required: false
+      STRAVA_CLIENT_SECRET:
+        required: false
+
+jobs:
+  sync:
+    if: github.repository != 'chrisrohn/chrisrohn'   # private callers only: this repository's logs are public
+    runs-on: ubuntu-latest
+    timeout-minutes: 50        # the first run backfills a year of Garmin days and all of Strava
+    concurrency:
+      group: fitness-sync
+      cancel-in-progress: false
+    permissions:
+      contents: write          # the state branch
+      actions: read            # the run named "garmin-code 123456" that carries Garmin's emailed code
+    env:
+      FITNESS_DATA_DIR: ${{ github.workspace }}/data
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: chrisrohn/chrisrohn
+          ref: main
+          path: app
+          persist-credentials: false
+
+      - name: Fetch state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git clone --quiet --depth 1 --branch state "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state 2>/dev/null; then
+            echo "::notice::First run: no state branch yet."
+            mkdir -p state
+          fi
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/fitness/requirements.txt
+      - run: pip install -r app/fitness/requirements.txt
+
+      - name: Unlock state
+        id: unlock
+        env:
+          STATE_KEY: ${{ secrets.STATE_KEY }}
+        run: |
+          mkdir -p data
+          if [ -z "$STATE_KEY" ]; then echo "::error title=STATE_KEY::Add a STATE_KEY secret (any long passphrase)."; exit 1; fi
+          if [ -f state/state.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:STATE_KEY -in state/state.enc | tar -xz -C data \
+              || { echo "::error title=STATE_KEY::STATE_KEY doesn't open the saved state. Put the old one back, or delete the state branch to start over."; exit 1; }
+          fi
+
+      - name: Sync
+        working-directory: app
+        env:
+          ACTION: ${{ inputs.action }}
+          CODE: ${{ inputs.code }}
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$CODE" ]; then echo "::add-mask::$CODE"; fi
+          python -m fitness cloud --action "${ACTION:-sync}" --out "$GITHUB_WORKSPACE/state"
+
+      - name: Save state
+        if: always() && steps.unlock.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE_KEY: ${{ secrets.STATE_KEY }}
+        run: |
+          tar -cz -C data . | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass env:STATE_KEY -out state/state.enc
+          cd state
+          [ -d .git ] || git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan next
+          git add -A state.enc $(ls fitness-data.json status.json 2>/dev/null)
+          git commit -q -m "sync $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/state
+          echo "Saved $(du -h state.enc | cut -f1) of encrypted state."

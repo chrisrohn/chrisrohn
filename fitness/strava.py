@@ -1,6 +1,7 @@
 """Strava: the official API (OAuth, your own app, read-only) for ongoing sync, and the bulk-export zip for full history.
 
-Create an app at https://www.strava.com/settings/api with Authorization Callback Domain `localhost`, then
+Create an app at https://www.strava.com/settings/api with Authorization Callback Domain `chrisrohn.com`
+(Strava always allows localhost too), then
 `STRAVA_CLIENT_ID=... STRAVA_CLIENT_SECRET=... python -m fitness login strava`.
 """
 from __future__ import annotations
@@ -58,12 +59,18 @@ def login() -> None:
             server.handle_request()
     if "error" in got or "activity:read_all" not in got.get("scope", ""):
         raise SystemExit(f"Strava authorization failed or the activity:read_all box was unticked: {got}")
-    token = _requests().post("https://www.strava.com/oauth/token", timeout=30, data={
-        "client_id": client_id, "client_secret": secret, "code": got["code"], "grant_type": "authorization_code"}).json()
-    if "access_token" not in token:
-        raise SystemExit(f"Strava token exchange failed: {token}")
-    _save({**token, "client_id": client_id, "client_secret": secret})
+    token = exchange(client_id, secret, got["code"])
     print(f"Strava connected as {token.get('athlete', {}).get('firstname', 'you')}; token saved to {STRAVA_TOKEN}.")
+
+
+def exchange(client_id: str, secret: str, code: str) -> dict:
+    """Trade an authorization code (from the browser's redirect) for tokens, and keep them."""
+    token = _requests().post("https://www.strava.com/oauth/token", timeout=30, data={
+        "client_id": client_id, "client_secret": secret, "code": code, "grant_type": "authorization_code"}).json()
+    if "access_token" not in token:
+        raise SystemExit(f"Strava token exchange failed: {token.get('message') or token}")
+    _save({**token, "client_id": client_id, "client_secret": secret})
+    return token
 
 
 def _save(token: dict) -> None:

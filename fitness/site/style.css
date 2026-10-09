@@ -269,12 +269,23 @@ header.top { padding-top: env(safe-area-inset-top); }
 .databar-in { max-width: 1200px; margin: 0 auto; padding: var(--sp-2) var(--gutter); display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); font-size: var(--fs-small); }
 .databar-in span { flex: 1 1 auto; }
 @media (max-width: 559px) { .databar-in span { flex-basis: 100%; } }
-.databar-in.stale span { color: var(--accent-ink); }
+.databar-in.stale span, .databar-in .bad { color: var(--accent-ink); }
+.databar-in .bad { flex-basis: 100%; }
+.databar-in input { font: inherit; width: 12ch; min-height: var(--tap); padding: 0 var(--sp-2); border: 1.5px solid var(--ink); border-radius: 0; background: var(--page); color: var(--ink); letter-spacing: .12em; }
+.databar-in a.chip { color: var(--ink); }
+.welcome .connect { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.welcome .state { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.welcome .state li::before { content: "○ "; }
+.welcome .state li.done::before { content: "● "; }
+.welcome .state li.bad { color: var(--accent-ink); }
 dialog { border: 1.5px solid var(--ink); border-radius: 0; background: var(--page); color: var(--ink); padding: 0; width: min(calc(100vw - 2 * var(--sp-4)), 480px); box-shadow: var(--sp-2) var(--sp-2) 0 var(--sheet-shadow); }
 dialog::backdrop { background: rgba(0, 0, 0, .55); }
 .sheet { padding: 0 var(--sp-4) var(--sp-4); display: grid; gap: var(--sp-2); }
 .sheet h2 { font-size: var(--fs-head); line-height: var(--lh-snug); letter-spacing: var(--track-head); background: var(--band); color: var(--on-band); margin: 0 calc(-1 * var(--sp-4)) var(--sp-2); padding: var(--sp-3) var(--sp-4); }
 .sheet textarea { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--fs-small); width: 100%; padding: var(--sp-2); border: 1.5px solid var(--ink); border-radius: 0; background: var(--raised); color: var(--ink); resize: vertical; word-break: break-all; }
+.sheet h3 { margin: 0; }
+.sheet input[type=text], .sheet input[type=password] { font: inherit; font-size: var(--fs-body); width: 100%; min-height: var(--tap); padding: 0 var(--sp-2); border: 1.5px solid var(--ink); border-radius: 0; background: var(--raised); color: var(--ink); }
+.sheet a { color: var(--ink); }
 .sheet input[type=file] { font: inherit; font-size: var(--fs-small); color: var(--ink-2, var(--ink)); }
 .sheet input[type=file]::file-selector-button { font: inherit; font-weight: 700; font-size: var(--fs-label); letter-spacing: var(--track-label); text-transform: uppercase;
   min-height: var(--tap); padding: 0 var(--sp-3); margin-right: var(--sp-3); border: 1.5px solid var(--ink); border-radius: 0; background: transparent; color: var(--ink); cursor: pointer; }
