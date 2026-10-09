@@ -69,7 +69,7 @@ def exchange(client_id: str, secret: str, code: str) -> dict:
         "client_id": client_id, "client_secret": secret, "code": code, "grant_type": "authorization_code"}).json()
     if "access_token" not in token:
         raise SystemExit(f"Strava token exchange failed: {_problem(token)}")
-    _save({**token, "client_id": client_id, "client_secret": secret})
+    _save({**token, "client_id": client_id})   # the client secret stays in the environment, never in the file
     return token
 
 
@@ -90,8 +90,12 @@ def _access_token() -> str:
         raise SystemExit("No Strava token yet: run `python -m fitness login strava` once (or import the bulk export).")
     token = json.loads(STRAVA_TOKEN.read_text())
     if token["expires_at"] - 300 < time.time():
+        legacy = token.pop("client_secret", None)   # older sign-ins kept it in the file; it's dropped on this save
+        secret = os.environ.get("STRAVA_CLIENT_SECRET") or legacy
+        if not secret:
+            raise SystemExit("Set STRAVA_CLIENT_SECRET in the environment to refresh the Strava sign-in.")
         fresh = _requests().post("https://www.strava.com/oauth/token", timeout=30, data={
-            "client_id": token["client_id"], "client_secret": token["client_secret"], "grant_type": "refresh_token",
+            "client_id": token["client_id"], "client_secret": secret, "grant_type": "refresh_token",
             "refresh_token": token["refresh_token"]}).json()
         if "access_token" not in fresh:
             raise SystemExit(f"Strava token refresh failed ({_problem(fresh)}): connect Strava again.")

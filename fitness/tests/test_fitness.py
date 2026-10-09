@@ -470,3 +470,34 @@ def test_strava_errors_never_echo_the_reply():
     from fitness.strava import _problem
     assert _problem({"message": "Bad Request", "errors": [{"resource": "AuthorizationCode", "field": "code", "code": "invalid"}]}) == "Bad Request (code invalid)"
     assert "secret" not in _problem({"access_token": "secret", "refresh_token": "secret"})
+
+
+def test_strava_client_secret_is_never_written_to_disk(tmp_path, monkeypatch):
+    import time as _time
+
+    from fitness import strava
+    path = tmp_path / "strava_token.json"
+    monkeypatch.setattr(strava, "STRAVA_TOKEN", path)
+    monkeypatch.setenv("STRAVA_CLIENT_SECRET", "from-env")
+    sent = []
+
+    class Reply:
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class Requests:
+        @staticmethod
+        def post(url, timeout, data):
+            sent.append(data)
+            return Reply({"access_token": "new", "refresh_token": "r2", "expires_at": _time.time() + 3600})
+
+    monkeypatch.setattr(strava, "_requests", lambda: Requests)
+    strava.exchange("4242", "from-env", "code")
+    assert "client_secret" not in json.loads(path.read_text())
+    path.write_text(json.dumps({"client_id": "4242", "client_secret": "legacy", "refresh_token": "r1", "expires_at": 0, "access_token": "old"}))
+    assert strava._access_token() == "new"
+    assert sent[-1]["client_secret"] == "from-env" and sent[-1]["grant_type"] == "refresh_token"
+    assert "client_secret" not in json.loads(path.read_text())          # an older file is cleaned up on its next refresh

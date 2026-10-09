@@ -234,7 +234,8 @@ pip install -r fitness/requirements.txt
    When the zip arrives: `python -m fitness import-strava ~/Downloads/export_12345.zip`.
 3. **Strava ongoing.** Create an app at <https://www.strava.com/settings/api> with
    *Authorization Callback Domain* `chrisrohn.com` (Strava always allows `localhost` too), then
-   `STRAVA_CLIENT_ID=… STRAVA_CLIENT_SECRET=… python -m fitness login strava`.
+   `STRAVA_CLIENT_ID=… STRAVA_CLIENT_SECRET=… python -m fitness login strava`. Keep `STRAVA_CLIENT_SECRET` in the
+   environment for later syncs too (e.g. `export` it in your shell profile): it's never written to disk.
    This is how your Zwift and MyWoosh rides arrive, with their power. If you also record a trainer ride on the
    watch, the two copies are merged into one: the watch's heart rate plus the trainer's power.
 4. `python -m fitness sync` (the first run backfills `sync.history_days` of Garmin data, about 2 requests a day),
@@ -253,7 +254,7 @@ To run it automatically, add this to `crontab -e`. It runs at 7:15 every morning
 last night's sleep:
 
 ```
-15 7 * * * cd ~/chrisrohn && .venv/bin/python -m fitness run >> fitness/data/cron.log 2>&1
+15 7 * * * cd ~/chrisrohn && STRAVA_CLIENT_SECRET=… .venv/bin/python -m fitness run >> fitness/data/cron.log 2>&1
 ```
 
 **On your phone:** run `python -m fitness serve` and open `http://<computer-ip>:8765/` on the same Wi-Fi. Away
