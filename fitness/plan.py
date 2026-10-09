@@ -197,26 +197,51 @@ def _commute_mode(phase: str, role: str, left: int, recovery_week: bool, indoor:
     return {"key": "workout", "endurance": "endurance", "easy": "easy"}.get(role)
 
 
+LONG_GIVE, FLEX_GIVE = 2 / 3, 0.5      # how far the long ride, and the endurance / recovery days, shrink to make room for commutes
+
+
 def _plan_commutes(week: list[dict], cfg: dict, done: int = 0) -> dict[date, str]:
-    """Pick this week's commute days: the most preferred days whose round trip fits the load the plan wanted that day,
-    up to per_week[1]; then the closest fits until per_week[0] is met. Commutes replace that day's session. `done`
-    commutes already ridden this week count toward both numbers, so a missed one is rebooked and none is doubled."""
+    """Pick this week's commute days against the week's load, not each day's. A commute is the cheapest training you
+    have (riding you'd otherwise spend driving), but a round trip costs two or three times a typical session, so it
+    never fits a single day's share. Booked like this instead, up to per_week[1], while the week stays within its load:
+
+    - key days first: the session rides home on the commute ("Commute + workout"), so it needs no extra time on the
+      bike before or after work; when the week can't afford that, the key day can still be an easy commute;
+    - then the other commute days, most preferred first (commute.days);
+    - what a commute costs beyond the session it replaces comes out of the endurance and recovery days (down to
+      half) and then the long ride (down to two thirds, never shorter than the race): each day's "keep" (_generate).
+
+    Then per_week[0] is met if the week can carry it within 30% (not in a taper's light weeks), a rest day last (its
+    rest moves). `done` commutes already ridden
+    this week count toward both numbers, so a missed one is rebooked and none is doubled."""
     c = cfg["commute"]
     loads = commute_loads(cfg)
     lo, hi = max(0, c["per_week"][0] - done), max(0, c["per_week"][1] - done)
     order = {d: i for i, d in enumerate(c["days"])}
-    cands = [w for w in week if w["mode"] and (DOW[w["date"].weekday()] in order or w.get("rest"))]
-    for w in cands:
-        w["ratio"] = loads[w["mode"]] / max(w["target"], 1.0)
-    planned = [w for w in cands if not w.get("rest")]
-    chosen = [w for w in sorted(planned, key=lambda w: order.get(DOW[w["date"].weekday()], 9)) if w["ratio"] <= 1.6][:hi]
-    # short of the week's minimum: the closest fits, then a rest day ridden easy (its rest moves; see _generate)
-    for w in sorted(cands, key=lambda w: (bool(w.get("rest")), w["ratio"])):
-        if len(chosen) >= lo:
+    # a taper sheds volume, so there a commute has to fit the day it replaces, and nothing shrinks to make room
+    cands = [w for w in week if w["mode"] and (DOW[w["date"].weekday()] in order or w.get("rest"))
+             and (w.get("phase") != "taper" or loads[w["mode"]] <= 1.6 * max(w["target"], 1.0))]
+    budget = 1.1 * sum(w["target"] for w in week)
+
+    def cost(chosen: dict[int, str]) -> float:
+        return sum(loads[m] for m in chosen.values()) + sum(w.get("keep", w["target"]) for i, w in enumerate(week) if i not in chosen)
+
+    chosen: dict[int, str] = {}
+    pref = sorted((i for i, w in enumerate(week) if w in cands and not w.get("rest")),
+                  key=lambda i: (week[i]["role"] != "key", order.get(DOW[week[i]["date"].weekday()], 9)))
+    for i in pref:
+        if len(chosen) >= hi:
             break
-        if w not in chosen and (w["ratio"] <= 3 or w.get("rest")):
-            chosen.append(w)
-    return {w["date"]: w["mode"] for w in chosen}
+        for mode in dict.fromkeys([week[i]["mode"], "easy"]):          # as planned, else easy
+            if cost({**chosen, i: mode}) <= budget:
+                chosen[i] = mode
+                break
+    for i in sorted((i for i, w in enumerate(week) if w in cands), key=lambda i: (bool(week[i].get("rest")), loads[week[i]["mode"]] - week[i]["target"])):
+        if len(chosen) >= lo:                                             # the week's minimum, unless it would
+            break                                                         # swamp a light week (a taper, race week)
+        if i not in chosen and cost({**chosen, i: week[i]["mode"]}) <= 1.3 * budget:
+            chosen[i] = week[i]["mode"]
+    return {week[i]["date"]: m for i, m in chosen.items()}
 
 
 def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_race: date | None, taper: int, floor: float, done_today: float,
@@ -227,6 +252,7 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
     taper_start = race["date"] - timedelta(days=taper)
     rows, mean, phase_now, week, taper_base, commutes = [], None, None, 0, None, {}
     rested: set[date] = set()
+    trim: dict[date, float] = {}
     d = start
     while d <= race["date"]:
         left = (race["date"] - d).days
@@ -249,8 +275,9 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
                 cap = cfg["plan"]["base_ramp"] if phase == "base" else cfg["plan"]["max_ramp"]
                 ramp = max(-2.0, min(cap, (opt["target_ctl"] - ctl) / weeks_left))
                 mean = max(15.0, ctl + 6.45 * ramp)        # Δctl over a week ≈ (mean − ctl) × 0.155
-                if cfg["plan"].get("cap_mean"):            # fitted to your riding (plan.fit): your busy week + 15%
-                    mean = max(15.0, min(mean, cfg["plan"]["cap_mean"]))
+                if cfg["plan"].get("cap_mean"):            # fitted to your riding (plan.fit): your busy week + 15%, but
+                    grow = ctl + 6.45 * cfg["plan"]["base_ramp"]   # never below what today's fitness safely grows into
+                    mean = max(15.0, min(mean, max(cfg["plan"]["cap_mean"], grow)))
         role = _role(phase, role_of[d.weekday()], left)
         moved = (adapt or {}).get("roles", {}).get(d) if phase in ("base", "build", "transition") else None
         if moved:
@@ -268,9 +295,26 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
                 est = (mean if mean is not None and ph == phase else max(15.0, 0.8 * ctl)) * pattern[e.weekday()] / mean_p
                 ro = ((adapt or {}).get("roles", {}).get(e) if ph in ("base", "build", "transition") else None) or ro
                 gone = d == start and e in (adapt or {}).get("no_commute", ())
-                week_days.append({"date": e, "target": est, "role": ro, "rest": ro == "rest",
+                # how far each day can shrink for a commute: not in a taper, not the key days, the long ride to two
+                # thirds but never below the race's own duration, the endurance and recovery days to half
+                keep = (est if ph == "taper" or ro in ("key", "rest") else
+                        max(LONG_GIVE * est, min(est, opt["hours"] * RATE["long"])) if ro == "long" else FLEX_GIVE * est)
+                week_days.append({"date": e, "target": est, "keep": keep, "role": ro, "rest": ro == "rest", "phase": ph,
                                   "mode": None if gone else _commute_mode(ph, ro, le, recovery_week and ph == phase, in_indoor(e, cfg), cfg, e)})
             commutes = _plan_commutes(week_days, cfg, (adapt or {}).get("commutes_done", 0) if d == start else 0)
+            # what the commutes cost beyond the sessions they replace comes out of the week's flexible riding first,
+            # then the long ride, each only down to its "keep"
+            loads_c = commute_loads(cfg)
+            extra = sum(loads_c[commutes[w["date"]]] - w["target"] for w in week_days if w["date"] in commutes)
+            for roles_ in (("easy", "endurance", "fun"), ("long",)):
+                pool = [w for w in week_days if w["date"] not in commutes and w["role"] in roles_ and w["target"] > 0]
+                spare = sum(w["target"] - w["keep"] for w in pool)
+                if extra <= 0 or spare <= 0:
+                    continue
+                share = min(1.0, extra / spare)
+                for w in pool:
+                    trim[w["date"]] = 1 - share * (w["target"] - w["keep"]) / w["target"]
+                extra -= share * spare
             # a rest day that became a commute hands its rest to the week's lightest easy day: one full day off stays
             for w in week_days:
                 if w["rest"] and w["date"] in commutes:
@@ -294,6 +338,8 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
                 load = taper_base * rel * (floor + (1 - floor) * math.exp(-(j + 1) / max(1.0, taper / 3)))
         else:
             load = mean * rel
+        if role in ("easy", "endurance", "fun", "long") and phase not in ("race", "openers"):
+            load *= trim.get(d, 1.0)
         if role == "strength":
             load = min(load, 25.0)
         elif role == "long" and phase not in ("race", "openers"):
@@ -573,21 +619,23 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
             and d not in out["roles"]
 
     def hard(d: date) -> bool:
-        role = out["roles"].get(d) or (planned.get(d) or {}).get("role")
-        return role in ("key", "long", "race")
+        p = planned.get(d) or {}
+        return (out["roles"].get(d) or ("key" if p.get("commute") == "workout" else p.get("role"))) in ("key", "long", "race")
 
     for d in misses:
         p = planned[d]
+        role = "key" if p.get("commute") == "workout" else p["role"]     # the workout rode on the commute: it's still owed
         if p.get("commute") and d != today:
-            out["notes"].append(f"{DAY[d.weekday()]}'s commute didn't happen.")
+            out["notes"].append(f"{DAY[d.weekday()]}'s commute didn't happen" + (", and with it the week's workout." if role == "key" else "."))
+            if role != "key":
+                continue
+        if role not in ("long", "key") or p["phase"] not in ("base", "build", "transition"):
             continue
-        if p["role"] not in ("long", "key") or p["phase"] not in ("base", "build", "transition"):
-            continue
-        what = "long ride" if p["role"] == "long" else "key session"
+        what = "long ride" if role == "long" else "key session"
         when = "today's" if d == today else f"{DAY[d.weekday()]}'s"
-        spot = next((e for e in week if free(e) and (p["role"] == "long" or not (hard(e - timedelta(days=1)) or hard(e + timedelta(days=1))))), None)
+        spot = next((e for e in week if free(e) and (role == "long" or not (hard(e - timedelta(days=1)) or hard(e + timedelta(days=1))))), None)
         if spot:
-            out["roles"][spot] = p["role"]
+            out["roles"][spot] = role
             out["notes"].append(f"{when.capitalize()} {what} didn't happen: it's on {'today' if spot == today else DAY[spot.weekday()]} instead.")
         else:
             out["notes"].append(f"{when.capitalize()} {what} didn't happen. No free day is left this week for it, so the plan carries on "
@@ -610,8 +658,9 @@ def fit(cfg: dict, habits: dict | None) -> tuple[dict, list[str]]:
 
     - Week shape: the configured weekly_pattern blended half-and-half with your own (how often you ride each weekday ×
       how long), with one full rest day. Days you rarely ride stay light options, not forced rest.
-    - Volume: a week's load target is capped at your usual busy week (75th percentile) + 15%. As you ride more, the
-      cap rises with you; the race target is then approached as fast as that allows.
+    - Volume: a week's load target is capped at your usual busy week (75th percentile) + 15%, or what your current
+      fitness can safely grow into (plan.base_ramp CTL a week), whichever is more. As you ride more, the cap rises
+      with you; the race target is then approached as fast as that allows.
     - Long rides: capped at your usual long ride + 25% (at least 1½ h), never above the race option's own.
     - Commutes: your commuting days, most-used first, and how many you really do in a week (25th–75th percentile).
     """
@@ -644,7 +693,9 @@ def fit(cfg: dict, habits: dict | None) -> tuple[dict, list[str]]:
     plan_cfg = {**cfg["plan"], "weekly_pattern": pattern}
     if habits["load"]["p75"] > 0:
         plan_cfg["cap_mean"] = habits["load"]["p75"] * 1.15 / 7
-        notes.append(f"Weekly volume up to your usual busy week + 15% (about {habits['hours']['p75'] * 1.15:.1f} h); it grows as you do.")
+        notes.append(f"Weekly volume up to your usual busy week + 15% (about {habits['hours']['p75'] * 1.15:.1f} h) or what your fitness can safely "
+                     f"grow into (+{cfg['plan']['base_ramp']} CTL a week), whichever is more. Commutes are booked against the whole week: "
+                     "a key session rides home on one, and the easy days and long ride give a little to make room.")
     races = cfg["races"]
     if habits["long_min"]["p75"]:
         cap_h = max(1.5, habits["long_min"]["p75"] / 60 * 1.25)

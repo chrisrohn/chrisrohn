@@ -725,7 +725,7 @@ def test_long_ride_not_logged_by_evening_moves_to_tomorrow(cfg):
 def test_missed_commute_is_rebooked_and_none_is_doubled(cfg):
     from fitness.plan import adapt
     a = adapt(date(2026, 10, 15), 6, cfg, {}, set(), _week_state())              # Tuesday's commute didn't happen
-    assert "Tuesday's commute didn't happen." in a["notes"] and a["commutes_done"] == 0
+    assert any(n.startswith("Tuesday's commute didn't happen") for n in a["notes"]) and a["commutes_done"] == 0
     rest_of_week = [d for d in season(date(2026, 10, 15), 55, 55, cfg, adapt=a)["days"] if d["date"] <= "2026-10-18"]
     assert any(d["commute"] for d in rest_of_week)                                # the week's one commute is rebooked
     done = adapt(date(2026, 10, 15), 6, cfg, {"2026-10-13": 80}, {date(2026, 10, 13), date(2026, 10, 14)}, _week_state())
@@ -744,7 +744,8 @@ def test_no_ride_in_by_ten_means_no_commute_today(cfg):
 
 def test_missed_key_session_with_no_room_is_dropped_not_crammed(cfg):
     from fitness.plan import adapt
-    a = adapt(date(2026, 10, 16), 6, cfg, {"2026-10-13": 80}, {date(2026, 10, 13)}, _week_state())   # Thursday's key session missed
+    cfg = {**cfg, "commute": {**cfg["commute"], "enabled": False}}            # Thursday is a key session, not a commute
+    a = adapt(date(2026, 10, 16), 6, cfg, {"2026-10-13": 80}, set(), _week_state())   # Thursday's key session missed
     assert not a["roles"] and any("Thursday's key session didn't happen. No free day" in n for n in a["notes"])
 
 
@@ -794,9 +795,11 @@ def test_fit_shapes_the_plan_to_the_habits(cfg):
     assert fitted["commute"]["per_week"] == [1, 2] and fitted["commute"]["days"][:2] == ["tue", "thu"]
     assert any(n.startswith("Rest day: Mondays.") for n in notes)
     light, _ = fit(cfg, {**h, "load": {"median": 220, "p75": 250}})               # a lighter usual week: the cap has to bite
-    capped = season(date(2026, 10, 12), 55, 55, light)["weeks"][:2]
-    free = season(date(2026, 10, 12), 55, 55, {**light, "plan": {**light["plan"], "cap_mean": None}})["weeks"][:2]
+    capped = season(date(2026, 10, 12), 20, 20, light)["weeks"][:2]                 # low fitness: the cap is above its safe growth
+    free = season(date(2026, 10, 12), 20, 20, {**light, "plan": {**light["plan"], "cap_mean": None}})["weeks"][:2]
     assert all(c["load"] <= f["load"] for c, f in zip(capped, free, strict=True)) and sum(c["load"] for c in capped) < sum(f["load"] for f in free)
+    grown = season(date(2026, 10, 12), 45, 45, light)["weeks"][1]                  # fitter than the habits: the cap gives way
+    assert grown["load"] > 7 * light["plan"]["cap_mean"] * 1.2
     assert fit({**cfg, "plan": {**cfg["plan"], "fit": False}}, h) == ({**cfg, "plan": {**cfg["plan"], "fit": False}}, [])
 
 
@@ -855,3 +858,32 @@ def test_rest_day_morning_offers_an_easy_commute_when_recovered(cfg):
     assert m.commute_call({"score": 78, "illness": False}, rest, mon, cfg, prof, th, room=False)["verdict"] == "skip"
     assert m.commute_call({"score": 78, "illness": False}, {**rest, "phase": "taper"}, mon, cfg, prof, th)["verdict"] == "skip"
     assert m.commute_call({"score": 90, "illness": False}, rest, date(2026, 10, 12), cfg, prof, th) is None   # Columbus Day
+
+
+def test_commutes_are_booked_against_the_week_not_the_day(cfg):
+    """A round trip costs two or three times a short session: it fits the week (the key session rides home, the
+    endurance days and long ride give a little), never a single day's share. Not in a taper."""
+    c = {**cfg, "plan": {**cfg["plan"], "weekly_pattern": [0.0, 1.1, 0.4, 1.0, 0.0, 0.9, 1.6], "cap_mean": 30.0},
+         "commute": {**cfg["commute"], "per_week": [1, 2], "days": ["tue", "thu", "wed", "mon", "fri"],
+                     "profile": {"legs": {"in": {"load": 65, "minutes": 67}, "home": {"load": 63, "minutes": 72}}, "climb_m": [10, 50]}}}
+    s = season(date(2026, 10, 9), 31, 48, c)
+    week = [d for d in s["days"] if "2026-10-12" <= d["date"] <= "2026-10-18"]
+    by = {date.fromisoformat(d["date"]).weekday(): d for d in week}
+    assert by[1]["commute"] == "workout" and sum(1 for d in week if d["commute"]) == 2   # Tuesday's session rides home
+    assert by[6]["role"] == "long" and by[6]["minutes"] >= 120                       # the long ride never drops below the race
+    assert sum(d["load"] for d in week) <= 1.25 * sum(d["load"] for d in season(date(2026, 10, 9), 31, 48, {**c, "commute": {**c["commute"], "enabled": False}})["days"][3:10])
+    race_week = [d for d in s["days"] if "2026-11-02" <= d["date"] <= "2026-11-07"]
+    assert not any(d["commute"] for d in race_week)
+    assert s["races"][0]["race_tsb"] >= 7                                                 # still arrives fresh
+
+
+def test_a_missed_commute_workout_still_owes_its_workout(cfg):
+    from fitness.plan import adapt
+    c = {**cfg, "commute": {**cfg["commute"], "per_week": [2, 2], "days": ["tue", "thu"]}}
+    planned = season(date(2026, 9, 28), 50, 50, c)["days"][:7]
+    tue = planned[1]
+    assert tue["commute"] == "workout"
+    state = {(date(2026, 9, 27) - timedelta(days=i)).isoformat(): {"ctl": 50.0, "atl": 50.0} for i in range(3)}
+    a = adapt(date(2026, 9, 30), 6, c, {}, set(), state)                          # Tuesday's ride didn't happen
+    assert any("and with it the week's workout" in n for n in a["notes"])
+    assert "key" in a["roles"].values() or any("No free day" in n for n in a["notes"])

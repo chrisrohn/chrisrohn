@@ -88,9 +88,21 @@ Your 30 km each-way commute is weekday training, so the plan builds it in instea
 under `[commute]` in `config.toml`: distance, climbing, the days you can ride (most preferred first), and how many
 commute days a week you want at least and at most (default 1–3).
 
-**How the plan uses it.** Each week the planner checks the load it wants on each commute-able day against what a
-round trip actually costs you. The cost is learned from your past commutes: about 110–130 TSS and 2¼ hours. It books
-the best-fitting days, and the commute replaces that day's session, so it never comes on top of it:
+**How the plan uses it.** A round trip costs about 110–130 TSS and 2¼ hours, learned from your past commutes. That's
+two or three times a typical session, so commutes are booked against the **whole week's** load, never one day's.
+Commutes are the cheapest training you have, since it's riding you'd otherwise spend driving, so the planner books
+them like this:
+
+1. **Key days first.** The workout rides home on the commute (*Commute + workout*), so a hard session needs no extra
+   time before or after work. When the week can't afford that, the key day can still be an easy commute.
+2. **Then your other commute days**, most preferred first, up to `per_week`'s most.
+3. **Something gives to make room.** What a commute costs beyond the session it replaces comes out of the endurance
+   and recovery days first (down to half), then the long ride (down to two thirds). The long ride is never cut
+   shorter than the race itself.
+4. **Not in a taper.** There a commute has to fit the day it replaces, since a taper sheds volume.
+
+A missed *Commute + workout* still owes its workout: the plan moves it to a free day, like any missed key session.
+The commute replaces that day's session, so it never comes on top of it:
 
 | The day's job in the plan | How the commute is ridden |
 |---|---|
@@ -260,7 +272,8 @@ next to each weekday's riding.
   times how long. Commutes are booked separately. One full rest day stays (the configured one). A day you rarely
   ride isn't forced to rest: it stays a light option the planner can use as your fitness grows.
 - **Volume** is capped at your usual busy week + 15%, so the plan stretches you without asking for a life you don't
-  have. The cap rises as you ride more.
+  have. The cap never sits below what your current fitness can safely grow into (`base_ramp`, +3 CTL a week), so a
+  quiet summer doesn't hold back an autumn build. The cap rises as you ride more.
 - **Long rides** are capped at your usual long ride + 25% (at least 1½ h).
 - **Commutes** use your own commuting days, most-used first, and your real 25th–75th percentile count per week.
 

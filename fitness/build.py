@@ -182,7 +182,8 @@ def _outlook(plan: dict, variants: dict, habits: dict | None) -> list[str]:
     for r in plan["races"]:
         if r["race_ctl"] >= r["target_ctl"] - 4:
             continue
-        line = (f"At what you realistically ride (about {habits['hours']['p75'] * 1.15:.1f} h a week at most), {r['name']} race-morning "
+        peak = f"peak week about {r['peak_week_h']:g} h" if r.get("peak_week_h") else f"about {habits['hours']['p75'] * 1.15:.1f} h a week"
+        line = (f"Building safely from where you are ({peak}), {r['name']} race-morning "
                 f"fitness lands near {r['race_ctl']:.0f} against the {r['label']}'s {r['target_ctl']:.0f}.")
         for o in r["options"]:
             v = variants.get(f"{r['name']}|{o['key']}")
