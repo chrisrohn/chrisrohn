@@ -208,6 +208,44 @@ run replaces it in a single commit. Nothing personal is ever written to this pub
 the failed run. Garmin sometimes asks for a fresh sign-in after a password change or about once a year: tap
 **Connect Garmin** again. A new Garmin password goes into the `GARMIN_PASSWORD` secret first.
 
+## What to eat
+
+The **Fuel** panel under today's call plans the day's eating, with tomorrow's in a fold ([`fuel.py`](fuel.py),
+`[nutrition]` in [`config.toml`](config.toml)):
+
+- **The Nutty Pudding and the Super Veggie** (Bryan Johnson's Blueprint, the make-it-yourself versions) whenever
+  they fit: the Pudding at breakfast unless a hard ride starts within a few hours (then it's the recovery meal) or
+  it's race morning; the Super Veggie at lunch unless a race is today or tomorrow.
+- **A vegetarian base for every other meal and snack**: how many grams of carbs and protein it should carry, sized
+  to what the day still owes, and what that is on a plate as two-part combinations: "5 corn tortillas + 2½ cups
+  rice / 4 cups pasta" and "175 g tofu + 1 cup black beans / 125 g tempeh + 2 oz cheese / 3 eggs + 1 cup Greek
+  yogurt". Snacks and pre-ride breakfasts list their building blocks (yogurt, banana, granola, honey, dates, oats).
+  Pick or write recipes to the numbers.
+- **The bottles**: Infinit Go Far, one serving a bottle at normal strength (a bottle an hour, so it's also the
+  water), sipped about ⅓ of a bottle every 20 minutes, which is ride mode's reminder. Above 66 g/h a gel or chews
+  make up the rest (races: 80 g/h). Past two bottles, extra powder rides in a bag for a refill; with nowhere to refill,
+  the two bottles go double strength and the 2 L back bladder carries water only.
+
+| Per serving (from the ingredients) | kcal | protein | carbs | fiber | fat |
+|---|---|---|---|---|---|
+| Nutty Pudding | ~620 | 44 g (11 g collagen) | 41 g | 21 g | 36 g |
+| Super Veggie, black lentils | ~550 | 28 g | 69 g | 25 g | 21 g |
+| Super Veggie, 100 g chicken | ~520 | 45 g | 34 g | 13 g | 25 g |
+| Infinit Go Far (1 packet) | 280 | 4 g | 66 g | | 379 mg sodium |
+
+- **Targets** scale with the day: carbohydrate 3 g/kg on rest days, 4 easy, 5 moderate, 6.5 hard, 8 long, 9 the day
+  before a race (on-bike fuel included); protein 1.8 g/kg every day. Weight comes from your Garmin profile, or
+  `[athlete] weight_kg`.
+- **Blueprint is high-fiber and fairly low-carb** (Pudding + Super Veggie ≈ 110 g carbs, ~45 g fiber): ideal on rest
+  days, short on hard ones, so hard days *add* to it (a banana with the Pudding, black rice or a sweet potato with
+  the Super Veggie, a pre-ride snack, a shake after).
+- **The day before a race and race morning swap it out**: ~25 g of fiber from lentils and crucifers the day before,
+  or the Pudding's fat and fiber three hours before the start, is asking for GI trouble.
+- **Tomorrow's ride shapes tonight's dinner**: before a long ride, pizza night is the plan, not a lapse.
+
+`[nutrition.ride_fuel]` holds the drink mix's label numbers (change them for another product); `bottle_cages` and
+`bladder_l` describe what the bike and you can carry.
+
 ## The app on your phone
 
 **<https://chrisrohn.com/fitness/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
@@ -319,6 +357,7 @@ legs actually felt on the bike.
 | File | Role |
 |---|---|
 | `cli.py` | `python -m fitness …` commands |
+| `fuel.py` | the day's eating around the Blueprint meals and the riding |
 | `cloud.py`, `cloud/training.yml` | the GitHub Actions sync (`python -m fitness cloud`) and the private repository's workflow that calls it |
 | `garmin.py`, `strava.py` | sync, sign-in and parsers (raw responses are kept in SQLite, so fixing a parser never needs a re-download) |
 | `activities.py` | sport mapping and the Garmin↔Strava duplicate merge |

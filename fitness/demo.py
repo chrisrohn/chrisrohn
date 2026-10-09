@@ -105,4 +105,5 @@ def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
             store.put_activity(activity(id=f"garmin:barry{year}", source="garmin", start=start, kind="gravel_cycling",
                                         name=f"Barry-Roubaix Killer {year}", duration_s=mins * 60 + 120, moving_s=mins * 60,
                                         distance_m=99800, elev_m=1220, avg_hr=158, max_hr=179))
+    store.set("profile", '{"weight_kg": 78.0, "height_cm": 180, "birth_year": 1980}')   # the Garmin profile's weight
     store.commit()
