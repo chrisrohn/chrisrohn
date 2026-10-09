@@ -8,6 +8,7 @@ Readiness or Sleep Score; those fields stay empty and the site computes its own 
 from __future__ import annotations
 
 import getpass
+import os
 import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -16,14 +17,21 @@ from fitness.activities import activity
 from fitness.store import Store
 
 
-def _client(cfg: dict, interactive: bool = False):
+def _client(cfg: dict, interactive: bool = False, prompt_mfa=None):
+    """A signed-in client. Saved tokens are used when they still work; with GARMIN_EMAIL / GARMIN_PASSWORD in the
+    environment (the GitHub Actions sync) a stale or missing session signs in again on its own, asking prompt_mfa
+    for the emailed code if the account has two-step verification."""
     from garminconnect import Garmin
 
     tokens = str(Path(cfg["sync"]["garmin_tokens"]).expanduser())
+    email, password = os.environ.get("GARMIN_EMAIL"), os.environ.get("GARMIN_PASSWORD")
     if interactive:
         email = input("Garmin email: ").strip()
         password = getpass.getpass("Garmin password: ")
         client = Garmin(email, password, prompt_mfa=lambda: input("Garmin MFA code: ").strip())
+    elif email and password:
+        Path(tokens).mkdir(parents=True, exist_ok=True)
+        client = Garmin(email, password, prompt_mfa=prompt_mfa)
     else:
         if not (Path(tokens) / "garmin_tokens.json").exists():
             raise SystemExit("No Garmin session yet: run `python -m fitness login garmin` once.")
@@ -81,10 +89,10 @@ def parse_activity(a: dict) -> dict:
     )
 
 
-def sync(cfg: dict, store: Store, days: int | None = None) -> None:
+def sync(cfg: dict, store: Store, days: int | None = None, prompt_mfa=None) -> None:
     from garminconnect import GarminConnectTooManyRequestsError
 
-    client = _client(cfg)
+    client = _client(cfg, prompt_mfa=prompt_mfa)
     today = date.today()
     first = today - timedelta(days=days or cfg["sync"]["history_days"])
     have = store.day_dates()

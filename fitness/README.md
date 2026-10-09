@@ -154,29 +154,70 @@ Tailscale (`tailscale serve --bg 8765` alongside `python -m fitness serve`).
 
 A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen or bring a small battery pack.
 
+## Cloud sync (no computer)
+
+Everything runs on GitHub and your phone. A **private** repository of yours syncs Garmin and Strava four times a day
+(6:17, 9:17, 13:17, 19:17 Michigan time) with [`fitness-sync.yml`](../.github/workflows/fitness-sync.yml), and the app
+at <https://chrisrohn.com/fitness/> reads the result with a token that can only see that repository. Garmin's
+official API is for approved companies only, so this signs in the way Garmin's own mobile app does.
+
+**One-time setup, about 10 minutes, all from the phone's browser:**
+
+1. **Repository.** <https://github.com/new>: name `training-data`, **Private**, tick *Add a README*. Then add
+   [`cloud/training.yml`](cloud/training.yml) to it as `.github/workflows/training.yml`.
+2. **Strava app.** <https://www.strava.com/settings/api>: any name and website; **Authorization Callback Domain**
+   `chrisrohn.com`. Keep the Client ID and Client Secret for the next step.
+3. **Secrets.** In `training-data`: *Settings → Secrets and variables → Actions → New repository secret*, five times:
+
+   | Secret | Value |
+   |---|---|
+   | `GARMIN_EMAIL`, `GARMIN_PASSWORD` | your Garmin Connect sign-in |
+   | `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` | from step 2 |
+   | `STATE_KEY` | any long passphrase you make up; it encrypts the stored sign-ins and history. Losing it means a fresh first sync, nothing worse |
+
+4. **Token for the app.** <https://github.com/settings/personal-access-tokens/new>: *Repository access → Only select
+   repositories → training-data*; *Permissions → Actions: Read and write, Contents: Read-only*. Choose the longest
+   expiry offered.
+5. **Connect.** Open the app → **Connect GitHub** → `yourname/training-data` and the token → **Save and sync**.
+   Then **Connect Garmin** (if Garmin emails you a sign-in code, type it into the bar that appears) and
+   **Connect Strava** (Strava's own page; leave *View data about your private activities* ticked).
+
+The first sync backfills a year of Garmin days and all of your Strava history (up to 15 minutes). After that the
+app shows the newest sync whenever you open it, and **Sync now** runs one on demand (about a minute), e.g. right after
+the watch has synced last night's sleep.
+
+**What lives where.** The private repository's `state` branch holds `fitness-data.json` and `status.json` (what the
+app reads) and `state.enc` (the SQLite history and the Garmin / Strava sign-ins, encrypted with `STATE_KEY`); each
+run replaces it in a single commit. Nothing personal is ever written to this public repository or its site.
+
+**When something goes wrong** the bar under the masthead says what (from `status.json`) and GitHub emails you about
+the failed run. Garmin sometimes asks for a fresh sign-in after a password change or about once a year: tap
+**Connect Garmin** again. A new Garmin password goes into the `GARMIN_PASSWORD` secret first.
+
 ## The app on your phone
 
 **<https://chrisrohn.com/fitness/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
-and it opens offline. The hosted copy holds no one's data; yours arrives from your own computer and stays on
-the phone.
+and it opens offline. The hosted copy holds no one's data; yours arrives from the [cloud sync](#cloud-sync-no-computer)
+(or by hand from a computer, below) and stays on the phone.
 
 1. **Install.** iPhone: open it in Safari → **Share** → **Add to Home Screen**. Android: Chrome → **Install**
    (the button in the top bar, or the ⋮ menu). Desktop Chrome / Edge: the install icon in the address bar.
-2. **Get your data in.** On the computer, `python -m fitness run`, then **Today → Phone app**:
+2. **Get your data in** with the [cloud sync](#cloud-sync-no-computer), or by hand: on a computer,
+   `python -m fitness run`, then **Today → Phone app**:
    - **Copy phone link** and send it to yourself (AirDrop, Messages, email). On the phone, open the app → **Import
      data** → paste it. The data rides after the `#` in the link, which browsers never send to a server.
    - Or **Save data file**, put it in iCloud Drive / Google Drive, and pick it under **Import data**. Set
      `[app] export_dir` (e.g. `"~/Library/Mobile Documents/com~apple~CloudDocs/Training"`) and every build drops a
      fresh `fitness-data.json` there for you.
-3. **Refresh** with **Update data** in the bar under the masthead; it turns red after 36 hours. **Remove** wipes it
-   from the phone.
+3. **Refresh** with **Sync now** (or **Update data** without the cloud sync) in the bar under the masthead; it turns
+   red after 36 hours. **Settings → Remove from this device** wipes it from the phone.
 
 On iPhone an installed app keeps its own storage, separate from Safari, so import *inside* the app after installing.
 Ride mode (also a long-press shortcut on the icon on Android) reads the same copy, so its zones and the week's sessions are
 already there. Theme and units follow you between the two. A new build of the site replaces the cached app the
 next time it opens with signal.
 
-## Setup (once, about 10 minutes)
+## Setup on a computer (optional)
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate      # Python 3.12+
@@ -192,8 +233,9 @@ pip install -r fitness/requirements.txt
 2. **Strava history.** On strava.com go to *Settings → My Account → Download or Delete Your Account → Request your archive*.
    When the zip arrives: `python -m fitness import-strava ~/Downloads/export_12345.zip`.
 3. **Strava ongoing.** Create an app at <https://www.strava.com/settings/api> with
-   *Authorization Callback Domain* `localhost`, then
-   `STRAVA_CLIENT_ID=… STRAVA_CLIENT_SECRET=… python -m fitness login strava`.
+   *Authorization Callback Domain* `chrisrohn.com` (Strava always allows `localhost` too), then
+   `STRAVA_CLIENT_ID=… STRAVA_CLIENT_SECRET=… python -m fitness login strava`. Keep `STRAVA_CLIENT_SECRET` in the
+   environment for later syncs too (e.g. `export` it in your shell profile): it's never written to disk.
    This is how your Zwift and MyWoosh rides arrive, with their power. If you also record a trainer ride on the
    watch, the two copies are merged into one: the watch's heart rate plus the trainer's power.
 4. `python -m fitness sync` (the first run backfills `sync.history_days` of Garmin data, about 2 requests a day),
@@ -212,7 +254,7 @@ To run it automatically, add this to `crontab -e`. It runs at 7:15 every morning
 last night's sleep:
 
 ```
-15 7 * * * cd ~/chrisrohn && .venv/bin/python -m fitness run >> fitness/data/cron.log 2>&1
+15 7 * * * cd ~/chrisrohn && STRAVA_CLIENT_SECRET=… .venv/bin/python -m fitness run >> fitness/data/cron.log 2>&1
 ```
 
 **On your phone:** run `python -m fitness serve` and open `http://<computer-ip>:8765/` on the same Wi-Fi. Away
@@ -263,6 +305,7 @@ legs actually felt on the bike.
 | File | Role |
 |---|---|
 | `cli.py` | `python -m fitness …` commands |
+| `cloud.py`, `cloud/training.yml` | the GitHub Actions sync (`python -m fitness cloud`) and the private repository's workflow that calls it |
 | `garmin.py`, `strava.py` | sync, sign-in and parsers (raw responses are kept in SQLite, so fixing a parser never needs a re-download) |
 | `activities.py` | sport mapping and the Garmin↔Strava duplicate merge |
 | `metrics.py` | load, PMC, sleep score, readiness, recommendation, insights (pure functions) |
@@ -273,4 +316,4 @@ legs actually felt on the bike.
 | `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page) and ride mode, styles, SVG charts, `manifest.webmanifest`, `sw.js` and `icons/` (no dependencies, works offline) |
 | `demo.py` | the synthetic athlete |
 
-Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, CSP, accessibility, link hand-off). CI runs both. This is a personal analysis tool, not medical advice.
+Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off). CI runs both. This is a personal analysis tool, not medical advice.

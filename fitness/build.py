@@ -306,10 +306,11 @@ def ride_qr(link: str) -> str | None:
 
 
 def csp(html: str) -> str:
-    """Fill the page's Content-Security-Policy: only its own inline scripts (by hash) may run, nothing may load."""
+    """Fill the page's Content-Security-Policy: only its own inline scripts (by hash) may run, nothing may load, and the
+    only place it may talk to is GitHub's API (the sync's private repository)."""
     hashes = [f"'sha256-{base64.b64encode(hashlib.sha256(m.group(1).encode()).digest()).decode()}'"
               for m in re.finditer(r"<script(?![^>]*application/json)[^>]*>(.*?)</script>", html, re.S)]
-    policy = (f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; "
+    policy = (f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com; manifest-src 'self'; worker-src 'self'; "
               "base-uri 'none'; form-action 'none'")   # the same policy fitness/build-app.mjs sets on the hosted pages
     return html.replace("__CSP__", policy)
 

@@ -308,6 +308,7 @@ def test_installable_app_and_phone_link(tmp_path, cfg):
     build.render(data, tmp_path / "index.html", {**cfg, "app": {**cfg["app"], "export_dir": str(export)}})
     manifest = json.loads((tmp_path / "manifest.webmanifest").read_text())
     assert manifest["display"] == "standalone" and manifest["start_url"].startswith("./") and manifest["scope"] == "./"
+    assert manifest["id"] == "/fitness/"   # resolved against the origin: "./" would be the music app's id at the root
     assert {"192x192", "512x512"} <= {i["sizes"] for i in manifest["icons"]} and any("maskable" in i.get("purpose", "") for i in manifest["icons"])
     assert all((tmp_path / i["src"]).exists() for i in manifest["icons"])
     sw = (tmp_path / "sw.js").read_text()
@@ -401,3 +402,102 @@ def test_commute_call(cfg):
     assert m.commute_call(ok, {"role": "endurance"}, thu, cfg, prof, th)["verdict"] == "optional"
     assert m.commute_call(ok, planned, date(2026, 10, 10), cfg, prof, th) is None   # Saturday: not a commute day
     assert "under 134 bpm" in m.commute_call({"score": 55, "illness": False}, planned, thu, cfg, prof, th)["detail"]
+
+
+# ── the GitHub Actions sync ───────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def cloud_dir(tmp_path, monkeypatch):
+    import time as _time
+
+    from fitness import cloud
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", data)
+    monkeypatch.setattr(config, "DB_PATH", data / "fitness.db")
+    monkeypatch.setattr(config, "STRAVA_TOKEN", data / "strava_token.json")
+    for k in ("GARMIN_EMAIL", "GARMIN_PASSWORD", "STRAVA_CLIENT_ID", "STRAVA_CLIENT_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("TZ", "UTC")
+    yield cloud, data
+    monkeypatch.undo()
+    _time.tzset()
+
+
+def test_cloud_run_writes_the_apps_two_files(tmp_path, cfg, cloud_dir):
+    cloud, data = cloud_dir
+    with Store(data / "fitness.db") as store:
+        demo.populate(store, date(2026, 10, 8), days=120)
+    out = tmp_path / "state"
+    status = cloud.run(cfg, out=out, today=date(2026, 10, 8))
+    saved = json.loads((out / "fitness-data.json").read_text())
+    assert saved["today"] == "2026-10-08" and saved["ride"]["days"] and "ride_qr" not in saved
+    assert json.loads((out / "status.json").read_text()) == status
+    assert status["ok"] and status["garmin"]["days"] > 100 and status["garmin"]["last"] == "2026-10-08"
+    assert status["strava"]["activities"] > 0 and not status["garmin"]["connected"] and not status["strava"]["connected"]
+
+
+def test_cloud_run_reports_what_needs_doing(tmp_path, cfg, cloud_dir):
+    cloud, _ = cloud_dir
+    status = cloud.run(cfg, action="connect-strava", code="", out=tmp_path)
+    assert not status["ok"] and "authorization code" in status["strava"]["error"]
+    status = cloud.run(cfg, action="connect-garmin", out=tmp_path)
+    assert "GARMIN_EMAIL" in status["garmin"]["error"] and not (tmp_path / "fitness-data.json").exists()
+
+
+def test_garmin_code_comes_from_a_run_named_after_it():
+    from datetime import UTC
+
+    from fitness import cloud
+    since = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+    pages = iter([
+        {"workflow_runs": [{"display_title": "garmin-code 111111", "created_at": "2026-10-09T11:59:00Z"}]},   # an older attempt
+        {"workflow_runs": [{"display_title": "sync", "created_at": "2026-10-09T12:01:00Z"},
+                           {"display_title": "garmin-code 482913", "created_at": "2026-10-09T12:02:00Z"}]},
+    ])
+    asked = []
+    code = cloud.wait_for_code("training.yml", since, fetch=lambda p: (asked.append(p), next(pages))[1], sleep=lambda s: None)
+    assert code == "482913" and asked[0] == "/actions/workflows/training.yml/runs?event=workflow_dispatch&per_page=20"
+
+
+def test_workflow_file_from_the_callers_ref(monkeypatch):
+    from fitness import cloud
+    monkeypatch.setenv("GITHUB_WORKFLOW_REF", "chrisrohn/training-data/.github/workflows/training.yml@refs/heads/main")
+    assert cloud.workflow_file() == "training.yml"
+
+
+def test_strava_errors_never_echo_the_reply():
+    from fitness.strava import _problem
+    assert _problem({"message": "Bad Request", "errors": [{"resource": "AuthorizationCode", "field": "code", "code": "invalid"}]}) == "Bad Request (code invalid)"
+    assert "secret" not in _problem({"access_token": "secret", "refresh_token": "secret"})
+
+
+def test_strava_client_secret_is_never_written_to_disk(tmp_path, monkeypatch):
+    import time as _time
+
+    from fitness import strava
+    path = tmp_path / "strava_token.json"
+    monkeypatch.setattr(strava, "STRAVA_TOKEN", path)
+    monkeypatch.setenv("STRAVA_CLIENT_SECRET", "from-env")
+    sent = []
+
+    class Reply:
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class Requests:
+        @staticmethod
+        def post(url, timeout, data):
+            sent.append(data)
+            return Reply({"access_token": "new", "refresh_token": "r2", "expires_at": _time.time() + 3600})
+
+    monkeypatch.setattr(strava, "_requests", lambda: Requests)
+    strava.exchange("4242", "from-env", "code")
+    assert "client_secret" not in json.loads(path.read_text())
+    path.write_text(json.dumps({"client_id": "4242", "client_secret": "legacy", "refresh_token": "r1", "expires_at": 0, "access_token": "old"}))
+    assert strava._access_token() == "new"
+    assert sent[-1]["client_secret"] == "from-env" and sent[-1]["grant_type"] == "refresh_token"
+    assert "client_secret" not in json.loads(path.read_text())          # an older file is cleaned up on its next refresh
