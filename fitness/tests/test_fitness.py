@@ -292,9 +292,36 @@ def test_ride_page_and_link(tmp_path, cfg):
     blob = link.split("#z=")[1]
     assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == ride
     assert len(link) < 2400   # small enough for a QR code a phone camera reads off a laptop screen
-    assert build.ride_link({**cfg, "ride": {**cfg["ride"], "url": ""}}, ride, "ride.html") == "ride.html"
+    assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == "ride.html"
     page = build.ride_page(None)
     assert "__CSP__" not in page and "script-src 'sha256-" in page and "__RIDE_DATA__" not in page
+
+
+def test_installable_app_and_phone_link(tmp_path, cfg):
+    import base64
+    import zlib
+    today = date(2026, 10, 8)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=120)
+        data = build.assemble(cfg, store.days(), store.activities(), today)
+    export = tmp_path / "drive"
+    build.render(data, tmp_path / "index.html", {**cfg, "app": {**cfg["app"], "export_dir": str(export)}})
+    manifest = json.loads((tmp_path / "manifest.webmanifest").read_text())
+    assert manifest["display"] == "standalone" and manifest["start_url"].startswith("./") and manifest["scope"] == "./"
+    assert {"192x192", "512x512"} <= {i["sizes"] for i in manifest["icons"]} and any("maskable" in i.get("purpose", "") for i in manifest["icons"])
+    assert all((tmp_path / i["src"]).exists() for i in manifest["icons"])
+    sw = (tmp_path / "sw.js").read_text()
+    assert "__VERSION__" not in sw and 'fitness-' in sw
+    html = (tmp_path / "index.html").read_text()
+    assert 'rel="manifest"' in html and "manifest-src 'self'" in html and "worker-src 'self'" in html and "/*__SHELL__*/" not in html
+    saved = json.loads((tmp_path / "fitness-data.json").read_text())
+    assert saved["today"] == "2026-10-08" and "ride_qr" not in saved and "phone_href" not in saved
+    assert (export / "fitness-data.json").read_text() == (tmp_path / "fitness-data.json").read_text()
+    link = build.phone_link(cfg, data)
+    assert link.startswith("https://chrisrohn.com/fitness/#d=")
+    blob = link.split("#d=")[1]
+    assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == saved
+    assert build.phone_link({**cfg, "app": {"url": ""}}, data) is None
 
 
 # ── commuting ─────────────────────────────────────────────────────────────────────────────────────────────

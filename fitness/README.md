@@ -10,6 +10,9 @@ Barry-Roubaix (Apr 17, 2027), with the 100k and 50k compared side by side.
 python -m fitness demo --open        # see it with a synthetic athlete first; no accounts needed
 ```
 
+It installs as an app on your phone from **<https://chrisrohn.com/fitness/>**, with your data kept only on the phone
+(see [The app on your phone](#the-app-on-your-phone)).
+
 ## What the Venu Sq can and can't give you
 
 The original Venu Sq has no Sleep Score. That's mostly Garmin limiting it in firmware. The watch already records
@@ -134,8 +137,8 @@ The watch keeps recording the official file, and ride mode uploads nothing.
 **Bluefy** browser and open ride mode in it. GPS, steps and cues work in any browser. On iPhone, also set Auto-Lock
 to *Never* for rides, in case the browser ignores the keep-awake request.
 
-**Where it lives: <https://chrisrohn.com/fitness/ride.html>.** The site build (`fitness/build-ride.mjs`, called from
-`build.mjs`) publishes it with the rest of chrisrohn.com. It's a data-free page: no zones, plan or history are
+**Where it lives: <https://chrisrohn.com/fitness/ride.html>**, inside the installed app. The site build
+(`fitness/build-app.mjs`, called from `build.mjs`) publishes it with the rest of chrisrohn.com. It's a data-free page: no zones, plan or history are
 in it, and it's `noindex`. A strict Content-Security-Policy lets only its own scripts run and nothing load,
 because it shares an origin with the music app. HTTPS is what phones require for Bluetooth and GPS.
 
@@ -146,10 +149,32 @@ plan, so the page works with no signal at the trailhead. Rescan when the plan ch
 is ignored, and the plan already on the phone stays.
 
 You can also host it elsewhere: `python -m fitness ride-page` writes a data-free copy to `dist/public/ride.html`.
-Put its address in `[ride] url`. To use the local copy with no hosting, set `url = ""` and serve it over Tailscale
-(`tailscale serve --bg 8765` alongside `python -m fitness serve`).
+Put the folder's address in `[app] url`. To use the local copy with no hosting, set `url = ""` and serve it over
+Tailscale (`tailscale serve --bg 8765` alongside `python -m fitness serve`).
 
 A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen or bring a small battery pack.
+
+## The app on your phone
+
+**<https://chrisrohn.com/fitness/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
+and it opens offline. The hosted copy holds no one's data; yours arrives from your own computer and stays on
+the phone.
+
+1. **Install.** iPhone: open it in Safari → **Share** → **Add to Home Screen**. Android: Chrome → **Install**
+   (the button in the top bar, or the ⋮ menu). Desktop Chrome / Edge: the install icon in the address bar.
+2. **Get your data in.** On the computer, `python -m fitness run`, then **Today → Phone app**:
+   - **Copy phone link** and send it to yourself (AirDrop, Messages, email). On the phone, open the app → **Import
+     data** → paste it. The data rides after the `#` in the link, which browsers never send to a server.
+   - Or **Save data file**, put it in iCloud Drive / Google Drive, and pick it under **Import data**. Set
+     `[app] export_dir` (e.g. `"~/Library/Mobile Documents/com~apple~CloudDocs/Training"`) and every build drops a
+     fresh `fitness-data.json` there for you.
+3. **Refresh** with **Update data** in the bar under the masthead; it turns red after 36 hours. **Remove** wipes it
+   from the phone.
+
+On iPhone an installed app keeps its own storage, separate from Safari, so import *inside* the app after installing.
+Ride mode (also a long-press shortcut on the icon on Android) reads the same copy, so its zones and the week's sessions are
+already there. Theme and units follow you between the two. A new build of the site replaces the cached app the
+next time it opens with signal.
 
 ## Setup (once, about 10 minutes)
 
@@ -243,9 +268,9 @@ legs actually felt on the bike.
 | `metrics.py` | load, PMC, sleep score, readiness, recommendation, insights (pure functions) |
 | `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` and `dist/ride.html` |
-| `build-ride.mjs` | writes the public, data-free `chrisrohn.com/fitness/ride.html` during the site build |
+| `build-app.mjs` | writes the public, data-free app to `chrisrohn.com/fitness/` during the site build: the dashboard shell, ride mode, manifest, icons and the offline service worker |
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
-| `site/` | the dashboard and ride-mode pages, styles and SVG charts (no dependencies, works offline) |
+| `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page) and ride mode, styles, SVG charts, `manifest.webmanifest`, `sw.js` and `icons/` (no dependencies, works offline) |
 | `demo.py` | the synthetic athlete |
 
-Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted ride page: CSP, accessibility, link hand-off). CI runs both. This is a personal analysis tool, not medical advice.
+Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, CSP, accessibility, link hand-off). CI runs both. This is a personal analysis tool, not medical advice.

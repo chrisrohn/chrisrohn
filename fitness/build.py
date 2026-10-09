@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import re
+import shutil
 import statistics
 import zlib
 from collections import defaultdict
@@ -263,14 +264,34 @@ def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
             "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models}
 
 
+def _pack(obj: dict) -> str:
+    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
+    packed = packer.compress(json.dumps(obj, separators=(",", ":")).encode()) + packer.flush()
+    return base64.urlsafe_b64encode(packed).decode().rstrip("=")
+
+
+def app_url(cfg: dict) -> str:
+    """Where the installable app is hosted ([app] url), or "" for local-only use."""
+    url = cfg.get("app", {}).get("url") or ""
+    return url if not url or url.endswith("/") else url + "/"
+
+
 def ride_link(cfg: dict, ride: dict, local: str) -> str:
     """The hosted ride page with the config deflated into the #fragment (never sent to the server; short enough for
     a QR code), or the local copy when no hosted page is configured."""
-    if not cfg["ride"].get("url"):
-        return local
-    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
-    packed = packer.compress(json.dumps(ride, separators=(",", ":")).encode()) + packer.flush()
-    return f"{cfg['ride']['url']}#z={base64.urlsafe_b64encode(packed).decode().rstrip('=')}"
+    base = app_url(cfg)
+    return f"{base}ride.html#z={_pack(ride)}" if base else local
+
+
+def phone_link(cfg: dict, data: dict) -> str | None:
+    """The whole dashboard for the installed app on the phone, deflated into the #fragment (about 40 KB: a link to send
+    yourself, not a QR code). The app keeps it in the phone's own storage."""
+    base = app_url(cfg)
+    return f"{base}#d={_pack(phone_data(data))}" if base else None
+
+
+def phone_data(data: dict) -> dict:
+    return {k: v for k, v in data.items() if k not in ("ride_qr", "phone_href", "ride_href")}
 
 
 def ride_qr(link: str) -> str | None:
@@ -288,7 +309,8 @@ def csp(html: str) -> str:
     """Fill the page's Content-Security-Policy: only its own inline scripts (by hash) may run, nothing may load."""
     hashes = [f"'sha256-{base64.b64encode(hashlib.sha256(m.group(1).encode()).digest()).decode()}'"
               for m in re.finditer(r"<script(?![^>]*application/json)[^>]*>(.*?)</script>", html, re.S)]
-    policy = f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
+    policy = (f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; "
+              "base-uri 'none'; form-action 'none'")   # the same policy fitness/build-app.mjs sets on the hosted pages
     return html.replace("__CSP__", policy)
 
 
@@ -305,26 +327,45 @@ def ride_page(ride: dict | None) -> str:
 
 
 def render_public_ride(out: Path | None = None) -> Path:
-    """ride.html with no data in it, safe to host anywhere: it gets zones and sessions from the #c= link."""
+    """ride.html with no data in it, safe to host anywhere: it gets zones and sessions from the #z= link."""
     out = out or DIST_DIR / "public" / "ride.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(ride_page(None))
     return out
 
 
+def app_files(out_dir: Path, pages: list[str]) -> None:
+    """The manifest, icons and service worker that make a built folder installable (when it's served over HTTPS)."""
+    shutil.copytree(SITE_DIR / "icons", out_dir / "icons", dirs_exist_ok=True)
+    (out_dir / "manifest.webmanifest").write_text((SITE_DIR / "manifest.webmanifest").read_text())
+    version = hashlib.sha256("".join((out_dir / p).read_text() for p in pages if (out_dir / p).exists()).encode()).hexdigest()[:10]
+    (out_dir / "sw.js").write_text((SITE_DIR / "sw.js").read_text().replace("__VERSION__", version))
+
+
 def render(data: dict, out: Path | None = None, cfg: dict | None = None) -> Path:
     out = out or DIST_DIR / "index.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
     ride_name = "ride.html" if out.name == "index.html" else f"{out.stem}-ride.html"
     if data.get("ride"):
-        out.parent.mkdir(parents=True, exist_ok=True)
         out.with_name(ride_name).write_text(ride_page(data["ride"]))
         href = ride_link(cfg, data["ride"], ride_name) if cfg else ride_name
         data = {**data, "ride_href": href, "ride_qr": ride_qr(href)}
+    if cfg:
+        data = {**data, "phone_href": phone_link(cfg, data)}
+        # the data file for the phone app's Import (and an optional copy where a phone can pick it up, e.g. iCloud Drive)
+        blob = json.dumps(phone_data(data), separators=(",", ":"))
+        out.with_name(f"{out.stem}-data.json" if out.name != "index.html" else "fitness-data.json").write_text(blob)
+        export = cfg.get("app", {}).get("export_dir")
+        if export:
+            target = Path(export).expanduser()
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "fitness-data.json").write_text(blob)
     html = (SITE_DIR / "index.html").read_text()
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = (html.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
+                .replace("/*__SHELL__*/", (SITE_DIR / "shell.js").read_text())
                 .replace("/*__APP__*/", (SITE_DIR / "app.js").read_text())
                 .replace("__DATA__", payload))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html)
+    out.write_text(csp(html))
+    app_files(out.parent, [out.name, ride_name])
     return out

@@ -85,12 +85,15 @@ days = ["tue", "thu", "wed", "mon", "fri"]   # the days you can commute, most pr
 per_week = [1, 3]         # fewest and most commute days a week the planner will book
 winter = false            # true = keep commuting through the [indoor] trainer season
 
-# Ride mode (dist/ride.html): the phone on your bars shows live HR from a Bluetooth strap, GPS speed and the
-# day's session as timed steps. Phones need it served over HTTPS; see README → Ride mode.
+# The installable app: chrisrohn.com/fitness/ (dashboard + ride mode), built data-free by build.mjs. The dashboard's
+# "Phone app" panel hands your data to it in a link's #fragment, which never reaches the server, or as a data file.
+[app]
+url = "https://chrisrohn.com/fitness/"   # "" = local-only: no phone link, ride mode served from dist/
+export_dir = ""           # also write fitness-data.json here on every build, e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/Fitness"
+                          # (iCloud Drive) or a Google Drive folder, so the phone app can Import it from Files
+
+# Ride mode: live HR from a Bluetooth strap, GPS speed and the day's session as timed steps. See README → Ride mode.
 [ride]
-url = "https://chrisrohn.com/fitness/ride.html"   # the hosted page (built by build.mjs, data-free). The dashboard's Ride
-                                         # mode button and QR code open it with your zones and the week's sessions
-                                         # in the link's #fragment, which never reaches the server. "" = local copy
 wheel_m = 2.29            # wheel circumference for a speed sensor: 29 x 2.2 ≈ 2.30, 700 x 40c ≈ 2.21
 fuel_every_min = 20       # eat/drink reminder interval; 0 turns it off
 

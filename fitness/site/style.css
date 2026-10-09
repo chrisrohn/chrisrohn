@@ -10,7 +10,7 @@
      rules    6 between sections · 2 inside them · 1 between rows */
 :root {
   color-scheme: light;
-  --page: #f5f2ea; --surface: #f5f2ea; --raised: #fbf9f4; --band: #111111; --on-band: #f5f2ea;
+  --page: #f5f2ea; --surface: #f5f2ea; --raised: #fbf9f4; --band: #111111; --on-band: #f5f2ea; --sheet-shadow: #111111;
   --ink: #111111; --ink-2: #45433f; --muted: #6a6762;
   --grid: #dcd8ce; --axis: #111111; --ring: #111111; --hair: #c9c5ba;
   --accent: #d6301f; --accent-ink: #b8281a;   /* the same red, one step darker where it sets small type (AA 4.5:1) */
@@ -38,7 +38,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --page: #141414; --surface: #141414; --raised: #1c1c1b; --band: #000000; --on-band: #f2efe8;
+    --page: #141414; --surface: #141414; --raised: #1c1c1b; --band: #000000; --on-band: #f2efe8; --sheet-shadow: #000000;
     --ink: #f2efe8; --ink-2: #c4c0b7; --muted: #9a968e;
     --grid: #2e2d2b; --axis: #f2efe8; --ring: #f2efe8; --hair: #3a3936;
     --accent: #e8442f; --accent-ink: #e8442f;
@@ -49,7 +49,7 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #141414; --surface: #141414; --raised: #1c1c1b; --band: #000000; --on-band: #f2efe8;
+  --page: #141414; --surface: #141414; --raised: #1c1c1b; --band: #000000; --on-band: #f2efe8; --sheet-shadow: #000000;
   --ink: #f2efe8; --ink-2: #c4c0b7; --muted: #9a968e;
   --grid: #2e2d2b; --axis: #f2efe8; --ring: #f2efe8; --hair: #3a3936;
   --accent: #e8442f; --accent-ink: #e8442f;
@@ -74,6 +74,7 @@ p { margin: 0; text-wrap: pretty; }
 h1 { font-size: var(--fs-head); line-height: var(--lh-tight); letter-spacing: var(--track-head); }
 h2 { font-size: var(--fs-title); line-height: 1.05; letter-spacing: var(--track-title); text-wrap: balance; }
 .num, .tbl td.r, .tile .v, .meter b, .kpis b { font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* the one label style: kickers, column heads, tags, buttons, axis notes */
@@ -261,6 +262,32 @@ details.phone { border-top: var(--rule-hair) solid var(--ink); padding-top: var(
 .empty { color: var(--ink-2); }
 .kpis { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); color: var(--ink-2); margin-bottom: var(--sp-4); }
 .kpis b { color: var(--ink); font-weight: 700; }
+
+/* ── the app shell: the data line under the masthead, the import sheet, the welcome screen ───────────────── */
+header.top { padding-top: env(safe-area-inset-top); }
+.databar { border-bottom: var(--rule-hair) solid var(--ink); background: var(--raised); }
+.databar-in { max-width: 1200px; margin: 0 auto; padding: var(--sp-2) var(--gutter); display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); font-size: var(--fs-small); }
+.databar-in span { flex: 1 1 auto; }
+@media (max-width: 559px) { .databar-in span { flex-basis: 100%; } }
+.databar-in.stale span { color: var(--accent-ink); }
+dialog { border: 1.5px solid var(--ink); border-radius: 0; background: var(--page); color: var(--ink); padding: 0; width: min(calc(100vw - 2 * var(--sp-4)), 480px); box-shadow: var(--sp-2) var(--sp-2) 0 var(--sheet-shadow); }
+dialog::backdrop { background: rgba(0, 0, 0, .55); }
+.sheet { padding: 0 var(--sp-4) var(--sp-4); display: grid; gap: var(--sp-2); }
+.sheet h2 { font-size: var(--fs-head); line-height: var(--lh-snug); letter-spacing: var(--track-head); background: var(--band); color: var(--on-band); margin: 0 calc(-1 * var(--sp-4)) var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+.sheet textarea { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--fs-small); width: 100%; padding: var(--sp-2); border: 1.5px solid var(--ink); border-radius: 0; background: var(--raised); color: var(--ink); resize: vertical; word-break: break-all; }
+.sheet input[type=file] { font: inherit; font-size: var(--fs-small); color: var(--ink-2, var(--ink)); }
+.sheet input[type=file]::file-selector-button { font: inherit; font-weight: 700; font-size: var(--fs-label); letter-spacing: var(--track-label); text-transform: uppercase;
+  min-height: var(--tap); padding: 0 var(--sp-3); margin-right: var(--sp-3); border: 1.5px solid var(--ink); border-radius: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.sheet input[type=file]::file-selector-button:hover { background: var(--ink); color: var(--page); }
+.sheet .actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.chip.primary { background: var(--ink); color: var(--page); }
+.error { color: var(--accent-ink); font-size: var(--fs-small); min-height: 1em; }
+.welcome .steps ol { margin: 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-2); max-width: 52ch; }
+.welcome .steps p { max-width: 52ch; }
+.welcome code { white-space: nowrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; background: var(--raised); padding: 1px 4px; }
+.big-chip { min-height: 44px !important; padding: 0 var(--sp-4) !important; }
+.phone-in { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
+.phone-in p { max-width: 60ch; }
 
 footer { max-width: 1200px; margin: 0 auto; padding: var(--sp-4) var(--gutter) var(--sp-7); color: var(--ink-2); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--sp-3) var(--sp-5); }
 footer::before { content: ""; grid-column: 1 / -1; border-top: var(--rule-hair) solid var(--ink); margin-bottom: var(--sp-1); }

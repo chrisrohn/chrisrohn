@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--open", action="store_true")
     sv = sub.add_parser("serve", help="serve fitness/dist on the local network (phone on the same Wi-Fi)")
     sv.add_argument("--port", type=int, default=8765)
-    sub.add_parser("ride-page", help="write a data-free ride.html to host over HTTPS (set [ride] url to it)")
+    sub.add_parser("ride-page", help="write a data-free ride.html to host over HTTPS (set [app] url to its folder)")
     dm = sub.add_parser("demo", help="build a demo page from a synthetic athlete")
     dm.add_argument("--open", action="store_true")
     args = p.parse_args(argv)
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                 webbrowser.open(out.as_uri())
     elif args.cmd == "ride-page":
         out = build.render_public_ride()
-        print(f"Wrote {out}. Host it over HTTPS (Cloudflare Pages, GitHub Pages, Netlify…), put its URL in config.toml [ride] url,")
+        print(f"Wrote {out}. Host it over HTTPS (Cloudflare Pages, GitHub Pages, Netlify…), put its folder in config.toml [app] url,")
         print("then rebuild: the dashboard's Ride mode button opens it with your zones and sessions in the link's #fragment.")
     elif args.cmd == "serve":
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(config.DIST_DIR))

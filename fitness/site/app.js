@@ -1,8 +1,9 @@
 "use strict";
-// Renders the dashboard from the JSON that `python -m fitness build` inlines. No dependencies: the charts are SVG
-// drawn here (thin marks, hairline grid, crosshair + tooltip, arrow-key navigation, a table view under each).
-(() => {
-  const D = JSON.parse(document.getElementById("data").textContent);
+// Renders the dashboard from the data shell.js hands it (inlined by `python -m fitness build`, a phone link, or this
+// device's saved copy). No dependencies: the charts are SVG drawn here (thin marks, hairline grid, crosshair +
+// tooltip, arrow-key navigation, a table view under each).
+/** @param {any} D */
+window.startDashboard = D => {
   const app = document.getElementById("app");
   // escape, then keep figures with their units and operators so a line never ends "RPE" or starts "min"
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c])
@@ -200,7 +201,7 @@
     host.addEventListener("blur", hide);
     const det = document.createElement("details");
     det.className = "table";
-    det.innerHTML = `<summary>Table</summary><div class="scroll"><table class="tbl"><thead><tr><th>${esc(cfg.xName || "Date")}</th>${cfg.series.map(s => `<th class="r">${esc(s.name)}</th>`).join("")}</tr></thead><tbody>${
+    det.innerHTML = `<summary>Table</summary><div class="scroll" tabindex="0" role="region" aria-label="Chart data"><table class="tbl"><thead><tr><th>${esc(cfg.xName || "Date")}</th>${cfg.series.map(s => `<th class="r">${esc(s.name)}</th>`).join("")}</tr></thead><tbody>${
       cfg.x.map((x, i) => [x, i]).reverse().map(([x, i]) => `<tr><td>${esc((cfg.tipFmt || fmtDow)(x))}</td>${cfg.series.map(s => `<td class="r">${s.values[i] == null ? "—" : esc((s.fmt || r0)(s.values[i]))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
     wrap.appendChild(det);
     let raf = 0;
@@ -275,7 +276,7 @@
         <span>form <b>${signed(r.race_tsb)}</b> <span class="tag ${r.in_band ? "good" : "bad"}">${r.in_band ? "▲ in band" : "▼ off"}</span> ${signed(r.target_tsb[0])} to ${signed(r.target_tsb[1])}</span></div>
       ${r.options.length > 1 ? compareOptions(r) : ""}
       ${best ? `<p class="sub">Best edition: ${best.date.slice(0, 4)}, ${dur(best.moving_s)} (${speed(best.speed_kph)}), started at fitness <b>${r0(best.ctl)}</b>, form <b>${signed(best.tsb)}</b>.</p>
-      <details class="table"><summary>${eds.length} past edition${eds.length === 1 ? "" : "s"}</summary><div class="scroll"><table class="tbl"><thead><tr><th>Date</th><th class="r">Time</th><th class="r">Speed</th><th class="r">Avg HR</th><th class="r">Fitness</th><th class="r">Form</th></tr></thead><tbody>
+      <details class="table"><summary>${eds.length} past edition${eds.length === 1 ? "" : "s"}</summary><div class="scroll" tabindex="0" role="region" aria-label="Past editions"><table class="tbl"><thead><tr><th>Date</th><th class="r">Time</th><th class="r">Speed</th><th class="r">Avg HR</th><th class="r">Fitness</th><th class="r">Form</th></tr></thead><tbody>
         ${eds.map(e => `<tr><td>${fmtD(e.date)}, ${e.date.slice(0, 4)}</td><td class="r">${dur(e.moving_s)}</td><td class="r">${speed(e.speed_kph)}</td><td class="r">${r0(e.avg_hr)}</td><td class="r">${r0(e.ctl)}</td><td class="r">${signed(e.tsb)}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
     </div>`;
   }
@@ -312,13 +313,13 @@
       <div class="head"><h2>Season</h2><span class="sub">${plan.races.length} race${plan.races.length === 1 ? "" : "s"} · plan through ${fmtD(plan.races[plan.races.length - 1].date)}, ${plan.races[plan.races.length - 1].date.slice(0, 4)}</span></div>
       <div class="grid">${plan.races.map(raceCard).join("")}</div>
       <h3 class="mt-6">${shown.length > 14 ? `Every day to ${esc(shortName(first.name))}` : "Next two weeks"}</h3>
-      <div class="scrollx"><table class="tbl plan"><thead><tr><th>Day</th><th>Session</th><th class="r">Time</th><th class="r hide-sm">TSS</th><th class="r">Form</th></tr></thead><tbody>
+      <div class="scrollx" tabindex="0" role="region" aria-label="Day by day plan"><table class="tbl plan"><thead><tr><th>Day</th><th>Session</th><th class="r">Time</th><th class="r hide-sm">TSS</th><th class="r">Form</th></tr></thead><tbody>
         ${shown.map((d, i) => `<tr class="${i === 0 ? "today" : ""} ${d.phase === "race" ? "race" : ""}"><td class="num nowrap">${fmtDow(d.date)}${chipFor(d, shown[i - 1])}${d.commute ? `${chipFor(d, shown[i - 1]) ? "" : "<br>"}<span class="phase commute">commute</span>` : ""}</td>
           <td><b>${esc(d.title)}</b><br><span class="sub">${esc(d.session)}</span></td><td class="r">${d.minutes ? dur(d.minutes * 60) : "—"}</td><td class="r hide-sm">${d.load || "—"}</td><td class="r">${signed(d.tsb)}</td></tr>`).join("")}
       </tbody></table></div>
       <p class="sub mt-3">Readiness can only make a day easier: on a red morning take the easy option and the plan recalculates from what you actually did at the next build.</p>
       <h3 class="mt-6">Projected fitness</h3><div id="c-season"></div>
-      <details class="table" open><summary>Week by week</summary><div class="scroll tall"><table class="tbl"><thead><tr><th>Week of</th><th>Phase</th><th class="r">Hours</th><th class="r hide-sm">TSS</th><th class="hide-sm">Key days</th><th class="r">Fitness</th></tr></thead><tbody>
+      <details class="table" open><summary>Week by week</summary><div class="scroll tall" tabindex="0" role="region" aria-label="Week by week"><table class="tbl"><thead><tr><th>Week of</th><th>Phase</th><th class="r">Hours</th><th class="r hide-sm">TSS</th><th class="hide-sm">Key days</th><th class="r">Fitness</th></tr></thead><tbody>
         ${plan.weeks.map(w => `<tr class="${w.race ? "race" : ""}"><td class="num nowrap">${fmtD(w.week)}</td><td class="nowrap"><span class="phase ${w.phase}">${esc(w.phase)}</span>${w.indoor ? ' <span class="phase indoor">trainer</span>' : ""}${w.recovery_week ? ' <span class="phase recovery">easy week</span>' : ""}</td>
           <td class="r">${w.hours}</td><td class="r hide-sm">${r0(w.load)}</td><td class="sub hide-sm">${w.race ? `<b>${esc(w.race)}</b> · ` : ""}${esc([...new Set(w.keys.filter(k => !k.startsWith("Race day")))].join(", ")) || "—"}${w.commutes ? ` · ${w.commutes} commute${w.commutes === 1 ? "" : "s"}` : ""}</td><td class="r">${r0(w.ctl)}</td></tr>`).join("")}
       </tbody></table></div></details>
@@ -332,7 +333,7 @@
     const html = [];
 
     // today
-    html.push(`<section id="today" class="hero">
+    html.push(`<section id="today" class="hero" aria-labelledby="today-h"><h2 class="sr" id="today-h">Today</h2>
       <div class="card call">
         <span class="sub">Today · ${fmtDow(D.today)}${next ? ` · ${esc(shortName(next.name))} in ${next.days_out} day${next.days_out === 1 ? "" : "s"}` : ""}${pToday && pToday.indoor ? " · trainer season" : ""}</span>
         <span class="badge ${esc(rec.level)}"><i></i>${esc(LEVEL[rec.level] || rec.level)}</span>
@@ -342,10 +343,13 @@
         ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${plan ? `<p class="sub">Next: ${plan.days.slice(1, 4).map(d => `<b>${DOW[asDate(d.date).getDay()]}</b> ${esc(d.title.toLowerCase())}${d.minutes ? ` ${dur(d.minutes * 60)}` : ""}`).join(" · ")}</p>` : ""}
         ${commuteBlock()}
-        ${D.ride_qr ? `<details class="phone"><summary>Ride mode on your phone</summary><div class="qr">
-          <div class="qrimg" role="img" aria-label="QR code that opens ride mode with this week's sessions">${D.ride_qr}</div>
-          <p class="sub">Scan with the phone on your bars, or <button type="button" class="chip" id="copy-ride">copy the link</button>. It opens chrisrohn.com/fitness/ride.html with your HR zones and the next 7 days of sessions; the phone keeps them, so rescan after a rebuild when the plan changes. Your data rides in the link's #fragment, which never reaches the server.</p>
-        </div></details>` : ""}
+        ${D.phone_href || D.ride_qr ? `<details class="phone"><summary>Phone app</summary>
+          <div class="phone-in">
+            ${D.phone_href ? `<p>The whole dashboard, in the app on your phone: <button type="button" class="chip" data-copy="phone">Copy phone link</button> <button type="button" class="chip" data-save="1">Save data file</button></p>
+            <p class="sub">Send the link to yourself (AirDrop, Messages, email) and paste it under <b>Import data</b> in the app, or put the file in iCloud Drive / Google Drive and pick it there. It carries this build's numbers after the <b>#</b>, which never reaches the server; the app keeps them on the phone, offline.</p>` : ""}
+            ${D.ride_qr ? `<div class="qr"><div class="qrimg" role="img" aria-label="QR code that opens ride mode with this week's sessions">${D.ride_qr}</div>
+            <p class="sub"><b>Just ride mode:</b> scan this with the phone on your bars, or <button type="button" class="chip" data-copy="ride">copy the ride link</button>. It opens ride mode with your HR zones and the next 7 days of sessions.</p></div>` : ""}
+          </div></details>` : ""}
         ${rd && rd.illness ? `<p class="sub"><b>Illness watch:</b> elevated resting HR plus breathing rate or overnight stress is the classic early sign of a cold. Rest beats a workout here.</p>` : ""}
       </div>
       <div class="card">
@@ -400,7 +404,7 @@
         <div class="zones-key">${zp.map((p, i) => `<span><b><i class="sw" style="background:var(--z${i + 1})"></i>Z${i + 1}</b>${p.toFixed(0)}%<br>${dur(z.seconds[i])}</span>`).join("")}</div>
         <p class="sub mt-3">${zp[0] + zp[1] >= 75 ? "Mostly easy, with the hard work concentrated: a polarized/pyramidal mix that suits a 2-hour race." : zp[2] > 25 ? "A lot of Zone 3: the 'grey zone' tires you without the stimulus of real intervals. Make easy days easier." : "A balanced mix."}</p>` : `<p class="empty">Time in zones comes from Garmin-recorded activities.</p>`}</div></div>
       ${commuteHTML()}
-      <h3 class="mt-6">Recent activities</h3><div class="scrollx"><table class="tbl"><thead><tr><th>When</th><th>Activity</th><th class="r">Time</th><th class="r">Distance</th><th class="r hide-sm">Climb</th><th class="r hide-sm">Avg HR</th><th class="r">TSS</th></tr></thead><tbody>
+      <h3 class="mt-6">Recent activities</h3><div class="scrollx" tabindex="0" role="region" aria-label="Recent activities"><table class="tbl"><thead><tr><th>When</th><th>Activity</th><th class="r">Time</th><th class="r">Distance</th><th class="r hide-sm">Climb</th><th class="r hide-sm">Avg HR</th><th class="r">TSS</th></tr></thead><tbody>
       ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}${a.indoor ? " · trainer" : ""}${a.commute ? ` · commute ${a.leg === "home" ? "home" : "in"}` : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r hide-sm">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r hide-sm">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
       </tbody></table></div>${D.recent.some(a => a.load_src === "duration") ? `<p class="sub mt-3">* No heart rate: load estimated from duration.</p>` : ""}</section>`);
 
@@ -411,7 +415,7 @@
     // data
     const th = D.athlete;
     html.push(`<section id="device" class="card"><div class="head"><h2>What the Venu Sq gives you</h2><span class="sub">last 30 days of data actually received</span></div>
-      <div class="scrollx"><table class="tbl"><thead><tr><th>Signal</th><th class="r">Days</th><th>Hardware</th><th>Note</th></tr></thead><tbody>
+      <div class="scrollx" tabindex="0" role="region" aria-label="Signals received"><table class="tbl"><thead><tr><th>Signal</th><th class="r">Days</th><th>Hardware</th><th>Note</th></tr></thead><tbody>
       ${D.coverage.map(c => `<tr><td>${esc(c.field)}</td><td class="r">${c.days}/${c.of}</td><td>${esc(c.device)}</td><td class="sub">${esc(c.note)}</td></tr>`).join("")}</tbody></table></div>
       <div class="kpis mt-4"><span>Max HR <b>${th.max_hr}</b></span><span>Resting HR <b>${r0(th.rest_hr)}</b></span><span>LTHR <b>${th.lthr}</b></span><span>FTP <b>${th.ftp || "—"}</b></span>
       ${th.estimated.length ? `<span class="muted">${esc(listOf(th.estimated.map(k => ({ max_hr: "max HR", resting_hr: "resting HR", lthr: "LTHR", ftp: "FTP" })[k] || k)))} estimated from your data; set ${th.estimated.length === 1 ? "it" : "them"} in fitness/config.toml</span>` : ""}</div>
@@ -545,12 +549,6 @@
 
   // ── controls ────────────────────────────────────────────────────────────────────────────────────────────
   const unitBtns = [...document.querySelectorAll("[data-units]")];
-  // light / dark: follows the device until a button is pressed, then that choice sticks (shared with ride mode)
-  const themeBtns = [...document.querySelectorAll("[data-theme-pick]")], deviceDark = matchMedia("(prefers-color-scheme: dark)");
-  const effective = () => document.documentElement.dataset.theme || (deviceDark.matches ? "dark" : "light");
-  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === effective())));
-  for (const b of themeBtns) b.addEventListener("click", () => { document.documentElement.dataset.theme = b.dataset.themePick; ls.set("fitness-theme", b.dataset.themePick); paintTheme(); });
-  deviceDark.addEventListener("change", paintTheme);
   const paintUnits = () => unitBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.units === units)));
   for (const b of unitBtns) b.addEventListener("click", () => {
     if (b.dataset.units === units) return;
@@ -560,9 +558,18 @@
   paintUnits();
   if (D.ride_href) { const rl = document.getElementById("ride-link"); rl.href = D.ride_href; rl.hidden = false; }
   app.addEventListener("click", e => {
-    if (!(e.target instanceof Element) || e.target.id !== "copy-ride") return;
-    const btn = e.target;
-    navigator.clipboard.writeText(D.ride_href).then(() => { btn.textContent = "copied"; }, () => { btn.textContent = "copy failed"; });
+    const btn = e.target instanceof Element ? e.target.closest("[data-copy], [data-save]") : null;
+    if (!btn) return;
+    if (btn.dataset.save) {   // the data file, for iCloud Drive / Google Drive → Import on the phone
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify({ ...D, ride_qr: null, phone_href: null })], { type: "application/json" }));
+      a.download = `fitness-data-${D.today}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      return;
+    }
+    const text = btn.dataset.copy === "phone" ? D.phone_href : D.ride_href;
+    navigator.clipboard.writeText(text).then(() => { btn.textContent = "Copied"; }, () => { btn.textContent = "Copy failed"; });
   });
   app.addEventListener("click", e => {
     const b = e.target instanceof Element ? e.target.closest("button.opt") : null;
@@ -573,6 +580,5 @@
     render();
     window.scrollTo(0, y);
   });
-  paintTheme();
   render();
-})();
+};

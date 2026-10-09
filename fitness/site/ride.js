@@ -406,6 +406,9 @@
   themeBtns.forEach(b => b.addEventListener("click", () => { document.documentElement.dataset.theme = b.dataset.themePick; ls.set("fitness-theme", b.dataset.themePick); paintTheme(); }));
   paintTheme();
 
+  // installed-app offline: the same service worker as the dashboard (scope: this folder)
+  if ("serviceWorker" in navigator && window.isSecureContext && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
+
   planned = daySel.value === "free" ? null : days[+daySel.value] || null;
   steps = planned ? planned.steps : [];
   if (S.running) { note.textContent = "Ride restored after a reload — tap Resume."; startGps(); }
