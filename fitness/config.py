@@ -18,11 +18,11 @@ DEFAULTS: dict = {
     "athlete": {"sex": "male", "max_hr": 0, "resting_hr": 0, "lthr": 0, "ftp": 0, "sleep_need_hours": 8.0, "timezone": "America/Detroit", "units": "imperial", "weight_kg": 0},
     "nutrition": {"lunch": "veggie", "weekday_ride": "evening", "bottle_cages": 2, "bladder_l": 0, "ride_fuel": {}},
     "indoor": {"start": "", "end": "", "apps": ["zwift", "mywoosh"], "long_ride_h": 2.5},
-    "plan": {"weekly_pattern": [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9], "max_ramp": 6, "base_ramp": 3},
+    "plan": {"weekly_pattern": [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9], "max_ramp": 6, "base_ramp": 3, "fit": True},
     "sync": {"garmin_tokens": "~/.garminconnect", "history_days": 400, "resync_days": 3},
     "ride": {"url": "", "wheel_m": 2.29, "fuel_every_min": 20},
     "app": {"url": "", "export_dir": ""},
-    "commute": {"enabled": False, "km_each_way": 0, "climb_m": [0, 0], "days": ["tue", "thu", "wed", "mon", "fri"], "per_week": [1, 3], "winter": False},
+    "commute": {"enabled": False, "km_each_way": 0, "climb_m": [0, 0], "days": ["tue", "thu", "wed", "mon", "fri"], "per_week": [1, 3], "winter": False, "holidays": "us-federal"},
 }
 OPTION_DEFAULTS = {"label": "", "km": 0, "climbing_ft": 0, "hours": 2.0, "target_ctl": 55, "long_ride_h": 3.0, "taper_days": [6, 14]}
 RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}}
@@ -36,6 +36,24 @@ def nth_weekday(rule: str, year: int) -> date:
     n, dow, mon = int(n[0]), DAYS.index(dow[:3].lower()), MONTHS.index(mon[:3].lower())
     first = date(year, mon, 1)
     return first + timedelta(days=(dow - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def us_federal_holidays(year: int) -> set[date]:
+    """The eleven US federal holidays (5 U.S.C. 6103), with Saturday ones observed Friday and Sunday ones Monday."""
+    def observed(d: date) -> date:
+        return d - timedelta(days=1) if d.weekday() == 5 else d + timedelta(days=1) if d.weekday() == 6 else d
+    last_mon_may = date(year, 5, 31) - timedelta(days=date(year, 5, 31).weekday())
+    fixed = [date(year, 1, 1), date(year, 6, 19), date(year, 7, 4), date(year, 11, 11), date(year, 12, 25)]
+    rules = ["3rd Mon Jan", "3rd Mon Feb", "1st Mon Sep", "2nd Mon Oct", "4th Thu Nov"]
+    out = {observed(d) for d in fixed} | {nth_weekday(r, year) for r in rules} | {last_mon_may}
+    if date(year + 1, 1, 1).weekday() == 5:          # next New Year's Day on a Saturday is observed on Dec 31
+        out.add(date(year, 12, 31))
+    return out
+
+
+def workday(d: date, cfg: dict) -> bool:
+    """Monday to Friday, except holidays (cfg commute.holidays = "us-federal", the default; "" for none)."""
+    return d.weekday() < 5 and not (cfg.get("commute", {}).get("holidays", "us-federal") == "us-federal" and d in us_federal_holidays(d.year))
 
 
 def _race(raw: dict) -> dict:

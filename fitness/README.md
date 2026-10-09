@@ -33,6 +33,22 @@ never exposes those numbers. This site uses overnight stress in its place.
 
 The **Data** section of the page shows how many of the last 30 days actually came through for each signal.
 
+## Your morning
+
+1. **Wake up.** The watch hands last night's sleep, HRV-proxy stress, resting HR and Body Battery to Garmin Connect
+   when the phone app syncs it (opening Garmin Connect makes sure).
+2. **Open the app.** If the last sync is more than 45 minutes old it starts one by itself and reloads about a minute
+   later with this morning's numbers. If last night still isn't in Garmin, the Today card says so, with a *Sync now*.
+3. **Read the call.** The Today card has:
+   - **The call:** the plan's session (or the commute), eased by readiness when the morning says so, never made harder.
+   - **Plan B:** what to do instead if it rains or the day runs short, so there's always a sensible option.
+   - **The next 7 days:** tap any day for its session and its Plan B. Every sync rebuilds them from what you rode,
+     slept and recovered: a missed day moves, a good week grows.
+   - **Fuel:** today's meals around the riding.
+
+Work days are Monday to Friday except US federal holidays (`commute.holidays = "us-federal"`, `""` for none): no
+commute is ever booked or suggested on a weekend or a holiday.
+
 ## Races and the trainer season
 
 Races live in [`config.toml`](config.toml) as `[[races]]` blocks. Each one has a date, a kind (`mtb` or `gravel`,
@@ -58,6 +74,10 @@ history:
 - **The history.** Rides recorded as Strava *Virtual Ride*, flagged *trainer*, or with Zwift / MyWoosh in the
   name count as indoor. They get their own color in the weekly-hours chart, and the Training section shows the
   season's rides, hours, average power and how your best-effort FTP moved.
+- **Weekend skills.** In base and build, a weekend endurance ride outdoors is a **Skills ride**: Z2 riding with the
+  handling and racecraft the next race asks for. Before Iceman that's singletrack flow, sand and two-track, wave
+  starts, punchy climbs with remounts, and eating on rough ground. Before Barry-Roubaix it's paceline work, loose
+  corners and descents, rolling hills at tempo, eating at speed in the drops, and sand and washboard.
 - **FTP.** Zwift and MyWoosh send trainer power, so with an FTP set, those rides are scored from power. Leave
   `ftp = 0` and the site estimates FTP from your best 20–90 minute power ride of the last year. After each ramp
   test, put the real number in `config.toml`.
@@ -77,7 +97,8 @@ the best-fitting days, and the commute replaces that day's session, so it never 
 | Key session | **Commute + workout:** in easy (Z1–Z2); home with a flat-road workout (2 × 15 sweet spot, 30 min tempo, 3 × 8 threshold, or race-pace blocks for gravel), the rest Z2 |
 | Endurance | **Endurance commute:** Z2 both ways, steady, no surges at the lights |
 | Easy, taper, recovery week | **Easy commute:** Z1 both ways, soft-pedal, arrive fresh |
-| Rest, openers, race, last 2 days before a race | Leave the bike |
+| Rest | Leave the bike, unless the week needs one more commute to reach its minimum: then an easy commute, and the rest moves to the week's lightest day |
+| Openers, race, last 2 days before a race | Leave the bike |
 | Trainer season (Dec–Feb) | Leave the bike, unless `winter = true` |
 
 **The morning call.** On a commute day the dashboard's call *is* the commute, and readiness can only make it
@@ -87,7 +108,9 @@ easier:
 - 45–59: easy both ways, no intervals.
 - Below 45, or an illness flag: leave the bike.
 
-On a non-commute weekday it says whether an optional easy commute makes sense. Each call gives the heart-rate
+On a non-commute weekday it says whether an optional easy commute makes sense. On a rest day that's a work day, a
+green morning (readiness 70+) in base or build, with the week under its commute maximum, offers an **optional easy
+commute** in place of "not a bike day". Rest is still the default. Each call gives the heart-rate
 ranges for each leg in bpm, the expected time, and a fueling plan for the day: breakfast, food at work, and an
 afternoon snack before the ride home.
 
@@ -156,8 +179,9 @@ A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen
 
 ## Cloud sync (no computer)
 
-Everything runs on GitHub and your phone. A **private** repository of yours syncs Garmin (and Strava, if you use it) four times a day
-(6:17, 9:17, 13:17, 19:17 Michigan time) with [`fitness-sync.yml`](../.github/workflows/fitness-sync.yml), and the app
+Everything runs on GitHub and your phone. A **private** repository of yours syncs Garmin (and Strava, if you use it) every hour
+while you're up (5:17 to 22:17 Michigan time; a run takes about 30 seconds) and whenever you open the app with data more than
+45 minutes old, with [`fitness-sync.yml`](../.github/workflows/fitness-sync.yml), and the app
 at <https://chrisrohn.com/fitness/> reads the result with a token that can only see that repository. Garmin's
 official API is for approved companies only, so this signs in the way Garmin's own mobile app does.
 
@@ -207,6 +231,38 @@ run replaces it in a single commit. Nothing personal is ever written to this pub
 **When something goes wrong** the bar under the masthead says what (from `status.json`) and GitHub emails you about
 the failed run. Garmin sometimes asks for a fresh sign-in after a password change or about once a year: tap
 **Connect Garmin** again. A new Garmin password goes into the `GARMIN_PASSWORD` secret first.
+
+## When the plan doesn't happen
+
+Every sync rebuilds the plan from what you actually did ([`plan.py`](plan.py) `adapt`), and the Today card says
+what changed under **Plan adjusted**:
+
+- **A missed long ride** moves to the next free day that week: Saturday's to Sunday.
+- **A missed key session** moves to a free day with no hard day on either side. If there isn't one, it's dropped
+  rather than crammed in.
+- **A missed commute** (weather, a meeting) is rebooked later in the week. Commutes you've already ridden count
+  toward the week's 1–3, so a skipped one is made up and none is doubled.
+- **Today, as it happens.** If no ride in is logged by 10:00 on a commute day, today stops being a commute. The
+  session it replaced comes back for the evening, on the trainer or outside, and the food plan follows. If nothing is
+  logged by 19:00 on a long-ride day, the long ride moves to tomorrow when tomorrow is free.
+- **Fitness lost to a missed day** isn't made up in one go. The coming weeks' load targets are recomputed from the
+  fitness you actually have, still capped at `max_ramp`, so the race-day target stays honest without a cram week.
+
+Recovery weeks, tapers and race weeks aren't rearranged: there, a missed session simply stays missed.
+
+## Fitted to your riding
+
+The plan fits itself to how you actually ride ([`plan.py`](plan.py) `fit`, from the last 12 weeks, once there are
+6 weeks of riding; `[plan] fit = false` turns it off). The Season section shows it under *Fitted to your riding*,
+next to each weekday's riding.
+
+- **The week's shape** blends `weekly_pattern` half-and-half with your own riding: how often you ride each weekday,
+  times how long. Commutes are booked separately. One full rest day stays (the configured one). A day you rarely
+  ride isn't forced to rest: it stays a light option the planner can use as your fitness grows.
+- **Volume** is capped at your usual busy week + 15%, so the plan stretches you without asking for a life you don't
+  have. The cap rises as you ride more.
+- **Long rides** are capped at your usual long ride + 25% (at least 1½ h).
+- **Commutes** use your own commuting days, most-used first, and your real 25th–75th percentile count per week.
 
 ## What to eat
 

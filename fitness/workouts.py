@@ -106,6 +106,8 @@ def steps_for(key: tuple[str, int] | None, title: str, minutes: int, race_hours:
         out = wu() + reps(3, "Sweet spot", 5, "ss", 5) + cd()
     elif title == "Recovery spin":
         return [step("Recovery", minutes, "z1", "Conversational. If it feels like work, slow down")]
+    elif title == "Skills ride":
+        return [step("Skills + endurance", minutes, "z2", "Z2 between drills; today's drill is in the plan")]
     elif title in ("Endurance", "Easy endurance", "Long easy ride", "Long trainer ride"):
         return [step("Endurance", minutes, "z2", "Steady, cadence 85–95" + ("; eat 60–80 g carbs an hour" if minutes >= 90 else ""))]
     elif title == "Long ride":

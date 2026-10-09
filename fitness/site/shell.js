@@ -291,7 +291,7 @@
             ${s && s.export ? item(true, `Strava history imported · ${s.export.rows} activities from ${esc(s.export.file)}`) : s && s.error && !s.client_id ? item(false, "Strava export", s.error) : ""}
           </ul>
           <p class="connect mt-4">${connectButtons()}<button type="button" class="chip big-chip" data-action="sync">Sync now</button><button type="button" class="chip big-chip" data-action="settings">Settings</button></p>
-          <p class="sub mt-4">Connect Garmin first: the first sync brings in a year of days and rides, and takes up to 15 minutes. After that it runs on its own four times a day. Zwift and MyWoosh rides arrive through Garmin Connect once you link them there.</p>`
+          <p class="sub mt-4">Connect Garmin first: the first sync brings in a year of days and rides, and takes up to 15 minutes. After that it runs on its own through the day, and whenever you open the app. Zwift and MyWoosh rides arrive through Garmin Connect once you link them there.</p>`
       : `<h3>Sync from GitHub</h3>
           <ol>
             <li>A private repository runs the sync: <a href="https://github.com/chrisrohn/chrisrohn/blob/main/fitness/README.md#cloud-sync-no-computer" target="_blank" rel="noopener">set it up</a> (about 10 minutes, all on the phone).</li>
@@ -318,6 +318,17 @@
   // a phone link opened while the app is already showing is only a #hash change: start over and take it
   window.addEventListener("hashchange", () => { if (/^#(.*&)?d=/.test(location.hash)) location.reload(); });
 
+  // wake up, open the app, get the day's call: when the last sync is older than FRESH_MS, opening the app (or coming
+  // back to it) starts one, and the page reloads with last night's numbers when it lands (about two minutes). At most
+  // one every AUTO_GAP_MS, and only once Garmin is connected; the scheduled runs keep it fresh in between.
+  const FRESH_MS = 45 * 60_000, AUTO_GAP_MS = 20 * 60_000;
+  function autoSync(st) {
+    if (!cloud() || busy || !st || !st.synced || !(st.garmin && st.garmin.connected) || !navigator.onLine) return;
+    if (Date.now() - Date.parse(st.synced) < FRESH_MS || Date.now() - Number(ls.get("fitness-autosync") || 0) < AUTO_GAP_MS) return;
+    ls.set("fitness-autosync", String(Date.now()));
+    job("sync", "Bringing in the latest from Garmin");
+  }
+
   // back in the app after a while: pick up the newest sync without a reload of the whole page by hand
   let shown = "";
   document.addEventListener("visibilitychange", async () => {
@@ -326,6 +337,7 @@
     try {
       const st = await stateFile(c, "status.json");
       if (st && st.synced && st.synced !== (status && status.synced)) location.reload();
+      else autoSync(st);
     } catch { /* offline: keep what's showing */ }
   });
 
@@ -340,5 +352,6 @@
     }
     if (typeof strava === "string") barHTML(`<span class="bad" role="alert">${esc(strava)}</span>`);
     else if (strava) job("connect-strava", "Connecting Strava", { code: strava.code });
+    else if (got && got.source === "cloud" && !cloudProblem) autoSync(status);
   });
 })();
