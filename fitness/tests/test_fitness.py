@@ -308,6 +308,7 @@ def test_installable_app_and_phone_link(tmp_path, cfg):
     build.render(data, tmp_path / "index.html", {**cfg, "app": {**cfg["app"], "export_dir": str(export)}})
     manifest = json.loads((tmp_path / "manifest.webmanifest").read_text())
     assert manifest["display"] == "standalone" and manifest["start_url"].startswith("./") and manifest["scope"] == "./"
+    assert manifest["id"] == "/fitness/"   # resolved against the origin: "./" would be the music app's id at the root
     assert {"192x192", "512x512"} <= {i["sizes"] for i in manifest["icons"]} and any("maskable" in i.get("purpose", "") for i in manifest["icons"])
     assert all((tmp_path / i["src"]).exists() for i in manifest["icons"])
     sw = (tmp_path / "sw.js").read_text()

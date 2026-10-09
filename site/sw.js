@@ -30,7 +30,8 @@ self.addEventListener("install", e => {
 self.addEventListener("activate", e => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== CACHE && k !== ART).map(k => caches.delete(k)));
+    // only this app's old builds: other apps on chrisrohn.com (e.g. /fitness/) keep their own caches on the same origin
+    await Promise.all(keys.filter(k => k.startsWith("newmusic-") && k !== CACHE && k !== ART).map(k => caches.delete(k)));
     if (self.registration.navigationPreload) { try { await self.registration.navigationPreload.enable(); } catch { /* optional */ } }
     await self.clients.claim();
   })());

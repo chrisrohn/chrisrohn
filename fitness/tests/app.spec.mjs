@@ -39,7 +39,13 @@ test.describe("installable app", () => {
     const res = await request.get("/fitness/manifest.webmanifest");
     expect(res.ok()).toBe(true);
     const m = await res.json();
-    expect(m).toMatchObject({ id: "./", scope: "./", display: "standalone", short_name: "Training" });
+    expect(m).toMatchObject({ scope: "./", display: "standalone", short_name: "Training" });
+    // an app's identity is its id resolved against the ORIGIN (not the manifest's folder): it must not collide with the
+    // music app's at the site root, or the phone thinks this one is already installed
+    const root = await (await request.get("/manifest.webmanifest")).json();
+    const origin = "https://chrisrohn.com";
+    expect(new URL(m.id, origin).href).toBe(`${origin}/fitness/`);
+    expect(new URL(m.id, origin).href).not.toBe(new URL(root.id || root.start_url, origin).href);
     expect(m.start_url.startsWith("./")).toBe(true);
     expect(m.icons.map(i => i.sizes)).toEqual(expect.arrayContaining(["192x192", "512x512"]));
     expect(m.icons.some(i => /maskable/.test(i.purpose || ""))).toBe(true);
@@ -98,6 +104,19 @@ test.describe("installable app", () => {
     await expect(page.locator("#load")).toBeVisible();
     await page.waitForLoadState("load");
     expect(await axe(page)).toEqual([]);
+  });
+
+  test("the music app's service worker leaves this app's offline cache alone", async ({ browser }) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto("/fitness/");
+    await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+    await expect.poll(() => page.evaluate(async () => (await caches.keys()).filter(k => k.startsWith("fitness-")).length)).toBe(1);
+    await page.goto("/");                                                        // the music app's worker installs and activates
+    await page.evaluate(async () => { const r = await navigator.serviceWorker.ready; return r.active && r.active.state; });
+    await expect.poll(() => page.evaluate(async () => (await caches.keys()).some(k => k.startsWith("newmusic-") && k !== "newmusic-art"))).toBe(true);
+    expect(await page.evaluate(async () => (await caches.keys()).filter(k => k.startsWith("fitness-")).length)).toBe(1);
+    await ctx.close();
   });
 
   test("opens offline once the service worker has it", async ({ browser }) => {
