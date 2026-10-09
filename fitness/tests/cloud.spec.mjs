@@ -85,6 +85,38 @@ test.describe("GitHub sync", () => {
     expect(gh.dispatches.length).toBe(1);
   });
 
+  test("bike jobs and Silca's pressures go to the sync as a service run", async ({ page }) => {
+    const gh = await github(page);
+    await page.goto("/fitness/");
+    await signIn(page);
+    await page.reload();
+    const done = page.locator("#bike [data-action=service][data-code=drip]");
+    await expect(done).toBeVisible();
+    page.once("dialog", d => d.accept());
+    await done.click();
+    await expect.poll(() => gh.dispatches.length).toBe(1);
+    expect(gh.dispatches[0].inputs).toEqual({ action: "service", code: "drip" });
+    await expect(page.locator("#job-text")).toHaveCount(0, { timeout: 15_000 });                   // reloaded with the run's results
+    await expect(page.locator("#bike form.pressure")).toBeVisible();
+    await page.locator("#p-where").selectOption("gravel");
+    await page.locator("#p-front").fill("28");
+    await page.locator("#p-rear").fill("30.5");
+    await page.locator("#bike form.pressure button[type=submit]").click();
+    await expect.poll(() => gh.dispatches.length).toBe(2);
+    expect(gh.dispatches[1].inputs).toEqual({ action: "service", code: "pressure:gravel:28/30.5" });
+  });
+
+  test("the morning notification can be turned on from the data sheet", async ({ page }) => {
+    await github(page, { status: { ...SYNCED, push: { key: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", devices: 0, last: null, error: null } } });
+    await page.goto("/fitness/");
+    await signIn(page);
+    await page.reload();
+    await page.locator("#databar [data-action=settings]").click();
+    await expect(page.locator("#notify")).toBeVisible();
+    await expect(page.locator("#notify-on")).toBeVisible();
+    expect(await axe(page)).toEqual([]);
+  });
+
   test("Sync now starts the workflow, follows the run and loads the new numbers", async ({ page }) => {
     const gh = await github(page, { onDispatch: (_i, g) => { g.status = { ...SYNCED, synced: new Date().toISOString() }; } });
     await page.goto("/fitness/");

@@ -88,7 +88,18 @@ def parse_activity(a: dict) -> dict:
         hr_zones=zones if any(zones) else None, te_aerobic=a.get("aerobicTrainingEffect"), te_anaerobic=a.get("anaerobicTrainingEffect"),
         garmin_load=a.get("activityTrainingLoad"),
         start_utc=datetime.fromisoformat(a["startTimeGMT"]).isoformat() if a.get("startTimeGMT") else None,
+        start_ll=_ll(a, "start"), end_ll=_ll(a, "end"),
     )
+
+
+def _ll(a: dict, end: str) -> list[float] | None:
+    """Where a ride started or ended, to ~100 m: it finds the commute's two ends for the weather. Stays in the
+    encrypted store; never in the phone's data."""
+    lat, lon = a.get(f"{end}Latitude"), a.get(f"{end}Longitude")
+    return [round(lat, 3), round(lon, 3)] if lat is not None and lon is not None and (lat or lon) else None
+
+
+PARSER_VERSION = 2   # bump when parse_activity learns a field: stored rides are re-read from their raw records
 
 
 def _profile(client, store: Store) -> None:
@@ -106,6 +117,10 @@ def _profile(client, store: Store) -> None:
 def sync(cfg: dict, store: Store, days: int | None = None, prompt_mfa=None) -> None:
     from garminconnect import GarminConnectTooManyRequestsError
 
+    if int(store.get("garmin_parser") or 1) < PARSER_VERSION:
+        n = store.reparse("garmin", parse_activity)
+        store.set("garmin_parser", str(PARSER_VERSION))
+        print(f"Garmin: re-read {n} stored activities")
     client = _client(cfg, prompt_mfa=prompt_mfa)
     today = date.today()
     first = today - timedelta(days=days or cfg["sync"]["history_days"])

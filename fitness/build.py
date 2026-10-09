@@ -12,11 +12,12 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fitness import fuel
+from fitness import bike, fuel, raceday
 from fitness import metrics as m
+from fitness import weather as wxm
 from fitness.activities import merge
-from fitness.config import DIST_DIR, SITE_DIR, nth_weekday
-from fitness.plan import adapt, fit, in_indoor, season
+from fitness.config import DIST_DIR, SITE_DIR, nth_weekday, workday
+from fitness.plan import _replaced, adapt, fit, in_indoor, season
 
 CHART_DAYS, SLEEP_DAYS, WEEKS = 180, 90, 16
 
@@ -26,7 +27,7 @@ def _iso(d: date) -> str:
 
 
 def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date, profile: dict | None = None,
-             now: datetime | None = None) -> dict:
+             now: datetime | None = None, weather: dict | None = None, bike_state: dict | None = None) -> dict:
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
@@ -52,6 +53,11 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     t, y = _iso(today), _iso(today - timedelta(days=1))
     commute = m.commute_profile(acts, cfg, today)
     cfg = {**cfg, "commute": {**cfg["commute"], "profile": commute}}   # the planner prices commutes from your own history
+    # the forecast (weather.py): the planner keeps commutes and long rides off wet days, and the calls get what to wear
+    route = wxm.route(acts, cfg, today)
+    wx = wxm.Wx(weather) if weather else None
+    if wx:
+        cfg = {**cfg, "forecast": _forecast(wx, route, cfg, today, commute)}
     habits = m.habits(acts, today)
     cfg, fit_notes = fit(cfg, habits)                                     # the plan fitted to how you actually ride
     state = by_day.get(y, {"ctl": 0, "atl": 0})
@@ -70,6 +76,9 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
                     variants[f"{r['name']}|{o['key']}"] = season(today, state["ctl"], state["atl"], cfg, load.get(t, 0), {r["name"]: o["key"]}, adjust)
     if plan:
         plan["adjustments"] = adjust["notes"] + _rebooked(plan, adjust, today)
+        if adjust.get("week_scale"):
+            plan["adjustments"].append(f"You've ridden {adjust['week_done']} TSS since Monday, so the rest of this week is trimmed to about "
+                                       f"{round(adjust['week_scale'] * 100)}% of plan: the week lands on its target instead of over it.")
         fit_notes += _outlook(plan, variants, habits)
     plan_today = plan["days"][0] if plan else None
     ready_today = ready.get(t)
@@ -78,10 +87,19 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     sunday = _iso(today + timedelta(days=6 - today.weekday()))
     booked = adjust["commutes_done"] + sum(1 for d in (plan["days"] if plan else []) if d["date"] <= sunday and d.get("commute"))
     room = booked < cfg["commute"]["per_week"][1]
-    commute_today = None if today in adjust["no_commute"] else m.commute_call(ready_today, plan_today, today, cfg, commute, th, room)
+    commute_wx = _commute_wx(wx, route, today, commute) if wx and commute else None
+    commute_today = None if today in adjust["no_commute"] else m.commute_call(ready_today, plan_today, today, cfg, commute, th, room, commute_wx)
     if commute_today and plan_today and plan_today.get("commute"):   # on a commute day the commute call is the day's call
-        level = {"skip": "rest", "easy": "easy", "optional": "easy"}.get(commute_today["verdict"], plan_today["level"])
-        rec = {"level": level, "title": commute_today["title"], "detail": commute_today["detail"]}
+        if commute_today.get("weather") and commute_today["verdict"] == "skip":   # the weather's no, not the body's: train later
+            rec = {"level": plan_today["level"], "title": "Drive today, train this evening",
+                   "detail": f"{commute_today['detail']} {_replaced(plan_today)[:1].upper()}{_replaced(plan_today)[1:]}."}
+        else:
+            level = {"skip": "rest", "easy": "easy", "optional": "easy"}.get(commute_today["verdict"], plan_today["level"])
+            rec = {"level": level, "title": commute_today["title"], "detail": commute_today["detail"]}
+    today_wx = _today_wx(wx, plan_today, cfg, today, now or datetime.now(), commute_today) if wx else None
+    if plan:
+        for d in plan["days"][:16]:
+            d["wx"] = wx.outlook(date.fromisoformat(d["date"])) if wx else None
 
     # sleep debt and regularity over the last week / fortnight
     recent_nights = [days[_iso(today - timedelta(days=i))].get("sleep") for i in range(14) if _iso(today - timedelta(days=i)) in days]
@@ -141,6 +159,10 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         if a.get("hr_zones") and a["start"][:10] >= _iso(today - timedelta(days=27)):
             zones = [z + (v or 0) for z, v in zip(zones, a["hr_zones"], strict=True)]
 
+    weight = cfg["athlete"].get("weight_kg") or (profile or {}).get("weight_kg")
+    upkeep = bike.upkeep(acts, bike_state or {}, cfg, today, wx, weight, plan["races"] if plan else [])
+    races_soon = raceday.pages(plan, cfg, wx, th, weight, upkeep, today)
+
     ytd = [a for a in acts if a["start"][:4] == str(today.year) and a["group"] == "ride"]
     indoor = _indoor_season(acts, cfg, today)
     coverage = _coverage(days, today)
@@ -149,7 +171,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "generated": datetime.now().isoformat(timespec="minutes"), "today": t, "athlete": th, "need_hours": need, "units": cfg["athlete"]["units"],
         "now": {"readiness": ready_today, "recommendation": rec, "base_call": m.recommend(ready_today, None), "sleep": sleep.get(t), "form": form_now,
                 "sleep_debt": round(debt, 1) if debt is not None else None, "regularity_min": round(regularity) if regularity is not None else None,
-                "last_night": (days.get(t) or {}).get("sleep")},
+                "last_night": (days.get(t) or {}).get("sleep"), "weather": today_wx},
         "pmc": [r for r in rows if r["date"] >= chart_from],
         "plan": plan,
         "variants": variants,
@@ -170,8 +192,72 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "ride": ride_config(cfg, th, plan),
         "commute": {**commute, "today": commute_today} if commute else None,
         "fuel": _fuel(cfg, plan, rec, commute_today, today, profile),
+        "bike": upkeep,
+        "race_day": races_soon,
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
+
+
+def forecast_for(store, cfg: dict, today: date, now: datetime, get=None) -> dict | None:
+    """The forecast for the store's rides (weather.py): where they start, fetched or from the 50-minute cache."""
+    acts = merge(store.activities())
+    m.mark_commutes(acts, cfg)
+    where = wxm.route(acts, cfg, today)["where"]
+    return wxm.load(store, where, cfg["athlete"]["timezone"], now, get) if get else wxm.load(store, where, cfg["athlete"]["timezone"], now)
+
+
+def _commute_wx(wx: wxm.Wx, route: dict, d: date, commute: dict) -> dict | None:
+    """The forecast for each leg of a commute on day `d`, at your usual departure times and along the route."""
+    legs, head = commute["legs"], route.get("bearing_in")
+    out = {}
+    for leg, heading in (("in", head), ("home", (head + 180) % 360 if head is not None else None)):
+        hh, mm = (int(x) for x in route["depart"][leg].split(":"))
+        out[leg] = wx.window(datetime.combine(d, datetime.min.time()).replace(hour=hh, minute=mm), legs[leg]["minutes"], heading)
+    sun = wx.sun(d)
+    out["sun"] = [x.strftime("%-I:%M") for x in sun] if sun else None
+    return out if out["in"] or out["home"] else None
+
+
+def _forecast(wx: wxm.Wx, route: dict, cfg: dict, today: date, commute: dict | None) -> dict[str, dict]:
+    """For each of the next 16 days: is it a wet day for a long ride, and would a commute get rained on (or worse)?"""
+    out = {}
+    for i in range(16):
+        d = today + timedelta(days=i)
+        if d.isoformat() not in wx.days:
+            break
+        f = {"rain_day": wx.rain_day(d)}
+        if commute and workday(d, cfg):
+            legs = _commute_wx(wx, route, d, commute) or {}
+            f["commute_wet"] = any(w and w["verdict"] in ("wet", "storm", "ice") for w in (legs.get("in"), legs.get("home")))
+        out[d.isoformat()] = f
+    return out
+
+
+def _today_wx(wx: wxm.Wx, day: dict | None, cfg: dict, today: date, now: datetime, commute_today: dict | None) -> dict | None:
+    """Today's weather for the Today card: on a commute day what the call already worked out; on an outdoor
+    training day the best window to ride in, what to wear and whether you'll need lights."""
+    units = cfg["athlete"]["units"]
+    o = wx.outlook(today)
+    if not o:
+        return None
+    out = {"outlook": o, "summary": f"{wxm.temp(o['lo'], units)} to {wxm.temp(o['hi'], units)}"
+                                     + (f", {o['pop']}% chance of rain" if o["pop"] >= 30 else ", dry") + f", wind up to {wxm.speed(o['wind'], units)}"}
+    if commute_today and commute_today.get("weather"):
+        return {**out, "commute": commute_today["weather"]}
+    if not day or day.get("indoor") or day.get("commute") or not day.get("minutes") or day["role"] in ("rest", "race", "strength"):
+        return out
+    evening = workday(today, cfg) and cfg["nutrition"].get("weekday_ride", "evening") == "evening"
+    earliest = max(now if now.date() == today else datetime.min, datetime.combine(today, datetime.min.time()).replace(hour=17 if evening else 8))
+    w = wxm.best_window(wx, today, day["minutes"], earliest)
+    if not w:
+        return out
+    start = datetime.fromisoformat(w["start"])
+    out["ride"] = {"when": f"{start.strftime('%-I:%M %p')}–{(start + timedelta(minutes=w['minutes'])).strftime('%-I:%M %p')}",
+                   "line": wxm.describe(w, units), "kit": wxm.kit(w["feels"], w["verdict"] in ("wet", "showers")), "verdict": w["verdict"],
+                   "lights": "Lights front and rear: part of it is in the dark." if w["dark"] else None}
+    if w["verdict"] in ("wet", "storm", "ice"):
+        out["ride"]["advice"] = "No dry window today: take the Plan B indoors." if day.get("alt") else "No dry window today: ride indoors."
+    return out
 
 
 def _outlook(plan: dict, variants: dict, habits: dict | None) -> list[str]:
@@ -217,7 +303,9 @@ def _fuel(cfg: dict, plan: dict | None, rec: dict, commute_today: dict | None, t
     days = [dict(d) for d in plan["days"]]
     if days and days[0]["date"] == _iso(today):
         d0 = days[0]
-        if commute_today and d0.get("commute") and commute_today["verdict"] == "skip":
+        if commute_today and d0.get("commute") and commute_today["verdict"] == "skip" and commute_today.get("weather"):
+            d0.update(commute=None)              # driving for the weather: the session moves to the evening, the eating stays
+        elif commute_today and d0.get("commute") and commute_today["verdict"] == "skip":
             d0.update(commute=None, role="rest", minutes=0, load=0)
         elif commute_today and d0.get("commute") and commute_today["verdict"] in ("easy", "optional"):
             d0.update(commute="easy", commute_workout=None)

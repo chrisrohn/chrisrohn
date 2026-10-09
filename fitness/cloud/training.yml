@@ -3,7 +3,8 @@
 #
 # Secrets (Settings → Secrets and variables → Actions): STATE_KEY, GARMIN_EMAIL, GARMIN_PASSWORD, STRAVA_CLIENT_ID,
 # STRAVA_CLIENT_SECRET. The app at chrisrohn.com/fitness/ starts runs with its token: "Sync now", "Connect Garmin",
-# "Connect Strava", and "garmin-code 123456", which only carries the code Garmin emailed to the sign-in waiting for it.
+# "Connect Strava", and "garmin-code 123456", which only carries the code Garmin emailed to the sign-in waiting for it;
+# "push-subscribe" / "push-test" for the morning notification, and "service" when you mark a bike job done.
 name: Training sync
 run-name: ${{ inputs.action == 'garmin-code' && format('garmin-code {0}', inputs.code) || inputs.action || 'sync' }}
 
@@ -18,10 +19,10 @@ on:
       action:
         description: What to do
         type: choice
-        options: [sync, connect-garmin, connect-strava, garmin-code]
+        options: [sync, connect-garmin, connect-strava, garmin-code, push-subscribe, push-test, service]
         default: sync
       code:
-        description: The Strava or Garmin code (the app fills this in)
+        description: The Strava or Garmin code, a notification subscription, or a bike job done (the app fills this in)
         type: string
         default: ""
 

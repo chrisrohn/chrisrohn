@@ -22,10 +22,12 @@ DEFAULTS: dict = {
     "sync": {"garmin_tokens": "~/.garminconnect", "history_days": 400, "resync_days": 3},
     "ride": {"url": "", "wheel_m": 2.29, "fuel_every_min": 20},
     "app": {"url": "", "export_dir": ""},
+    "bike": {"name": "Bike", "parts": "", "tire": "", "rim": "", "trainer": True, "every": {}},
+    "weather": {"enabled": True, "lat": 0, "lon": 0},
     "commute": {"enabled": False, "km_each_way": 0, "climb_m": [0, 0], "days": ["tue", "thu", "wed", "mon", "fri"], "per_week": [1, 3], "winter": False, "holidays": "us-federal"},
 }
 OPTION_DEFAULTS = {"label": "", "km": 0, "climbing_ft": 0, "hours": 2.0, "target_ctl": 55, "long_ride_h": 3.0, "taper_days": [6, 14]}
-RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}}
+RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}, "start": ""}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 MONTHS = [m.lower() for m in calendar.month_abbr]
 

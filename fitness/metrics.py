@@ -16,6 +16,7 @@ import statistics
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
+from fitness import weather
 from fitness.config import workday
 
 CTL_DAYS, ATL_DAYS = 42, 7
@@ -387,7 +388,43 @@ def zone_bpm(th: dict, lo: float, hi: float) -> str:
 
 
 def commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: dict, profile: dict | None, th: dict,
-                 room: bool = True) -> dict | None:
+                 room: bool = True, wx: dict | None = None) -> dict | None:
+    """The morning's commute call (_commute_call), checked against the weather for each leg (weather.py): no bike in
+    thunderstorms, high winds or ice; rain is your call with its Plan B; and what to wear, lights, and the wind home."""
+    call = _commute_call(ready, plan_today, today, cfg, profile, th, room)
+    if not call or not wx or call["verdict"] == "skip":
+        return call
+    units = cfg["athlete"]["units"]
+    legs = [(name, w) for name, w in (("in", wx.get("in")), ("home", wx.get("home"))) if w]
+    if not legs:
+        return call
+    side = lambda n: "in" if n == "in" else "home"   # noqa: E731
+    bad = next(((n, w) for n, w in legs if w["verdict"] in ("storm", "ice")), None)
+    if bad:
+        what = "Thunderstorms or high winds" if bad[1]["verdict"] == "storm" else "Ice risk"
+        return {"verdict": "skip", "weather": True, "title": "Leave the bike at home",
+                "detail": f"{what} on the ride {side(bad[0])}: {weather.describe(bad[1], units)}.", "fuel": ""}
+    wet = [(n, w) for n, w in legs if w["verdict"] == "wet"]
+    out = {**call, "weather": {n: weather.describe(w, units) for n, w in legs}}
+    out["weather"]["kit"] = weather.kit(min(w["feels"] for _, w in legs), any(w["verdict"] in ("wet", "showers") for _, w in legs))
+    dark = [n for n, w in legs if w["dark"]]
+    if dark:
+        out["weather"]["lights"] = "Lights front and rear " + ("both ways" if len(dark) == 2 else f"on the ride {side(dark[0])}") + (f" (sunrise {wx['sun'][0]}, sunset {wx['sun'][1]})" if wx.get("sun") else "")
+    home = dict(legs).get("home")
+    if home and (home.get("head") or 0) >= 15:
+        out["weather"]["wind"] = (f"Headwind home, about {weather.speed(home['head'], units)}: do the intervals into it and pace them by heart rate or power, not speed."
+                                  if call["verdict"] == "ride" and plan_today and plan_today.get("commute") == "workout"
+                                  else f"Headwind home, about {weather.speed(home['head'], units)}: gear down and let the speed drop; the effort is what counts.")
+    if wet:
+        n, w = wet[0]
+        out.update(verdict="wet", title=f"Rain on the ride {side(n)}: your call",
+                   detail=f"{weather.describe(w, units)}. Ride it with a rain jacket, fenders and lights and re-drip the chain after, "
+                          f"or drive and do the day's Plan B this evening. If you ride: {call['detail'][:1].lower()}{call['detail'][1:]}")
+    return out
+
+
+def _commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: dict, profile: dict | None, th: dict,
+                  room: bool = True) -> dict | None:
     """This morning's commute decision and how to ride it. The plan proposes; readiness can only make it easier, except
     that a rest day on a work day becomes an optional easy commute when you're well recovered and the week has `room`
     for one more (fewer commutes ridden and booked than commute.per_week allows)."""

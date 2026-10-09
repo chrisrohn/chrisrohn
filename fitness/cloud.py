@@ -25,7 +25,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from fitness import build, config
+from fitness import bike, build, config
 from fitness.store import Store
 
 CODE_WAIT_S = 600          # how long a sign-in waits for the code Garmin emailed
@@ -89,6 +89,76 @@ def import_inbox(inbox: Path | None, store: Store, tz: str) -> dict | None:
     return done if done.get("file") else None
 
 
+# ── the morning notification (webpush.py) ──────────────────────────────────────────────────────────────
+
+MORNING = (5, 11)        # local hours the day's first notification may go out in (once last night's data is in, or from 9)
+UPDATES_UNTIL = 15       # a call that changes later (the forecast turned) gets one update before this hour
+
+
+def _vapid(store: Store) -> dict:
+    keys = json.loads(store.get("vapid") or "null")
+    if not keys:
+        from fitness import webpush
+        keys = webpush.new_keys()
+        store.set("vapid", json.dumps(keys))
+    return keys
+
+
+def subscribe(store: Store, code: str) -> None:
+    """A "push-subscribe" run: the app's subscription (base64url JSON) joins the list (at most five devices)."""
+    from fitness import webpush
+    sub = json.loads(webpush.unb64u(code.strip()))
+    if not (str(sub.get("endpoint", "")).startswith("https://") and sub.get("keys", {}).get("p256dh") and sub["keys"].get("auth")):
+        raise ValueError("that isn't a push subscription")
+    subs = [x for x in json.loads(store.get("push_subs") or "[]") if x["endpoint"] != sub["endpoint"]]
+    store.set("push_subs", json.dumps([*subs, {"endpoint": sub["endpoint"], "keys": sub["keys"]}][-5:]))
+
+
+def message(data: dict, test: bool = False) -> dict:
+    """The notification: the call as the title; readiness, the weather and the first line of the detail as the body."""
+    now = data["now"]
+    rec = now["recommendation"]
+    bits = [f"Readiness {now['readiness']['score']}" if now.get("readiness") else None,
+            (now.get("weather") or {}).get("summary"), rec["detail"].split(". ")[0].rstrip(".")]
+    body = " · ".join(b for b in bits if b)
+    return {"title": ("Test · " if test else "") + rec["title"], "body": body[:230], "tag": "today", "url": "./?source=push#today"}
+
+
+def notify(store: Store, data: dict, now: datetime, action: str, send: Callable | None = None) -> dict:
+    """Send the morning notification when it's due (or a test), and say what happened for status.json."""
+    from fitness import webpush
+    send = send or webpush.send
+    keys = _vapid(store)
+    subs = json.loads(store.get("push_subs") or "[]")
+    sent = json.loads(store.get("push_sent") or "{}")
+    out = {"key": keys["public"], "devices": len(subs), "last": sent.get("at")}
+    if not subs or not data:
+        return out
+    msg, t = message(data, test=action in ("push-test", "push-subscribe")), data["today"]
+    due = action in ("push-test", "push-subscribe")
+    if not due and MORNING[0] <= now.hour < MORNING[1] and sent.get("date") != t:
+        due = bool(data["now"].get("readiness") or data["now"].get("last_night")) or now.hour >= 9
+    update = (not due and sent.get("date") == t and sent.get("title") != msg["title"] and not sent.get("updated")
+              and MORNING[0] <= now.hour < UPDATES_UNTIL)
+    if update:
+        msg["title"], due = "Update · " + msg["title"], True
+    if not due:
+        return out
+    kept, delivered = [], 0
+    for sub in subs:
+        code = send(sub, msg, keys["private"])
+        delivered += 200 <= code < 300
+        if code not in (404, 410):          # gone: the browser dropped the subscription
+            kept.append(sub)
+    store.set("push_subs", json.dumps(kept))
+    if action not in ("push-test", "push-subscribe"):
+        at = now.isoformat(timespec="minutes")
+        sent = {**sent, "updated": True, "at": at} if update else {"date": t, "title": msg["title"], "at": at}
+        store.set("push_sent", json.dumps(sent))
+    print(f"Notification: delivered to {delivered} of {len(subs)} device(s)")
+    return {**out, "devices": len(kept), "last": sent.get("at"), "delivered": delivered}
+
+
 def _why(e: BaseException) -> str:
     text = str(e).strip() or type(e).__name__
     return text.splitlines()[0][:300]
@@ -107,6 +177,13 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
     cfg = {**cfg, "sync": {**cfg["sync"], "garmin_tokens": str(tokens)}}
     out.mkdir(parents=True, exist_ok=True)
     errors: dict[str, str] = {}
+
+    if action == "push-subscribe" and code:
+        with Store(config.DB_PATH) as store:
+            try:
+                subscribe(store, code)
+            except Exception as e:
+                errors["push"] = f"notifications couldn't be turned on: {_why(e)}"
 
     if action == "connect-strava":
         try:
@@ -138,13 +215,31 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
                 errors["strava"] = _why(e)
         days, acts = store.days(), store.activities()
         profile = json.loads(store.get("profile") or "null")
+        if action == "service" and code:
+            try:
+                print(f"Bike: {bike.log(store, code, datetime.now(), (profile or {}).get('weight_kg'))} logged")
+            except Exception as e:
+                errors["bike"] = f"that bike job wasn't logged: {_why(e)}"
+        bike_state = bike.state(store, today or date.today())
+        try:
+            forecast = build.forecast_for(store, cfg, today or date.today(), datetime.now())
+        except Exception as e:   # the day's call still works without the weather
+            forecast = None
+            print(f"Weather: skipped ({_why(e)})")
 
+    data = None
     if days or acts:
         try:
-            data = build.assemble(cfg, days, acts, today or date.today(), profile)
+            data = build.assemble(cfg, days, acts, today or date.today(), profile, weather=forecast, bike_state=bike_state)
             (out / DATA_FILE).write_text(json.dumps(build.phone_data(data), separators=(",", ":")))
         except Exception as e:
             errors["build"] = _why(e)
+    push = None
+    try:
+        with Store(config.DB_PATH) as store:
+            push = notify(store, data, datetime.now(), action)
+    except Exception as e:   # a notification problem never fails the sync
+        errors.setdefault("push", f"the notification didn't go out: {_why(e)}")
 
     status = {
         "synced": started.isoformat().replace("+00:00", "Z"),
@@ -155,6 +250,8 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
         "strava": {"connected": config.STRAVA_TOKEN.exists(), "client_id": os.environ.get("STRAVA_CLIENT_ID") or None,
                    "activities": sum(1 for a in acts if str(a.get("id", "")).startswith("strava:")),
                    "export": {k: export[k] for k in ("file", "rows", "at")} if export else None, "error": errors.get("strava")},
+        "push": {**(push or {}), "error": errors.get("push")},
+        "bike": {"error": errors.get("bike")},
         "error": errors.get("build"),
     }
     (out / STATUS_FILE).write_text(json.dumps(status, indent=2))

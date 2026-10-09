@@ -219,8 +219,10 @@ def _plan_commutes(week: list[dict], cfg: dict, done: int = 0) -> dict[date, str
     lo, hi = max(0, c["per_week"][0] - done), max(0, c["per_week"][1] - done)
     order = {d: i for i, d in enumerate(c["days"])}
     # a taper sheds volume, so there a commute has to fit the day it replaces, and nothing shrinks to make room
+    # the forecast's wet commutes (weather.py, the next 16 days) aren't booked: the week's commutes go to dry days
+    wet = {k for k, v in (cfg.get("forecast") or {}).items() if v.get("commute_wet")}
     cands = [w for w in week if w["mode"] and (DOW[w["date"].weekday()] in order or w.get("rest"))
-             and (w.get("phase") != "taper" or loads[w["mode"]] <= 1.6 * max(w["target"], 1.0))]
+             and (w.get("phase") != "taper" or loads[w["mode"]] <= 1.6 * max(w["target"], 1.0)) and w["date"].isoformat() not in wet]
     budget = 1.1 * sum(w["target"] for w in week)
 
     def cost(chosen: dict[int, str]) -> float:
@@ -253,6 +255,7 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
     rows, mean, phase_now, week, taper_base, commutes = [], None, None, 0, None, {}
     rested: set[date] = set()
     trim: dict[date, float] = {}
+    week_scale: dict[date, float] = {}
     d = start
     while d <= race["date"]:
         left = (race["date"] - d).days
@@ -278,6 +281,15 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
                 if cfg["plan"].get("cap_mean"):            # fitted to your riding (plan.fit): your busy week + 15%, but
                     grow = ctl + 6.45 * cfg["plan"]["base_ramp"]   # never below what today's fitness safely grows into
                     mean = max(15.0, min(mean, max(cfg["plan"]["cap_mean"], grow)))
+        if d == start and d.weekday() and mean and (adapt or {}).get("week_done") and phase in ("base", "build", "transition"):
+            # part of this week is already ridden: the days left share what the week still has room for, never more
+            # than planned (a light start isn't crammed into the weekend) and never less than half
+            left_days = [d + timedelta(days=i) for i in range(7 - d.weekday())]
+            remaining = sum(mean * pattern[e.weekday()] / mean_p for e in left_days)
+            scale = (7 * mean - adapt["week_done"]) / remaining if remaining else 1.0
+            if scale < 0.95:
+                adapt["week_scale"] = round(max(0.5, scale), 2)
+                week_scale.update(dict.fromkeys(left_days, max(0.5, scale)))
         role = _role(phase, role_of[d.weekday()], left)
         moved = (adapt or {}).get("roles", {}).get(d) if phase in ("base", "build", "transition") else None
         if moved:
@@ -339,7 +351,7 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
         else:
             load = mean * rel
         if role in ("easy", "endurance", "fun", "long") and phase not in ("race", "openers"):
-            load *= trim.get(d, 1.0)
+            load *= trim.get(d, 1.0) * week_scale.get(d, 1.0)
         if role == "strength":
             load = min(load, 25.0)
         elif role == "long" and phase not in ("race", "openers"):
@@ -586,6 +598,7 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
     monday = today - timedelta(days=today.weekday())
     week = [monday + timedelta(days=i) for i in range(7)]
     out["commutes_done"] = sum(1 for d in commute_days if monday <= d < today)   # today's, if ridden, is today's booking
+    out["week_done"] = round(sum(load_by_day.get(d.isoformat(), 0.0) for d in week if d < today))
     prior = state.get((monday - timedelta(days=1)).isoformat(), {"ctl": 0.0, "atl": 0.0})
     base = season(monday, prior["ctl"], prior["atl"], cfg) if cfg.get("races") else None
     if not base:
@@ -622,6 +635,7 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
         p = planned.get(d) or {}
         return (out["roles"].get(d) or ("key" if p.get("commute") == "workout" else p.get("role"))) in ("key", "long", "race")
 
+    _rain_swap(week, today, now_hour, planned, out, cfg, free)
     for d in misses:
         p = planned[d]
         role = "key" if p.get("commute") == "workout" else p["role"]     # the workout rode on the commute: it's still owed
@@ -641,6 +655,24 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
             out["notes"].append(f"{when.capitalize()} {what} didn't happen. No free day is left this week for it, so the plan carries on "
                                 "rather than cramming it in; the coming weeks' targets already account for it.")
     return out
+
+
+def _rain_swap(week: list[date], today: date, now_hour: int, planned: dict, out: dict, cfg: dict, free) -> None:
+    """A long ride forecast into the rain (cfg["forecast"], from weather.py) trades places with a free neighbouring
+    day that's dry: Saturday's long ride on a wet Saturday goes to a dry Sunday, and Sunday's shorter ride to Saturday."""
+    fc = cfg.get("forecast") or {}
+    for d in week:
+        p = planned.get(d) or {}
+        if (out["roles"].get(d) or p.get("role")) != "long" or d < today or (d == today and now_hour >= 10):
+            continue
+        if not fc.get(d.isoformat(), {}).get("rain_day") or p.get("phase") not in ("base", "build", "transition"):
+            continue
+        for e in (d + timedelta(days=1), d - timedelta(days=1)):
+            if e in planned and free(e) and e.isoformat() in fc and not fc[e.isoformat()].get("rain_day"):
+                out["roles"][e], out["roles"][d] = "long", planned[e]["role"]
+                out["notes"].append(f"Rain forecast {DAY[d.weekday()]}, drier {DAY[e.weekday()]}: the long ride moves to {DAY[e.weekday()]}, "
+                                    f"and {DAY[d.weekday()]} takes the shorter ride (or its Plan B indoors).")
+                return
 
 
 def _replaced(p: dict) -> str:

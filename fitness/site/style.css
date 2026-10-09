@@ -233,13 +233,47 @@ details.table .scroll { max-height: 264px; overflow: auto; margin-top: var(--sp-
 .commute-call.skip .label { color: var(--accent-ink); }
 .fit-notes { margin: var(--sp-2) 0 var(--sp-3); padding-left: var(--sp-4); display: grid; gap: var(--sp-1); max-width: 72ch; }
 .tbl.fit td:first-child { font-weight: 700; }
+.weather { display: grid; gap: var(--sp-1); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
+.weather p { margin: 0; text-wrap: pretty; }
+.weather dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-3); }
+.weather dt { font-weight: 700; }
+.weather dd { margin: 0; }
+.week-ahead .wx { white-space: nowrap; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+:root:not([data-cloud]) .needs-cloud { display: none !important; }
+.race-day + .race-day { border-top: var(--rule-minor) solid var(--ink); margin-top: var(--sp-5); padding-top: var(--sp-4); }
+.race-day h4 { margin: var(--sp-4) 0 var(--sp-1); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: var(--track-label); }
+.race-day p { margin: 0 0 var(--sp-2); max-width: 64ch; text-wrap: pretty; }
+.timeline { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-2) var(--sp-3); }
+.timeline dt { font-weight: 700; white-space: nowrap; }
+.timeline dd { margin: 0; }
+.checks, .plain, .upkeep { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.checks li { display: grid; grid-template-columns: 1.2em 1fr; }
+.checks li::before { content: "\25CB"; }
+.checks li.ok::before { content: "\2713"; color: var(--good-ink); }
+.upkeep { gap: var(--sp-4); max-width: 72ch; margin-top: var(--sp-4); }
+.upkeep li { display: grid; gap: var(--sp-1); grid-template-columns: 1fr auto; align-items: center; border-bottom: var(--rule-hair) solid var(--ink-2); padding-bottom: var(--sp-3); }
+.upkeep .row { display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
+.upkeep .track, .upkeep .sub { grid-column: 1; }
+.upkeep button { grid-column: 2; grid-row: 1 / span 4; }
+.upkeep .track { display: block; height: 6px; background: var(--hair); }
+.upkeep .fill { height: 100%; background: var(--good); }
+.upkeep li.soon .fill { background: var(--warn); }
+.upkeep li.due .fill { background: var(--crit); }
+.upkeep .how { color: var(--ink-2); }
+.tag.warn { color: var(--ink-2); }
+.warn-line { margin: 0 0 var(--sp-2); color: var(--accent-ink); max-width: 64ch; }
+form.pressure { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); align-items: end; max-width: 52ch; margin-top: var(--sp-3); }
+form.pressure > div { display: grid; gap: var(--sp-1); flex: 1 1 5.5em; min-width: 0; }
+form.pressure > div.wide { flex: 2 1 12em; }
+form.pressure select, form.pressure input { min-height: 40px; font: inherit; width: 100%; min-width: 0; }
+form.pressure button { min-height: 40px; }
 .plan-b, .overnight { margin: 0; max-width: 60ch; text-wrap: pretty; }
 .plan-b .label, .overnight .label { margin-right: var(--sp-2); }
 .overnight .label { color: var(--accent-ink); }
 .week-ahead { display: grid; gap: var(--sp-2); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
 .week-ahead ol { list-style: none; margin: 0; padding: 0; display: grid; }
 .week-ahead li { border-bottom: var(--rule-hair) solid var(--ink-2); }
-.week-ahead summary { display: grid; width: auto; grid-template-columns: 4.5em 10px 1fr 14px; align-items: baseline; gap: var(--sp-2); min-height: 40px; padding: var(--sp-2) 0; cursor: pointer; list-style: none; font-size: var(--fs-body); line-height: var(--lh-snug); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.week-ahead summary { display: grid; width: auto; grid-template-columns: 4.5em 10px 1fr auto 14px; align-items: baseline; gap: var(--sp-2); min-height: 40px; padding: var(--sp-2) 0; cursor: pointer; list-style: none; font-size: var(--fs-body); line-height: var(--lh-snug); text-transform: none; letter-spacing: 0; font-weight: 400; }
 .week-ahead summary::-webkit-details-marker { display: none; }
 .week-ahead summary::before { order: 1; align-self: center; }   /* the +/− at the row's end */
 .week-ahead .dow { font-weight: 700; }

@@ -113,6 +113,23 @@ test.describe("installable app", () => {
     expect(await axe(page)).toEqual([]);
   });
 
+  test("race day, the bike and today's weather: all there, and nothing that needs the sync without it", async ({ page }) => {
+    const problems = watch(page);
+    const weather = { summary: "41°F to 58°F, dry, wind up to 12 mph", ride: { when: "5:00 PM–6:00 PM", line: "52°F, dry, wind 9 mph W", kit: "Arm and knee warmers, a vest", verdict: "dry", lights: null } };
+    const days = DATA.plan.days.map((d, i) => i < 7 ? { ...d, wx: { hi: 14, lo: 5, pop: i === 2 ? 70 : 10, mm: 0, code: i === 2 ? 63 : 1, wind: 20 } } : d);
+    await page.goto(phoneLink({ ...DATA, now: { ...DATA.now, weather }, plan: { ...DATA.plan, days } }));
+    await expect(page.locator(".weather")).toContainText("Best window · 5:00 PM–6:00 PM");
+    await expect(page.locator(".weather")).toContainText("Wear: Arm and knee warmers");
+    await expect(page.locator(".week-ahead li").nth(2).locator(".wx")).toContainText("70%");
+    await expect(page.locator("#race .race-day").first()).toContainText("Race morning");
+    await expect(page.locator("#bike .upkeep li").first()).toBeVisible();
+    await expect(page.locator("#bike")).toContainText("Re-drip the chain");
+    await expect(page.locator("#bike [data-action=service]").first()).toBeHidden();      // no sync to log it with
+    await expect(page.locator(".bar nav a[href='#race']")).toBeVisible();
+    expect(await axe(page)).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
   test("opens offline once the service worker has it", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

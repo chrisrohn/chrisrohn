@@ -27,6 +27,10 @@ window.startDashboard = D => {
   const dur = s => { const m = Math.round((s || 0) / 60); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${m} min`; };
   const hrs = h => h == null ? "—" : `${Math.floor(h)}h${String(Math.round((h % 1) * 60)).padStart(2, "0")}`;
   const dist = m => { const v = units === "mi" ? m / 1609.344 : m / 1000; return `${v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1)} ${units}`; };
+  const deg = c => units === "mi" ? `${Math.round(c * 9 / 5 + 32)}°` : `${Math.round(c)}°`;
+  // WMO weather codes as a plain glyph (text presentation, so it takes the ink colour like the rest of the page)
+  const sky = c => (c >= 95 ? "\u26A1" : c >= 71 && c <= 86 && !(c >= 80 && c <= 82) ? "\u2744" : c >= 51 ? "\u2602" : c >= 45 ? "\u2248" : c >= 3 ? "\u2601" : c >= 1 ? "\u26C5" : "\u2600") + "\uFE0E";
+  const SKY = c => c >= 95 ? "thunderstorms" : c >= 71 && c <= 86 && !(c >= 80 && c <= 82) ? "snow" : c >= 51 ? "rain" : c >= 45 ? "fog" : c >= 3 ? "overcast" : c >= 1 ? "partly cloudy" : "clear";
   const elev = m => units === "mi" ? `${Math.round(m * 3.28084).toLocaleString()} ft` : `${Math.round(m).toLocaleString()} m`;
   const speed = kph => kph == null ? "—" : units === "mi" ? `${(kph / 1.609344).toFixed(1)} mph` : `${kph.toFixed(1)} km/h`;
   const signed = v => v == null ? "—" : (Math.round(v) > 0 ? "+" : Math.round(v) < 0 ? "−" : "") + Math.abs(Math.round(v));
@@ -232,6 +236,7 @@ window.startDashboard = D => {
     const base = now.base_call;
     if (!day) return base;
     const c = D.commute && D.commute.today;
+    if (day.commute && c && c.weather && c.verdict === "skip") return now.recommendation;   // drive today, train this evening
     if (day.commute && c) return { level: { skip: "rest", easy: "easy", optional: "easy" }[c.verdict] || day.level, title: c.title, detail: c.detail };   // same rule as the build
     if (ORDER.includes(base.level) && ORDER.indexOf(base.level) < ORDER.indexOf(day.level)) return { ...base, detail: `Planned: ${day.session}. Readiness says scale it back — ${base.detail.charAt(0).toLowerCase()}${base.detail.slice(1)}` };
     const m = day.minutes || 0;
@@ -286,7 +291,7 @@ window.startDashboard = D => {
     const c = D.commute && D.commute.today;
     if (!c) return "";
     const headline = pToday0() && pToday0().commute;   // on a planned commute day the call above already is the commute
-    const mark = { ride: "▲", easy: "■", optional: "□", skip: "▼" }[c.verdict] || "■";
+    const mark = { ride: "▲", easy: "■", optional: "□", wet: "☂\uFE0E", skip: "▼" }[c.verdict] || "■";
     return `<div class="commute-call ${esc(c.verdict)}"><span class="label">Bike commute</span>
       ${headline ? "" : `<p><b>${mark} ${esc(c.title)}.</b> ${esc(c.detail)}</p>`}
       ${c.fuel && !D.fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
@@ -306,6 +311,28 @@ window.startDashboard = D => {
     return `<p class="overnight"><span class="label">Last night isn't in yet</span> Open Garmin Connect so the watch syncs its sleep, then sync here; the call above uses yesterday's numbers until then.${sync}</p>`;
   }
 
+  // a day's forecast in the week list: sky, high / low, and the rain chance when it matters
+  const wxChip = w => w ? `<span class="wx" aria-label="${esc(`${SKY(w.code)}, high ${deg(w.hi)}, low ${deg(w.lo)}${w.pop >= 30 ? `, ${w.pop}% chance of rain` : ""}`)}"><span aria-hidden="true">${sky(w.code)} ${deg(w.hi)}/${deg(w.lo)}${w.pop >= 30 ? ` ${w.pop}%` : ""}</span></span>` : "";
+
+  // today's weather: the commute legs (from the call), or the best window to ride, what to wear and lights
+  function weatherBlock() {
+    const W = now.weather;
+    if (!W) return "";
+    const rows = [];
+    if (W.commute) {
+      if (W.commute.in) rows.push(["Ride in", W.commute.in]);
+      if (W.commute.home) rows.push(["Ride home", W.commute.home]);
+    } else if (W.ride) {
+      rows.push([`Best window · ${W.ride.when}`, W.ride.line]);
+      if (W.ride.advice) rows.push(["", W.ride.advice]);
+    }
+    const kit = (W.commute && W.commute.kit) || (W.ride && W.ride.kit);
+    const extra = [(W.commute && W.commute.lights) || (W.ride && W.ride.lights), W.commute && W.commute.wind].filter(Boolean);
+    return `<div class="weather"><span class="label">Weather · ${esc(W.summary)}</span>
+      ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : ""}
+      ${kit ? `<p><b>Wear:</b> ${esc(kit)}</p>` : ""}${extra.map(x => `<p>${esc(x)}</p>`).join("")}</div>`;
+  }
+
   // the next seven days at a glance: tap a day for the session and its Plan B (it reshuffles at each sync)
   function weekBlock() {
     if (!plan) return "";
@@ -313,7 +340,7 @@ window.startDashboard = D => {
     const hours = week.reduce((a, d) => a + (d.minutes || 0), 0) / 60, commutes = week.filter(d => d.commute).length;
     return `<div class="week-ahead"><span class="label">The next 7 days · ${hours.toFixed(1)} h${commutes ? ` · ${commutes} commute${commutes === 1 ? "" : "s"}` : ""}</span>
       <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i>
-        <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}</span></summary>
+        <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}</span>${wxChip(d.wx)}</summary>
         <p class="sub">${esc(d.session)}</p>${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}</details></li>`).join("")}</ol>
       <p class="sub">Rebuilt at every sync from what you actually rode, slept and recovered: a missed day moves, a good week grows.</p></div>`;
   }
@@ -372,6 +399,53 @@ window.startDashboard = D => {
       </tbody></table></div>`;
   }
 
+  // race day: the morning, the start, the bottles, the bike the week before, what to pack (fitness/raceday.py)
+  function raceHTML() {
+    const R = D.race_day || [];
+    if (!R.length) return "";
+    const one = r => `<article class="race-day">
+      <div class="head"><h3>${esc(r.name)} · ${esc(r.label)}</h3><span class="sub">${fmtDow(r.date)} · ${r.days_out === 0 ? "today" : `${r.days_out} day${r.days_out === 1 ? "" : "s"} to go`}</span></div>
+      <div class="grid">
+        <div><h4>Race morning</h4><dl class="timeline">${r.timeline.map(t => `<dt class="num">${esc(t.at)}</dt><dd>${esc(t.what)}</dd>`).join("")}</dl>
+          ${r.start_set ? "" : `<p class="sub">Timed from a 10:00 start: set your wave's start time in config.toml (start = "HH:MM").</p>`}</div>
+        <div><h4>The start</h4><p>${esc(r.strategy)}</p>
+          <h4>Fuel</h4><p>${esc(r.fuel.setup)}.</p><p>${esc(r.fuel.sips[0].toUpperCase() + r.fuel.sips.slice(1))}${r.fuel.top_up ? `, plus ${r.fuel.top_up} g an hour from gels or chews` : ""}: about ${r.fuel.rate} g of carbs and ${r.fuel.sodium} mg of sodium an hour.</p>
+          ${r.fuel.no_refill ? `<p class="sub">${esc(r.fuel.no_refill)}</p>` : ""}
+          ${r.forecast ? `<h4>Forecast at the start</h4><p>${esc(r.forecast.line)}.</p><p><b>Wear:</b> ${esc(r.forecast.kit)}. ${esc(r.forecast.warm)}</p>` : `<p class="sub">The race-morning forecast appears 16 days out.</p>`}</div>
+        <div><h4>The bike, the week before</h4><ul class="checks">${r.bike.map(b => `<li class="${b.ok ? "ok" : ""}"><span><span class="sr">${b.ok ? "Done: " : "To do: "}</span>${esc(b.job)}${b.note ? ` <span class="sub">${esc(b.note)}</span>` : ""}</span></li>`).join("")}</ul>
+          <h4>Pack</h4><ul class="checks">${r.pack.map(x => `<li><span>${esc(x)}</span></li>`).join("")}</ul>
+          <h4>Between now and the start</h4>${r.sessions_left.length ? `<ul class="plain">${r.sessions_left.map(x => `<li><b>${fmtDow(x.date)}</b> ${esc(x.title)}</li>`).join("")}</ul>` : `<p class="sub">No hard sessions left: it's all freshening up now.</p>`}
+          <p class="sub">Taper: ${r.taper.days} days, arriving at form ${signed(r.taper.race_tsb)} (target ${r.taper.target_tsb[0]} to ${r.taper.target_tsb[1]}).</p></div>
+      </div></article>`;
+    return `<section id="race" class="card"><div class="head"><h2>Race day</h2><span class="sub">${R.length === 1 ? esc(R[0].name) : `${R.length} races in the next six weeks`}</span></div>${R.map(one).join("")}</section>`;
+  }
+
+  // the bike: what's due, Silca's pressures, and "Done" to log a job (fitness/bike.py)
+  function bikeHTML() {
+    const B = D.bike;
+    if (!B) return "";
+    const tag = s => s === "due" ? `<span class="tag bad">Due</span>` : s === "soon" ? `<span class="tag warn">Soon</span>` : `<span class="tag good">OK</span>`;
+    const P = B.pressure || {}, S = B.surfaces || {};
+    return `<section id="bike" class="card"><div class="head"><h2>Bike</h2><span class="sub">${esc(B.name)}</span></div>
+      ${B.parts ? `<p class="sub">${esc(B.parts)}</p>` : ""}
+      <ul class="upkeep">${B.items.map(i => `<li class="${esc(i.status)}"><div class="row"><b>${esc(i.job)}</b>${tag(i.status)}</div>
+        <span class="track" aria-hidden="true"><span class="fill" style="display:block;width:${Math.max(2, Math.min(100, i.pct * 100))}%"></span></span>
+        <span class="sub">${esc(i.used)}${i.why ? ` · due now after ${esc(i.why)}` : ""}${i.done ? ` · last done ${fmtD(i.done)}` : ` · counting since ${fmtD(i.counting_since)}`}</span>
+        <span class="sub how">${esc(i.how)}</span>
+        <button type="button" class="chip needs-cloud" data-action="service" data-code="${esc(i.key)}" data-label="${esc(i.job)}" aria-label="Done: ${esc(i.job)}">Done</button></li>`).join("")}</ul>
+      <h3 class="mt-6">Tire pressure · Silca</h3>
+      ${(B.pressure_notes || []).map(n => `<p class="warn-line">${esc(n)}</p>`).join("")}
+      ${Object.keys(P).length ? `<div class="scrollx" tabindex="0" role="region" aria-label="Tire pressures"><table class="tbl"><thead><tr><th>For</th><th class="r">Front</th><th class="r">Rear</th><th>Set</th></tr></thead><tbody>
+        ${Object.entries(P).map(([k, v]) => `<tr><td>${esc(S[k] || k)}</td><td class="r num">${v.front} psi</td><td class="r num">${v.rear} psi</td><td>${fmtD(v.at)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="sub">No pressures yet: run Silca's calculator for each surface and add them here.</p>`}
+      <p class="sub">In Silca's calculator: total weight ${B.silca.system_lb ? `<b>${units === "mi" ? `${B.silca.system_lb} lb` : `${B.silca.system_kg} kg`}</b> (you, the bike and two full bottles and tools)` : "you + the bike + bottles"}${B.silca.tire ? `; tire ${esc(B.silca.tire)}` : ""}${B.silca.rim ? `; rim ${esc(B.silca.rim)}` : ""}.</p>
+      <form class="pressure needs-cloud" data-form="pressure">
+        <div class="wide"><label for="p-where" class="label">For</label><select id="p-where">${Object.entries(S).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("")}</select></div>
+        <div><label for="p-front" class="label">Front psi</label><input id="p-front" inputmode="decimal" pattern="[0-9.]*" required></div>
+        <div><label for="p-rear" class="label">Rear psi</label><input id="p-rear" inputmode="decimal" pattern="[0-9.]*" required></div>
+        <button type="submit" class="chip primary">Save</button></form>
+    </section>`;
+  }
+
   function seasonHTML() {
     if (!plan) return `<section id="season" class="card"><div class="head"><h2>Season</h2></div><p class="empty">Add a race under [[races]] in fitness/config.toml to get a plan.</p></section>`;
     const first = plan.races[0], raceIdx = plan.days.findIndex(d => d.phase === "race");
@@ -411,6 +485,7 @@ window.startDashboard = D => {
         ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${planB(pToday, rec, rd)}
         ${overnightBlock()}
+        ${weatherBlock()}
         ${weekBlock()}
         ${adjustedBlock()}
         ${commuteBlock()}
@@ -438,6 +513,7 @@ window.startDashboard = D => {
     </section>`);
 
     // season
+    html.push(raceHTML());
     html.push(seasonHTML());
 
 
@@ -486,6 +562,7 @@ window.startDashboard = D => {
 
     // data
     const th = D.athlete;
+    html.push(bikeHTML());
     html.push(`<section id="device" class="card"><div class="head"><h2>What the Venu Sq gives you</h2><span class="sub">last 30 days of data actually received</span></div>
       <div class="scrollx" tabindex="0" role="region" aria-label="Signals received"><table class="tbl"><thead><tr><th>Signal</th><th class="r">Days</th><th>Hardware</th><th>Note</th></tr></thead><tbody>
       ${D.coverage.map(c => `<tr><td>${esc(c.field)}</td><td class="r">${c.days}/${c.of}</td><td>${esc(c.device)}</td><td class="sub">${esc(c.note)}</td></tr>`).join("")}</tbody></table></div>
@@ -494,6 +571,7 @@ window.startDashboard = D => {
       <p class="sub">${D.counts.days} days of wellness, ${D.counts.activities} activities since ${fmtD(D.counts.first)}, ${D.counts.first.slice(0, 4)}. Built ${esc(D.generated.replace("T", " "))}.</p></section>`);
 
     app.innerHTML = html.join("");
+    for (const a of document.querySelectorAll(".bar nav a[href^='#']")) a.hidden = !document.getElementById(a.getAttribute("href").slice(1));
     document.getElementById("foot").innerHTML = `<p><b>How the numbers work.</b> TSS from power (when an FTP is set), else heart-rate TSS (Banister TRIMP, 1 h at threshold HR = 100), else a duration estimate. Fitness/fatigue are 42/7-day exponentially weighted load; form is yesterday's fitness minus fatigue. Readiness compares last night's resting HR, overnight stress (the Venu Sq's HRV-derived signal), Body Battery and breathing rate with your own 60-day normal, blends in the sleep score, and takes points off for deep fatigue or a load spike.</p>
       <p>This is a personal analysis tool, not medical advice. Private data: keep this page off the public web.</p>`;
     charts();
