@@ -8,7 +8,7 @@ import { build, transform } from "esbuild";
 import { createHash } from "node:crypto";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { buildRide } from "./fitness/build-ride.mjs";
+import { buildApp } from "./fitness/build-app.mjs";
 
 const SRC = "site", OUT = process.env.OUT_DIR || "dist";
 const ORIGIN = "https://chrisrohn.com";
@@ -69,7 +69,7 @@ const sw = readFileSync(join(SRC, "sw.js"), "utf8");
 for (const tag of ["__APP_JS__", "__STYLE_CSS__", "__THEME_JS__", "__BUILD__"]) if (!sw.includes(tag)) throw new Error(`site/sw.js must contain ${tag}`);
 writeFileSync(join(OUT, "sw.js"), sw.replaceAll("__APP_JS__", "/" + appName).replaceAll("__STYLE_CSS__", "/" + styleName).replaceAll("__THEME_JS__", "/" + themeName).replaceAll("__BUILD__", hash));
 
-buildRide(OUT);   // /fitness/ride.html, the phone view of the private fitness dashboard (see fitness/README.md)
+buildApp(OUT);   // /fitness/: the installable training app (dashboard shell + ride mode), data-free (see fitness/README.md)
 
 // the sitemap: the pages a search engine should index, dated by this build (the feed changes daily)
 const today = new Date().toISOString().slice(0, 10);

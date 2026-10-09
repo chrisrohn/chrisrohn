@@ -2,11 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="light dark">
   <title>Training &amp; Recovery</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' fill='%23d6301f'/%3E%3Cpath d='M6 17h5l3-7 4 13 3-6h5' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#111111">
+  <meta name="application-name" content="Training">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Training">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <script>try { const t = localStorage.getItem("fitness-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <style>/*__STYLE__*/</style>
 </head>
@@ -19,8 +28,9 @@
         <a href="#recovery">Recovery</a><a href="#training">Training</a><a href="#insights">Insights</a><a href="#device">Data</a>
       </nav>
       <div class="tools">
-        <a class="chip" id="ride-link" href="ride.html" hidden>Ride mode</a>
-        <div class="seg" role="group" aria-label="Units">
+        <button type="button" class="chip" id="install" hidden>Install</button>
+        <a class="chip" id="ride-link" href="ride.html">Ride mode</a>
+        <div class="seg" role="group" aria-label="Units" id="units-seg">
           <button type="button" class="chip" data-units="mi" aria-pressed="true"><span class="long">Imperial</span><span class="short">mi</span></button><button type="button" class="chip" data-units="km" aria-pressed="false"><span class="long">Metric</span><span class="short">km</span></button>
         </div>
         <div class="seg" role="group" aria-label="Theme">
@@ -29,9 +39,24 @@
       </div>
     </div>
   </header>
+  <section id="databar" class="databar" aria-label="Data on this device" hidden></section>
   <main id="app"></main>
+  <dialog id="import" aria-labelledby="import-title">
+    <form method="dialog" class="sheet">
+      <h2 id="import-title">Import data</h2>
+      <p class="sub">Paste the phone link from the dashboard on your computer, or pick the data file you saved.</p>
+      <label for="import-text" class="label">Phone link</label>
+      <textarea id="import-text" rows="4" spellcheck="false" autocomplete="off" placeholder="https://chrisrohn.com/fitness/#d=…"></textarea>
+      <div class="actions"><button type="button" class="chip" id="import-paste">Paste</button><button type="submit" class="chip primary" id="import-go">Import</button></div>
+      <label for="import-file" class="label mt-3">Or a data file</label>
+      <input id="import-file" type="file" accept=".json,application/json,text/plain">
+      <p id="import-error" class="error" role="alert"></p>
+      <div class="actions"><button type="submit" class="chip" value="cancel">Close</button></div>
+    </form>
+  </dialog>
   <footer id="foot"></footer>
   <script type="application/json" id="data">__DATA__</script>
+  <script>/*__SHELL__*/</script>
   <script>/*__APP__*/</script>
 </body>
 </html>

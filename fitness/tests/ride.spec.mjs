@@ -1,4 +1,4 @@
-// Ride mode (/fitness/ride.html, written by fitness/build-ride.mjs from fitness/site): it loads clean under its own CSP, passes axe, takes
+// Ride mode (/fitness/ride.html, written by fitness/build-app.mjs from fitness/site): it loads clean under its own CSP, passes axe, takes
 // its plan from a #z= link without ever executing what the link carries, and its settings sheet works under
 // form-action 'none'.
 import { test, expect } from "@playwright/test";
