@@ -464,3 +464,9 @@ def test_workflow_file_from_the_callers_ref(monkeypatch):
     from fitness import cloud
     monkeypatch.setenv("GITHUB_WORKFLOW_REF", "chrisrohn/training-data/.github/workflows/training.yml@refs/heads/main")
     assert cloud.workflow_file() == "training.yml"
+
+
+def test_strava_errors_never_echo_the_reply():
+    from fitness.strava import _problem
+    assert _problem({"message": "Bad Request", "errors": [{"resource": "AuthorizationCode", "field": "code", "code": "invalid"}]}) == "Bad Request (code invalid)"
+    assert "secret" not in _problem({"access_token": "secret", "refresh_token": "secret"})
