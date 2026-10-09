@@ -9,6 +9,7 @@ name: Fitness sync
 #   fitness-data.json  the dashboard's numbers, which the app downloads with its own read-only token
 #   status.json        what's connected, when it last ran, and what went wrong if anything did
 # A wrong STATE_KEY stops the run before anything is written, so the saved state is never overwritten with nothing.
+# Strava's free account export, uploaded to the private repository's strava/ folder, is imported once per file.
 
 on:
   workflow_call:
@@ -55,6 +56,13 @@ jobs:
           path: app
           persist-credentials: false
 
+      - name: Fetch uploads            # strava/: Strava's account export, if you've uploaded one
+        uses: actions/checkout@v7
+        with:
+          path: inbox
+          sparse-checkout: strava
+          persist-credentials: false
+
       - name: Fetch state
         env:
           GH_TOKEN: ${{ github.token }}
@@ -95,7 +103,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ -n "$CODE" ]; then echo "::add-mask::$CODE"; fi
-          python -m fitness cloud --action "${ACTION:-sync}" --out "$GITHUB_WORKSPACE/state"
+          python -m fitness cloud --action "${ACTION:-sync}" --out "$GITHUB_WORKSPACE/state" --inbox "$GITHUB_WORKSPACE/inbox"
 
       - name: Save state
         if: always() && steps.unlock.outcome == 'success'

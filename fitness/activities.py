@@ -60,33 +60,60 @@ def activity(*, id: str, source: str, start: datetime, kind: str, name: str = ""
 
 
 def merge(acts: list[dict]) -> list[dict]:
-    """One row per real-world session. Garmin auto-uploads to Strava, so the same ride arrives twice: a Garmin and a
-    Strava record that start within 10 minutes of each other and last within 25% of each other are one ride. The
-    Garmin record wins (it carries HR zones and training effect) and borrows what only Strava has (power, its name)."""
-    garmin = [dict(a) for a in sorted((a for a in acts if a["source"] == "garmin"), key=lambda a: a["start"])]
-    starts = [datetime.fromisoformat(a["start"]) for a in garmin]
-    out = list(garmin)
-    for a in (a for a in acts if a["source"] != "garmin"):
-        t = datetime.fromisoformat(a["start"])
-        lo = bisect.bisect_left(starts, t - timedelta(minutes=10))
-        hi = bisect.bisect_right(starts, t + timedelta(minutes=10))
-        twin = next((garmin[i] for i in range(lo, hi) if _close(garmin[i]["duration_s"], a["duration_s"])), None)
+    """One row per real-world session, however many copies arrive. The same ride can come from the watch, from
+    Zwift / MyWoosh uploading to Garmin Connect, from Strava's API and from Strava's account export: records that
+    start within 10 minutes of each other and last within 25% of each other are one ride.
+
+    Start times are compared in UTC when both copies carry it (Strava's export is in UTC, Garmin's local start is
+    wherever you rode, so a ride out of town still matches); otherwise on the local clock. The watch's Garmin record
+    wins (heart rate, zones, training effect) and borrows what only the others have: power, a better name, the
+    indoor and commute flags."""
+    rank = sorted(acts, key=lambda a: (a["source"] != "garmin", not a.get("avg_hr"), a["start"], a["id"]))
+    kept: list[dict] = []
+    by_utc: list[tuple[datetime, int]] = []
+    by_local: list[tuple[datetime, int]] = []
+    window = timedelta(minutes=10)
+
+    def near(index: list[tuple[datetime, int]], t: datetime) -> list[int]:
+        lo = bisect.bisect_left(index, (t - window, -1))
+        hi = bisect.bisect_right(index, (t + window, len(kept)))
+        return [i for _, i in index[lo:hi]]
+
+    for a in rank:
+        utc = _utc(a)
+        local = datetime.fromisoformat(a["start"])
+        candidates = near(by_utc, utc) if utc else []
+        # the local clock only decides between copies that don't both know their UTC start
+        candidates += [i for i in near(by_local, local) if not (utc and _utc(kept[i]))]
+        twin = next((kept[i] for i in candidates if _close(kept[i]["duration_s"], a["duration_s"])), None)
         if twin is None:
-            out.append(dict(a))
+            kept.append(dict(a))
+            if utc:
+                bisect.insort(by_utc, (utc, len(kept) - 1))
+            bisect.insort(by_local, (local, len(kept) - 1))
             continue
-        twin.setdefault("links", {})[a["source"]] = a["id"]
-        if a.get("commute"):
-            twin["commute"] = True
-        for key in ("avg_power", "np", "kj", "suffer_score"):
-            if not twin.get(key) and a.get(key):
-                twin[key] = a[key]
-        if twin["name"] in ("", None) or twin["name"].endswith((" Cycling", " Mountain Biking", " Riding", " Running", "Indoor Cycling", "Virtual Cycling")):
-            twin["name"] = a["name"] or twin["name"]
-        if a.get("offroad") and not twin.get("offroad"):
-            twin["offroad"] = True
-        if a.get("indoor") and not twin.get("indoor"):   # a watch-recorded "cycling" that Zwift / MyWoosh also uploaded
-            twin["indoor"], twin["offroad"] = True, False
-    return sorted(out, key=lambda a: a["start"])
+        _fold(twin, a)
+    return sorted(kept, key=lambda a: a["start"])
+
+
+def _utc(a: dict) -> datetime | None:
+    return datetime.fromisoformat(a["start_utc"]) if a.get("start_utc") else None
+
+
+def _fold(twin: dict, a: dict) -> None:
+    """`a` is another copy of `twin`'s session: keep twin, take what only `a` has."""
+    twin.setdefault("links", {})[a["source"]] = a["id"]
+    if a.get("commute"):
+        twin["commute"] = True
+    for key in ("avg_power", "np", "kj", "suffer_score", "avg_hr", "max_hr", "hr_zones", "distance_m", "elev_m"):
+        if not twin.get(key) and a.get(key):
+            twin[key] = a[key]
+    if twin["name"] in ("", None) or twin["name"].endswith((" Cycling", " Mountain Biking", " Riding", " Running", "Indoor Cycling", "Virtual Cycling")):
+        twin["name"] = a["name"] or twin["name"]
+    if a.get("offroad") and not twin.get("offroad") and not twin.get("indoor"):
+        twin["offroad"] = True
+    if a.get("indoor") and not twin.get("indoor"):   # a watch-recorded "cycling" that Zwift / MyWoosh also uploaded
+        twin["indoor"], twin["offroad"] = True, False
 
 
 def _close(a: float, b: float) -> bool:

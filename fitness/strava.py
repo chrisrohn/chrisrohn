@@ -111,6 +111,7 @@ def parse_api(a: dict) -> dict:
         moving_s=a.get("moving_time"), distance_m=a.get("distance"), elev_m=a.get("total_elevation_gain"), avg_hr=a.get("average_heartrate"),
         max_hr=a.get("max_heartrate"), avg_power=a.get("average_watts") if a.get("device_watts") else None,
         np=a.get("weighted_average_watts") if a.get("device_watts") else None, kj=a.get("kilojoules"), suffer_score=a.get("suffer_score"), trainer=a.get("trainer"), commute=a.get("commute") or None,
+        start_utc=datetime.fromisoformat(a["start_date"].rstrip("Z")).isoformat() if a.get("start_date") else None,
     )
 
 
@@ -146,6 +147,12 @@ def _num(v: str | None) -> float | None:
         return None
 
 
+def _flag(v: str | None) -> bool:
+    """The export's yes/no columns come as true/false, 1/0 or 1.0/0.0, depending on the column and the year."""
+    v = (v or "").strip().lower()
+    return v in ("true", "yes") or (_num(v) or 0) > 0
+
+
 def parse_export(text: str, tz: str) -> list[tuple[dict, dict]]:
     """activities.csv from Strava's "Download your data" zip. The file repeats some headers ("Elapsed Time",
     "Distance"); the later column is the raw SI value, the earlier one is in display units, so the last one wins.
@@ -158,16 +165,20 @@ def parse_export(text: str, tz: str) -> list[tuple[dict, dict]]:
         if len(row) < len(header):
             continue
         rec = {name: row[i] for name, i in col.items()}
-        when = datetime.strptime(rec["Activity Date"], "%b %d, %Y, %I:%M:%S %p").replace(tzinfo=UTC).astimezone(zone)
+        utc = datetime.strptime(rec["Activity Date"], "%b %d, %Y, %I:%M:%S %p")
+        when = utc.replace(tzinfo=UTC).astimezone(zone)   # your home time zone; the UTC start is what matches a Garmin copy
         watts = _num(rec.get("Average Watts"))
-        has_meter = (rec.get("Device Watts") or "").lower() in ("true", "1")
+        # measured power, not Strava's estimate: "Device Watts" says so when the export has it; newer exports drop that
+        # column, but Strava only works out a weighted average power from a real power reading (trainer or meter)
+        has_meter = _flag(rec.get("Device Watts")) if "Device Watts" in rec else bool(_num(rec.get("Weighted Average Power")))
         out.append((activity(
             id=f"strava:{rec['Activity ID']}", source="strava", start=when, kind=rec.get("Activity Type") or "Workout",
             name=rec.get("Activity Name") or "", duration_s=_num(rec.get("Elapsed Time")) or 0, moving_s=_num(rec.get("Moving Time")),
             distance_m=_num(rec.get("Distance")), elev_m=_num(rec.get("Elevation Gain")), avg_hr=_num(rec.get("Average Heart Rate")),
             max_hr=_num(rec.get("Max Heart Rate")), avg_power=watts if has_meter else None,
             np=_num(rec.get("Weighted Average Power")) if has_meter else None, calories=_num(rec.get("Calories")),
-            suffer_score=_num(rec.get("Relative Effort")), commute=(rec.get("Commute") or "").lower() in ("true", "1") or None,
+            suffer_score=_num(rec.get("Relative Effort")), commute=_flag(rec.get("Commute")) or None,
+            start_utc=utc.isoformat(),
         ), rec))
     return out
 

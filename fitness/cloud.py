@@ -15,6 +15,7 @@ Strava connects once through its own authorize page, which redirects to the app 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -61,14 +62,42 @@ def wait_for_code(workflow: str, since: datetime, timeout: float = CODE_WAIT_S, 
     raise TimeoutError("no sign-in code arrived within 10 minutes")
 
 
+def import_inbox(inbox: Path | None, store: Store, tz: str) -> dict | None:
+    """Strava's account export, uploaded to the private repository's strava/ folder: the activities.csv from it (or the
+    whole zip, if it's small enough to upload). Each distinct file is imported once; what was imported is remembered
+    in the store, so the status can say so after the file is gone."""
+    from fitness import strava
+
+    done = json.loads(store.get("strava_export") or "null") or {"shas": []}
+    files = sorted([*inbox.glob("strava/*.csv"), *inbox.glob("strava/*.zip")]) if inbox and inbox.is_dir() else []
+    for f in files:
+        sha = hashlib.sha256(f.read_bytes()).hexdigest()
+        if sha in done["shas"]:
+            continue
+        if f.suffix == ".csv":
+            rows = strava.parse_export(f.read_text(encoding="utf-8-sig"), tz)
+            for act, raw in rows:
+                store.put_activity(act, raw)
+            n = len(rows)
+        else:
+            n = strava.import_export(f, store, tz)
+        done = {"shas": [*done["shas"], sha], "file": f.name, "rows": n,
+                "at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")}
+        store.set("strava_export", json.dumps(done))
+        store.commit()
+        print(f"Strava export: {n} activities from {f.name}")
+    return done if done.get("file") else None
+
+
 def _why(e: BaseException) -> str:
     text = str(e).strip() or type(e).__name__
     return text.splitlines()[0][:300]
 
 
 def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), today: date | None = None,
-        prompt_code: Callable[[], str] | None = None) -> dict:
-    """Connect (if asked), sync both services, and write fitness-data.json + status.json into `out`."""
+        prompt_code: Callable[[], str] | None = None, inbox: Path | None = None) -> dict:
+    """Connect (if asked), import an uploaded Strava export, sync both services, and write fitness-data.json +
+    status.json into `out`."""
     from fitness import garmin, strava
 
     os.environ["TZ"] = cfg["athlete"]["timezone"]   # "today" is your day, not the runner's UTC one
@@ -89,7 +118,12 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
 
     # whether the sign-in secrets are set, without the password's value going anywhere near what's printed or saved
     has_login = all(os.environ.get(name) for name in ("GARMIN_EMAIL", "GARMIN_PASSWORD"))
+    export = None
     with Store(config.DB_PATH) as store:
+        try:
+            export = import_inbox(inbox, store, cfg["athlete"]["timezone"])
+        except Exception as e:
+            errors["strava"] = f"the uploaded export couldn't be read: {_why(e)}"
         if has_login or (tokens / "garmin_tokens.json").exists():
             try:
                 garmin.sync(cfg, store, prompt_mfa=prompt_code or (lambda: wait_for_code(workflow_file(), started)))
@@ -118,7 +152,8 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
         "garmin": {"connected": (tokens / "garmin_tokens.json").exists(), "days": len(days),
                    "last": max(days) if days else None, "error": errors.get("garmin")},
         "strava": {"connected": config.STRAVA_TOKEN.exists(), "client_id": os.environ.get("STRAVA_CLIENT_ID") or None,
-                   "activities": sum(1 for a in acts if str(a.get("id", "")).startswith("strava:")), "error": errors.get("strava")},
+                   "activities": sum(1 for a in acts if str(a.get("id", "")).startswith("strava:")),
+                   "export": {k: export[k] for k in ("file", "rows", "at")} if export else None, "error": errors.get("strava")},
         "error": errors.get("build"),
     }
     (out / STATUS_FILE).write_text(json.dumps(status, indent=2))

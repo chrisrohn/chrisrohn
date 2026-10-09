@@ -501,3 +501,76 @@ def test_strava_client_secret_is_never_written_to_disk(tmp_path, monkeypatch):
     assert strava._access_token() == "new"
     assert sent[-1]["client_secret"] == "from-env" and sent[-1]["grant_type"] == "refresh_token"
     assert "client_secret" not in json.loads(path.read_text())          # an older file is cleaned up on its next refresh
+
+
+def test_cloud_imports_an_uploaded_strava_export_once(tmp_path, cfg, cloud_dir):
+    cloud, data = cloud_dir
+    inbox = tmp_path / "inbox" / "strava"
+    inbox.mkdir(parents=True)
+    (inbox / "activities.csv").write_text(
+        'Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time,Distance,Max Heart Rate,Relative Effort,Elapsed Time,Moving Time,Distance,'
+        'Elevation Gain,Average Heart Rate,Average Watts,Device Watts,Weighted Average Power,Commute\n'
+        '77,"Nov 2, 2024, 3:00:00 PM",Iceman!,Mountain Bike Ride,7300,48.9,180,250,7300,7200,48900.5,575,163,,false,,false\n'
+        '78,"Jan 9, 2025, 11:00:00 PM",Zwift - Watopia,Virtual Ride,3600,30.1,170,80,3600,3600,30100,200,140,190,true,200,false\n')
+    status = cloud.run(cfg, out=tmp_path / "state", today=date(2026, 10, 8), inbox=tmp_path / "inbox")
+    assert status["ok"] and status["strava"]["activities"] == 2 and status["strava"]["export"]["rows"] == 2
+    assert status["strava"]["export"]["file"] == "activities.csv" and (tmp_path / "state" / "fitness-data.json").exists()
+    with Store(data / "fitness.db") as store:
+        acts = {a["id"]: a for a in store.activities()}
+    assert acts["strava:78"]["indoor"] and acts["strava:78"]["avg_power"] == 190
+    (inbox / "activities.csv").unlink()                                              # gone from the repository: still remembered
+    again = cloud.run(cfg, out=tmp_path / "state", today=date(2026, 10, 8), inbox=tmp_path / "inbox")
+    assert again["strava"]["export"]["rows"] == 2 and again["strava"]["activities"] == 2
+
+
+def test_merge_matches_an_out_of_town_ride_by_its_utc_start():
+    # ridden in Colorado: Garmin keeps Mountain time, Strava's export is UTC shown in Detroit time two hours later
+    g = activity(id="garmin:5", source="garmin", start=datetime(2026, 7, 4, 9), kind="mountain_biking", duration_s=7200, avg_hr=150,
+                 start_utc="2026-07-04T15:00:00")
+    s = activity(id="strava:55", source="strava", start=datetime(2026, 7, 4, 11), kind="MountainBikeRide", name="Monarch Crest", duration_s=7300,
+                 start_utc="2026-07-04T15:00:00")
+    home = activity(id="strava:56", source="strava", start=datetime(2026, 7, 4, 9, 2), kind="Ride", duration_s=7200,   # same local clock,
+                    start_utc="2026-07-04T13:02:00")                                                               # but a different ride
+    out = merge([s, g, home])
+    assert [a["id"] for a in out] == ["garmin:5", "strava:56"] and out[0]["name"] == "Monarch Crest"
+
+
+def test_merge_folds_the_watch_and_zwift_copies_of_one_trainer_ride():
+    watch = activity(id="garmin:7", source="garmin", start=datetime(2026, 12, 9, 18), kind="indoor_cycling", name="Indoor Cycling",
+                     duration_s=3600, avg_hr=142, start_utc="2026-12-09T23:00:00")
+    zwift = activity(id="garmin:8", source="garmin", start=datetime(2026, 12, 9, 18, 2), kind="virtual_ride", name="Zwift - Watopia",
+                     duration_s=3480, avg_power=185, np=196, start_utc="2026-12-09T23:02:00")
+    strava = activity(id="strava:80", source="strava", start=datetime(2026, 12, 9, 18, 2), kind="VirtualRide", name="Zwift - Watopia",
+                      duration_s=3480, avg_power=185, start_utc="2026-12-09T23:02:00")
+    later = activity(id="garmin:9", source="garmin", start=datetime(2026, 12, 9, 20), kind="walking", duration_s=1800, avg_hr=95)
+    out = merge([zwift, strava, later, watch])
+    assert [a["id"] for a in out] == ["garmin:7", "garmin:9"]
+    ride = out[0]
+    assert ride["avg_hr"] == 142 and ride["np"] == 196 and ride["indoor"] and ride["name"] == "Zwift - Watopia"
+    assert ride["links"] == {"garmin": "garmin:8", "strava": "strava:80"}
+
+
+def test_merge_falls_back_to_the_local_clock_for_records_without_utc():
+    old = activity(id="garmin:1", source="garmin", start=datetime(2025, 5, 1, 7), kind="road_biking", duration_s=3600, avg_hr=140)
+    s = activity(id="strava:2", source="strava", start=datetime(2025, 5, 1, 7, 3), kind="Ride", duration_s=3500, start_utc="2025-05-01T11:03:00")
+    assert [a["id"] for a in merge([s, old])] == ["garmin:1"]
+
+
+def test_parsers_keep_the_utc_start():
+    csv = ('Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time\n'
+           '77,"Nov 2, 2024, 3:00:00 PM",Iceman!,Mountain Bike Ride,7300\n')
+    (a, _), = parse_export(csv, "America/Detroit")
+    assert a["start"] == "2024-11-02T11:00:00" and a["start_utc"] == "2024-11-02T15:00:00"
+    g = parse_activity({"activityId": 1, "startTimeLocal": "2026-07-04 09:00:00", "startTimeGMT": "2026-07-04 15:00:00",
+                        "activityType": {"typeKey": "cycling"}, "duration": 60})
+    assert g["start_utc"] == "2026-07-04T15:00:00"
+
+
+def test_parse_strava_export_power_and_commutes_in_newer_exports():
+    # newer exports: no "Device Watts", Strava's estimated watts on every ride, and a second numeric "Commute" column
+    csv = ('Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time,Commute,Average Watts,Weighted Average Power,Commute\n'
+           '1,"Jan 9, 2025, 11:00:00 PM",Zwift - Watopia,Virtual Ride,3600,true,190,200,1.0\n'
+           '2,"May 9, 2025, 11:00:00 AM",Morning Ride,Ride,4000,false,150,,0.0\n')
+    (z, _), (r, _) = parse_export(csv, "America/Detroit")
+    assert z["avg_power"] == 190 and z["np"] == 200 and z["indoor"] and z["commute"]
+    assert r["avg_power"] is None and r["np"] is None and not r.get("commute")   # an estimate is not a measurement

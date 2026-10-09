@@ -129,13 +129,15 @@ test.describe("GitHub sync", () => {
   });
 
   test("without Strava's secrets the app never asks for Strava (its API needs a paid subscription)", async ({ page }) => {
-    await github(page, { status: { ...FRESH, strava: { connected: false, client_id: null, activities: 0, error: null } }, data: null });
+    await github(page, { status: { ...FRESH, strava: { connected: false, client_id: null, activities: 812, error: null,
+      export: { file: "activities.csv", rows: 812, at: new Date().toISOString() } } }, data: null });
     await page.goto("/fitness/");
     await signIn(page);
     await page.reload();
     await expect(page.locator(".welcome [data-action=connect-garmin]")).toBeVisible();
     await expect(page.locator("[data-action=connect-strava]")).toHaveCount(0);
     await expect(page.locator(".welcome")).not.toContainText("Strava not connected");
+    await expect(page.locator(".welcome")).toContainText("Strava history imported · 812 activities from activities.csv");
   });
 
   test("a failed sync says what went wrong, from status.json", async ({ page }) => {
