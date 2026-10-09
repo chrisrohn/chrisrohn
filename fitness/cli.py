@@ -63,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--action", choices=["sync", "connect-garmin", "connect-strava"], default="sync")
     cl.add_argument("--code", default=None, help="Strava authorization code (default: $CODE)")
     cl.add_argument("--out", type=Path, default=Path("."), help="where the two files go (the state branch checkout)")
+    cl.add_argument("--inbox", type=Path, default=None, help="a checkout of the private repository's main branch (its strava/ export)")
     dm = sub.add_parser("demo", help="build a demo page from a synthetic athlete")
     dm.add_argument("--open", action="store_true")
     args = p.parse_args(argv)
@@ -113,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         import os
 
         from fitness import cloud
-        status = cloud.run(cfg, args.action, args.code if args.code is not None else os.environ.get("CODE", ""), args.out)
+        status = cloud.run(cfg, args.action, args.code if args.code is not None else os.environ.get("CODE", ""), args.out, inbox=args.inbox)
         print(json.dumps(status, indent=2))
         return 0 if status["ok"] else 1
     elif args.cmd == "demo":

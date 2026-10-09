@@ -180,7 +180,18 @@ official API is for approved companies only, so this signs in the way Garmin's o
 5. **Trainer rides.** In Zwift's and MyWoosh's connection settings, link Garmin Connect. Their rides then arrive
    with power, and the sync marks them as trainer rides.
 
-**Strava (optional).** Strava's API needs a paid Strava subscription since June 2026. With one, create an app at
+**Your Strava history (free).** Strava's account export carries every activity you've ever uploaded, and the sync
+imports it once:
+
+1. On strava.com (in the phone's browser, desktop view): *Settings → My Account → Download or Delete Your Account
+   → Get Started → Request your archive*. Strava emails a link to a zip, usually within a few hours.
+2. Open the zip on the phone (Files by Google: tap it → *Extract*) and find `activities.csv`.
+3. In `training-data`, open the `strava` folder → *Add file → Upload files* → pick `activities.csv` → *Commit
+   changes*. (No `strava` folder yet? Create `strava/README.md` with *Add file → Create new file* first.)
+4. **Sync now** in the app. The setup list shows *Strava history imported · N activities*. Upload a newer export
+   any time; each file is imported once, and rides the watch also recorded are merged with their Garmin copy.
+
+**Strava (optional, live).** Strava's API needs a paid Strava subscription since June 2026. With one, create an app at
 <https://www.strava.com/settings/api> (*Authorization Callback Domain* `chrisrohn.com`), add `STRAVA_CLIENT_ID` and
 `STRAVA_CLIENT_SECRET` as secrets, and **Connect Strava** appears in the app. Without it, the sync and the app
 simply leave Strava out.

@@ -288,6 +288,7 @@
             ${item(!!status, status ? `Sync has run (last ${esc(when(status.synced))})` : "Sync hasn't run yet", cloudProblem)}
             ${item(!!(g && g.connected), g && g.connected ? `Garmin connected · ${g.days} days` : "Garmin not connected", g && g.error)}
             ${s && (s.connected || s.client_id) ? item(!!s.connected, s.connected ? `Strava connected · ${s.activities} activities` : "Strava not connected", s.error) : ""}
+            ${s && s.export ? item(true, `Strava history imported · ${s.export.rows} activities from ${esc(s.export.file)}`) : s && s.error && !s.client_id ? item(false, "Strava export", s.error) : ""}
           </ul>
           <p class="connect mt-4">${connectButtons()}<button type="button" class="chip big-chip" data-action="sync">Sync now</button><button type="button" class="chip big-chip" data-action="settings">Settings</button></p>
           <p class="sub mt-4">Connect Garmin first: the first sync brings in a year of days and rides, and takes up to 15 minutes. After that it runs on its own four times a day. Zwift and MyWoosh rides arrive through Garmin Connect once you link them there.</p>`

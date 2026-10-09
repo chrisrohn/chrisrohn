@@ -501,3 +501,23 @@ def test_strava_client_secret_is_never_written_to_disk(tmp_path, monkeypatch):
     assert strava._access_token() == "new"
     assert sent[-1]["client_secret"] == "from-env" and sent[-1]["grant_type"] == "refresh_token"
     assert "client_secret" not in json.loads(path.read_text())          # an older file is cleaned up on its next refresh
+
+
+def test_cloud_imports_an_uploaded_strava_export_once(tmp_path, cfg, cloud_dir):
+    cloud, data = cloud_dir
+    inbox = tmp_path / "inbox" / "strava"
+    inbox.mkdir(parents=True)
+    (inbox / "activities.csv").write_text(
+        'Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time,Distance,Max Heart Rate,Relative Effort,Elapsed Time,Moving Time,Distance,'
+        'Elevation Gain,Average Heart Rate,Average Watts,Device Watts,Weighted Average Power,Commute\n'
+        '77,"Nov 2, 2024, 3:00:00 PM",Iceman!,Mountain Bike Ride,7300,48.9,180,250,7300,7200,48900.5,575,163,,false,,false\n'
+        '78,"Jan 9, 2025, 11:00:00 PM",Zwift - Watopia,Virtual Ride,3600,30.1,170,80,3600,3600,30100,200,140,190,true,200,false\n')
+    status = cloud.run(cfg, out=tmp_path / "state", today=date(2026, 10, 8), inbox=tmp_path / "inbox")
+    assert status["ok"] and status["strava"]["activities"] == 2 and status["strava"]["export"]["rows"] == 2
+    assert status["strava"]["export"]["file"] == "activities.csv" and (tmp_path / "state" / "fitness-data.json").exists()
+    with Store(data / "fitness.db") as store:
+        acts = {a["id"]: a for a in store.activities()}
+    assert acts["strava:78"]["indoor"] and acts["strava:78"]["avg_power"] == 190
+    (inbox / "activities.csv").unlink()                                              # gone from the repository: still remembered
+    again = cloud.run(cfg, out=tmp_path / "state", today=date(2026, 10, 8), inbox=tmp_path / "inbox")
+    assert again["strava"]["export"]["rows"] == 2 and again["strava"]["activities"] == 2
