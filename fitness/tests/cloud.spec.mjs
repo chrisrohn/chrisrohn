@@ -6,7 +6,7 @@ import { DATA, watch, axe } from "./fixtures.mjs";
 
 const REPO = "me/training-data";
 const SYNCED = { synced: new Date().toISOString(), ok: true, garmin: { connected: true, days: 200, error: null }, strava: { connected: true, client_id: "4242", activities: 310, error: null } };
-const FRESH = { synced: null, ok: true, garmin: { connected: false, login: true, days: 0, error: null }, strava: { connected: false, client_id: "4242", activities: 0, error: null } };
+const FRESH = { synced: null, ok: true, garmin: { connected: false, days: 0, error: null }, strava: { connected: false, client_id: "4242", activities: 0, error: null } };
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET, POST", "Content-Type": "application/json" };
 
 /** A tiny GitHub: the repository, its state branch's two files, workflow dispatches and runs. Each dispatch becomes a

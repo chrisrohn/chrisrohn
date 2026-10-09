@@ -87,7 +87,8 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
         except (SystemExit, Exception) as e:   # every failure ends up in status.json, for the app to show
             errors["strava"] = _why(e)
 
-    has_login = bool(os.environ.get("GARMIN_EMAIL") and os.environ.get("GARMIN_PASSWORD"))
+    # whether the sign-in secrets are set, without the password's value going anywhere near what's printed or saved
+    has_login = all(os.environ.get(name) for name in ("GARMIN_EMAIL", "GARMIN_PASSWORD"))
     with Store(config.DB_PATH) as store:
         if has_login or (tokens / "garmin_tokens.json").exists():
             try:
@@ -114,7 +115,7 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
         "synced": started.isoformat().replace("+00:00", "Z"),
         "action": action,
         "ok": not errors,
-        "garmin": {"connected": (tokens / "garmin_tokens.json").exists(), "login": has_login, "days": len(days),
+        "garmin": {"connected": (tokens / "garmin_tokens.json").exists(), "days": len(days),
                    "last": max(days) if days else None, "error": errors.get("garmin")},
         "strava": {"connected": config.STRAVA_TOKEN.exists(), "client_id": os.environ.get("STRAVA_CLIENT_ID") or None,
                    "activities": sum(1 for a in acts if str(a.get("id", "")).startswith("strava:")), "error": errors.get("strava")},
