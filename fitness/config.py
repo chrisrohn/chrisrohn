@@ -16,7 +16,7 @@ STRAVA_TOKEN = DATA_DIR / "strava_token.json"
 
 DEFAULTS: dict = {
     "athlete": {"sex": "male", "max_hr": 0, "resting_hr": 0, "lthr": 0, "ftp": 0, "sleep_need_hours": 8.0, "timezone": "America/Detroit", "units": "imperial", "weight_kg": 0},
-    "nutrition": {"blueprint_days": ["mon", "tue", "wed", "thu", "fri"], "lunch": "veggie", "weekday_ride": "evening"},
+    "nutrition": {"lunch": "veggie", "weekday_ride": "evening", "bottle_cages": 2, "bladder_l": 0, "ride_fuel": {}},
     "indoor": {"start": "", "end": "", "apps": ["zwift", "mywoosh"], "long_ride_h": 2.5},
     "plan": {"weekly_pattern": [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9], "max_ramp": 6, "base_ramp": 3},
     "sync": {"garmin_tokens": "~/.garminconnect", "history_days": 400, "resync_days": 3},

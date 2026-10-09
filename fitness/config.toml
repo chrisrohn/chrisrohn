@@ -11,12 +11,21 @@ timezone = "America/Detroit"
 units = "imperial"        # "imperial" (mi, ft, mph) or "metric" (km, m, km/h): the default; each page's toggle remembers its own choice
 weight_kg = 0             # 0 = your Garmin profile's weight (it sets the day's carb and protein targets)
 
-# What to eat (fitness/fuel.py): Bryan Johnson's Blueprint meals, made at home, are the weekday breakfast and lunch;
-# the rest of each day is planned around them and around today's and tomorrow's riding.
+# What to eat (fitness/fuel.py): Bryan Johnson's Nutty Pudding and Super Veggie (made at home) whenever they fit
+# the day, a vegetarian base for every other meal and snack, and the bottles for the ride, all sized to the training.
 [nutrition]
-blueprint_days = ["mon", "tue", "wed", "thu", "fri"]   # Nutty Pudding for breakfast, Super Veggie for lunch
 lunch = "veggie"          # "veggie" (black lentils) or "veggie_chicken" (100 g chicken instead)
 weekday_ride = "evening"  # when a non-commute weekday ride happens: "evening" or "morning"
+bottle_cages = 2
+bladder_l = 2             # a back bladder (water only), for long rides with nowhere to refill; 0 = none
+
+# The on-bike drink mix, per serving (one packet / one bottle): Infinit Go Far by default. Change any of it here.
+[nutrition.ride_fuel]
+name = "Infinit Go Far"
+carbs = 66                # g
+sodium = 379              # mg
+protein = 4               # g
+bottle_oz = 24
 
 # The trainer season, every year: sessions in this window are written as Zwift / MyWoosh workouts, and rides
 # recorded there (Strava "Virtual Ride", or a name with one of the apps in it) are counted as indoor.

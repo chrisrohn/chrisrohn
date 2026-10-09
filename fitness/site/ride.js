@@ -198,6 +198,8 @@
   let last = 0, lastBeep = 0;
   const fuelText = () => {
     const long = (planned && planned.minutes >= 150) || S.elapsed > 2.5 * 3600;
+    const drink = cfg.drink;   // the drink mix from the fuel plan: a bottle an hour, so a third of one every 20 min
+    if (drink && drink.name) return long ? ` ⅓ bottle of ${drink.name} (~${Math.round(drink.carbs / 3)} g) and a gel or a few chews each hour` : ` ⅓ bottle of ${drink.name} (~${Math.round(drink.carbs / 3)} g carbs)`;
     return long ? " ~30 g carbs (a gel or half a bar) and a few big sips" : " ~20 g carbs and a few sips";
   };
   function advance(manual) {

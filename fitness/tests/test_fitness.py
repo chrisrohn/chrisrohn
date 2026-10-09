@@ -590,17 +590,22 @@ def test_fuel_tiers():
     assert tier(_fuel_day("race", 170, 220, "hard")) == "race"
 
 
-def test_fuel_weekdays_are_built_on_the_blueprint_meals(cfg):
+def test_fuel_blueprint_meals_when_they_fit_and_a_vegetarian_base_for_the_rest(cfg):
     from fitness.fuel import day_plan
     rest = day_plan(_fuel_day("rest"), None, date(2026, 10, 12), cfg, 78)            # a Monday
-    slots = {m["slot"]: m["what"] for m in rest["meals"]}
-    assert rest["blueprint"] and slots["Breakfast"].startswith("Nutty Pudding") and slots["Lunch"].startswith("Super Veggie with chicken")
-    assert rest["carbs_g"] == 230 and rest["protein_g"] == 140 and "Lighter" in slots["Dinner"]
+    slots = {m["slot"]: m for m in rest["meals"]}
+    assert slots["Breakfast"]["what"].startswith("Nutty Pudding") and slots["Lunch"]["what"].startswith("Super Veggie with the lentils")
+    assert rest["carbs_g"] == 230 and rest["protein_g"] == 140
+    dinner = slots["Dinner"]
+    assert "Lighter" in dinner["what"] and dinner["base"].startswith("Vegetarian base: up to ~") and "tofu" in dinner["base"]
+    assert not any(w in " ".join(m["what"] + m.get("base", "") for m in rest["meals"]) for w in ("chicken", "fish", "steak"))
     hard = day_plan(_fuel_day("commute", 135, 120, "hard", commute="workout", commute_workout="2 × 15 min"), None, date(2026, 10, 13), cfg, 78)
     slots = {m["slot"]: m["what"] for m in hard["meals"]}
     assert "banana" in slots["Breakfast"] and "45 min before you leave" in slots["Breakfast"]
     assert "lentils" in slots["Lunch"] and "black rice" in slots["Lunch"] and "ride home" in slots["Afternoon"]
     assert "On the bike" not in slots                                                    # two hour-long legs: no on-bike fuel needed
+    sun = day_plan(_fuel_day("rest"), None, date(2026, 10, 18), cfg, 78)              # a rest Sunday still gets the Blueprint meals
+    assert {m["slot"]: m["what"] for m in sun["meals"]}["Breakfast"].startswith("Nutty Pudding")
 
 
 def test_fuel_race_eve_and_race_morning_drop_the_fiber(cfg):
@@ -608,20 +613,31 @@ def test_fuel_race_eve_and_race_morning_drop_the_fiber(cfg):
     race = _fuel_day("race", 170, 220, "hard")
     eve = day_plan(_fuel_day("openers", 40, 30, "easy"), race, date(2026, 11, 6), cfg, 78)
     slots = {m["slot"]: m for m in eve["meals"]}
-    assert eve["tier"] == "load" and eve["carbs_g"] == 700 and "Skip the Super Veggie" in slots["Lunch"]["why"] and "carb night" in slots["Dinner"]["what"]
+    assert eve["tier"] == "load" and eve["carbs_g"] == 700 and "Not the Super Veggie" in slots["Lunch"]["why"]
+    assert "carb night" in slots["Dinner"]["what"] and "beans" not in slots["Dinner"]["base"]
     day = day_plan(race, None, date(2026, 11, 7), cfg, 78)
     slots = {m["slot"]: m for m in day["meals"]}
     assert "Not the Pudding" in slots["Breakfast"]["why"] and "80 g carbs an hour" in slots["On the bike"]["what"]
+    assert "Infinit Go Far" in slots["On the bike"]["what"] and "gel" in slots["On the bike"]["what"]   # 80 g/h: a bottle an hour + a gel
 
 
 def test_fuel_weekend_long_ride_moves_the_pudding_after(cfg):
     from fitness.fuel import day_plan
     sat = day_plan(_fuel_day("long", 180, 140, "hard"), None, date(2026, 10, 17), cfg, 78)
     slots = {m["slot"]: m["what"] for m in sat["meals"]}
-    assert not sat["blueprint"] and "2–3 h before" in slots["Breakfast"] and "75 g carbs an hour" in slots["On the bike"]
-    assert "Nutty Pudding you skipped" in slots["After"]
+    assert "2–3 h before" in slots["Breakfast"] and "75 g carbs an hour" in slots["On the bike"]
+    assert slots["After"].startswith("The Nutty Pudding") and slots["Lunch"].endswith("after the ride")
     fri = day_plan(_fuel_day("easy", 45, 20, "easy"), _fuel_day("long", 180, 140, "hard"), date(2026, 10, 16), cfg, None)
     assert fri["carbs_g"] is None and "long ride starts here" in {m["slot"]: m["what"] for m in fri["meals"]}["Dinner"]
+
+
+def test_bottles_for_go_far():
+    from fitness.fuel import RIDE_FUEL, bottles, on_bike_rate
+    two_hours = bottles(100, on_bike_rate(100), RIDE_FUEL)
+    assert two_hours["servings"] == 1 and "plain water" in two_hours["setup"] and "¼ of a bottle every 20 min" in two_hours["sips"]
+    barry = bottles(225, on_bike_rate(225, race=True), RIDE_FUEL)                     # Barry-Roubaix Killer, ~3¾ h
+    assert barry["servings"] == 4 and "2 servings of powder in a bag" in barry["setup"] and barry["top_up"] == 14
+    assert "⅓ of a bottle every 20 min (~22 g carbs)" in barry["sips"] and barry["sodium"] == 379
 
 
 def test_fuel_reaches_the_page_with_the_garmin_weight(tmp_path, cfg):
@@ -645,3 +661,19 @@ def test_garmin_profile_weight(tmp_path):
     with Store(tmp_path / "d.db") as store:
         _profile(Client, store)
         assert json.loads(store.get("profile")) == {"weight_kg": 78.3, "height_cm": 180.3, "birth_year": 1980}
+
+
+def test_bladder_only_when_theres_no_refill():
+    from fitness.fuel import RIDE_FUEL, bottles, on_bike_rate
+    short = bottles(110, on_bike_rate(110), RIDE_FUEL, cages=2, bladder_l=2)
+    assert short["no_refill"] == ""                                                    # two cages cover it: no bladder
+    long = bottles(240, on_bike_rate(240), RIDE_FUEL, cages=2, bladder_l=2)
+    assert "refill" in long["setup"] and "2 servings into each bottle" in long["no_refill"] and "2 L bladder with water only" in long["no_refill"]
+    assert bottles(240, on_bike_rate(240), RIDE_FUEL, cages=2, bladder_l=0)["no_refill"] == ""
+
+
+def test_vegetarian_bases_are_plates_not_piles():
+    from fitness.fuel import base
+    line = base(180, 40)
+    assert "5 corn tortillas + 2½ cups cooked rice" in line and "175 g extra-firm tofu + 1 cup black beans" in line and "4 cups cooked pasta /" in line and "3 eggs + " in base(150, 30, low_fiber=True)
+    assert "beans" not in base(150, 30, low_fiber=True) and "Blocks:" in base(40, 24, kind="snack")

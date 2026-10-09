@@ -283,7 +283,8 @@ def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
     nxt = (plan or {}).get("races", [{}])[0] if plan else {}
     return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "days": days,
             "race": {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None,
-            "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models}
+            "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models,
+            "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")}}
 
 
 def _pack(obj: dict) -> str:

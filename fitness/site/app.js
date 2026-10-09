@@ -293,7 +293,7 @@ window.startDashboard = D => {
 
   // what to eat today, around the Blueprint meals and the riding (fitness/fuel.py), and tomorrow's in a fold
   function mealsHTML(day) {
-    return `<dl class="meals">${day.meals.map(m => `<dt>${esc(m.slot)}</dt><dd>${esc(m.what)}<span class="sub">${esc(m.why)}</span></dd>`).join("")}</dl>`;
+    return `<dl class="meals">${day.meals.map(m => `<dt>${esc(m.slot)}</dt><dd>${esc(m.what)}${m.base ? `<span class="base">${esc(m.base)}</span>` : ""}<span class="sub">${esc(m.why)}</span></dd>`).join("")}</dl>`;
   }
   function fuelBlock() {
     const F = D.fuel;
@@ -301,7 +301,7 @@ window.startDashboard = D => {
     const T = F.today, N = F.tomorrow;
     const targets = T.carbs_g ? `About <b>${T.carbs_g} g carbs</b> and <b>${T.protein_g} g protein</b> today (${T.carbs_per_kg} and ${T.protein_per_kg} g per kg at ${F.weight_kg} kg).`
       : `About ${T.carbs_per_kg} g carbs and ${T.protein_per_kg} g protein per kg of body weight today (add your weight in Garmin Connect for grams).`;
-    return `<div class="fuel"><span class="label">Fuel · ${esc(T.label)}${T.blueprint ? " · Blueprint" : ""}</span>
+    return `<div class="fuel"><span class="label">Fuel · ${esc(T.label)}</span>
       <p class="sub">${targets}</p>
       ${mealsHTML(T)}
       ${N ? `<details class="fuel-next"><summary>Tomorrow · ${esc(N.label)}</summary>${mealsHTML(N)}</details>` : ""}</div>`;

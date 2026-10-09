@@ -237,6 +237,7 @@ details.table .scroll { max-height: 264px; overflow: auto; margin-top: var(--sp-
 .meals dt { font-weight: 700; font-size: var(--fs-label); letter-spacing: var(--track-label); text-transform: uppercase; padding-top: 3px; }
 .meals dd { margin: 0; display: grid; gap: 2px; }
 .meals dd .sub { font-size: var(--fs-small); }
+.meals dd .base { font-size: var(--fs-small); font-weight: 700; }
 .fuel-next summary { cursor: pointer; }
 .fuel-next .meals { margin-top: var(--sp-2); }
 @media (max-width: 559px) { .meals { grid-template-columns: 1fr; gap: 2px var(--sp-3); } .meals dd { margin-bottom: var(--sp-2); } }
