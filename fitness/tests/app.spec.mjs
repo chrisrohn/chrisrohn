@@ -93,6 +93,13 @@ test.describe("installable app", () => {
     await ctx.close();
   });
 
+  test("says what the plan did about a session that didn't happen", async ({ page }) => {
+    const moved = { ...DATA, plan: { ...DATA.plan, adjustments: ["Saturday's long ride didn't happen: it's on today instead."] } };
+    await page.goto(phoneLink(moved));
+    await expect(page.locator(".adjusted")).toContainText("Saturday's long ride didn't happen: it's on today instead.");
+    expect(await axe(page)).toEqual([]);
+  });
+
   test("opens offline once the service worker has it", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

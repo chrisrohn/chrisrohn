@@ -165,12 +165,13 @@ def _commute_mode(phase: str, role: str, left: int, recovery_week: bool, indoor:
     return {"key": "workout", "endurance": "endurance", "easy": "easy"}.get(role)
 
 
-def _plan_commutes(week: list[dict], cfg: dict) -> dict[date, str]:
+def _plan_commutes(week: list[dict], cfg: dict, done: int = 0) -> dict[date, str]:
     """Pick this week's commute days: the most preferred days whose round trip fits the load the plan wanted that day,
-    up to per_week[1]; then the closest fits until per_week[0] is met. Commutes replace that day's session."""
+    up to per_week[1]; then the closest fits until per_week[0] is met. Commutes replace that day's session. `done`
+    commutes already ridden this week count toward both numbers, so a missed one is rebooked and none is doubled."""
     c = cfg["commute"]
     loads = commute_loads(cfg)
-    lo, hi = c["per_week"]
+    lo, hi = max(0, c["per_week"][0] - done), max(0, c["per_week"][1] - done)
     order = {d: i for i, d in enumerate(c["days"])}
     cands = [w for w in week if w["mode"] and DOW[w["date"].weekday()] in order]
     for w in cands:
@@ -184,7 +185,8 @@ def _plan_commutes(week: list[dict], cfg: dict) -> dict[date, str]:
     return {w["date"]: w["mode"] for w in chosen}
 
 
-def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_race: date | None, taper: int, floor: float, done_today: float) -> list[dict]:
+def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_race: date | None, taper: int, floor: float, done_today: float,
+              adapt: dict | None = None) -> list[dict]:
     opt, pattern = race["opt"], cfg["plan"]["weekly_pattern"]
     mean_p = sum(pattern) / 7 or 1
     role_of = roles(pattern)
@@ -213,6 +215,9 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
                 ramp = max(-2.0, min(cap, (opt["target_ctl"] - ctl) / weeks_left))
                 mean = max(15.0, ctl + 6.45 * ramp)        # Δctl over a week ≈ (mean − ctl) × 0.155
         role = _role(phase, role_of[d.weekday()], left)
+        moved = (adapt or {}).get("roles", {}).get(d) if phase in ("base", "build", "transition") else None
+        if moved:
+            role = moved
         if cfg["commute"].get("enabled") and (d == start or d.weekday() == 0):   # book this week's commutes
             week_days = []
             for i in range(7 - d.weekday()):
@@ -222,9 +227,12 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
                 ph, le = _phase(e, race, taper_start, prev_race, cfg), (race["date"] - e).days
                 ro = _role(ph, role_of[e.weekday()], le)
                 est = (mean if mean is not None and ph == phase else max(15.0, 0.8 * ctl)) * pattern[e.weekday()] / mean_p
-                week_days.append({"date": e, "target": est, "mode": _commute_mode(ph, ro, le, recovery_week and ph == phase, in_indoor(e, cfg), cfg)})
-            commutes = _plan_commutes(week_days, cfg)
-        rel = pattern[d.weekday()] / mean_p
+                ro = ((adapt or {}).get("roles", {}).get(e) if ph in ("base", "build", "transition") else None) or ro
+                gone = d == start and e in (adapt or {}).get("no_commute", ())
+                week_days.append({"date": e, "target": est, "mode": None if gone else _commute_mode(ph, ro, le, recovery_week and ph == phase, in_indoor(e, cfg), cfg)})
+            commutes = _plan_commutes(week_days, cfg, (adapt or {}).get("commutes_done", 0) if d == start else 0)
+        # a moved session carries the load of the day it was planned on (Saturday's long ride on Sunday is still long)
+        rel = (pattern[role_of.index(moved)] if moved in role_of else pattern[d.weekday()] if not moved else 0.0) / mean_p
         rate = RATE[role] * (INDOOR_RATE if indoor else 1)
         if phase == "race":
             load = opt["hours"] * RACE_IF ** 2 * 100
@@ -262,13 +270,14 @@ def _generate(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_r
     return rows
 
 
-def _segment(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_race: date | None, done_today: float) -> tuple[list[dict], dict]:
+def _segment(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_race: date | None, done_today: float,
+             adapt: dict | None = None) -> tuple[list[dict], dict]:
     lo, hi = race["target_tsb"]
     t_lo, t_hi = race["opt"]["taper_days"]
     best = None
     for taper in range(t_lo, t_hi + 1):
         for floor in FLOORS:
-            rows = _generate(start, race, ctl, atl, cfg, prev_race, taper, floor, done_today)
+            rows = _generate(start, race, ctl, atl, cfg, prev_race, taper, floor, done_today, adapt)
             morning = rows[-1]
             race_ctl = rows[-2]["ctl"] if len(rows) > 1 else ctl
             miss = 0 if lo <= morning["tsb"] <= hi else min(abs(morning["tsb"] - lo), abs(morning["tsb"] - hi))
@@ -285,14 +294,15 @@ def _segment(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_ra
     return rows, summary
 
 
-def season(today: date, ctl0: float, atl0: float, cfg: dict, done_today: float = 0.0, choices: dict[str, str] | None = None) -> dict | None:
+def season(today: date, ctl0: float, atl0: float, cfg: dict, done_today: float = 0.0, choices: dict[str, str] | None = None,
+           adapt: dict | None = None) -> dict | None:
     races, last = upcoming(cfg, today, choices)
     if not races:
         return None
     rows, summaries = [], []
     start, ctl, atl, prev = today, ctl0, atl0, last
     for race in races:
-        seg, summary = _segment(start, race, ctl, atl, cfg, prev, done_today if start == today else 0.0)
+        seg, summary = _segment(start, race, ctl, atl, cfg, prev, done_today if start == today else 0.0, adapt if start == today else None)
         summary["days_out"] = (race["date"] - today).days
         for r in seg:
             r["race"] = race["name"]
@@ -419,3 +429,88 @@ def _weeks(days: list[dict]) -> list[dict]:
                     "commutes": sum(1 for d in ds if d.get("commute")), "race": next((d["race"] for d in ds if d["phase"] == "race"), None),
                     "days": len(ds)})
     return out
+
+
+DAY = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+COMMUTE_BY, LONG_BY = 10, 19          # local hour by which a commute day's ride in, or a long ride, should be on the watch
+
+
+def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], commute_days: set[date], state: dict[str, dict]) -> dict:
+    """What this week's plan has to absorb: sessions that didn't happen, and what to do about them.
+
+    The plan is rebuilt from scratch at every sync, so this works it out the same way: the week as it was planned on
+    Monday (Monday's fitness through the same planner) against the load actually logged each day.
+    - A missed long ride moves to the next free day this week (Saturday's to Sunday); a missed key session to a free
+      day with no hard day either side; with no such day it's dropped, not crammed in.
+    - A missed commute is rebooked: commutes already ridden count toward the week's per_week, the rest are re-picked.
+    - Today: no ride in by 10:00 on a commute day means no commute (the session it replaced is back, for the evening);
+      nothing logged by 19:00 on a long-ride day means it moves to tomorrow if tomorrow is free.
+    Recovery weeks, tapers and race weeks aren't rearranged. Fitness lost to a missed day is made up the slow way: the
+    next weeks' ramp toward the race target recomputes from the fitness you actually have.
+    """
+    out: dict = {"roles": {}, "commutes_done": 0, "no_commute": set(), "notes": []}
+    monday = today - timedelta(days=today.weekday())
+    week = [monday + timedelta(days=i) for i in range(7)]
+    out["commutes_done"] = sum(1 for d in commute_days if monday <= d < today)   # today's, if ridden, is today's booking
+    prior = state.get((monday - timedelta(days=1)).isoformat(), {"ctl": 0.0, "atl": 0.0})
+    base = season(monday, prior["ctl"], prior["atl"], cfg) if cfg.get("races") else None
+    if not base:
+        return out
+    planned = {date.fromisoformat(d["date"]): d for d in base["days"] if date.fromisoformat(d["date"]) in week}
+    done = {d: load_by_day.get(d.isoformat(), 0.0) for d in week}
+    out["base_commutes"] = {d for d, p in planned.items() if p.get("commute")}
+
+    def missed(d: date) -> bool:
+        p = planned.get(d)
+        if not p:
+            return False
+        if p.get("commute"):                      # a commute day counts when the commute was ridden, whatever its load
+            return d not in commute_days
+        return p["load"] >= 20 and done[d] < 0.5 * p["load"]
+
+    misses = [d for d in week if d < today and missed(d)]
+    p_today = planned.get(today)
+    if p_today and p_today.get("commute") and now_hour >= COMMUTE_BY and today not in commute_days:
+        out["no_commute"].add(today)
+        out["notes"].append(f"No ride in this morning, so no commute today: {_replaced(p_today)}.")
+    if p_today and p_today["role"] == "long" and now_hour >= LONG_BY and missed(today):
+        misses.append(today)
+        out["roles"][today] = "rest"
+
+    def free(d: date) -> bool:
+        p = planned.get(d)
+        if not p or d < today or (d == today and (now_hour >= 12 or done[d] >= 10 or today in misses)):
+            return False
+        return p["role"] in ("endurance", "easy", "fun") and not p.get("commute") and p["phase"] in ("base", "build", "transition") \
+            and d not in out["roles"]
+
+    def hard(d: date) -> bool:
+        role = out["roles"].get(d) or (planned.get(d) or {}).get("role")
+        return role in ("key", "long", "race")
+
+    for d in misses:
+        p = planned[d]
+        if p.get("commute") and d != today:
+            out["notes"].append(f"{DAY[d.weekday()]}'s commute didn't happen.")
+            continue
+        if p["role"] not in ("long", "key") or p["phase"] not in ("base", "build", "transition"):
+            continue
+        what = "long ride" if p["role"] == "long" else "key session"
+        when = "today's" if d == today else f"{DAY[d.weekday()]}'s"
+        spot = next((e for e in week if free(e) and (p["role"] == "long" or not (hard(e - timedelta(days=1)) or hard(e + timedelta(days=1))))), None)
+        if spot:
+            out["roles"][spot] = p["role"]
+            out["notes"].append(f"{when.capitalize()} {what} didn't happen: it's on {'today' if spot == today else DAY[spot.weekday()]} instead.")
+        else:
+            out["notes"].append(f"{when.capitalize()} {what} didn't happen. No free day is left this week for it, so the plan carries on "
+                                "rather than cramming it in; the coming weeks' targets already account for it.")
+    return out
+
+
+def _replaced(p: dict) -> str:
+    """What a commute day turns into when the commute doesn't happen."""
+    if p.get("commute") == "workout":
+        return "do the planned workout this evening instead, on the trainer or outside"
+    if p.get("commute") == "endurance":
+        return "an hour of steady Z2 this evening keeps the week on track, trainer or outside"
+    return "an easy spin this evening, or simply take the day"

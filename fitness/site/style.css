@@ -231,6 +231,9 @@ details.table .scroll { max-height: 264px; overflow: auto; margin-top: var(--sp-
 .commute-call { display: grid; gap: var(--sp-1); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 60ch; }
 .commute-call .label { color: var(--s2); }
 .commute-call.skip .label { color: var(--accent-ink); }
+.adjusted { display: grid; gap: var(--sp-1); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
+.adjusted .label { color: var(--accent-ink); }
+.adjusted ul { margin: 0; padding-left: var(--sp-4); display: grid; gap: var(--sp-1); }
 .fuel { display: grid; gap: var(--sp-2); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
 .fuel .label { color: var(--ink); }
 .meals { display: grid; grid-template-columns: 11ch 1fr; gap: var(--sp-2) var(--sp-3); margin: 0; }

@@ -208,6 +208,24 @@ run replaces it in a single commit. Nothing personal is ever written to this pub
 the failed run. Garmin sometimes asks for a fresh sign-in after a password change or about once a year: tap
 **Connect Garmin** again. A new Garmin password goes into the `GARMIN_PASSWORD` secret first.
 
+## When the plan doesn't happen
+
+Every sync rebuilds the plan from what you actually did ([`plan.py`](plan.py) `adapt`), and the Today card says
+what changed under **Plan adjusted**:
+
+- **A missed long ride** moves to the next free day that week: Saturday's to Sunday.
+- **A missed key session** moves to a free day with no hard day on either side. If there isn't one, it's dropped
+  rather than crammed in.
+- **A missed commute** (weather, a meeting) is rebooked later in the week. Commutes you've already ridden count
+  toward the week's 1–3, so a skipped one is made up and none is doubled.
+- **Today, as it happens.** If no ride in is logged by 10:00 on a commute day, today stops being a commute. The
+  session it replaced comes back for the evening, on the trainer or outside, and the food plan follows. If nothing is
+  logged by 19:00 on a long-ride day, the long ride moves to tomorrow when tomorrow is free.
+- **Fitness lost to a missed day** isn't made up in one go. The coming weeks' load targets are recomputed from the
+  fitness you actually have, still capped at `max_ramp`, so the race-day target stays honest without a cram week.
+
+Recovery weeks, tapers and race weeks aren't rearranged: there, a missed session simply stays missed.
+
 ## What to eat
 
 The **Fuel** panel under today's call plans the day's eating, with tomorrow's in a fold ([`fuel.py`](fuel.py),

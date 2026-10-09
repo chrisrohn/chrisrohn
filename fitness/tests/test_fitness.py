@@ -282,7 +282,10 @@ def test_ride_page_and_link(tmp_path, cfg):
     ride = data["ride"]
     assert ride["units"] == data["units"] == "imperial"
     assert ride["lthr"] and 1 <= len({d["date"] for d in ride["days"]}) <= 7 and ride["days"][0]["date"] == "2026-10-08" and ride["days"][0]["steps"]
-    assert [d["title"] for d in ride["days"][:2]] == ["Commute in", "Commute home"] and ride["days"][0]["check"] and ride["commute"]["in"]
+    # this week's commute was ridden Tuesday, so the next one ride mode carries is next week's
+    titles = [d["title"] for d in ride["days"]]
+    i = titles.index("Commute in")
+    assert titles[i + 1] == "Commute home" and ride["days"][i]["check"] and ride["commute"]["in"] and ride["days"][i]["date"] > "2026-10-08"
     build.render(data, tmp_path / "index.html", cfg)
     page = (tmp_path / "ride.html").read_text()
     assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' in page
@@ -691,3 +694,56 @@ def test_vegetarian_bases_are_plates_not_piles():
     line = base(180, 40)
     assert "5 corn tortillas + 2½ cups cooked rice" in line and "175 g extra-firm tofu + 1 cup black beans" in line and "4 cups cooked pasta /" in line and "3 eggs + " in base(150, 30, low_fiber=True)
     assert "beans" not in base(150, 30, low_fiber=True) and "Blocks:" in base(40, 24, kind="snack")
+
+
+# ── when the plan doesn't happen ──────────────────────────────────────────────────────────────────────────────
+
+def _week_state(ctl=55.0):
+    return {(date(2026, 10, 11) - timedelta(days=i)).isoformat(): {"ctl": ctl, "atl": ctl} for i in range(3)}
+
+
+def _days_of(plan_):
+    return {d["date"]: d for d in plan_["days"]}
+
+
+def test_missed_long_ride_moves_to_sunday(cfg):
+    from fitness.plan import adapt
+    loads = {"2026-10-13": 80, "2026-10-15": 65, "2026-10-17": 0}          # Saturday's long ride didn't happen
+    a = adapt(date(2026, 10, 18), 6, cfg, loads, {date(2026, 10, 13)}, _week_state())
+    assert a["roles"] == {date(2026, 10, 18): "long"} and "Saturday's long ride didn't happen: it's on today instead." in a["notes"]
+    sunday = season(date(2026, 10, 18), 55, 55, cfg, adapt=a)["days"][0]
+    assert sunday["role"] == "long" and sunday["minutes"] >= 90
+
+
+def test_long_ride_not_logged_by_evening_moves_to_tomorrow(cfg):
+    from fitness.plan import adapt
+    a = adapt(date(2026, 10, 17), 20, cfg, {"2026-10-13": 80, "2026-10-15": 65}, {date(2026, 10, 13)}, _week_state())
+    assert a["roles"] == {date(2026, 10, 17): "rest", date(2026, 10, 18): "long"}
+    days = _days_of(season(date(2026, 10, 17), 55, 55, cfg, adapt=a))
+    assert days["2026-10-17"]["role"] == "rest" and days["2026-10-18"]["role"] == "long"
+
+
+def test_missed_commute_is_rebooked_and_none_is_doubled(cfg):
+    from fitness.plan import adapt
+    a = adapt(date(2026, 10, 15), 6, cfg, {}, set(), _week_state())              # Tuesday's commute didn't happen
+    assert "Tuesday's commute didn't happen." in a["notes"] and a["commutes_done"] == 0
+    rest_of_week = [d for d in season(date(2026, 10, 15), 55, 55, cfg, adapt=a)["days"] if d["date"] <= "2026-10-18"]
+    assert any(d["commute"] for d in rest_of_week)                                # the week's one commute is rebooked
+    done = adapt(date(2026, 10, 15), 6, cfg, {"2026-10-13": 80}, {date(2026, 10, 13), date(2026, 10, 14)}, _week_state())
+    assert done["commutes_done"] == 2 and not any("commute" in n for n in done["notes"])
+
+
+def test_no_ride_in_by_ten_means_no_commute_today(cfg):
+    from fitness.plan import adapt
+    a = adapt(date(2026, 10, 13), 11, cfg, {}, set(), _week_state())
+    assert date(2026, 10, 13) in a["no_commute"] and a["notes"][0].startswith("No ride in this morning, so no commute today")
+    today = season(date(2026, 10, 13), 55, 55, cfg, adapt=a)["days"][0]
+    assert not today["commute"] and today["role"] == "key"                      # the session the commute replaced is back
+    early = adapt(date(2026, 10, 13), 7, cfg, {}, set(), _week_state())
+    assert not early["no_commute"]                                               # 7 am: still time to ride in
+
+
+def test_missed_key_session_with_no_room_is_dropped_not_crammed(cfg):
+    from fitness.plan import adapt
+    a = adapt(date(2026, 10, 16), 6, cfg, {"2026-10-13": 80}, {date(2026, 10, 13)}, _week_state())   # Thursday's key session missed
+    assert not a["roles"] and any("Thursday's key session didn't happen. No free day" in n for n in a["notes"])

@@ -16,7 +16,7 @@ from fitness import fuel
 from fitness import metrics as m
 from fitness.activities import merge
 from fitness.config import DIST_DIR, SITE_DIR, nth_weekday
-from fitness.plan import in_indoor, season
+from fitness.plan import adapt, in_indoor, season
 
 CHART_DAYS, SLEEP_DAYS, WEEKS = 180, 90, 16
 
@@ -25,7 +25,8 @@ def _iso(d: date) -> str:
     return d.isoformat()
 
 
-def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date, profile: dict | None = None) -> dict:
+def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date, profile: dict | None = None,
+             now: datetime | None = None) -> dict:
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
@@ -52,18 +53,25 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     commute = m.commute_profile(acts, cfg, today)
     cfg = {**cfg, "commute": {**cfg["commute"], "profile": commute}}   # the planner prices commutes from your own history
     state = by_day.get(y, {"ctl": 0, "atl": 0})
-    plan = season(today, state["ctl"], state["atl"], cfg, done_today=load.get(t, 0))
+    # what this week has to absorb: sessions that didn't happen (plan.adapt), judged by the local time of this build
+    now = now or datetime.now()
+    hour = now.hour if now.date() == today else 6
+    commute_days = {date.fromisoformat(a["start"][:10]) for a in acts if a.get("commute")}
+    adjust = adapt(today, hour, cfg, load, commute_days, by_day)
+    plan = season(today, state["ctl"], state["atl"], cfg, done_today=load.get(t, 0), adapt=adjust)
     # every other distance option of every race, so the page can compare "100k or 50k?" side by side
     variants = {}
     if plan:
         for r in plan["races"]:
             for o in r["options"]:
                 if o["key"] != r["option"]:
-                    variants[f"{r['name']}|{o['key']}"] = season(today, state["ctl"], state["atl"], cfg, load.get(t, 0), {r["name"]: o["key"]})
+                    variants[f"{r['name']}|{o['key']}"] = season(today, state["ctl"], state["atl"], cfg, load.get(t, 0), {r["name"]: o["key"]}, adjust)
+    if plan:
+        plan["adjustments"] = adjust["notes"] + _rebooked(plan, adjust, today)
     plan_today = plan["days"][0] if plan else None
     ready_today = ready.get(t)
     rec = m.recommend(ready_today, plan_today)
-    commute_today = m.commute_call(ready_today, plan_today, today, cfg, commute, th)
+    commute_today = None if today in adjust["no_commute"] else m.commute_call(ready_today, plan_today, today, cfg, commute, th)
     if commute_today and plan_today and plan_today.get("commute"):   # on a commute day the commute call is the day's call
         level = {"skip": "rest", "easy": "easy", "optional": "easy"}.get(commute_today["verdict"], plan_today["level"])
         rec = {"level": level, "title": commute_today["title"], "detail": commute_today["detail"]}
@@ -156,6 +164,19 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "fuel": _fuel(cfg, plan, rec, commute_today, today, profile),
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
+
+
+def _rebooked(plan: dict, adjust: dict, today: date) -> list[str]:
+    """Commutes the rebuilt week booked that Monday's plan didn't have: where a missed one went."""
+    if not any("commute didn't happen" in n or "no commute today" in n for n in adjust["notes"]):
+        return []
+    sunday = today + timedelta(days=6 - today.weekday())
+    new = [date.fromisoformat(d["date"]) for d in plan["days"] if d.get("commute") and today <= date.fromisoformat(d["date"]) <= sunday]
+    added = [d for d in new if d not in adjust.get("base_commutes", set())]
+    if added:
+        days = " and ".join(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][d.weekday()] for d in added)
+        return [f"To keep the week's riding, {days} {'is' if len(added) == 1 else 'are'} now a commute day."]
+    return []
 
 
 def _fuel(cfg: dict, plan: dict | None, rec: dict, commute_today: dict | None, today: date, profile: dict | None) -> dict | None:

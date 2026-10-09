@@ -291,6 +291,13 @@ window.startDashboard = D => {
       ${c.fuel && !D.fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
   }
 
+  // what the plan did about sessions that didn't happen this week (fitness/plan.py adapt)
+  function adjustedBlock() {
+    const notes = (plan && plan.adjustments) || (D.plan && D.plan.adjustments);   // a race-option variant carries the same week
+    if (!notes || !notes.length) return "";
+    return `<div class="adjusted"><span class="label">Plan adjusted</span><ul>${notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>`;
+  }
+
   // what to eat today, around the Blueprint meals and the riding (fitness/fuel.py), and tomorrow's in a fold
   function mealsHTML(day) {
     return `<dl class="meals">${day.meals.map(m => `<dt>${esc(m.slot)}</dt><dd>${esc(m.what)}${m.base ? `<span class="base">${esc(m.base)}</span>` : ""}<span class="sub">${esc(m.why)}</span></dd>`).join("")}</dl>`;
@@ -360,6 +367,7 @@ window.startDashboard = D => {
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
         ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${plan ? `<p class="sub">Next: ${plan.days.slice(1, 4).map(d => `<b>${DOW[asDate(d.date).getDay()]}</b> ${esc(d.title.toLowerCase())}${d.minutes ? ` ${dur(d.minutes * 60)}` : ""}`).join(" · ")}</p>` : ""}
+        ${adjustedBlock()}
         ${commuteBlock()}
         ${fuelBlock()}
         ${D.phone_href || D.ride_qr ? `<details class="phone"><summary>Phone app</summary>
