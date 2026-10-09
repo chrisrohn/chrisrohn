@@ -20,6 +20,7 @@ window.startDashboard = D => {
   const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const asDate = iso => new Date(iso.slice(0, 10) + "T12:00:00");
+  const isoToday = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
   const fmtD = iso => { const d = asDate(iso); return `${MON[d.getMonth()]} ${d.getDate()}`; };
   const fmtDow = iso => { const d = asDate(iso); return `${DOW[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}`; };
   const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "—";
@@ -291,6 +292,32 @@ window.startDashboard = D => {
       ${c.fuel && !D.fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
   }
 
+  // the fallback for weather or a short day; a rest day's "feeling great?" only when the morning says so
+  function planB(day, rec, rd) {
+    if (!day || !day.alt || (rd && rd.illness)) return "";
+    if (day.role === "rest" ? rd && rd.score < 70 : rec.level === "rest") return "";
+    return `<p class="plan-b"><span class="label">Plan B</span> ${esc(day.alt)}</p>`;
+  }
+
+  // the call above is only as good as last night's data: say when the watch hasn't handed it over yet
+  function overnightBlock() {
+    if (now.last_night || D.today !== isoToday()) return "";
+    const sync = document.querySelector("[data-action=sync]") ? ` <button type="button" class="chip" data-action="sync">Sync now</button>` : "";
+    return `<p class="overnight"><span class="label">Last night isn't in yet</span> Open Garmin Connect so the watch syncs its sleep, then sync here; the call above uses yesterday's numbers until then.${sync}</p>`;
+  }
+
+  // the next seven days at a glance: tap a day for the session and its Plan B (it reshuffles at each sync)
+  function weekBlock() {
+    if (!plan) return "";
+    const week = plan.days.slice(0, 7);
+    const hours = week.reduce((a, d) => a + (d.minutes || 0), 0) / 60, commutes = week.filter(d => d.commute).length;
+    return `<div class="week-ahead"><span class="label">The next 7 days · ${hours.toFixed(1)} h${commutes ? ` · ${commutes} commute${commutes === 1 ? "" : "s"}` : ""}</span>
+      <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i>
+        <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}</span></summary>
+        <p class="sub">${esc(d.session)}</p>${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}</details></li>`).join("")}</ol>
+      <p class="sub">Rebuilt at every sync from what you actually rode, slept and recovered: a missed day moves, a good week grows.</p></div>`;
+  }
+
   // what the plan did about sessions that didn't happen this week (fitness/plan.py adapt)
   function adjustedBlock() {
     const notes = (plan && plan.adjustments) || (D.plan && D.plan.adjustments);   // a race-option variant carries the same week
@@ -330,6 +357,21 @@ window.startDashboard = D => {
       ${c.series.length >= 6 ? `<p class="sub">Same route, same terrain: speed per heartbeat on it is a free fitness test every commute. ${trend}</p><div id="c-commute" class="mt-3"></div>` : `<p class="empty">Efficiency tracking starts after a handful of commutes with heart rate.</p>`}`;
   }
 
+  // how the plan is fitted to the riding you actually do (fitness/plan.py fit, from the last 12 weeks)
+  function fitHTML() {
+    const F = D.fit;
+    if (!F || !F.habits) return "";
+    const H = F.habits, names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const week = plan.days.slice(0, 7), roleOn = i => week.find(d => asDate(d.date).getDay() === (i + 1) % 7);
+    return `<h3 class="mt-6">Fitted to your riding</h3>
+      <p class="sub">From your last ${H.weeks} weeks, commutes included: a usual week of ${H.hours.median} h (busy weeks ${H.hours.p75} h), long rides around ${dur(H.long_min.median * 60)}.</p>
+      <ul class="fit-notes">${F.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>
+      <div class="scrollx" tabindex="0" role="region" aria-label="Your week, ridden and planned"><table class="tbl fit"><thead><tr><th>Day</th><th class="r">You ride</th><th class="r">Usually</th><th>Next 7 days</th></tr></thead><tbody>
+        ${H.days.map((h, i) => { const d = roleOn(i); return `<tr><td>${names[i]}</td><td class="r">${Math.round(h.p * 100)}%</td><td class="r">${h.minutes ? dur(h.minutes * 60) : "—"}</td>
+          <td>${d ? `${esc(d.title)}${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}` : "—"}</td></tr>`; }).join("")}
+      </tbody></table></div>`;
+  }
+
   function seasonHTML() {
     if (!plan) return `<section id="season" class="card"><div class="head"><h2>Season</h2></div><p class="empty">Add a race under [[races]] in fitness/config.toml to get a plan.</p></section>`;
     const first = plan.races[0], raceIdx = plan.days.findIndex(d => d.phase === "race");
@@ -337,6 +379,7 @@ window.startDashboard = D => {
     return `<section id="season" class="card">
       <div class="head"><h2>Season</h2><span class="sub">${plan.races.length} race${plan.races.length === 1 ? "" : "s"} · plan through ${fmtD(plan.races[plan.races.length - 1].date)}, ${plan.races[plan.races.length - 1].date.slice(0, 4)}</span></div>
       <div class="grid">${plan.races.map(raceCard).join("")}</div>
+      ${fitHTML()}
       <h3 class="mt-6">${shown.length > 14 ? `Every day to ${esc(shortName(first.name))}` : "Next two weeks"}</h3>
       <div class="scrollx" tabindex="0" role="region" aria-label="Day by day plan"><table class="tbl plan"><thead><tr><th>Day</th><th>Session</th><th class="r">Time</th><th class="r hide-sm">TSS</th><th class="r">Form</th></tr></thead><tbody>
         ${shown.map((d, i) => `<tr class="${i === 0 ? "today" : ""} ${d.phase === "race" ? "race" : ""}"><td class="num nowrap">${fmtDow(d.date)}${chipFor(d, shown[i - 1])}${d.commute ? `${chipFor(d, shown[i - 1]) ? "" : "<br>"}<span class="phase commute">commute</span>` : ""}</td>
@@ -366,7 +409,9 @@ window.startDashboard = D => {
         <p class="detail">${esc(rec.detail)}</p>
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
         ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
-        ${plan ? `<p class="sub">Next: ${plan.days.slice(1, 4).map(d => `<b>${DOW[asDate(d.date).getDay()]}</b> ${esc(d.title.toLowerCase())}${d.minutes ? ` ${dur(d.minutes * 60)}` : ""}`).join(" · ")}</p>` : ""}
+        ${planB(pToday, rec, rd)}
+        ${overnightBlock()}
+        ${weekBlock()}
         ${adjustedBlock()}
         ${commuteBlock()}
         ${fuelBlock()}

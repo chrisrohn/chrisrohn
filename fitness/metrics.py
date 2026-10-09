@@ -16,6 +16,8 @@ import statistics
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
+from fitness.config import workday
+
 CTL_DAYS, ATL_DAYS = 42, 7
 DURATION_IF = {"ride": 0.68, "run": 0.78, "walk": 0.45, "swim": 0.7, "strength": 0.6, "other": 0.6}
 
@@ -384,12 +386,15 @@ def zone_bpm(th: dict, lo: float, hi: float) -> str:
     return f"under {round(th['lthr'] * hi / 100)} bpm" if lo <= 0 else f"{round(th['lthr'] * lo / 100)}–{round(th['lthr'] * hi / 100)} bpm"
 
 
-def commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: dict, profile: dict | None, th: dict) -> dict | None:
-    """This morning's commute decision and how to ride it. The plan proposes; readiness can only make it easier."""
+def commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: dict, profile: dict | None, th: dict,
+                 room: bool = True) -> dict | None:
+    """This morning's commute decision and how to ride it. The plan proposes; readiness can only make it easier, except
+    that a rest day on a work day becomes an optional easy commute when you're well recovered and the week has `room`
+    for one more (fewer commutes ridden and booked than commute.per_week allows)."""
     if not profile:
         return None
     dow = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][today.weekday()]
-    if dow not in cfg["commute"]["days"]:
+    if dow not in cfg["commute"]["days"] or not workday(today, cfg):   # weekends and federal holidays: no work to ride to
         return None
     legs = profile["legs"]
     planned = plan_today.get("commute") if plan_today else None
@@ -405,6 +410,11 @@ def commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: 
     if score is not None and score < 45:
         return {"verdict": "skip", "title": "Leave the bike at home", "detail": f"Readiness {score}: recovery is the job today. If you must ride, Z1 only ({z1}) both ways.", "fuel": ""}
     if not planned:
+        phase = plan_today.get("phase") if plan_today else None
+        if role == "rest" and room and score is not None and score >= 70 and phase in ("base", "build", "transition") and not (ready or {}).get("illness"):
+            return {**easy, "verdict": "optional", "title": "Rest day — or an easy commute",
+                    "detail": f"Readiness {score}: you've recovered well. Rest is still the plan, but an easy commute fits if you want it: "
+                              f"Z1 both ways ({z1}), about {tin} min in and {thome} min home, and nothing else today."}
         if role in ("rest", "race", "openers"):
             return {"verdict": "skip", "title": "Not a bike day", "detail": "The plan has you resting today; driving keeps the week's load where the plan needs it.", "fuel": ""}
         if score is not None and score >= 60:
@@ -424,3 +434,50 @@ def commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: 
     return {"verdict": "ride", "title": "Ride in easy, workout on the way home",
             "detail": f"In: Z1–Z2, {zone_bpm(th, 0, 85)}, arrive fresh. Home: 10 min easy, then {workout} on the flattest open stretch, the rest Z2.{check}",
             "fuel": fuel}
+
+
+def habits(acts: list[dict], today: date, weeks: int = 12) -> dict | None:
+    """How you actually ride, from the last `weeks` full weeks: which days and for how long, your usual week, your long
+    rides, and your commutes. The planner fits itself to this (plan.fit); None until there are 6 weeks with riding."""
+    monday = today - timedelta(days=today.weekday())
+    start = monday - timedelta(weeks=weeks)
+    rides = [a for a in acts if a.get("group") == "ride" and start <= date.fromisoformat(a["start"][:10]) < monday]
+    if len({(date.fromisoformat(a["start"][:10]) - start).days // 7 for a in rides}) < 6:
+        return None
+    minutes = defaultdict(float)
+    free = defaultdict(float)                     # riding that isn't commuting: what shapes the rest of the week
+    longest = defaultdict(float)
+    week_h, week_load, week_commutes = [0.0] * weeks, [0.0] * weeks, [set() for _ in range(weeks)]
+    for a in rides:
+        d = date.fromisoformat(a["start"][:10])
+        w = (d - start).days // 7
+        mins = (a.get("moving_s") or a.get("duration_s") or 0) / 60
+        minutes[d] += mins
+        week_h[w] += mins / 60
+        week_load[w] += a.get("load", 0) or 0
+        if a.get("commute"):
+            week_commutes[w].add(d)
+        else:
+            free[d] += mins
+            longest[w] = max(longest[w], mins)
+    days = []
+    for i in range(7):
+        dates = [start + timedelta(weeks=w, days=i) for w in range(weeks)]
+        ridden = [minutes[d] for d in dates if minutes[d] >= 15]
+        other = [free[d] for d in dates if free[d] >= 15]
+        commuted = sum(1 for w in range(weeks) if any(d.weekday() == i for d in week_commutes[w]))
+        days.append({"p": round(len(ridden) / weeks, 2), "minutes": round(statistics.median(ridden)) if ridden else 0,
+                     "free_p": round(len(other) / weeks, 2), "free_minutes": round(statistics.median(other)) if other else 0,
+                     "commute_p": round(commuted / weeks, 2)})
+
+    def pct(xs: list[float], q: float) -> float:
+        xs = sorted(xs)
+        return xs[min(len(xs) - 1, int(round(q * (len(xs) - 1))))] if xs else 0.0
+
+    commuting = [len(c) for c in week_commutes]
+    long_weeks = [v for v in longest.values() if v >= 30]
+    return {"weeks": weeks, "days": days,
+            "hours": {"median": round(statistics.median(week_h), 1), "p75": round(pct(week_h, 0.75), 1)},
+            "load": {"median": round(statistics.median(week_load)), "p75": round(pct(week_load, 0.75))},
+            "long_min": {"median": round(statistics.median(long_weeks)) if long_weeks else 0, "p75": round(pct(long_weeks, 0.75))},
+            "commutes": {"median": statistics.median(commuting), "p25": pct(commuting, 0.25), "p75": pct(commuting, 0.75)}}

@@ -70,6 +70,21 @@ test.describe("GitHub sync", () => {
     expect(await page.evaluate(() => localStorage.getItem("fitness-cloud"))).toBeNull();
   });
 
+  test("opening the app after a while syncs on its own, and only once", async ({ page }) => {
+    const hoursAgo = { ...SYNCED, synced: new Date(Date.now() - 3 * 36e5).toISOString() };
+    const gh = await github(page, { status: hoursAgo });   // the run "lands" without news: the reload mustn't start another
+    await page.goto("/fitness/");
+    await signIn(page);
+    await page.reload();
+    await expect.poll(() => gh.dispatches.length).toBe(1);
+    expect(gh.dispatches[0]).toEqual({ ref: "main", inputs: { action: "sync", code: "" } });
+    await expect(page.locator("#databar [data-action=sync]")).toBeVisible({ timeout: 15_000 });
+    await page.reload();
+    await expect(page.locator("#load")).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(gh.dispatches.length).toBe(1);
+  });
+
   test("Sync now starts the workflow, follows the run and loads the new numbers", async ({ page }) => {
     const gh = await github(page, { onDispatch: (_i, g) => { g.status = { ...SYNCED, synced: new Date().toISOString() }; } });
     await page.goto("/fitness/");

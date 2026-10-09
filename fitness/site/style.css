@@ -231,6 +231,24 @@ details.table .scroll { max-height: 264px; overflow: auto; margin-top: var(--sp-
 .commute-call { display: grid; gap: var(--sp-1); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 60ch; }
 .commute-call .label { color: var(--s2); }
 .commute-call.skip .label { color: var(--accent-ink); }
+.fit-notes { margin: var(--sp-2) 0 var(--sp-3); padding-left: var(--sp-4); display: grid; gap: var(--sp-1); max-width: 72ch; }
+.tbl.fit td:first-child { font-weight: 700; }
+.plan-b, .overnight { margin: 0; max-width: 60ch; text-wrap: pretty; }
+.plan-b .label, .overnight .label { margin-right: var(--sp-2); }
+.overnight .label { color: var(--accent-ink); }
+.week-ahead { display: grid; gap: var(--sp-2); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
+.week-ahead ol { list-style: none; margin: 0; padding: 0; display: grid; }
+.week-ahead li { border-bottom: var(--rule-hair) solid var(--ink-2); }
+.week-ahead summary { display: grid; width: auto; grid-template-columns: 4.5em 10px 1fr 14px; align-items: baseline; gap: var(--sp-2); min-height: 40px; padding: var(--sp-2) 0; cursor: pointer; list-style: none; font-size: var(--fs-body); line-height: var(--lh-snug); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.week-ahead summary::-webkit-details-marker { display: none; }
+.week-ahead summary::before { order: 1; align-self: center; }   /* the +/− at the row's end */
+.week-ahead .dow { font-weight: 700; }
+.week-ahead li.today .dow { color: var(--accent-ink); }
+.week-ahead summary i { width: 10px; height: 10px; align-self: center; background: var(--muted); }
+.week-ahead li.hard summary i, .week-ahead li.moderate summary i { background: var(--good); }
+.week-ahead li.easy summary i { background: var(--warn); }
+.week-ahead li.rest summary i { background: var(--crit); }
+.week-ahead details p { margin: 0 0 var(--sp-2) calc(4.5em + 10px + 2 * var(--sp-2)); }
 .adjusted { display: grid; gap: var(--sp-1); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
 .adjusted .label { color: var(--accent-ink); }
 .adjusted ul { margin: 0; padding-left: var(--sp-4); display: grid; gap: var(--sp-1); }
@@ -318,7 +336,7 @@ footer::before { content: ""; grid-column: 1 / -1; border-top: var(--rule-hair) 
 footer p { max-width: 64ch; }
 
 @media (forced-colors: active) {
-  .badge i, .sw, .fill { forced-color-adjust: none; }
+  .badge i, .sw, .fill, .week-ahead summary i { forced-color-adjust: none; }
 }
 @media print {
   header.top { position: static; }

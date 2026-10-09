@@ -40,6 +40,7 @@ long_ride_h = 2.5         # the longest trainer ride the plan will ask for
 weekly_pattern = [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9]
 max_ramp = 6              # CTL points a week the outdoor build may add
 base_ramp = 3             # CTL points a week the indoor base may add (every 4th week is a recovery week)
+fit = true                # fit the week to how you actually ride (the last 12 weeks): see "Fitted to your riding" in the README
 
 # Races, in any order. `every` rolls a race to next year's date once it's past (nth weekday of a month); fix
 # `date` when the organizer announces something different. `distance` is the option the plan is built for;

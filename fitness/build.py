@@ -16,7 +16,7 @@ from fitness import fuel
 from fitness import metrics as m
 from fitness.activities import merge
 from fitness.config import DIST_DIR, SITE_DIR, nth_weekday
-from fitness.plan import adapt, in_indoor, season
+from fitness.plan import adapt, fit, in_indoor, season
 
 CHART_DAYS, SLEEP_DAYS, WEEKS = 180, 90, 16
 
@@ -52,6 +52,8 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     t, y = _iso(today), _iso(today - timedelta(days=1))
     commute = m.commute_profile(acts, cfg, today)
     cfg = {**cfg, "commute": {**cfg["commute"], "profile": commute}}   # the planner prices commutes from your own history
+    habits = m.habits(acts, today)
+    cfg, fit_notes = fit(cfg, habits)                                     # the plan fitted to how you actually ride
     state = by_day.get(y, {"ctl": 0, "atl": 0})
     # what this week has to absorb: sessions that didn't happen (plan.adapt), judged by the local time of this build
     now = now or datetime.now()
@@ -68,10 +70,15 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
                     variants[f"{r['name']}|{o['key']}"] = season(today, state["ctl"], state["atl"], cfg, load.get(t, 0), {r["name"]: o["key"]}, adjust)
     if plan:
         plan["adjustments"] = adjust["notes"] + _rebooked(plan, adjust, today)
+        fit_notes += _outlook(plan, variants, habits)
     plan_today = plan["days"][0] if plan else None
     ready_today = ready.get(t)
     rec = m.recommend(ready_today, plan_today)
-    commute_today = None if today in adjust["no_commute"] else m.commute_call(ready_today, plan_today, today, cfg, commute, th)
+    # room for an extra, optional commute: this week's ridden and still-booked commutes under commute.per_week's most
+    sunday = _iso(today + timedelta(days=6 - today.weekday()))
+    booked = adjust["commutes_done"] + sum(1 for d in (plan["days"] if plan else []) if d["date"] <= sunday and d.get("commute"))
+    room = booked < cfg["commute"]["per_week"][1]
+    commute_today = None if today in adjust["no_commute"] else m.commute_call(ready_today, plan_today, today, cfg, commute, th, room)
     if commute_today and plan_today and plan_today.get("commute"):   # on a commute day the commute call is the day's call
         level = {"skip": "rest", "easy": "easy", "optional": "easy"}.get(commute_today["verdict"], plan_today["level"])
         rec = {"level": level, "title": commute_today["title"], "detail": commute_today["detail"]}
@@ -146,6 +153,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "pmc": [r for r in rows if r["date"] >= chart_from],
         "plan": plan,
         "variants": variants,
+        "fit": {"habits": habits, "notes": fit_notes} if habits else None,
         "indoor": indoor,
         "sleep": sleep_rows,
         "markers": markers,
@@ -164,6 +172,28 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "fuel": _fuel(cfg, plan, rec, commute_today, today, profile),
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
+
+
+def _outlook(plan: dict, variants: dict, habits: dict | None) -> list[str]:
+    """An honest line when what you realistically ride doesn't reach a race's fitness target, and which option does."""
+    if not habits:
+        return []
+    out = []
+    for r in plan["races"]:
+        if r["race_ctl"] >= r["target_ctl"] - 4:
+            continue
+        line = (f"At what you realistically ride (about {habits['hours']['p75'] * 1.15:.1f} h a week at most), {r['name']} race-morning "
+                f"fitness lands near {r['race_ctl']:.0f} against the {r['label']}'s {r['target_ctl']:.0f}.")
+        for o in r["options"]:
+            v = variants.get(f"{r['name']}|{o['key']}")
+            alt = next((x for x in (v or {}).get("races", []) if x["name"] == r["name"]), None)
+            if alt and alt["race_ctl"] >= alt["target_ctl"] - 2:
+                line += f" The {alt['label']} fits that ({alt['race_ctl']:.0f} of {alt['target_ctl']:.0f})."
+                break
+        else:
+            line += " An extra hour a week, or a longer weekend ride, closes most of that gap."
+        out.append(line)
+    return out
 
 
 def _rebooked(plan: dict, adjust: dict, today: date) -> list[str]:

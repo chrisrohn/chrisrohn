@@ -100,6 +100,19 @@ test.describe("installable app", () => {
     expect(await axe(page)).toEqual([]);
   });
 
+  test("today's call comes with a Plan B and the next seven days, each one opening to its session", async ({ page }) => {
+    const days = DATA.plan.days.map((d, i) => i === 0 ? { ...d, role: "endurance", level: "moderate", title: "Endurance", alt: "Rain or short on time: 1h00 Z2 on Zwift." } : d);
+    await page.goto(phoneLink({ ...DATA, plan: { ...DATA.plan, days }, now: { ...DATA.now, last_night: null } }));
+    await expect(page.locator(".plan-b")).toContainText("Rain or short on time");
+    await expect(page.locator(".overnight")).toContainText("Last night isn't in yet");
+    const week = page.locator(".week-ahead li");
+    await expect(week).toHaveCount(7);
+    await expect(week.first()).toContainText("Today");
+    await week.nth(1).locator("summary").click();
+    await expect(week.nth(1).locator("details p").first()).toHaveText(DATA.plan.days[1].session);
+    expect(await axe(page)).toEqual([]);
+  });
+
   test("opens offline once the service worker has it", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

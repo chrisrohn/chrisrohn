@@ -9,7 +9,10 @@ run-name: ${{ inputs.action == 'garmin-code' && format('garmin-code {0}', inputs
 
 on:
   schedule:
-    - cron: "17 10,13,17,23 * * *"   # 6:17, 9:17, 13:17, 19:17 in Michigan (EDT; an hour earlier in winter)
+    # hourly while you're up: 5:17 to 22:17 in Michigan (EDT; an hour earlier in winter). A run takes about half a
+    # minute, so this is ~570 of a private repository's 2,000 free Actions minutes a month. The app also syncs when
+    # you open it and the last sync is over 45 minutes old, so waking up and opening it gets you last night's call.
+    - cron: "17 0-2,9-23 * * *"
   workflow_dispatch:
     inputs:
       action:
