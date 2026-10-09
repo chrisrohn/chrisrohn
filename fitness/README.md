@@ -156,7 +156,7 @@ A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen
 
 ## Cloud sync (no computer)
 
-Everything runs on GitHub and your phone. A **private** repository of yours syncs Garmin and Strava four times a day
+Everything runs on GitHub and your phone. A **private** repository of yours syncs Garmin (and Strava, if you use it) four times a day
 (6:17, 9:17, 13:17, 19:17 Michigan time) with [`fitness-sync.yml`](../.github/workflows/fitness-sync.yml), and the app
 at <https://chrisrohn.com/fitness/> reads the result with a token that can only see that repository. Garmin's
 official API is for approved companies only, so this signs in the way Garmin's own mobile app does.
@@ -165,24 +165,27 @@ official API is for approved companies only, so this signs in the way Garmin's o
 
 1. **Repository.** <https://github.com/new>: name `training-data`, **Private**, tick *Add a README*. Then add
    [`cloud/training.yml`](cloud/training.yml) to it as `.github/workflows/training.yml`.
-2. **Strava app.** <https://www.strava.com/settings/api>: any name and website; **Authorization Callback Domain**
-   `chrisrohn.com`. Keep the Client ID and Client Secret for the next step.
-3. **Secrets.** In `training-data`: *Settings → Secrets and variables → Actions → New repository secret*, five times:
+2. **Secrets.** In `training-data`: *Settings → Secrets and variables → Actions → New repository secret*:
 
    | Secret | Value |
    |---|---|
    | `GARMIN_EMAIL`, `GARMIN_PASSWORD` | your Garmin Connect sign-in |
-   | `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` | from step 2 |
    | `STATE_KEY` | any long passphrase you make up; it encrypts the stored sign-ins and history. Losing it means a fresh first sync, nothing worse |
 
-4. **Token for the app.** <https://github.com/settings/personal-access-tokens/new>: *Repository access → Only select
+3. **Token for the app.** <https://github.com/settings/personal-access-tokens/new>: *Repository access → Only select
    repositories → training-data*; *Permissions → Actions: Read and write, Contents: Read-only*. Choose the longest
    expiry offered.
-5. **Connect.** Open the app → **Connect GitHub** → `yourname/training-data` and the token → **Save and sync**.
-   Then **Connect Garmin** (if Garmin emails you a sign-in code, type it into the bar that appears) and
-   **Connect Strava** (Strava's own page; leave *View data about your private activities* ticked).
+4. **Connect.** Open the app → **Connect GitHub** → `yourname/training-data` and the token → **Save and sync**.
+   Then **Connect Garmin** (if Garmin emails you a sign-in code, type it into the bar that appears).
+5. **Trainer rides.** In Zwift's and MyWoosh's connection settings, link Garmin Connect. Their rides then arrive
+   with power, and the sync marks them as trainer rides.
 
-The first sync backfills a year of Garmin days and all of your Strava history (up to 15 minutes). After that the
+**Strava (optional).** Strava's API needs a paid Strava subscription since June 2026. With one, create an app at
+<https://www.strava.com/settings/api> (*Authorization Callback Domain* `chrisrohn.com`), add `STRAVA_CLIENT_ID` and
+`STRAVA_CLIENT_SECRET` as secrets, and **Connect Strava** appears in the app. Without it, the sync and the app
+simply leave Strava out.
+
+The first sync backfills a year of Garmin days and activities (up to 15 minutes; with Strava, all of its history too). After that the
 app shows the newest sync whenever you open it, and **Sync now** runs one on demand (about a minute), e.g. right after
 the watch has synced last night's sleep.
 

@@ -128,6 +128,16 @@ test.describe("GitHub sync", () => {
     await expect(page.locator("#databar")).toContainText("private activities");
   });
 
+  test("without Strava's secrets the app never asks for Strava (its API needs a paid subscription)", async ({ page }) => {
+    await github(page, { status: { ...FRESH, strava: { connected: false, client_id: null, activities: 0, error: null } }, data: null });
+    await page.goto("/fitness/");
+    await signIn(page);
+    await page.reload();
+    await expect(page.locator(".welcome [data-action=connect-garmin]")).toBeVisible();
+    await expect(page.locator("[data-action=connect-strava]")).toHaveCount(0);
+    await expect(page.locator(".welcome")).not.toContainText("Strava not connected");
+  });
+
   test("a failed sync says what went wrong, from status.json", async ({ page }) => {
     await github(page, { onDispatch: (_i, g) => { g.runs[0].conclusion = "failure"; g.status = { ...SYNCED, garmin: { ...SYNCED.garmin, error: "Garmin is rate-limiting this account" } }; } });
     await page.goto("/fitness/");
