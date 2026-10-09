@@ -198,6 +198,14 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     }
 
 
+def forecast_for(store, cfg: dict, today: date, now: datetime, get=None) -> dict | None:
+    """The forecast for the store's rides (weather.py): where they start, fetched or from the 50-minute cache."""
+    acts = merge(store.activities())
+    m.mark_commutes(acts, cfg)
+    where = wxm.route(acts, cfg, today)["where"]
+    return wxm.load(store, where, cfg["athlete"]["timezone"], now, get) if get else wxm.load(store, where, cfg["athlete"]["timezone"], now)
+
+
 def _commute_wx(wx: wxm.Wx, route: dict, d: date, commute: dict) -> dict | None:
     """The forecast for each leg of a commute on day `d`, at your usual departure times and along the route."""
     legs, head = commute["legs"], route.get("bearing_in")

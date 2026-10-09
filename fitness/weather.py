@@ -58,16 +58,6 @@ def load(store, where: tuple[float, float] | None, tz: str, now: datetime, get: 
     return data
 
 
-def for_store(store, cfg: dict, today: date, now: datetime, get: Callable[[str], dict] = _get) -> dict | None:
-    """The forecast for the store's rides: where they start, fetched or from the 50-minute cache."""
-    from fitness import metrics
-    from fitness.activities import merge
-
-    acts = merge(store.activities())
-    metrics.mark_commutes(acts, cfg)
-    return load(store, route(acts, cfg, today)["where"], cfg["athlete"]["timezone"], now, get)
-
-
 # ── where ────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _median_point(points: list[tuple[float, float]]) -> tuple[float, float] | None:

@@ -25,7 +25,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from fitness import bike, build, config, weather
+from fitness import bike, build, config
 from fitness.store import Store
 
 CODE_WAIT_S = 600          # how long a sign-in waits for the code Garmin emailed
@@ -222,7 +222,7 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
                 errors["bike"] = f"that bike job wasn't logged: {_why(e)}"
         bike_state = bike.state(store, today or date.today())
         try:
-            forecast = weather.for_store(store, cfg, today or date.today(), datetime.now())
+            forecast = build.forecast_for(store, cfg, today or date.today(), datetime.now())
         except Exception as e:   # the day's call still works without the weather
             forecast = None
             print(f"Weather: skipped ({_why(e)})")
