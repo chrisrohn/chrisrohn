@@ -175,7 +175,7 @@ def _fuel(cfg: dict, plan: dict | None, rec: dict, commute_today: dict | None, t
             if rec["level"] == "rest":
                 d0.update(role="rest", minutes=0, load=0)
     weight = cfg["athlete"].get("weight_kg") or (profile or {}).get("weight_kg")
-    return fuel.plan(days, today, cfg, weight)
+    return fuel.plan(days, today, cfg, weight, profile)
 
 
 def _weeks(acts: list[dict], today: date) -> list[dict]:

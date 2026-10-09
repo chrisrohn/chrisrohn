@@ -233,9 +233,12 @@ The **Fuel** panel under today's call plans the day's eating, with tomorrow's in
 | Super Veggie, 100 g chicken | ~520 | 45 g | 34 g | 13 g | 25 g |
 | Infinit Go Far (1 packet) | 280 | 4 g | 66 g | | 379 mg sodium |
 
-- **Targets** scale with the day: carbohydrate 3 g/kg on rest days, 4 easy, 5 moderate, 6.5 hard, 8 long, 9 the day
-  before a race (on-bike fuel included); protein 1.8 g/kg every day. Weight comes from your Garmin profile, or
-  `[athlete] weight_kg`.
+- **Targets** scale with the day's intensity and length (not the training-load number: two easy commuting hours
+  score high but eat like a training day): carbohydrate 3 g/kg on rest days, 3.5 easy, 5 moderate (or an easy day
+  over two hours), 6 hard, 7 long, 8 on race day and the day before (on-bike fuel included); protein 1.8 g/kg.
+  Carbs are capped by what the day burns: resting burn (Mifflin-St Jeor from Garmin's weight, height and age) × 1.35
+  for daily life, plus the ride (METs by its intensity), so the plan never asks you to out-eat your riding. The panel
+  shows the day's total calories next to that estimate.
 - **Blueprint is high-fiber and fairly low-carb** (Pudding + Super Veggie ≈ 110 g carbs, ~45 g fiber): ideal on rest
   days, short on hard ones, so hard days *add* to it (a banana with the Pudding, black rice or a sweet potato with
   the Super Veggie, a pre-ride snack, a shake after).
