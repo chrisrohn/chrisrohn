@@ -257,7 +257,8 @@
   function connectButtons() {
     if (!status) return "";
     return (status.garmin && !status.garmin.connected ? `<button type="button" class="chip" data-action="connect-garmin">Connect Garmin</button>` : "")
-      + (status.strava && !status.strava.connected ? `<button type="button" class="chip" data-action="connect-strava">Connect Strava</button>` : "");
+      // Strava is optional (its API needs a paid subscription): offered only once its app's secrets are in the repository
+      + (status.strava && status.strava.client_id && !status.strava.connected ? `<button type="button" class="chip" data-action="connect-strava">Connect Strava</button>` : "");
   }
   function databar(D, source) {
     if (!bar() || source === "build") return;
@@ -286,10 +287,10 @@
           <ul class="state mt-2">
             ${item(!!status, status ? `Sync has run (last ${esc(when(status.synced))})` : "Sync hasn't run yet", cloudProblem)}
             ${item(!!(g && g.connected), g && g.connected ? `Garmin connected · ${g.days} days` : "Garmin not connected", g && g.error)}
-            ${item(!!(s && s.connected), s && s.connected ? `Strava connected · ${s.activities} activities` : "Strava not connected", s && s.error)}
+            ${s && (s.connected || s.client_id) ? item(!!s.connected, s.connected ? `Strava connected · ${s.activities} activities` : "Strava not connected", s.error) : ""}
           </ul>
           <p class="connect mt-4">${connectButtons()}<button type="button" class="chip big-chip" data-action="sync">Sync now</button><button type="button" class="chip big-chip" data-action="settings">Settings</button></p>
-          <p class="sub mt-4">Connect Garmin first: the first sync brings in a year of days and every Strava ride, and takes up to 15 minutes. After that it runs on its own four times a day.</p>`
+          <p class="sub mt-4">Connect Garmin first: the first sync brings in a year of days and rides, and takes up to 15 minutes. After that it runs on its own four times a day. Zwift and MyWoosh rides arrive through Garmin Connect once you link them there.</p>`
       : `<h3>Sync from GitHub</h3>
           <ol>
             <li>A private repository runs the sync: <a href="https://github.com/chrisrohn/chrisrohn/blob/main/fitness/README.md#cloud-sync-no-computer" target="_blank" rel="noopener">set it up</a> (about 10 minutes, all on the phone).</li>
