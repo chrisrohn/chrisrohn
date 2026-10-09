@@ -574,3 +574,74 @@ def test_parse_strava_export_power_and_commutes_in_newer_exports():
     (z, _), (r, _) = parse_export(csv, "America/Detroit")
     assert z["avg_power"] == 190 and z["np"] == 200 and z["indoor"] and z["commute"]
     assert r["avg_power"] is None and r["np"] is None and not r.get("commute")   # an estimate is not a measurement
+
+
+# ── fuel ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+def _fuel_day(role, minutes=0, load=0, level=None, **kw):
+    return {"role": role, "minutes": minutes, "load": load, "level": level or role, **kw}
+
+
+def test_fuel_tiers():
+    from fitness.fuel import tier
+    assert tier(None) == "rest" and tier(_fuel_day("rest")) == "rest"
+    assert tier(_fuel_day("easy", 45, 20, "easy")) == "easy" and tier(_fuel_day("endurance", 60, 50, "moderate")) == "moderate"
+    assert tier(_fuel_day("key", 55, 65, "hard")) == "hard" and tier(_fuel_day("long", 180, 140, "hard")) == "long"
+    assert tier(_fuel_day("race", 170, 220, "hard")) == "race"
+
+
+def test_fuel_weekdays_are_built_on_the_blueprint_meals(cfg):
+    from fitness.fuel import day_plan
+    rest = day_plan(_fuel_day("rest"), None, date(2026, 10, 12), cfg, 78)            # a Monday
+    slots = {m["slot"]: m["what"] for m in rest["meals"]}
+    assert rest["blueprint"] and slots["Breakfast"].startswith("Nutty Pudding") and slots["Lunch"].startswith("Super Veggie with chicken")
+    assert rest["carbs_g"] == 230 and rest["protein_g"] == 140 and "Lighter" in slots["Dinner"]
+    hard = day_plan(_fuel_day("commute", 135, 120, "hard", commute="workout", commute_workout="2 × 15 min"), None, date(2026, 10, 13), cfg, 78)
+    slots = {m["slot"]: m["what"] for m in hard["meals"]}
+    assert "banana" in slots["Breakfast"] and "45 min before you leave" in slots["Breakfast"]
+    assert "lentils" in slots["Lunch"] and "black rice" in slots["Lunch"] and "ride home" in slots["Afternoon"]
+    assert "On the bike" not in slots                                                    # two hour-long legs: no on-bike fuel needed
+
+
+def test_fuel_race_eve_and_race_morning_drop_the_fiber(cfg):
+    from fitness.fuel import day_plan
+    race = _fuel_day("race", 170, 220, "hard")
+    eve = day_plan(_fuel_day("openers", 40, 30, "easy"), race, date(2026, 11, 6), cfg, 78)
+    slots = {m["slot"]: m for m in eve["meals"]}
+    assert eve["tier"] == "load" and eve["carbs_g"] == 700 and "Skip the Super Veggie" in slots["Lunch"]["why"] and "carb night" in slots["Dinner"]["what"]
+    day = day_plan(race, None, date(2026, 11, 7), cfg, 78)
+    slots = {m["slot"]: m for m in day["meals"]}
+    assert "Not the Pudding" in slots["Breakfast"]["why"] and "80 g carbs an hour" in slots["On the bike"]["what"]
+
+
+def test_fuel_weekend_long_ride_moves_the_pudding_after(cfg):
+    from fitness.fuel import day_plan
+    sat = day_plan(_fuel_day("long", 180, 140, "hard"), None, date(2026, 10, 17), cfg, 78)
+    slots = {m["slot"]: m["what"] for m in sat["meals"]}
+    assert not sat["blueprint"] and "2–3 h before" in slots["Breakfast"] and "75 g carbs an hour" in slots["On the bike"]
+    assert "Nutty Pudding you skipped" in slots["After"]
+    fri = day_plan(_fuel_day("easy", 45, 20, "easy"), _fuel_day("long", 180, 140, "hard"), date(2026, 10, 16), cfg, None)
+    assert fri["carbs_g"] is None and "long ride starts here" in {m["slot"]: m["what"] for m in fri["meals"]}["Dinner"]
+
+
+def test_fuel_reaches_the_page_with_the_garmin_weight(tmp_path, cfg):
+    today = date(2026, 10, 8)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=120)
+        profile = json.loads(store.get("profile"))
+        data = build.assemble(cfg, store.days(), store.activities(), today, profile)
+    assert data["fuel"]["weight_kg"] == 78.0 and data["fuel"]["today"]["date"] == "2026-10-08" and data["fuel"]["tomorrow"]["meals"]
+    assert data["fuel"]["recipes"]["pudding"]["kcal"] == 620
+
+
+def test_garmin_profile_weight(tmp_path):
+    from fitness.garmin import _profile
+
+    class Client:
+        @staticmethod
+        def get_user_profile():
+            return {"userData": {"weight": 78350.0, "height": 180.3, "birthDate": "1980-05-02", "gender": "MALE"}}
+
+    with Store(tmp_path / "d.db") as store:
+        _profile(Client, store)
+        assert json.loads(store.get("profile")) == {"weight_kg": 78.3, "height_cm": 180.3, "birth_year": 1980}

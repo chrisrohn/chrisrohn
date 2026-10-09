@@ -208,6 +208,35 @@ run replaces it in a single commit. Nothing personal is ever written to this pub
 the failed run. Garmin sometimes asks for a fresh sign-in after a password change or about once a year: tap
 **Connect Garmin** again. A new Garmin password goes into the `GARMIN_PASSWORD` secret first.
 
+## What to eat
+
+The **Fuel** panel under today's call plans the day's eating around Bryan Johnson's Blueprint meals (the
+make-it-yourself versions) and the riding today and tomorrow ([`fuel.py`](fuel.py), `[nutrition]` in
+[`config.toml`](config.toml)). Weekdays assume the **Nutty Pudding** for breakfast and the **Super Veggie** for
+lunch; evenings and weekends are yours, and the panel says what dinner still owes and how tacos or pizza can pay it.
+
+| Per serving (from the ingredients) | kcal | protein | carbs | fiber | fat |
+|---|---|---|---|---|---|
+| Nutty Pudding | ~620 | 44 g (11 g collagen) | 41 g | 21 g | 36 g |
+| Super Veggie, black lentils | ~550 | 28 g | 69 g | 25 g | 21 g |
+| Super Veggie, 100 g chicken | ~520 | 45 g | 34 g | 13 g | 25 g |
+
+- **Targets** scale with the day: carbohydrate 3 g/kg on rest days, 4 easy, 5 moderate, 6.5 hard, 8 long, 9 the day
+  before a race (on-bike fuel included); protein 1.8 g/kg every day. Weight comes from your Garmin profile, or
+  `[athlete] weight_kg`.
+- **Blueprint is high-fiber and fairly low-carb** (Pudding + Super Veggie ≈ 110 g carbs, ~45 g fiber): ideal on
+  rest days, short on hard ones. So hard days *add* to it (a banana with the Pudding, black rice or a sweet potato
+  with the lentil Super Veggie, a pre-ride snack, a whey shake after) and rest days lean on the chicken version.
+- **The day before a race and race morning swap it out**: ~25 g of fiber from lentils and crucifers the day before,
+  or the Pudding's fat and fiber three hours before the start, is asking for GI trouble. Those days get low-fiber
+  carbs instead, and the Pudding comes back the day after.
+- **Commute mornings**: the Pudding at least 45 minutes before you leave; a banana or dates 60–90 minutes before the
+  ride home when it carries the workout.
+- **Tomorrow's ride shapes tonight's dinner**: before a long ride, pizza night is the plan, not a lapse.
+
+`[nutrition] lunch = "veggie_chicken"` makes the chicken version your default; `blueprint_days` sets which days
+start from the two Blueprint meals.
+
 ## The app on your phone
 
 **<https://chrisrohn.com/fitness/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
@@ -319,6 +348,7 @@ legs actually felt on the bike.
 | File | Role |
 |---|---|
 | `cli.py` | `python -m fitness …` commands |
+| `fuel.py` | the day's eating around the Blueprint meals and the riding |
 | `cloud.py`, `cloud/training.yml` | the GitHub Actions sync (`python -m fitness cloud`) and the private repository's workflow that calls it |
 | `garmin.py`, `strava.py` | sync, sign-in and parsers (raw responses are kept in SQLite, so fixing a parser never needs a re-download) |
 | `activities.py` | sport mapping and the Garmin↔Strava duplicate merge |

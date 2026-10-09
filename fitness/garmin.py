@@ -8,6 +8,7 @@ Readiness or Sleep Score; those fields stay empty and the site computes its own 
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -90,6 +91,18 @@ def parse_activity(a: dict) -> dict:
     )
 
 
+def _profile(client, store: Store) -> None:
+    """Body weight, height and birth year from the Garmin profile (the fuel plan's g/kg targets need the weight)."""
+    try:
+        u = (client.get_user_profile() or {}).get("userData") or {}
+    except Exception:   # optional: the sync carries on without it
+        return
+    if u.get("weight"):
+        store.set("profile", json.dumps({"weight_kg": round(u["weight"] / 1000, 1), "height_cm": u.get("height"),
+                                         "birth_year": int(str(u["birthDate"])[:4]) if u.get("birthDate") else None}))
+        print(f"Garmin: profile weight {u['weight'] / 1000:.1f} kg")
+
+
 def sync(cfg: dict, store: Store, days: int | None = None, prompt_mfa=None) -> None:
     from garminconnect import GarminConnectTooManyRequestsError
 
@@ -116,6 +129,7 @@ def sync(cfg: dict, store: Store, days: int | None = None, prompt_mfa=None) -> N
         for a in acts:
             store.put_activity(parse_activity(a), a)
         print(f"Garmin: {len(acts)} activit{'y' if len(acts) == 1 else 'ies'} since {start}")
+        _profile(client, store)
     except GarminConnectTooManyRequestsError:
         print("Garmin is rate-limiting this account; progress is saved, run sync again in an hour.")
     finally:

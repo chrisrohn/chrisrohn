@@ -137,10 +137,11 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
             except (SystemExit, Exception) as e:
                 errors["strava"] = _why(e)
         days, acts = store.days(), store.activities()
+        profile = json.loads(store.get("profile") or "null")
 
     if days or acts:
         try:
-            data = build.assemble(cfg, days, acts, today or date.today())
+            data = build.assemble(cfg, days, acts, today or date.today(), profile)
             (out / DATA_FILE).write_text(json.dumps(build.phone_data(data), separators=(",", ":")))
         except Exception as e:
             errors["build"] = _why(e)

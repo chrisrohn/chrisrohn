@@ -12,6 +12,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from fitness import fuel
 from fitness import metrics as m
 from fitness.activities import merge
 from fitness.config import DIST_DIR, SITE_DIR, nth_weekday
@@ -24,7 +25,7 @@ def _iso(d: date) -> str:
     return d.isoformat()
 
 
-def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date) -> dict:
+def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date, profile: dict | None = None) -> dict:
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
@@ -152,8 +153,29 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "coverage": coverage,
         "ride": ride_config(cfg, th, plan),
         "commute": {**commute, "today": commute_today} if commute else None,
+        "fuel": _fuel(cfg, plan, rec, commute_today, today, profile),
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
+
+
+def _fuel(cfg: dict, plan: dict | None, rec: dict, commute_today: dict | None, today: date, profile: dict | None) -> dict | None:
+    """Today's and tomorrow's meals (fitness/fuel.py), with today as readiness and the commute call left it."""
+    if not plan:
+        return None
+    days = [dict(d) for d in plan["days"]]
+    if days and days[0]["date"] == _iso(today):
+        d0 = days[0]
+        if commute_today and d0.get("commute") and commute_today["verdict"] == "skip":
+            d0.update(commute=None, role="rest", minutes=0, load=0)
+        elif commute_today and d0.get("commute") and commute_today["verdict"] in ("easy", "optional"):
+            d0.update(commute="easy", commute_workout=None)
+        order = ["rest", "easy", "moderate", "hard"]
+        if rec.get("level") in order and d0.get("level") in order and order.index(rec["level"]) < order.index(d0["level"]):
+            d0["level"] = rec["level"]          # readiness eased the day: so does the eating
+            if rec["level"] == "rest":
+                d0.update(role="rest", minutes=0, load=0)
+    weight = cfg["athlete"].get("weight_kg") or (profile or {}).get("weight_kg")
+    return fuel.plan(days, today, cfg, weight)
 
 
 def _weeks(acts: list[dict], today: date) -> list[dict]:

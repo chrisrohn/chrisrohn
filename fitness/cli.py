@@ -16,7 +16,7 @@ from fitness.store import Store
 
 def _build(cfg: dict, db: Path, out: Path | None = None, today: date | None = None) -> tuple[Path, dict]:
     with Store(db) as store:
-        data = build.assemble(cfg, store.days(), store.activities(), today or date.today())
+        data = build.assemble(cfg, store.days(), store.activities(), today or date.today(), json.loads(store.get("profile") or "null"))
     return build.render(data, out, cfg), data
 
 
