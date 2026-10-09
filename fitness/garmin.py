@@ -86,6 +86,7 @@ def parse_activity(a: dict) -> dict:
         avg_hr=a.get("averageHR"), max_hr=a.get("maxHR"), avg_power=a.get("avgPower"), np=a.get("normPower"), calories=a.get("calories"),
         hr_zones=zones if any(zones) else None, te_aerobic=a.get("aerobicTrainingEffect"), te_anaerobic=a.get("anaerobicTrainingEffect"),
         garmin_load=a.get("activityTrainingLoad"),
+        start_utc=datetime.fromisoformat(a["startTimeGMT"]).isoformat() if a.get("startTimeGMT") else None,
     )
 
 
