@@ -29,7 +29,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: discovery/requirements.lock
-      - run: pip install --require-hashes -r discovery/requirements.lock && pip install ruff pytest
+      - run: pip install --require-hashes -r discovery/requirements.lock && pip install ruff pytest "cryptography>=42"   # fitness/webpush.py
       - run: ruff check discovery fitness tests
       - run: python -m pytest tests fitness/tests
 
