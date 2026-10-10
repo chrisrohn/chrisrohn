@@ -254,3 +254,10 @@ def test_race_day_page(cfg):
     assert iceman["forecast"]["warm"] and "Winter" in iceman["forecast"]["kit"] or "Thermal" in iceman["forecast"]["kit"]
     assert any(b["job"].startswith("Tire pressure: 24 front / 26 rear") and b["ok"] for b in iceman["bike"])
     assert iceman["sessions_left"] and all(s["date"] < iceman["date"] for s in iceman["sessions_left"])
+
+
+def test_ride_mode_carries_a_day_and_a_half_of_hourly_weather(cfg):
+    wx = wxm.Wx(forecast(date(2026, 10, 9), days=3, wind=18, wind_from=250))
+    rows = build._ride_wx(wx, datetime(2026, 10, 9, 6, 40))
+    assert len(rows) == 36 and rows[0] == ["2026-10-09T06:00", 12.0, 10.0, 18, 250, 27, 5]
+    assert build.ride_config(cfg, {"lthr": 160, "max_hr": 185, "rest_hr": 50, "sex": "male"}, None)["wx"] is None

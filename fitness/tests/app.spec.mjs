@@ -109,7 +109,8 @@ test.describe("installable app", () => {
     await expect(week).toHaveCount(7);
     await expect(week.first()).toContainText("Today");
     await week.nth(1).locator("summary").click();
-    await expect(week.nth(1).locator("details p").first()).toHaveText(DATA.plan.days[1].session);
+    const plain = t => (t || "").replace(/\u2060/g, "").replace(/\u00a0/g, " ");   // the page's word joiners keep "4–5" on one line
+    await expect.poll(async () => plain(await week.nth(1).locator("details p").first().textContent())).toBe(DATA.plan.days[1].session);
     expect(await axe(page)).toEqual([]);
   });
 

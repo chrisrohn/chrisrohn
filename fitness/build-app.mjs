@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), "site");
 const part = (/** @type {string} */ f) => readFileSync(join(SITE, f), "utf8");
-export const POLICY = "default-src 'none'; script-src %SCRIPTS%; style-src 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'";
+export const POLICY = "default-src 'none'; script-src %SCRIPTS%; style-src 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com https://api.open-meteo.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'";
 
 /** @param {string} page */
 function lockDown(page) {

@@ -41,6 +41,38 @@ test.describe("ride mode", () => {
     await ctx.close();
   });
 
+  test("Start fetches the weather where you are; the synced forecast stands in without signal", async ({ browser }) => {
+    const hour = `${iso(today)}T${String(new Date().getHours()).padStart(2, "0")}:00`;
+    const plan = { ...PLAN, units: "imperial", wx: [[hour, 10, 8, 20, 270, 35, 40]] };
+    const ctx = await browser.newContext({ geolocation: { latitude: 42.2917, longitude: -85.5872 }, permissions: ["geolocation"] });
+    const page = await ctx.newPage();
+    const problems = watch(page);
+    let asked = "", up = true;
+    await page.route("https://api.open-meteo.com/**", route => {
+      asked = route.request().url();
+      return up ? route.fulfill({ status: 200, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
+        body: JSON.stringify({ current: { temperature_2m: 15, apparent_temperature: 13, wind_speed_10m: 16, wind_direction_10m: 90, wind_gusts_10m: 30 },
+          hourly: { precipitation_probability: [10, 60, 70] } }) }) : route.fulfill({ status: 503, body: "" });
+    });
+    await page.goto(link(plan));
+    await expect(page.locator("#wx-temp")).toHaveText("50°F");                         // the sync's forecast before Start
+    await expect(page.locator("#wx-src")).toHaveText("Forecast from the sync");
+    await page.locator("#btn-start").click();
+    await expect(page.locator("#wx-temp")).toHaveText("59°F");                         // live, at the tap
+    await expect(page.locator("#wx-wind")).toContainText("10");
+    await expect(page.locator("#wx-dir")).toHaveText("from E · gusts 19");
+    await expect(page.locator("#wx-feels")).toHaveText("feels 55°F · 70% rain");
+    await expect(page.locator("#wx-src")).toContainText("Live");
+    expect(asked).toContain("latitude=42.29");
+    expect(asked).toContain("longitude=-85.59");                                      // ~1 km, not your doorstep
+    up = false;
+    await page.locator("#btn-start").click();                                          // pause
+    await page.locator("#btn-start").click();                                          // resume: fetches again, falls back
+    await expect(page.locator("#wx-src")).toHaveText("Forecast from the sync");
+    expect(problems.filter(p => !/503/.test(p))).toEqual([]);                         // the 503's own console line is the browser's
+    await ctx.close();
+  });
+
   test("takes its plan from the link, keeps it, and never runs what the link carries", async ({ page }) => {
     const problems = watch(page);
     await page.goto(link(PLAN));
