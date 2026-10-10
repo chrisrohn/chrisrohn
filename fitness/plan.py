@@ -606,6 +606,7 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
     planned = {date.fromisoformat(d["date"]): d for d in base["days"] if date.fromisoformat(d["date"]) in week}
     done = {d: load_by_day.get(d.isoformat(), 0.0) for d in week}
     out["base_commutes"] = {d for d, p in planned.items() if p.get("commute")}
+    out["planned"] = planned                       # the week as planned on Monday: what each session asked for
 
     def missed(d: date) -> bool:
         p = planned.get(d)

@@ -267,8 +267,11 @@ form.pressure > div { display: grid; gap: var(--sp-1); flex: 1 1 5.5em; min-widt
 form.pressure > div.wide { flex: 2 1 12em; }
 form.pressure select, form.pressure input { min-height: 40px; font: inherit; width: 100%; min-width: 0; }
 form.pressure button { min-height: 40px; }
-.plan-b, .overnight { margin: 0; max-width: 60ch; text-wrap: pretty; }
-.plan-b .label, .overnight .label { margin-right: var(--sp-2); }
+.shop li { display: flex; justify-content: space-between; gap: var(--sp-3); border-bottom: var(--rule-hair) solid var(--hair); padding-bottom: var(--sp-1); }
+.shop b { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kitchen h3, #training h4 { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: var(--track-label); }
+.plan-b, .overnight, .tonight { margin: 0; max-width: 60ch; text-wrap: pretty; }
+.plan-b .label, .overnight .label, .tonight .label { margin-right: var(--sp-2); }
 .overnight .label { color: var(--accent-ink); }
 .week-ahead { display: grid; gap: var(--sp-2); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
 .week-ahead ol { list-style: none; margin: 0; padding: 0; display: grid; }

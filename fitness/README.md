@@ -74,10 +74,31 @@ Settings → *Morning notification* → **Turn on**. It works in Chrome without 
 the same site doesn't get in the way.
 
 - **What arrives:** the day's call, between 5 and 11 am, once last night's sleep is in (or from 9 am regardless).
-  One update follows if the call changes before 3 pm, for example when the forecast turns.
+  One update follows if the call changes before 5 pm, for example when the forecast turns or the afternoon check
+  eases the ride home.
+- **Sunday evening:** the week's recap. It covers hours ridden against plan, commute days, the fitness change, and
+  next week's hours and key sessions.
 - **Privacy:** the sync encrypts each message to your browser's key (RFC 8291, signed with VAPID, RFC 8292), so the
   push service in between only ever carries ciphertext.
 - **Sending a test:** *Send a test* in the same place.
+
+### The afternoon check
+
+On a commute day, once you've ridden in, every sync after noon takes a second look at the ride home. It reads
+today's Body Battery and stress (as of the watch's last sync to your phone) and the latest forecast for the ride
+home.
+- **Workout home, drained day:** Body Battery 25 or below, today's stress averaging 50 or more, or 2+ hours of high
+  stress turns it into **Ride home easy**: Z1–Z2, no intervals.
+- **Endurance ride home:** the same check, with a lower bar (Body Battery 15, stress 60).
+- **Storms on the way home** say to wait it out or get a ride and leave the bike at work.
+- **Otherwise** the call says the ride home stands.
+
+### Tonight's bedtime
+
+The Today card says when to turn the lights out tonight. It starts from your usual wake time on mornings like
+tomorrow (work day or not, from the last six weeks). If you're commuting tomorrow, it uses an hour before the ride
+in when that's earlier. Then it takes off your sleep need and 15 minutes to fall asleep. Lights out comes 30 minutes
+earlier with more than 3 hours of sleep debt this week, and 15 earlier before a hard day.
 
 ### The week so far
 
@@ -113,6 +134,9 @@ history:
   handling and racecraft the next race asks for. Before Iceman that's singletrack flow, sand and two-track, wave
   starts, punchy climbs with remounts, and eating on rough ground. Before Barry-Roubaix it's paceline work, loose
   corners and descents, rolling hills at tempo, eating at speed in the drops, and sand and washboard.
+- **Workout files.** Each planned trainer session downloads as a Zwift `.zwo` file from its day in the 7-day list,
+  with power as a fraction of FTP for each zone. Put it in Zwift's custom workouts folder; check MyWoosh can import
+  it before relying on it there.
 - **FTP.** Zwift and MyWoosh send trainer power, so with an FTP set, those rides are scored from power. Leave
   `ftp = 0` and the site estimates FTP from your best 20–90 minute power ride of the last year. After each ramp
   test, put the real number in `config.toml`.
@@ -287,6 +311,19 @@ run replaces it in a single commit. Nothing personal is ever written to this pub
 the failed run. Garmin sometimes asks for a fresh sign-in after a password change or about once a year: tap
 **Connect Garmin** again. A new Garmin password goes into the `GARMIN_PASSWORD` secret first.
 
+## Inside the rides
+
+The sync fetches each ride's minute-by-minute heart rate, speed and power from Garmin. It goes back 120 days, at
+most 30 rides per sync to stay under Garmin's limits.
+- **Aerobic decoupling:** on long steady rides (an hour or more, not commutes), how much more heart rate the second
+  half cost for the same output. Under 5% over a ride as long as the race means the aerobic engine holds; more means
+  more long Z2 riding. Trainer rides with power read cleanest. Outdoors, wind and hills blur any single ride, so
+  watch the trend.
+- **This week's hard sessions:** each session's planned minutes at target against the minutes your heart rate
+  actually spent there. A rep under 4 minutes is expected to show half its length, because heart rate lags. If two
+  sessions in a week fall well short, the page suggests your threshold heart rate is set too high, and how to retest
+  it.
+
 ## When the plan doesn't happen
 
 Every sync rebuilds the plan from what you actually did ([`plan.py`](plan.py) `adapt`), and the Today card says
@@ -398,6 +435,29 @@ The **Fuel** panel under today's call plans the day's eating, with tomorrow's in
 `[nutrition.ride_fuel]` holds the drink mix's label numbers (change them for another product); `bottle_cages` and
 `bladder_l` describe what the bike and you can carry.
 
+### Shopping and prep
+
+Under the fuel plan, *Shopping & prep* covers the next seven days:
+- **How many** Nutty Puddings and Super Veggies the plan calls for, and on which days.
+- **Your recipes scaled to that:** what to buy, with bag counts (for example frozen broccoli in 12 oz bags,
+  lentil cans, limes), and what to check you still have (nuts, seeds, spices, supplements, in spoons or grams).
+- **The prep:** pudding jars with the dry ingredients pre-portioned, one jar of dressing for the week, and lunches
+  cooked up to four days at a time. With `lunch = "veggie_chicken"` the list swaps the lentils for chicken.
+
+### Bottles for the weather
+
+The bottle plan follows the forecast for the ride.
+- **24°C / 75°F and up:** it adds water and sodium the mix doesn't cover: about 0.8 L and 600 mg an hour, rising to
+  1 L and 800 mg from 29°C / 84°F. The extra comes from the bladder or a refill.
+- **5°C / 41°F and below:** warm water in an insulated bottle, and drink on schedule even when you're not thirsty.
+- **Race day** uses the race-morning forecast.
+
+### Weight
+
+Log a weigh-in now and then: Garmin Connect → Health Stats → Weight, or a Garmin Index scale. The fuel targets then
+follow a 10-day smoothed trend instead of the profile's single number, and the page shows the 4-week change. The
+Silca weight comes from the same figure.
+
 ## The app on your phone
 
 **<https://chrisrohn.com/fitness/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
@@ -482,6 +542,10 @@ are git-ignored.
   come off when form is below −10 or the load ratio is above 1.3. When resting HR is ≥ 2 SD high together with
   elevated respiration or stress, the day becomes an **illness watch** with a rest call.
   Thresholds: ≥ 75 key session · 60–74 train as planned · 45–59 easy · < 45 rest.
+- **Readiness, weighted for you.** Once there are 20 mornings with a commute, each marker's weight grows with how
+  well it has predicted your good days. A good day is measured, not felt: speed per heartbeat on the commute against
+  that leg's usual. The weights are shrunk toward the defaults until there are plenty of days (n / (n + 30)). The
+  readiness panel names the marker that predicts best for you.
 - **Season plan.** Each stretch to a race goes through the phases recovery → transition → indoor base → outdoor
   build → taper, and each week's load steers toward that race option's `target_ctl`. For every race the planner
   simulates each taper length in the option's `taper_days` range, with volume cut to 35–65%. A fast-decay taper

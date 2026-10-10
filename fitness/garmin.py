@@ -73,6 +73,8 @@ def parse_day(summary: dict | None, sleep: dict | None) -> dict:
         "resp_awake": s.get("avgWakingRespirationValue"), "spo2": s.get("averageSpo2"),
         "intensity_min": (s.get("moderateIntensityMinutes") or 0) + 2 * (s.get("vigorousIntensityMinutes") or 0) if "moderateIntensityMinutes" in s else None,
         "active_kcal": s.get("activeKilocalories"), "sleep": night,
+        # today, as of the last watch sync: the afternoon's ride-home check reads these
+        "bb_now": s.get("bodyBatteryMostRecentValue"), "stress_high_s": s.get("highStressDuration"),
     }
     day = {k: v for k, v in day.items() if v is not None}
     return day or {"empty": True}
@@ -100,6 +102,46 @@ def _ll(a: dict, end: str) -> list[float] | None:
 
 
 PARSER_VERSION = 2   # bump when parse_activity learns a field: stored rides are re-read from their raw records
+
+
+STREAM_DAYS, STREAM_MAX = 120, 30   # how far back ride traces are fetched, and at most how many per sync (Garmin rate-limits)
+
+
+def _streams(client, store: Store, today: date) -> None:
+    """Each ride's minute-by-minute heart rate, speed and power (streams.py), newest first; a ride without a usable
+    trace is remembered too, so it isn't asked for again."""
+    from fitness import streams
+
+    have = store.prefixed("stream:")
+    since = (today - timedelta(days=STREAM_DAYS)).isoformat()
+    todo = sorted((a for a in store.activities() if a["source"] == "garmin" and a.get("group") == "ride" and a["start"][:10] >= since
+                   and a["id"] not in have), key=lambda a: a["start"], reverse=True)
+    done = 0
+    for a in todo[:STREAM_MAX]:
+        try:
+            details = client.get_activity_details(a["id"].split(":", 1)[1], maxchart=2000, maxpoly=0)
+        except Exception as e:      # rate limit or a missing record: the rest wait for the next sync
+            print(f"Garmin: ride traces paused ({str(e)[:80]})")
+            break
+        store.set(f"stream:{a['id']}", json.dumps(streams.compact(details or {}) or {"none": True}, separators=(",", ":")))
+        done += 1
+        time.sleep(0.35)
+    if done:
+        print(f"Garmin: {done} ride trace(s), {max(0, len(todo) - done)} still to fetch")
+
+
+def _weigh_ins(client, store: Store, today: date) -> None:
+    """Your Garmin Connect weigh-ins (a scale, or typed into the app): [date, kg], a year back on the first run."""
+    have = dict(json.loads(store.get("weigh_ins") or "[]"))
+    start = today - timedelta(days=30 if have else 365)
+    try:
+        got = (client.get_body_composition(start.isoformat(), today.isoformat()) or {}).get("dateWeightList") or []
+    except Exception:            # optional: the sync carries on without it
+        return
+    for w in got:
+        if w.get("weight") and w.get("calendarDate"):
+            have[w["calendarDate"]] = round(w["weight"] / 1000, 2)
+    store.set("weigh_ins", json.dumps(sorted(have.items())))
 
 
 def _profile(client, store: Store) -> None:
@@ -145,6 +187,8 @@ def sync(cfg: dict, store: Store, days: int | None = None, prompt_mfa=None) -> N
             store.put_activity(parse_activity(a), a)
         print(f"Garmin: {len(acts)} activit{'y' if len(acts) == 1 else 'ies'} since {start}")
         _profile(client, store)
+        _weigh_ins(client, store, today)
+        _streams(client, store, today)
     except GarminConnectTooManyRequestsError:
         print("Garmin is rate-limiting this account; progress is saved, run sync again in an hour.")
     finally:
