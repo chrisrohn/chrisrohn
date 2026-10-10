@@ -191,6 +191,14 @@ On the phone it shows:
 
 - **Live readings:** heart rate, with your zone and a marker on the zone bar; time, distance, speed (from the
   wheel sensor, else GPS), cadence or power, average HR, and live load against the planned TSS.
+- **Weather where you are:** temperature and how it feels, the rain chance, and wind speed and direction (with gusts).
+  - **When it updates:** fetched from Open-Meteo each time you tap **Start** or **Resume**, and every 30 minutes on
+    the ride. Only a position rounded to about 1 km leaves the phone.
+  - **The wind arrow** points where the wind is blowing: north-up while you're stopped, turned to your direction of
+    travel once you're moving. *On your line* then reads it live: headwind, tailwind, or crosswind from the left or
+    right.
+  - **No signal:** it falls back to the hourly forecast from the last sync, which is also what it shows before
+    you start.
 - **The day's session as timed steps.** For example: warm-up → VO2 1/5 at **166–176 bpm** → easy 3 min → …
   - Each step shows a countdown, its target range from your threshold HR, and a status (▲ Push / On target /
     ▼ Ease off). Efforts of 2 minutes or less say *by feel*, because HR lags them.

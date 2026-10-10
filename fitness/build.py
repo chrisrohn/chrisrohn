@@ -189,7 +189,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "ytd": {"rides": len(ytd), "hours": round(sum(a["moving_s"] for a in ytd) / 3600, 1), "km": round(sum(a["distance_m"] for a in ytd) / 1000),
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
         "coverage": coverage,
-        "ride": ride_config(cfg, th, plan),
+        "ride": ride_config(cfg, th, plan, wx, now),
         "commute": {**commute, "today": commute_today} if commute else None,
         "fuel": _fuel(cfg, plan, rec, commute_today, today, profile),
         "bike": upkeep,
@@ -409,8 +409,9 @@ def _coverage(days: dict[str, dict], today: date) -> list[dict]:
     return [{"field": f, "days": n, "of": total, "device": dev, "note": note} for f, n, dev, note in checks]
 
 
-def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
-    """What ride mode needs, and nothing else: HR anchors and the next week of sessions with their steps."""
+def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None, now: datetime | None = None) -> dict:
+    """What ride mode needs, and nothing else: HR anchors, the next week of sessions with their steps, and the next
+    day and a half of hourly weather (ride mode's fallback when it can't fetch the conditions where you are)."""
     days = []
     for d in (plan or {}).get("days", []):
         if d.get("legs"):
@@ -424,7 +425,21 @@ def ride_config(cfg: dict, th: dict, plan: dict | None) -> dict:
     return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "days": days,
             "race": {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None,
             "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models,
-            "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")}}
+            "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")},
+            "wx": _ride_wx(wx, now or datetime.now()) if wx else None}
+
+
+def _ride_wx(wx: wxm.Wx, now: datetime) -> list[list]:
+    """[hour, temp °C, feels °C, wind km/h, from °, gusts km/h, rain %] for the next 36 hours."""
+    start = now.replace(minute=0, second=0, microsecond=0)
+    out = []
+    for i in range(36):
+        key = (start + timedelta(hours=i)).strftime("%Y-%m-%dT%H:00")
+        r = wx.hours.get(key)
+        if r and r["temperature_2m"] is not None:
+            out.append([key, round(r["temperature_2m"], 1), round(r["apparent_temperature"] if r["apparent_temperature"] is not None else r["temperature_2m"], 1),
+                        round(r["wind_speed_10m"] or 0), round(r["wind_direction_10m"] or 0), round(r["wind_gusts_10m"] or 0), r["precipitation_probability"] or 0])
+    return out
 
 
 def _pack(obj: dict) -> str:
@@ -473,7 +488,7 @@ def csp(html: str) -> str:
     only place it may talk to is GitHub's API (the sync's private repository)."""
     hashes = [f"'sha256-{base64.b64encode(hashlib.sha256(m.group(1).encode()).digest()).decode()}'"
               for m in re.finditer(r"<script(?![^>]*application/json)[^>]*>(.*?)</script>", html, re.S)]
-    policy = (f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com; manifest-src 'self'; worker-src 'self'; "
+    policy = (f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com https://api.open-meteo.com; manifest-src 'self'; worker-src 'self'; "
               "base-uri 'none'; form-action 'none'")   # the same policy fitness/build-app.mjs sets on the hosted pages
     return html.replace("__CSP__", policy)
 

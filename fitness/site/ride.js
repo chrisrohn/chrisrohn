@@ -69,7 +69,7 @@
   // ── ride state (saved every few seconds so a reload mid-ride picks up where it was) ───────────────────────
   const S = { running: false, paused: false, elapsed: 0, moving: 0, dist: 0, step: 0, stepStart: 0, hrSum: 0, hrSecs: 0, hrMax: 0, zones: [0, 0, 0, 0, 0],
     trimp: 0, cadSum: 0, cadSecs: 0, fuelAt: 0, fuelDue: false, ended: false };
-  const live = { hr: null, hrAt: 0, cad: null, cadAt: 0, power: null, powerAt: 0, wheelSpeed: null, wheelAt: 0, gpsSpeed: null, gpsAt: 0, lastFix: null, still: 0 };
+  const live = { heading: null, anchor: null, hr: null, hrAt: 0, cad: null, cadAt: 0, power: null, powerAt: 0, wheelSpeed: null, wheelAt: 0, gpsSpeed: null, gpsAt: 0, lastFix: null, still: 0 };
   try {
     const saved = JSON.parse(ls.get("fitness-ride-state") || "null");
     if (saved && saved.running && Date.now() - saved.savedAt < 12 * 3600e3) { Object.assign(S, saved, { paused: true }); daySel.value = saved.day ?? daySel.value; }
@@ -171,6 +171,7 @@
 
   // ── GPS ─────────────────────────────────────────────────────────────────────────────────────────────────
   const R = 6371e3, rad = x => x * Math.PI / 180;
+  const bearing = (a, b) => { const y = Math.sin(rad(b.lon - a.lon)) * Math.cos(rad(b.lat)), x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lon - a.lon)); return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; };
   const hav = (a, b) => { const dl = rad(b.lat - a.lat), dn = rad(b.lon - a.lon); const h = Math.sin(dl / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
   let watch = null;
   const startGps = () => {
@@ -182,6 +183,9 @@
       if (c.accuracy > 50) return;
       const prev = live.lastFix;
       live.lastFix = fix;
+      // which way you're riding, for the wind on your line: the GPS course when it gives one, else every 25 m moved
+      if (c.heading != null && !Number.isNaN(c.heading) && (c.speed ?? 0) > 2) live.heading = c.heading;
+      else if (!live.anchor || hav(live.anchor, fix) > 25) { if (live.anchor) live.heading = bearing(live.anchor, fix); live.anchor = fix; }
       if (!prev) return;
       const d = hav(prev, fix), dt = (fix.t - prev.t) / 1000;
       live.gpsSpeed = c.speed != null && c.speed >= 0 ? c.speed : dt > 0 ? d / dt : null;
@@ -190,6 +194,71 @@
       if (S.running && !S.paused && !wheelLive && d < 200 && (live.gpsSpeed ?? 0) > 0.8) S.dist += d;
     }, () => chip("gps-chip", "off"), { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
   };
+
+  // ── weather: conditions where you are, fetched from Open-Meteo when Start is tapped and every 30 minutes on the
+  //    ride (only a ~1 km-rounded position leaves the phone); the last sync's hourly forecast when there's no signal
+  const WX_EVERY = 30 * 60e3;
+  const wx = { cur: null, src: "", at: 0, busy: false };
+  const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d / 45) % 8];
+  const tempTxt = c => P.km ? `${Math.round(c)}°C` : `${Math.round(c * 9 / 5 + 32)}°F`;
+  const windTxt = kmh => String(Math.round(P.km ? kmh : kmh / 1.609344));
+  const windU = () => (P.km ? "km/h" : "mph");
+  const hhmm = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const fromSync = () => {   // cfg.wx: [hour, temp, feels, wind, direction, gusts, rain chance] for the next day and a half
+    const n = new Date(), key = `${iso(n)}T${String(n.getHours()).padStart(2, "0")}:00`;
+    const r = (cfg.wx || []).find(x => x[0] === key);
+    return r ? { temp: r[1], feels: r[2], wind: r[3], dir: r[4], gust: r[5], pop: r[6] } : null;
+  };
+  const here = () => new Promise(res => {
+    if (live.lastFix && Date.now() - live.lastFix.t < 120e3) return res(live.lastFix);
+    if (!("geolocation" in navigator)) return res(null);
+    navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lon: p.coords.longitude }), () => res(null),
+      { enableHighAccuracy: false, maximumAge: 300e3, timeout: 8000 });
+  });
+  async function refreshWx() {
+    if (wx.busy) return;
+    wx.busy = true;
+    try {
+      const p = await here();
+      if (!p) throw new Error("no position");
+      const q = new URLSearchParams({ latitude: p.lat.toFixed(2), longitude: p.lon.toFixed(2), timezone: "auto", wind_speed_unit: "kmh", forecast_hours: "3",
+        current: "temperature_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,wind_gusts_10m", hourly: "precipitation_probability" });
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 8000);
+      const r = await fetch(`https://api.open-meteo.com/v1/forecast?${q}`, { signal: ctl.signal, cache: "no-store" }).finally(() => clearTimeout(t));
+      if (!r.ok) throw new Error(`weather ${r.status}`);
+      const j = await r.json(), c = j.current || {};
+      if (c.temperature_2m == null) throw new Error("no current weather");
+      wx.cur = { temp: c.temperature_2m, feels: c.apparent_temperature ?? c.temperature_2m, wind: c.wind_speed_10m ?? 0, dir: c.wind_direction_10m ?? 0,
+        gust: c.wind_gusts_10m ?? 0, pop: Math.max(0, ...((j.hourly && j.hourly.precipitation_probability) || []).filter(x => x != null)) };
+      wx.src = "Live";
+    } catch {
+      const s = fromSync();
+      if (s) { wx.cur = s; wx.src = "Forecast"; }
+    }
+    wx.at = Date.now();
+    wx.busy = false;
+    render();
+  }
+  wx.cur = fromSync();
+  if (wx.cur) wx.src = "Forecast";
+  function paintWx(now) {
+    const W = wx.cur;
+    $("wxbar").hidden = !W;
+    if (!W) return;
+    $("wx-temp").textContent = tempTxt(W.temp);
+    $("wx-feels").textContent = `feels ${tempTxt(W.feels)}${W.pop >= 30 ? ` · ${W.pop}% rain` : ""}`;
+    $("wx-wind").innerHTML = `${windTxt(W.wind)}<small>${windU()}</small>`;
+    $("wx-dir").textContent = `from ${compass(W.dir)}${W.gust >= W.wind + 10 ? ` · gusts ${windTxt(W.gust)}` : ""}`;
+    const moving = live.heading != null && now - live.gpsAt < 8000 && (live.gpsSpeed ?? 0) > 2;
+    // the arrow points where the wind blows: north-up when standing, turned to your direction of travel when riding
+    $("wx-arrow").style.transform = `rotate(${(W.dir + 180 - (moving ? live.heading : 0) + 360) % 360}deg)`;
+    if (moving && W.wind >= 3) {
+      const along = W.wind * Math.cos(rad(W.dir - live.heading));
+      const side = Math.sin(rad(W.dir - live.heading)) > 0 ? "right" : "left";
+      $("wx-rel").textContent = Math.abs(along) < 0.35 * W.wind ? `Crosswind from the ${side}` : along > 0 ? `Headwind ${windTxt(along)} ${windU()}` : `Tailwind ${windTxt(-along)} ${windU()}`;
+    } else $("wx-rel").textContent = W.wind < 3 ? "Calm" : "—";
+    $("wx-src").textContent = wx.src === "Live" ? `Live · ${hhmm(wx.at)}` : "Forecast from the sync";
+  }
 
   // ── the loop ────────────────────────────────────────────────────────────────────────────────────────────
   const k = cfg.sex === "female" ? [0.86, 1.67] : [0.64, 1.92];
@@ -234,6 +303,7 @@
     const now = Date.now(), dt = last ? Math.min(5, (now - last) / 1000) : 1;
     last = now;
     if (S.running && !S.paused) {
+      if (now - wx.at > WX_EVERY) refreshWx();   // fresh conditions every half hour on a long ride
       S.elapsed += dt;
       const spd = Date.now() - live.wheelAt < 5000 ? live.wheelSpeed : Date.now() - live.gpsAt < 8000 ? live.gpsSpeed : null;
       if (spd == null || spd > 0.8) { S.moving += dt; live.still = 0; } else live.still += dt;
@@ -323,6 +393,7 @@
     $("t-avg").textContent = S.hrSecs ? Math.round(S.hrSum / S.hrSecs) : "—";
     const tss = S.trimp / trimpHour() * 100;
     $("t-load").innerHTML = `${Math.round(tss)}${planned && planned.load ? `<small>/${Math.round(+planned.load)}</small>` : ""}`;
+    paintWx(now);
     $("fuel").hidden = !S.fuelDue;
     if (S.fuelDue) $("fuel-text").textContent = fuelText();
 
@@ -341,6 +412,7 @@
     if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { audio = null; } }
     if (audio && audio.state === "suspended") audio.resume();
     startGps();
+    if (!S.running || S.paused) refreshWx();   // Start and Resume fetch the weather where you are now
     if (!S.running) {
       Object.assign(S, { running: true, paused: false, elapsed: 0, moving: 0, dist: 0, step: 0, stepStart: 0, hrSum: 0, hrSecs: 0, hrMax: 0, zones: [0, 0, 0, 0, 0], trimp: 0, cadSum: 0, cadSecs: 0, fuelAt: 0, fuelDue: false });
       samples.length = 0; check = null; checkSaid = "";

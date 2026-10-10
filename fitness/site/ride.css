@@ -75,6 +75,10 @@ span.chip {
 .rtile { border-top: var(--rule-hair) solid var(--ink); padding: var(--sp-2) 0 var(--sp-3); display: grid; gap: var(--sp-1); min-width: 0; }
 .rtile .v { font-size: var(--fs-ride-figure); font-weight: 700; line-height: var(--lh-tight); letter-spacing: var(--track-figure); white-space: nowrap; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: clip; }
 button.rtile { font: inherit; color: inherit; text-align: left; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; border-radius: 0; cursor: pointer; }
+.rtile .s { font-size: var(--fs-small); color: var(--ink-2); line-height: var(--lh-snug); }
+.wxbar .v .arrow { display: inline-block; font-style: normal; margin-right: 4px; transition: transform .4s ease; }
+.wxbar #wx-rel { font-size: var(--fs-body); font-weight: 700; white-space: normal; line-height: var(--lh-snug); }
+@media (prefers-reduced-motion: reduce) { .wxbar .v .arrow { transition: none; } }
 .rtile .v small { font-size: var(--fs-small); font-weight: 400; letter-spacing: 0; color: var(--ink-2); margin-left: 2px; }
 
 .fuel { display: flex; align-items: center; gap: var(--sp-3); min-height: var(--sp-7); padding: var(--sp-2) var(--sp-3); background: var(--ink); color: var(--page); border-left: var(--sp-3) solid var(--accent); }
