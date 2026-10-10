@@ -304,6 +304,21 @@ window.startDashboard = D => {
     return `<p class="plan-b"><span class="label">Plan B</span> ${esc(day.alt)}</p>`;
   }
 
+  // readiness weighted by what predicts your good commutes (metrics.personal_weights)
+  function personalNote() {
+    const P = now.personal;
+    if (!P) return `<p class="sub mt-3">Weights are the defaults until there are 20 mornings with a commute to learn from.</p>`;
+    const best = P.best ? `${COMP[P.best] || P.best} tracks your good days best (ρ ${P.rho[P.best].toFixed(2)}), so it counts most` : "No marker stands out yet, so the weights stay close to the defaults";
+    return `<p class="sub mt-3">Weighted for you: ${esc(best)}. Learned from ${P.days} mornings against your commute's speed per heartbeat.</p>`;
+  }
+
+  // tonight's lights-out, worked back from tomorrow's wake time and sleep need (fitness/build.py _bedtime)
+  function bedBlock() {
+    const B = now.bedtime;
+    if (!B) return "";
+    return `<p class="tonight"><span class="label">Tonight</span> Lights out by <b>${esc(B.bed)}</b>: up around ${esc(B.wake)}${B.ride_in ? " for the ride in" : ""}, ${B.need} h of sleep and 15 min to fall asleep${B.reasons.length ? `; earlier for ${esc(B.reasons.join(" and "))}` : ""}.</p>`;
+  }
+
   // the call above is only as good as last night's data: say when the watch hasn't handed it over yet
   function overnightBlock() {
     if (now.last_night || D.today !== isoToday()) return "";
@@ -341,7 +356,7 @@ window.startDashboard = D => {
     return `<div class="week-ahead"><span class="label">The next 7 days · ${hours.toFixed(1)} h${commutes ? ` · ${commutes} commute${commutes === 1 ? "" : "s"}` : ""}</span>
       <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i>
         <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}</span>${wxChip(d.wx)}</summary>
-        <p class="sub">${esc(d.session)}</p>${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}</details></li>`).join("")}</ol>
+        <p class="sub">${esc(d.session)}</p>${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}${d.indoor && d.steps && d.steps.length ? `<p><button type="button" class="chip" data-zwo="${esc(d.date)}">Zwift / MyWoosh file (.zwo)</button></p>` : ""}</details></li>`).join("")}</ol>
       <p class="sub">Rebuilt at every sync from what you actually rode, slept and recovered: a missed day moves, a good week grows.</p></div>`;
   }
 
@@ -364,10 +379,14 @@ window.startDashboard = D => {
     const energy = T.kcal && T.burn ? ` That's about <b>${k(T.kcal)} kcal</b>, all meals and snacks together; today burns roughly ${k(T.burn.total)} (${k(T.burn.base)} living${T.burn.ride ? ` + ${k(T.burn.ride)} riding` : ""}).` : "";
     const targets = T.carbs_g ? `About <b>${T.carbs_g} g carbs</b> and <b>${T.protein_g} g protein</b> today (${Math.round(T.carbs_g / F.weight_kg * 10) / 10} and ${T.protein_per_kg} g per kg at ${F.weight_kg} kg).${energy}`
       : `About ${T.carbs_per_kg} g carbs and ${T.protein_per_kg} g protein per kg of body weight today (add your weight in Garmin Connect for grams).`;
+    const W = D.weight, kg = v => units === "mi" ? `${(v * 2.20462).toFixed(1)} lb` : `${v.toFixed(1)} kg`;
+    const weight = W ? `<p class="sub">Weight trend <b>${kg(W.kg)}</b>${W.change_4w != null ? ` (${W.change_4w > 0 ? "+" : W.change_4w < 0 ? "−" : "±"}${kg(Math.abs(W.change_4w))} over 4 weeks)` : ""}, from ${W.count} Garmin weigh-in${W.count === 1 ? "" : "s"}, the last ${fmtD(W.last)}. The targets follow it.</p>`
+      : `<p class="sub">Weigh in now and then (Garmin Connect → Health Stats → Weight, or a Garmin Index scale) and the targets follow your trend instead of the profile's one number.</p>`;
     return `<div class="fuel"><span class="label">Fuel · ${esc(T.label)}</span>
-      <p class="sub">${targets}</p>
+      <p class="sub">${targets}</p>${weight}
       ${mealsHTML(T)}
-      ${N ? `<details class="fuel-next"><summary>Tomorrow · ${esc(N.label)}</summary>${mealsHTML(N)}</details>` : ""}</div>`;
+      ${N ? `<details class="fuel-next"><summary>Tomorrow · ${esc(N.label)}</summary>${mealsHTML(N)}</details>` : ""}
+      ${kitchenHTML(F.kitchen)}</div>`;
   }
   const pToday0 = () => plan && plan.days[0];
 
@@ -382,6 +401,54 @@ window.startDashboard = D => {
       <div class="kpis"><span>This year <b>${Math.round(c.year.legs / 2)}</b> round trips · <b>${dist(c.year.km * 1000)}</b> · <b>${c.year.hours} h</b></span><span>Last 8 weeks <b>${c.per_week_8}</b> a week</span>
         <span>In <b>${L.in.minutes} min</b> at ${sp(L.in.speed)}${L.in.hr ? `, ${L.in.hr} bpm` : ""}</span><span>Home <b>${L.home.minutes} min</b> at ${sp(L.home.speed)}${L.home.hr ? `, ${L.home.hr} bpm` : ""}</span></div>
       ${c.series.length >= 6 ? `<p class="sub">Same route, same terrain: speed per heartbeat on it is a free fitness test every commute. ${trend}</p><div id="c-commute" class="mt-3"></div>` : `<p class="empty">Efficiency tracking starts after a handful of commutes with heart rate.</p>`}`;
+  }
+
+  // inside the rides: decoupling on the long steady rides, and this week's hard sessions against their targets
+  function insideHTML() {
+    const R = D.rides;
+    if (!R) return "";
+    const L = R.latest;
+    return `<h3 class="mt-6">Inside the rides</h3>
+      ${L ? `<p>Aerobic decoupling on ${fmtD(L.date)}'s ${dur(L.minutes * 60)} ride: <b>${L.pct.toFixed(1)}%</b>, ${esc(L.verdict)}.</p>
+        <p class="sub">How much more heart rate the second half cost for the same ${L.by === "power" ? "power" : "speed"}. Under 5% over a ride as long as the race is the goal${L.by === "speed" ? "; outdoors, wind and hills blur a single ride, so watch the trend" : ""}.</p>` : ""}
+      ${R.decoupling.length > 1 ? `<div class="scrollx" tabindex="0" role="region" aria-label="Decoupling by ride"><table class="tbl"><thead><tr><th>Ride</th><th class="r">Length</th><th class="r">Decoupling</th><th class="hide-sm">From</th></tr></thead><tbody>
+        ${R.decoupling.slice().reverse().map(x => `<tr><td>${fmtD(x.date)} · ${esc(x.name)}</td><td class="r">${dur(x.minutes * 60)}</td><td class="r num">${x.pct.toFixed(1)}%</td><td class="hide-sm">${x.by}${x.indoor ? ", trainer" : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${R.sessions.length ? `<h4 class="mt-3">This week's hard sessions</h4><ul class="plain">${R.sessions.map(x => `<li><b>${fmtDow(x.date)}</b> ${esc(x.title)}: ${x.actual} of ${x.expected} planned minutes at ${x.bpm}+ bpm <span class="tag ${x.pct >= 80 ? "good" : x.pct < 60 ? "bad" : ""}">${x.pct}%</span></li>`).join("")}</ul>` : ""}
+      ${R.hint ? `<p class="warn-line">${esc(R.hint)}</p>` : ""}`;
+  }
+
+  // a trainer session as a Zwift workout file (.zwo, also what MyWoosh imports): power as a fraction of FTP per zone
+  const ZWO_POWER = { z1: 0.5, z2: 0.68, tempo: 0.83, race: 0.88, ss: 0.9, thr: 0.97, z5: 1.12, max: 1.25 };
+  const xml = t => String(t ?? "").replace(/[<>&"']/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[c]);
+  function zwo(day) {
+    const body = day.steps.map(st => {
+      const secs = Math.max(1, Math.round(st.min * 60)), cue = st.cue ? `<textevent timeoffset="0" message="${xml(st.name + ": " + st.cue)}"/>` : `<textevent timeoffset="0" message="${xml(st.name)}"/>`;
+      if (/warm/i.test(st.name)) return `    <Warmup Duration="${secs}" PowerLow="0.45" PowerHigh="0.68">${cue}</Warmup>`;
+      if (/cool/i.test(st.name)) return `    <Cooldown Duration="${secs}" PowerLow="0.65" PowerHigh="0.45">${cue}</Cooldown>`;
+      return `    <SteadyState Duration="${secs}" Power="${ZWO_POWER[st.zone] ?? 0.65}">${cue}</SteadyState>`;
+    }).join("\n");
+    return `<workout_file>\n  <author>Training &amp; Recovery</author>\n  <name>${xml(day.title)} ${xml(day.date)}</name>\n  <description>${xml(day.session)}</description>\n  <sportType>bike</sportType>\n  <tags/>\n  <workout>\n${body}\n  </workout>\n</workout_file>\n`;
+  }
+  document.addEventListener("click", e => {
+    const b = e.target instanceof Element ? e.target.closest("[data-zwo]") : null;
+    const day = b && plan && plan.days.find(d => d.date === /** @type {HTMLElement} */ (b).dataset.zwo);
+    if (!day) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([zwo(day)], { type: "application/xml" }));
+    a.download = `${day.date}-${day.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.zwo`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+
+  // the week's shopping and prep for the Blueprint meals (fitness/grocery.py)
+  function kitchenHTML(K) {
+    if (!K) return "";
+    const list = rows => `<ul class="plain shop">${rows.map(r => `<li><span>${esc(r.item)}</span><b>${esc(r.amount)}</b></li>`).join("")}</ul>`;
+    return `<details class="fuel-next kitchen"><summary>Shopping &amp; prep · ${fmtDow(K.from)} – ${fmtDow(K.to)}</summary>
+      <p class="sub">${K.pudding} Nutty Pudding${K.pudding === 1 ? "" : "s"} (${K.pudding_days.join(", ")}) and ${K.veggie} Super Veggie${K.veggie === 1 ? "" : "s"} (${K.veggie_days.join(", ")})${K.chicken ? ", with chicken" : ""}: the fuel plan's next seven days.</p>
+      <h3>Buy</h3>${list(K.buy)}
+      <h3>Check you have</h3>${list(K.check)}
+      <h3>Prep</h3><ul class="plain">${K.prep.map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>`;
   }
 
   // how the plan is fitted to the riding you actually do (fitness/plan.py fit, from the last 12 weeks)
@@ -410,6 +477,7 @@ window.startDashboard = D => {
           ${r.start_set ? "" : `<p class="sub">Timed from a 10:00 start: set your wave's start time in config.toml (start = "HH:MM").</p>`}</div>
         <div><h4>The start</h4><p>${esc(r.strategy)}</p>
           <h4>Fuel</h4><p>${esc(r.fuel.setup)}.</p><p>${esc(r.fuel.sips[0].toUpperCase() + r.fuel.sips.slice(1))}${r.fuel.top_up ? `, plus ${r.fuel.top_up} g an hour from gels or chews` : ""}: about ${r.fuel.rate} g of carbs and ${r.fuel.sodium} mg of sodium an hour.</p>
+          ${r.fuel.climate ? `<p>${esc(r.fuel.climate)}</p>` : ""}
           ${r.fuel.no_refill ? `<p class="sub">${esc(r.fuel.no_refill)}</p>` : ""}
           ${r.forecast ? `<h4>Forecast at the start</h4><p>${esc(r.forecast.line)}.</p><p><b>Wear:</b> ${esc(r.forecast.kit)}. ${esc(r.forecast.warm)}</p>` : `<p class="sub">The race-morning forecast appears 16 days out.</p>`}</div>
         <div><h4>The bike, the week before</h4><ul class="checks">${r.bike.map(b => `<li class="${b.ok ? "ok" : ""}"><span><span class="sr">${b.ok ? "Done: " : "To do: "}</span>${esc(b.job)}${b.note ? ` <span class="sub">${esc(b.note)}</span>` : ""}</span></li>`).join("")}</ul>
@@ -486,6 +554,7 @@ window.startDashboard = D => {
         ${planB(pToday, rec, rd)}
         ${overnightBlock()}
         ${weatherBlock()}
+        ${bedBlock()}
         ${weekBlock()}
         ${adjustedBlock()}
         ${commuteBlock()}
@@ -508,7 +577,7 @@ window.startDashboard = D => {
           ${tile("Fatigue (ATL)", r0(form.atl), "", form.acwr != null ? `ACWR ${form.acwr.toFixed(2)}${form.acwr > 1.3 ? " · spike" : form.acwr < 0.8 ? " · detraining" : " · sweet spot"}` : "")}
           ${tile("Sleep debt", now.sleep_debt == null ? "—" : now.sleep_debt.toFixed(1), "h", `last 7 nights vs ${D.need_hours} h need`, now.sleep_debt != null ? (now.sleep_debt > 3 ? "bad" : "good") : "")}
         </div>
-        ${rd ? `<h3 class="mt-6">What went into readiness</h3>${meters(rd.components, COMP)}` : ""}
+        ${rd ? `<h3 class="mt-6">What went into readiness</h3>${meters(rd.components, COMP)}${personalNote()}` : ""}
       </div>
     </section>`);
 
@@ -552,6 +621,7 @@ window.startDashboard = D => {
         <div class="zones-key">${zp.map((p, i) => `<span><b><i class="sw" style="background:var(--z${i + 1})"></i>Z${i + 1}</b>${p.toFixed(0)}%<br>${dur(z.seconds[i])}</span>`).join("")}</div>
         <p class="sub mt-3">${zp[0] + zp[1] >= 75 ? "Mostly easy, with the hard work concentrated: a polarized/pyramidal mix that suits a 2-hour race." : zp[2] > 25 ? "A lot of Zone 3: the 'grey zone' tires you without the stimulus of real intervals. Make easy days easier." : "A balanced mix."}</p>` : `<p class="empty">Time in zones comes from Garmin-recorded activities.</p>`}</div></div>
       ${commuteHTML()}
+      ${insideHTML()}
       <h3 class="mt-6">Recent activities</h3><div class="scrollx" tabindex="0" role="region" aria-label="Recent activities"><table class="tbl"><thead><tr><th>When</th><th>Activity</th><th class="r">Time</th><th class="r">Distance</th><th class="r hide-sm">Climb</th><th class="r hide-sm">Avg HR</th><th class="r">TSS</th></tr></thead><tbody>
       ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}${a.indoor ? " · trainer" : ""}${a.commute ? ` · commute ${a.leg === "home" ? "home" : "in"}` : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r hide-sm">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r hide-sm">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
       </tbody></table></div>${D.recent.some(a => a.load_src === "duration") ? `<p class="sub mt-3">* No heart rate: load estimated from duration.</p>` : ""}</section>`);

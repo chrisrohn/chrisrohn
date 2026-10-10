@@ -62,6 +62,10 @@ class Store:
             self.put_activity(parse(json.loads(raw)), json.loads(raw))
         return len(rows)
 
+    def prefixed(self, prefix: str) -> dict[str, str]:
+        """Every kv value whose key starts with `prefix`, keyed by the rest of the key."""
+        return {k[len(prefix):]: v for k, v in self.db.execute("SELECT key, value FROM kv WHERE key >= ? AND key < ?", (prefix, prefix + "\uffff"))}
+
     def latest_start(self, source: str) -> str | None:
         return self.db.execute("SELECT MAX(start) FROM activities WHERE source = ?", (source,)).fetchone()[0]
 

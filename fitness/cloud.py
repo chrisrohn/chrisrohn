@@ -92,7 +92,8 @@ def import_inbox(inbox: Path | None, store: Store, tz: str) -> dict | None:
 # ── the morning notification (webpush.py) ──────────────────────────────────────────────────────────────
 
 MORNING = (5, 11)        # local hours the day's first notification may go out in (once last night's data is in, or from 9)
-UPDATES_UNTIL = 15       # a call that changes later (the forecast turned) gets one update before this hour
+RECAP_HOURS = (17, 22)   # Sunday evening: the week's recap, once
+UPDATES_UNTIL = 17       # a call that changes later (the forecast turned, the afternoon's ride-home check) gets one update before this hour
 
 
 def _vapid(store: Store) -> dict:
@@ -142,6 +143,12 @@ def notify(store: Store, data: dict, now: datetime, action: str, send: Callable 
               and MORNING[0] <= now.hour < UPDATES_UNTIL)
     if update:
         msg["title"], due = "Update · " + msg["title"], True
+    recap = data.get("recap")
+    if not due and recap and now.weekday() == 6 and RECAP_HOURS[0] <= now.hour < RECAP_HOURS[1] and sent.get("recap") != recap["week"]:
+        msg, due = {"title": recap["title"], "body": recap["body"][:230], "tag": "recap", "url": "./?source=push#season"}, True
+        sent = {**sent, "recap": recap["week"]}
+        store.set("push_sent", json.dumps(sent))
+        action = "recap"
     if not due:
         return out
     kept, delivered = [], 0
@@ -151,7 +158,7 @@ def notify(store: Store, data: dict, now: datetime, action: str, send: Callable 
         if code not in (404, 410):          # gone: the browser dropped the subscription
             kept.append(sub)
     store.set("push_subs", json.dumps(kept))
-    if action not in ("push-test", "push-subscribe"):
+    if action not in ("push-test", "push-subscribe", "recap"):
         at = now.isoformat(timespec="minutes")
         sent = {**sent, "updated": True, "at": at} if update else {"date": t, "title": msg["title"], "at": at}
         store.set("push_sent", json.dumps(sent))
@@ -214,13 +221,14 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
             except (SystemExit, Exception) as e:
                 errors["strava"] = _why(e)
         days, acts = store.days(), store.activities()
-        profile = json.loads(store.get("profile") or "null")
+        profile = {**(json.loads(store.get("profile") or "null") or {}), "weigh_ins": json.loads(store.get("weigh_ins") or "[]")}
         if action == "service" and code:
             try:
                 print(f"Bike: {bike.log(store, code, datetime.now(), (profile or {}).get('weight_kg'))} logged")
             except Exception as e:
                 errors["bike"] = f"that bike job wasn't logged: {_why(e)}"
         bike_state = bike.state(store, today or date.today())
+        traces = store.prefixed("stream:")
         try:
             forecast = build.forecast_for(store, cfg, today or date.today(), datetime.now())
         except Exception as e:   # the day's call still works without the weather
@@ -230,7 +238,7 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
     data = None
     if days or acts:
         try:
-            data = build.assemble(cfg, days, acts, today or date.today(), profile, weather=forecast, bike_state=bike_state)
+            data = build.assemble(cfg, days, acts, today or date.today(), profile, weather=forecast, bike_state=bike_state, traces=traces)
             (out / DATA_FILE).write_text(json.dumps(build.phone_data(data), separators=(",", ":")))
         except Exception as e:
             errors["build"] = _why(e)

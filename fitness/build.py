@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import re
 import shutil
 import statistics
@@ -12,7 +13,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fitness import bike, fuel, raceday
+from fitness import bike, fuel, raceday, streams
 from fitness import metrics as m
 from fitness import weather as wxm
 from fitness.activities import merge
@@ -27,7 +28,8 @@ def _iso(d: date) -> str:
 
 
 def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date, profile: dict | None = None,
-             now: datetime | None = None, weather: dict | None = None, bike_state: dict | None = None) -> dict:
+             now: datetime | None = None, weather: dict | None = None, bike_state: dict | None = None,
+             traces: dict[str, str] | None = None) -> dict:
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
@@ -43,12 +45,19 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     need = cfg["athlete"]["sleep_need_hours"]
 
     sleep = {k: s for k, d in days.items() if (s := m.sleep_score(d.get("sleep"), need))}
-    ready = {}
-    for k in sorted(days):
-        prev = by_day.get(_iso(date.fromisoformat(k) - timedelta(days=1)))
-        form = {"tsb": by_day[k]["tsb"], "acwr": prev["acwr"] if prev else None} if k in by_day else None
-        if r := m.readiness(k, days, sleep.get(k), form):
-            ready[k] = r
+    def score_all(custom: dict | None = None) -> dict[str, dict]:
+        out = {}
+        for k in sorted(days):
+            prev = by_day.get(_iso(date.fromisoformat(k) - timedelta(days=1)))
+            form = {"tsb": by_day[k]["tsb"], "acwr": prev["acwr"] if prev else None} if k in by_day else None
+            if r := m.readiness(k, days, sleep.get(k), form, custom=custom):
+                out[k] = r
+        return out
+
+    ready = score_all()
+    personal = m.personal_weights(ready, acts)             # readiness weighted by what predicts your good days
+    if personal:
+        ready = score_all(personal["weights"])
 
     t, y = _iso(today), _iso(today - timedelta(days=1))
     commute = m.commute_profile(acts, cfg, today)
@@ -89,6 +98,10 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     room = booked < cfg["commute"]["per_week"][1]
     commute_wx = _commute_wx(wx, route, today, commute) if wx and commute else None
     commute_today = None if today in adjust["no_commute"] else m.commute_call(ready_today, plan_today, today, cfg, commute, th, room, commute_wx)
+    clock = now or datetime.now()
+    rode_in = any(a.get("commute") and a.get("leg") == "in" and a["start"][:10] == t for a in acts)
+    if commute_today and rode_in and clock.date() == today and plan_today and plan_today.get("commute"):
+        commute_today = m.ride_home(commute_today, days.get(t, {}), plan_today, clock, route["depart"]["home"])   # the afternoon's second look
     if commute_today and plan_today and plan_today.get("commute"):   # on a commute day the commute call is the day's call
         if commute_today.get("weather") and commute_today["verdict"] == "skip":   # the weather's no, not the body's: train later
             rec = {"level": plan_today["level"], "title": "Drive today, train this evening",
@@ -159,7 +172,8 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         if a.get("hr_zones") and a["start"][:10] >= _iso(today - timedelta(days=27)):
             zones = [z + (v or 0) for z, v in zip(zones, a["hr_zones"], strict=True)]
 
-    weight = cfg["athlete"].get("weight_kg") or (profile or {}).get("weight_kg")
+    trend = _weight_trend((profile or {}).get("weigh_ins") or [], today)
+    weight = cfg["athlete"].get("weight_kg") or (trend or {}).get("kg") or (profile or {}).get("weight_kg")
     upkeep = bike.upkeep(acts, bike_state or {}, cfg, today, wx, weight, plan["races"] if plan else [])
     races_soon = raceday.pages(plan, cfg, wx, th, weight, upkeep, today)
 
@@ -171,7 +185,8 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "generated": datetime.now().isoformat(timespec="minutes"), "today": t, "athlete": th, "need_hours": need, "units": cfg["athlete"]["units"],
         "now": {"readiness": ready_today, "recommendation": rec, "base_call": m.recommend(ready_today, None), "sleep": sleep.get(t), "form": form_now,
                 "sleep_debt": round(debt, 1) if debt is not None else None, "regularity_min": round(regularity) if regularity is not None else None,
-                "last_night": (days.get(t) or {}).get("sleep"), "weather": today_wx},
+                "last_night": (days.get(t) or {}).get("sleep"), "weather": today_wx,
+                "bedtime": _bedtime(days, need, debt, plan, today, cfg, route), "personal": personal},
         "pmc": [r for r in rows if r["date"] >= chart_from],
         "plan": plan,
         "variants": variants,
@@ -191,8 +206,11 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "coverage": coverage,
         "ride": ride_config(cfg, th, plan, wx, now),
         "commute": {**commute, "today": commute_today} if commute else None,
-        "fuel": _fuel(cfg, plan, rec, commute_today, today, profile),
+        "fuel": _fuel(cfg, plan, rec, commute_today, today, {**(profile or {}), **({"weight_kg": trend["kg"]} if trend else {})}, wx),
+        "weight": trend,
         "bike": upkeep,
+        "rides": _inside_rides(acts, traces, th, adjust, today),
+        "recap": _recap(acts, by_day, adjust, plan, today),
         "race_day": races_soon,
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
@@ -204,6 +222,128 @@ def forecast_for(store, cfg: dict, today: date, now: datetime, get=None) -> dict
     m.mark_commutes(acts, cfg)
     where = wxm.route(acts, cfg, today)["where"]
     return wxm.load(store, where, cfg["athlete"]["timezone"], now, get) if get else wxm.load(store, where, cfg["athlete"]["timezone"], now)
+
+
+def _weight_trend(weigh_ins: list, today: date) -> dict | None:
+    """A smoothed weight from your weigh-ins (a 10-day exponential average, so one salty dinner doesn't move the fuel
+    targets), the change over four weeks, and how recent it is. Nothing without a weigh-in in the last 30 days."""
+    rows = [(date.fromisoformat(d), kg) for d, kg in weigh_ins if kg]
+    if not rows or (today - rows[-1][0]).days > 30:
+        return None
+    ema, last = rows[0][1], rows[0][0]
+    series = []
+    for d, kg in rows:
+        a = 1 - math.exp(-max(1, (d - last).days) / 10)
+        ema, last = ema + a * (kg - ema), d
+        series.append((d, ema))
+    month = next((v for d, v in reversed(series) if (today - d).days >= 28), None)
+    return {"kg": round(ema, 1), "last": rows[-1][0].isoformat(), "last_kg": rows[-1][1], "count": len(rows),
+            "change_4w": round(ema - month, 1) if month is not None else None,
+            "series": [[d.isoformat(), round(v, 2)] for d, v in series if (today - d).days <= 120]}
+
+
+def _bedtime(days: dict, need_h: float, debt_h: float | None, plan: dict | None, today: date, cfg: dict, route: dict) -> dict | None:
+    """Tonight's lights-out: your usual wake time on mornings like tomorrow (work day or not, from the last six weeks),
+    minus your sleep need and 15 minutes to fall asleep, earlier when there's sleep debt or a hard day tomorrow."""
+    tmr = today + timedelta(days=1)
+    alike = workday(tmr, cfg)
+    ends = []
+    for i in range(42):
+        d = today - timedelta(days=i)
+        night = (days.get(_iso(d)) or {}).get("sleep") or {}
+        if night.get("end") and workday(d, cfg) == alike:
+            e = datetime.fromisoformat(night["end"])
+            if 3 <= e.hour < 12:
+                ends.append(e.hour * 60 + e.minute)
+    if len(ends) < 5:
+        return None
+    wake = round(statistics.median(ends))
+    tom = next((d for d in (plan or {}).get("days", []) if d["date"] == _iso(tmr)), None)
+    reasons = []
+    if tom and tom.get("commute"):                  # up in time for breakfast an hour before the ride in
+        hh, mm = (int(x) for x in route["depart"]["in"].split(":"))
+        if wake > hh * 60 + mm - 60:
+            wake = hh * 60 + mm - 60
+    extra = 0
+    if debt_h is not None and debt_h > 3:
+        extra += 30
+        reasons.append(f"{debt_h:.1f} h of sleep debt this week")
+    if tom and (tom["role"] in ("key", "long", "race") or tom.get("commute") == "workout"):
+        extra += 15
+        reasons.append(f"tomorrow's {tom['title'].lower()}")
+    bed = (wake - round(need_h * 60) - 15 - extra) % 1440
+
+    def clock(mins: int) -> str:
+        h, mm = divmod(mins, 60)
+        return f"{(h - 1) % 12 + 1}:{mm:02d} {'AM' if h < 12 else 'PM'}"
+    return {"bed": clock(bed), "wake": clock(wake), "need": need_h, "reasons": reasons, "workday": alike,
+            "ride_in": bool(tom and tom.get("commute"))}
+
+
+def _recap(acts: list[dict], by_day: dict, adjust: dict, plan: dict | None, today: date) -> dict:
+    """The week in two lines, for Sunday evening's notification: done against planned, fitness change, and next week."""
+    monday = today - timedelta(days=today.weekday())
+    rides = [a for a in acts if a.get("group") == "ride" and _iso(monday) <= a["start"][:10] <= _iso(today)]
+    done_h = round(sum(a["moving_s"] for a in rides) / 3600, 1)
+    planned_h = round(sum(p.get("minutes") or 0 for p in (adjust.get("planned") or {}).values()) / 60, 1)
+    commutes = len({a["start"][:10] for a in rides if a.get("commute")})
+    c0 = by_day.get(_iso(monday - timedelta(days=1)), {}).get("ctl")
+    c1 = by_day.get(_iso(today), {}).get("ctl")
+    fitness = f"Fitness {c0:.0f} → {c1:.0f}" if c0 is not None and c1 is not None else ""
+    nxt = next((w for w in (plan or {}).get("weeks", []) if w["week"] == _iso(monday + timedelta(days=7))), None)
+    ahead = ""
+    if nxt:
+        keys = ", ".join(dict.fromkeys(k for k in nxt["keys"] if not k.startswith("Race day"))) or "easy riding"
+        ahead = f"Next week: {nxt['hours']} h, {keys}" + (f", {nxt['commutes']} commute{'s' if nxt['commutes'] != 1 else ''}" if nxt["commutes"] else "")
+        ahead += f" ({nxt['phase']}{', an easy week' if nxt.get('recovery_week') else ''})."
+    body = " · ".join(x for x in (f"{len(rides)} ride{'s' if len(rides) != 1 else ''}" + (f", {commutes} commute day{'s' if commutes != 1 else ''}" if commutes else ""),
+                                   fitness) if x)
+    return {"week": _iso(monday), "title": f"Your week: {done_h} h ridden" + (f" of {planned_h} planned" if planned_h else ""),
+            "body": (body + ". " if body else "") + ahead}
+
+
+def _inside_rides(acts: list[dict], traces: dict[str, str] | None, th: dict, adjust: dict, today: date) -> dict | None:
+    """From the rides' minute-by-minute traces (streams.py): aerobic decoupling on the long steady rides, and how
+    this week's hard sessions measured up against the minutes at target they asked for."""
+    if not traces:
+        return None
+    tr = {k: json.loads(v) for k, v in traces.items()}
+    def usable(a: dict) -> dict | None:
+        s = tr.get(a["id"])
+        return s if s and not s.get("none") else None
+
+    since = _iso(today - timedelta(days=120))
+    long_rides = []
+    for a in acts:
+        steady = a.get("group") == "ride" and not a.get("commute") and a["start"][:10] >= since and a["moving_s"] >= 3600
+        if steady and (s := usable(a)) and (d := streams.decoupling(s, bool(a.get("indoor")))):
+            long_rides.append({"date": a["start"][:10], "name": a["name"], **d})
+    long_rides = long_rides[-8:]
+    lthr = th["lthr"]
+    sessions = []
+    for d, p in sorted((adjust.get("planned") or {}).items()):
+        if d >= today:
+            continue
+        steps = [st for leg in p["legs"] for st in leg["steps"]] if p.get("legs") else (p.get("steps") or [])
+        work = [st for st in steps if st["lo"] >= 88]
+        traced = [s for a in acts if a["start"][:10] == _iso(d) and a.get("group") == "ride" and (s := usable(a))]
+        if not work or not traced:
+            continue
+        expected = sum(st["min"] if st["min"] >= 4 else st["min"] / 2 for st in work)   # HR lags a short rep
+        bpm = min(st["lo"] for st in work) * lthr / 100 - 2
+        got = sum(streams.minutes_at(s, bpm) for s in traced)
+        sessions.append({"date": _iso(d), "title": p["title"], "expected": round(expected), "actual": got,
+                         "pct": min(100, round(got / expected * 100)) if expected else 100, "bpm": round(bpm)})
+    hint = None
+    if sum(1 for x in sessions if x["pct"] < 60) >= 2:
+        hint = (f"Two of this week's hard sessions came in well under their heart-rate targets. If they felt as hard as they "
+                f"should, your threshold heart rate ({lthr} bpm) is probably set too high: ride 30 minutes solo all-out, and put the "
+                "average HR of the last 20 minutes in config.toml as lthr.")
+    if not long_rides and not sessions:
+        return None
+    last = long_rides[-1] if long_rides else None
+    return {"decoupling": long_rides, "latest": {**last, "verdict": streams.verdict(last["pct"])} if last else None,
+            "sessions": sessions, "hint": hint, "traced": sum(1 for v in tr.values() if not v.get("none"))}
 
 
 def _commute_wx(wx: wxm.Wx, route: dict, d: date, commute: dict) -> dict | None:
@@ -296,11 +436,16 @@ def _rebooked(plan: dict, adjust: dict, today: date) -> list[str]:
     return []
 
 
-def _fuel(cfg: dict, plan: dict | None, rec: dict, commute_today: dict | None, today: date, profile: dict | None) -> dict | None:
+def _fuel(cfg: dict, plan: dict | None, rec: dict, commute_today: dict | None, today: date, profile: dict | None,
+          wx: wxm.Wx | None = None) -> dict | None:
     """Today's and tomorrow's meals (fitness/fuel.py), with today as readiness and the commute call left it."""
     if not plan:
         return None
     days = [dict(d) for d in plan["days"]]
+    for d in days[:3]:          # the bottles follow the forecast: the day's high when it's hot, else the middle of the day
+        o = wx.outlook(date.fromisoformat(d["date"])) if wx else None
+        if o:
+            d["ride_temp"] = o["hi"] if o["hi"] >= 24 else (o["hi"] + o["lo"]) / 2
     if days and days[0]["date"] == _iso(today):
         d0 = days[0]
         if commute_today and d0.get("commute") and commute_today["verdict"] == "skip" and commute_today.get("weather"):

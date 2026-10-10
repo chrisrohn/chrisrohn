@@ -2,6 +2,7 @@
 // data, shows the welcome screen until data arrives, takes a phone link's #d= or a pasted/picked data file, keeps it
 // on the device (and hands ride mode its plan), passes axe under its CSP, and opens offline once installed.
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { deflateRawSync } from "node:zlib";
 import { DATA, watch, axe } from "./fixtures.mjs";
 
@@ -127,6 +128,34 @@ test.describe("installable app", () => {
     await expect(page.locator("#bike")).toContainText("Re-drip the chain");
     await expect(page.locator("#bike [data-action=service]").first()).toBeHidden();      // no sync to log it with
     await expect(page.locator(".bar nav a[href='#race']")).toBeVisible();
+    expect(await axe(page)).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
+  test("shopping, the inside of the rides, tonight's bedtime, weight and a trainer workout file", async ({ page }) => {
+    const problems = watch(page);
+    const kitchen = { from: DATA.today, to: DATA.today, pudding: 6, veggie: 5, pudding_days: ["Mon"], veggie_days: ["Mon"], chicken: false,
+      buy: [{ item: "Frozen broccoli", amount: "2.8 lb (≈ 4 × 12 oz bags)" }], check: [{ item: "Chia seeds", amount: "12 tbsp (5 oz)" }], prep: ["Pudding jars (6): …"] };
+    const rides = { decoupling: [{ date: DATA.today, name: "Long ride", pct: 4.2, minutes: 130, by: "speed", indoor: false }],
+      latest: { date: DATA.today, name: "Long ride", pct: 4.2, minutes: 130, by: "speed", indoor: false, verdict: "holding: the aerobic engine lasts this long" },
+      sessions: [{ date: DATA.today, title: "Key session", expected: 36, actual: 30, pct: 83, bpm: 150 }], hint: null, traced: 12 };
+    const trainer = { ...DATA.plan.days[1], indoor: true, title: "Trainer workout", steps: [{ name: "Warm-up", min: 10, zone: "z2", lo: 81, hi: 89, cue: "" }, { name: "Threshold 1/3", min: 12, zone: "thr", lo: 95, hi: 100, cue: "Smooth" }] };
+    const days = DATA.plan.days.map((d, i) => i === 1 ? trainer : d);
+    await page.goto(phoneLink({ ...DATA, fuel: { ...DATA.fuel, kitchen }, rides, weight: null, plan: { ...DATA.plan, days },
+      now: { ...DATA.now, bedtime: { bed: "9:45 PM", wake: "6:00 AM", need: 8, reasons: ["tomorrow's key session"], workday: true, ride_in: true } } }));
+    await page.locator(".kitchen summary").click();
+    await expect(page.locator(".kitchen")).toContainText("Frozen broccoli");
+    await expect(page.locator(".kitchen")).toContainText("12 tbsp");
+    await expect(page.locator("#training")).toContainText("Aerobic decoupling");
+    await expect(page.locator("#training")).toContainText("30 of 36 planned minutes at 150+ bpm");
+    await expect(page.locator(".tonight")).toContainText("Lights out by 9:45 PM: up around 6:00 AM for the ride in");
+    await expect(page.locator(".fuel")).toContainText("Weigh in now and then");
+    await page.locator(".week-ahead li").nth(1).locator("summary").click();
+    const [file] = await Promise.all([page.waitForEvent("download"), page.locator("[data-zwo]").click()]);
+    expect(file.suggestedFilename()).toMatch(/trainer-workout\.zwo$/);
+    const xmlText = readFileSync(await file.path(), "utf8");
+    expect(xmlText).toContain('<SteadyState Duration="720" Power="0.97">');
+    expect(xmlText).toContain('<Warmup Duration="600"');
     expect(await axe(page)).toEqual([]);
     expect(problems).toEqual([]);
   });

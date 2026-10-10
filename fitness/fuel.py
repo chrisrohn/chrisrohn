@@ -161,7 +161,8 @@ def base(carbs: float | None, protein: float | None, low_fiber: bool = False, ki
 RIDE_FUEL = {"name": "Infinit Go Far", "carbs": 66, "sodium": 379, "protein": 4, "bottle_oz": 24}
 
 
-def bottles(minutes: float, rate: int, drink: dict, cages: int = 2, bladder_l: float = 0) -> dict:
+def bottles(minutes: float, rate: int, drink: dict, cages: int = 2, bladder_l: float = 0, temp_c: float | None = None,
+            units: str = "imperial") -> dict:
     """How to set the bottles for a ride and when to drink them. One serving per bottle at normal strength (Infinit's
     design: a bottle an hour), so the drink is also the water; when the day's carbs-an-hour target is above what a
     bottle an hour carries, a gel or chews make up the difference rather than a syrupy double-strength bottle. Past
@@ -186,7 +187,29 @@ def bottles(minutes: float, rate: int, drink: dict, cages: int = 2, bladder_l: f
     no_refill = (f"No refill on the route? Mix {num(servings / cages)} servings into each bottle and take the "
                  f"{bladder_l:g} L bladder with water only: a sip of water with every swig of the strong mix, or it sits in your gut."
                  if bag and bladder_l else "")
-    return {"servings": servings, "setup": setup, "sips": sips, "top_up": top_up, "sodium": round(drink["sodium"] * per_hour), "no_refill": no_refill}
+    sodium = round(drink["sodium"] * per_hour)
+    return {"servings": servings, "setup": setup, "sips": sips, "top_up": top_up, "sodium": sodium, "no_refill": no_refill,
+            "climate": climate(temp_c, per_hour, drink, sodium, bladder_l, units) if temp_c is not None else ""}
+
+
+def climate(temp_c: float, per_hour: float, drink: dict, sodium: int, bladder_l: float, units: str) -> str:
+    """Drinking for the day's temperature: sweat rate climbs steeply past the mid-20s °C, and with it the water and
+    sodium a bottle of mix an hour doesn't cover (ACSM fluid replacement position stand, 2007: 0.4–0.8 L an hour,
+    more in heat; ~300–600 mg sodium per litre of sweat lost, more for salty sweaters)."""
+    t = f"{round(temp_c * 9 / 5 + 32)}°F" if units == "imperial" else f"{round(temp_c)}°C"
+    vol = (lambda litres: f"{round(litres * 33.814)} oz") if units == "imperial" else (lambda litres: f"{round(litres * 1000, -1):g} ml")
+    mix_l = per_hour * drink["bottle_oz"] * 0.0295735
+    if temp_c >= 24:
+        want_l, want_na = (1.0, 800) if temp_c >= 29 else (0.8, 600)
+        extra = max(0.0, want_l - mix_l)
+        return (f"Hot ({t}): aim for about {vol(want_l)} of fluid and {want_na} mg of sodium an hour. The mix gives {vol(mix_l)} and {sodium} mg, "
+                f"so add {vol(extra)} of water an hour with an electrolyte tab"
+                + (", from the bladder if there's no refill" if bladder_l else " (refill at a store stop)") +
+                ". Drink 500 ml with a pinch of salt in the hour before you start, and slow down before you cook.")
+    if temp_c <= 5:
+        return (f"Cold ({t}): you won't feel thirsty, but drink on schedule anyway: cold-weather dehydration sneaks up. Fill an insulated "
+                "bottle with warm water so the mix stays drinkable and the valve doesn't freeze; keep gels in an inside pocket.")
+    return ""
 
 
 def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weight_kg: float | None, body: dict | None = None) -> dict:
@@ -216,9 +239,9 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
     carbs = protein = 0.0
     pudding_later = False
 
-    def add(slot: str, what: str, why: str, c: float = 0, p: float = 0, base_line: str = "") -> None:
+    def add(slot: str, what: str, why: str, c: float = 0, p: float = 0, base_line: str = "", recipe: str = "") -> None:
         nonlocal carbs, protein
-        meals.append({"slot": slot, "what": what, "why": why, **({"base": base_line} if base_line else {})})
+        meals.append({"slot": slot, "what": what, "why": why, **({"base": base_line} if base_line else {}), **({"recipe": recipe} if recipe else {})})
         carbs, protein = carbs + c, protein + p
 
     # ── breakfast ──
@@ -242,7 +265,7 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
         when = " at least 45 min before you leave: its fat and fiber digest slowly" if commute or (rides and ride_when == "morning") else ""
         add("Breakfast", f"Nutty Pudding{extra}{when}",
             f"{pudding['protein']} g protein, {pudding['carbs']} g carbs, {pudding['fiber']} g fiber ({pudding['note']}).",
-            c, pudding["protein"] - COLLAGEN)
+            c, pudding["protein"] - COLLAGEN, recipe="pudding")
 
     # ── lunch ──
     if t in ("load", "race"):
@@ -265,7 +288,7 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
         why = (f"{veggie['carbs'] + (CARB_SIDE if side else 0)} g carbs to refill what the ride used." if side and pudding_later and not weekday
                else f"{veggie['carbs'] + (CARB_SIDE if side else 0)} g carbs for the riding still to come." if side
                else f"{veggie['protein']} g protein, {veggie['carbs']} g carbs, {veggie['fiber']} g fiber: as it is, it fits the day.")
-        add("Lunch", what, why, veggie["carbs"] + (CARB_SIDE if side else 0), veggie["protein"])
+        add("Lunch", what, why, veggie["carbs"] + (CARB_SIDE if side else 0), veggie["protein"], recipe=n.get("lunch", "veggie"))
 
     # ── before, during and after the ride ──
     if rides and t != "race" and mins >= 45 and t in ("moderate", "hard", "long") and ride_when in ("evening", "commute"):
@@ -280,19 +303,19 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
     if rides and rate:
         on_bike = rate * mins / 60
         drink = {**RIDE_FUEL, **n.get("ride_fuel", {})}
-        b = bottles(mins, rate, drink, n.get("bottle_cages", 2), n.get("bladder_l", 0))
+        b = bottles(mins, rate, drink, n.get("bottle_cages", 2), n.get("bladder_l", 0), (day or {}).get("ride_temp"), cfg.get("athlete", {}).get("units", "imperial"))
         extra = f" On top, a gel or a few chews every hour (~{b['top_up']} g carbs)." if b["top_up"] >= 10 else ""
         add("On the bike", f"{rate} g carbs an hour, ~{_r10(on_bike)} g in all. Bottles: {b['setup']}. Start sipping in the first 15 min, "
             f"then {b['sips']}.{extra}",
             "Little and often absorbs best, and ride mode reminds you every 20 min. "
-            f"{drink['name']} carries ~{b['sodium']} mg sodium an hour: in heat, or if you finish crusted in salt, add an electrolyte tab to one bottle."
+            + (b["climate"] if b["climate"] else f"{drink['name']} carries ~{b['sodium']} mg sodium an hour: in heat, or if you finish crusted in salt, add an electrolyte tab to one bottle.")
             + (f" {b['no_refill']}" if b["no_refill"] else ""),
             on_bike, drink["protein"] * b["servings"])
     if t in ("hard", "long", "race"):
         if pudding_later:
             add("After the ride", "The Nutty Pudding, within an hour of finishing, with a banana",
                 "Its protein and the banana's carbs start the repair; this is when its fat and fiber don't get in the way.",
-                pudding["carbs"] + BANANA, pudding["protein"] - COLLAGEN)
+                pudding["carbs"] + BANANA, pudding["protein"] - COLLAGEN, recipe="pudding")
         else:
             add("After the ride", "Within an hour: a whey shake with fruit, or Greek yogurt with berries and honey",
                 "Protein and carbs early start the repair and refill the glycogen tomorrow's riding needs.",
@@ -358,4 +381,15 @@ def plan(days: list[dict], today: date, cfg: dict, weight_kg: float | None, prof
     return {"weight_kg": round(weight_kg, 1) if weight_kg else None,
             "today": day_plan(d0, d1, today, cfg, weight_kg, body),
             "tomorrow": day_plan(d1, d2, today + timedelta(days=1), cfg, weight_kg, body),
+            "kitchen": _kitchen(by, today, cfg, weight_kg, body),
             "recipes": {k: {f: v[f] for f in ("name", "kcal", "protein", "carbs", "fiber", "fat")} for k, v in RECIPES.items()}}
+
+
+def _kitchen(by: dict, today: date, cfg: dict, weight_kg: float | None, body: dict | None) -> dict | None:
+    """The next seven days' Blueprint meals, as a shopping list and prep plan (grocery.py)."""
+    from fitness import grocery
+
+    start = today + timedelta(days=1)
+    week = [day_plan(by.get(d.isoformat()), by.get((d + timedelta(days=1)).isoformat()), d, cfg, weight_kg, body)
+            for d in grocery.days_from(start) if d.isoformat() in by]
+    return grocery.week(week, cfg, start)

@@ -176,7 +176,8 @@ def baseline(series: list[float], floor: float) -> tuple[float, float] | None:
     return statistics.mean(series), max(statistics.pstdev(series), floor)
 
 
-def readiness(today: str, days: dict[str, dict], sleep: dict | None, form: dict | None, window: int = 60) -> dict | None:
+def readiness(today: str, days: dict[str, dict], sleep: dict | None, form: dict | None, window: int = 60,
+              custom: dict[str, float] | None = None) -> dict | None:
     if today not in days or days[today].get("empty"):
         return None
     t = date.fromisoformat(today)
@@ -199,10 +200,10 @@ def readiness(today: str, days: dict[str, dict], sleep: dict | None, form: dict 
             word = "above" if delta > 0 else "below"
             tone = "good" if good > 0 else "bad"
             reasons.append({"tone": tone, "text": f"{label} {value:g}{(' ' + unit) if unit else ''} — {abs(delta):.1f} {word} your 60-day norm ({mean:.1f} ± {sd:.1f})"})
-    weights = {k: MARKERS[k][1] for k in comps}
+    weights = {k: (custom or {}).get(k, MARKERS[k][1]) for k in comps}
     if sleep:
         comps["sleep"] = sleep["score"]
-        weights["sleep"] = 0.25
+        weights["sleep"] = (custom or {}).get("sleep", 0.25)
         if sleep["score"] < 60:
             reasons.append({"tone": "bad", "text": f"Sleep score {sleep['score']} ({sleep['label']}), {sleep['hours']:.1f} h"})
         elif sleep["score"] >= 85:
@@ -226,6 +227,49 @@ def readiness(today: str, days: dict[str, dict], sleep: dict | None, form: dict 
         reasons.append({"tone": "good", "text": "Every overnight marker inside your normal range"})
     return {"date": today, "score": round(score), "components": {k: round(v) for k, v in comps.items()}, "z": {k: round(v, 2) for k, v in z.items()},
             "illness": illness, "reasons": reasons}
+
+
+BASE_WEIGHTS = {**{k: v[1] for k, v in MARKERS.items()}, "sleep": 0.25}
+
+
+def personal_weights(ready: dict[str, dict], acts: list[dict], min_days: int = 20) -> dict | None:
+    """Which overnight markers actually predict your good days, and the readiness weights that follow.
+
+    "A good day" is measured, not felt: speed per heartbeat on your commute, against that leg's usual (same route,
+    so it's a daily performance test; wind adds noise, which the shrinkage absorbs). Each marker's weight grows with
+    its rank correlation to that, shrunk toward the defaults until there are enough days (n / (n + 30))."""
+    perf: dict[str, list[float]] = defaultdict(list)
+    for leg in ("in", "home"):
+        xs = [a for a in acts if a.get("commute") and a.get("leg") == leg and a.get("avg_hr") and a["moving_s"] > 0 and a["distance_m"] > 0]
+        if len(xs) < 10:
+            continue
+        efs = [a["distance_m"] / a["moving_s"] * 3.6 / a["avg_hr"] for a in xs]
+        med = statistics.median(efs)
+        mad = statistics.median(abs(e - med) for e in efs) * 1.4826 or 1e-6
+        for a, e in zip(xs, efs, strict=True):
+            perf[a["start"][:10]].append((e - med) / mad)
+    outcome = {d: statistics.mean(v) for d, v in perf.items()}
+    pairs: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for d, r in ready.items():
+        if d not in outcome:
+            continue
+        for k, z in (r.get("z") or {}).items():
+            pairs[k].append((z * MARKERS[k][0], outcome[d]))
+        if "sleep" in (r.get("components") or {}):
+            pairs["sleep"].append((r["components"]["sleep"], outcome[d]))
+    n = len({d for d in ready if d in outcome})
+    if n < min_days:
+        return None
+    rho = {k: spearman([x for x, _ in v], [y for _, y in v]) for k, v in pairs.items() if len(v) >= min_days}
+    rho = {k: r for k, r in rho.items() if r is not None}
+    if not rho:
+        return None
+    shrink = n / (n + 30)
+    raw = {k: BASE_WEIGHTS[k] * (1 + 2 * max(0.0, rho.get(k, 0.0)) * shrink) for k in BASE_WEIGHTS}
+    total = sum(raw.values())
+    weights = {k: round(v / total * sum(BASE_WEIGHTS.values()), 3) for k, v in raw.items()}
+    best = max(rho, key=lambda k: rho[k])
+    return {"weights": weights, "rho": {k: round(v, 2) for k, v in rho.items()}, "days": n, "best": best if rho[best] > 0.1 else None}
 
 
 def recommend(ready: dict | None, plan_today: dict | None = None) -> dict:
@@ -421,6 +465,36 @@ def commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: 
                    detail=f"{weather.describe(w, units)}. Ride it with a rain jacket, fenders and lights and re-drip the chain after, "
                           f"or drive and do the day's Plan B this evening. If you ride: {call['detail'][:1].lower()}{call['detail'][1:]}")
     return out
+
+
+def ride_home(call: dict, day: dict, plan_today: dict | None, now: datetime, depart: str) -> dict:
+    """The afternoon's second look, once you've ridden in: today's Body Battery and stress (as of the watch's last
+    sync) and the forecast for the ride home. A drained or stressful day turns the workout home into an easy ride;
+    storms on the way home say to wait or get a ride. Nothing changes after you've left."""
+    hh, mm = (int(x) for x in depart.split(":"))
+    leave = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if not (now.hour >= 12 and now <= leave + timedelta(minutes=45)):
+        return call
+    bb, stress, high_h = day.get("bb_now"), day.get("stress"), (day.get("stress_high_s") or 0) / 3600
+    planned = (plan_today or {}).get("commute")
+    if call.get("weather") and call["verdict"] == "skip":   # the forecast's storm, seen after you've already ridden in
+        return {**call, "afternoon": True, "title": "Storms on the ride home: wait or get a ride",
+                "detail": call["detail"] + " Leave a little later if it passes, or get a ride and leave the bike at work tonight."}
+    why = []
+    if bb is not None and bb <= (25 if planned == "workout" else 15):
+        why.append(f"Body Battery is down to {bb}")
+    if stress is not None and stress >= (50 if planned == "workout" else 60):
+        why.append(f"today's stress has averaged {stress}")
+    if high_h >= 2 and planned == "workout":
+        why.append(f"{high_h:.1f} h of high stress")
+    state = f"Body Battery {bb}" if bb is not None else ""
+    if why and planned in ("workout", "endurance") and call["verdict"] in ("ride", "wet"):
+        return {**call, "verdict": "easy", "afternoon": True, "title": "Ride home easy",
+                "detail": f"Afternoon check: {' and '.join(why)}. The work won't land today: Z1–Z2 all the way home, no intervals; "
+                          "the plan picks it up from what you actually ride."}
+    if bb is not None:
+        return {**call, "afternoon": True, "detail": call["detail"] + f" Afternoon check: {state}{f', stress {stress}' if stress is not None else ''}: the ride home stands."}
+    return call
 
 
 def _commute_call(ready: dict | None, plan_today: dict | None, today: date, cfg: dict, profile: dict | None, th: dict,

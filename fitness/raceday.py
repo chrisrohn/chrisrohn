@@ -45,7 +45,8 @@ def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: 
         gun = datetime.combine(race_day, datetime.min.time()).replace(hour=hh, minute=mm)
         minutes = r["hours"] * 60
         rate = fuel.on_bike_rate(minutes, race=True) or 60
-        b = fuel.bottles(minutes, rate, drink, n.get("bottle_cages", 2), n.get("bladder_l", 0))
+        w = wx.window(gun, minutes) if wx and race_day.isoformat() in wx.days else None
+        b = fuel.bottles(minutes, rate, drink, n.get("bottle_cages", 2), n.get("bladder_l", 0), w["temp_max"] if w else None, units)
         lthr = th.get("lthr")
         settle = f"{round(lthr * 0.92)}–{round(lthr * 0.97)} bpm" if lthr else "just under threshold"
         carbs_g = round(2.5 * weight_kg / 10) * 10 if weight_kg else None
@@ -61,11 +62,9 @@ def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: 
                   + (f", plus {b['top_up']} g an hour from gels or chews" if b["top_up"] else "") + "."),
         ]
         forecast = None
-        if wx and race_day.isoformat() in wx.days:
-            w = wx.window(gun, minutes)
-            if w:
-                forecast = {"line": wxm.describe(w, units), "kit": wxm.kit(w["feels"], w["verdict"] in ("wet", "showers")),
-                            "warm": "Bring a warm jacket and dry clothes for the finish." if w["feels"] < 12 else ""}
+        if w:
+            forecast = {"line": wxm.describe(w, units), "kit": wxm.kit(w["feels"], w["verdict"] in ("wet", "showers")),
+                        "warm": "Bring a warm jacket and dry clothes for the finish." if w["feels"] < 12 else ""}
         before = [d for d in plan["days"] if d["date"] < r["date"] and (d["role"] in ("key", "long") or d.get("commute") == "workout")]
         before = [d for d in before if date.fromisoformat(d["date"]) >= today]
         pack = ["Helmet, shoes, glasses, gloves", "Race number and timing chip", f"{b['servings']:g} servings of {drink['name']} and the gels",
@@ -76,7 +75,7 @@ def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: 
             "start": _clock(gun), "start_set": bool(conf.get("start")),
             "timeline": [{"at": _clock(t), "what": w} for t, w in timeline],
             "strategy": START.get(r["kind"], START["gravel"]) + f" Hold {settle} once the start settles; above it only for the moves that matter.",
-            "fuel": {"rate": rate, **{k: b[k] for k in ("setup", "sips", "top_up", "sodium", "no_refill")}},
+            "fuel": {"rate": rate, **{k: b[k] for k in ("setup", "sips", "top_up", "sodium", "no_refill", "climate")}},
             "forecast": forecast,
             "bike": bike.prerace(up, r) if up else [],
             "pack": pack,
