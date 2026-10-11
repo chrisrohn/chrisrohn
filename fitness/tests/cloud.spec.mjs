@@ -52,7 +52,7 @@ test.describe("GitHub sync", () => {
     expect(await axe(page)).toEqual([]);
     await page.locator("#cloud-token").fill("github_pat_good");
     await page.locator("#cloud-save").click();
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     await expect(page.locator("#databar")).toContainText("Synced");
     expect(JSON.parse(await page.evaluate(() => localStorage.getItem("fitness-cloud") || "{}"))).toMatchObject({ repo: REPO, branch: "main" });
     expect(await axe(page)).toEqual([]);
@@ -80,7 +80,7 @@ test.describe("GitHub sync", () => {
     expect(gh.dispatches[0]).toEqual({ ref: "main", inputs: { action: "sync", code: "" } });
     await expect(page.locator("#databar [data-action=sync]")).toBeVisible({ timeout: 15_000 });
     await page.reload();
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     await page.waitForTimeout(500);
     expect(gh.dispatches.length).toBe(1);
   });
@@ -90,6 +90,7 @@ test.describe("GitHub sync", () => {
     await page.goto("/fitness/");
     await signIn(page);
     await page.reload();
+    await page.locator("#tab-ride").click();
     const done = page.locator("#bike [data-action=service][data-code=drip]");
     await expect(done).toBeVisible();
     page.once("dialog", d => d.accept());
@@ -122,13 +123,13 @@ test.describe("GitHub sync", () => {
     await page.goto("/fitness/");
     await signIn(page);
     await page.reload();
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     await page.locator("#databar [data-action=sync]").click();
     await expect(page.locator("#job-text")).toContainText("Syncing");
     await expect.poll(() => gh.dispatches.length).toBe(1);
     expect(gh.dispatches[0]).toEqual({ ref: "main", inputs: { action: "sync", code: "" } });
     await expect(page.locator("#databar [data-action=sync]")).toBeVisible({ timeout: 15_000 });   // reloaded with the run's results
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
   });
 
   test("connecting Garmin: the code Garmin emails goes back as its own run", async ({ page }) => {
@@ -152,7 +153,7 @@ test.describe("GitHub sync", () => {
     await page.locator("[data-action=send-code]").click();
     await expect.poll(() => gh.dispatches.map(d => d.inputs.action)).toEqual(["connect-garmin", "garmin-code"]);
     expect(gh.dispatches[1].inputs.code).toBe("482913");
-    await expect(page.locator("#load")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("#tab-today")).toBeVisible({ timeout: 15_000 });
     await expect(page.locator("#databar [data-action=connect-strava]")).toBeVisible();   // Strava still to do
   });
 

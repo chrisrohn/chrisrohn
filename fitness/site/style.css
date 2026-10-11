@@ -78,7 +78,7 @@ h2 { font-size: var(--fs-title); line-height: 1.05; letter-spacing: var(--track-
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* the one label style: kickers, column heads, tags, buttons, axis notes */
-h3, .label, .tile .k, .badge, button.chip, a.chip, .phase, .tbl th, details > summary, .bar nav a,
+h3, .label, .tile .k, .badge, button.chip, a.chip, .phase, .tbl th, details > summary, .tabs button,
 .call > .sub:first-child, .card > .head h2::before, .tip .t, .rhead .when {
   font-size: var(--fs-label); font-weight: 700; line-height: var(--lh-snug); text-transform: uppercase; letter-spacing: var(--track-label);
 }
@@ -94,9 +94,27 @@ header.top { position: sticky; top: 0; z-index: 5; background: var(--band); colo
 .bar { max-width: 1200px; margin: 0 auto; padding: var(--sp-3) var(--gutter); display: flex; align-items: center; gap: var(--sp-2) var(--sp-6); flex-wrap: wrap; }
 .bar h1 { flex: 1 1 auto; color: var(--on-band); }   /* row 1: title and tools; row 2: the sections — the Unigrid's two tiers */
 .bar h1::after { content: ""; display: inline-block; width: .45em; height: .45em; background: var(--accent); margin-left: .3em; }
-.bar nav { order: 3; flex-basis: 100%; display: flex; gap: 0 var(--sp-5); overflow-x: auto; scrollbar-width: none; margin-bottom: calc(-1 * var(--sp-1)); }
-.bar nav a { color: var(--on-band); opacity: .72; text-decoration: none; white-space: nowrap; padding: var(--sp-2) 0; border-bottom: var(--rule-minor) solid transparent; }
-.bar nav a:hover, .bar nav a:focus-visible { opacity: 1; border-bottom-color: var(--accent); outline: 0; }
+/* the tabs: the band's second tier on a wide screen; on a phone a bar along the bottom, under the thumb */
+.tabs { order: 3; flex-basis: 100%; margin-bottom: calc(-1 * var(--sp-1)); }
+.tabs-in { display: flex; gap: 0 var(--sp-6); }
+.tabs button { font-family: inherit; appearance: none; background: none; border: 0; border-bottom: var(--rule-minor) solid transparent; border-radius: 0; color: var(--on-band);
+  opacity: .72; padding: var(--sp-2) 0; min-height: var(--tap); cursor: pointer; white-space: nowrap; position: relative; }
+.tabs button:hover { opacity: 1; }
+.tabs button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: -2px; }
+.tabs button[aria-selected=true] { opacity: 1; border-bottom-color: var(--accent); }
+.tabs .dot { display: inline-block; width: 6px; height: 6px; background: var(--accent); margin-left: var(--sp-1); vertical-align: .5em; }
+.panel { display: grid; gap: var(--sp-8); outline: 0; }
+.panel[hidden] { display: none; }
+@media (max-width: 760px) {
+  .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; margin: 0; background: var(--band); border-top: var(--rule-hair) solid var(--on-band);
+    padding: 0 max(var(--sp-2), env(safe-area-inset-right)) env(safe-area-inset-bottom) max(var(--sp-2), env(safe-area-inset-left)); }
+  .tabs-in { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; }
+  .tabs button { min-height: 56px; padding: 0; border-bottom: 0; border-top: 3px solid transparent; text-align: center; }
+  .tabs button[aria-selected=true] { border-top-color: var(--accent); }
+  .tabs .dot { position: absolute; top: var(--sp-3); margin-left: 2px; }
+  body:has(.tabs:not([hidden])) { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+  .bar:has(.tabs:not([hidden])) #ride-link { display: none; }       /* the Ride tab opens it, a thumb's reach away */
+}
 .tools { display: flex; gap: var(--sp-2); }
 .tools .chip, .tools a.chip { color: var(--on-band); border-color: var(--on-band); }
 .tools .chip:hover, .tools a.chip:hover { background: var(--on-band); color: var(--band); }
@@ -221,7 +239,6 @@ details.table .scroll { max-height: 264px; overflow: auto; margin-top: var(--sp-
   .tbl.plan td.r { padding-left: 0; }
   .tbl.plan tr.today { background: var(--raised); box-shadow: 0 0 0 var(--sp-2) var(--raised); }
   .tbl.plan tr.today td { background: transparent; }
-  .bar nav { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--sp-6)), transparent); mask-image: linear-gradient(to right, #000 calc(100% - var(--sp-6)), transparent); padding-right: var(--sp-6); }
 }
 .nowrap .phase { margin-top: var(--sp-1); }
 .phase { display: inline-flex; align-items: center; min-height: 18px; padding: 0 5px; border: 1px solid var(--ink); color: var(--ink); white-space: nowrap; }
@@ -274,6 +291,13 @@ form.pressure button { min-height: 40px; }
 .shop b { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .kitchen h3, #training h4 { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: var(--track-label); }
 .plan-b, .overnight, .tonight { margin: 0; max-width: 60ch; text-wrap: pretty; }
+/* Today's last lines: tomorrow, and the day's eating, each a tap from its tab */
+.tomorrow, .fuel-line { margin: var(--sp-4) 0 0; padding-top: var(--sp-3); border-top: var(--rule-hair) solid var(--hair); max-width: 60ch; text-wrap: pretty; }
+.tomorrow .label, .fuel-line .label { margin-right: var(--sp-2); }
+.tomorrow a, .fuel-line a { color: var(--ink); font-weight: 700; white-space: nowrap; margin-left: var(--sp-1); }
+.tiles.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 600px) { .tiles.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ride-cta p { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); margin: 0; }
 .plan-b .label, .overnight .label, .tonight .label { margin-right: var(--sp-2); }
 .overnight .label { color: var(--accent-ink); }
 .week-ahead { display: grid; gap: var(--sp-2); border-top: var(--rule-hair) solid var(--ink); padding-top: var(--sp-3); max-width: 64ch; }
@@ -380,5 +404,6 @@ footer p { max-width: 64ch; }
 }
 @media print {
   header.top { position: static; }
-  .tools { display: none; }
+  .tools, .tabs { display: none; }
+  .panel[hidden] { display: grid; }
 }

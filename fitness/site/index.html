@@ -23,10 +23,6 @@
   <header class="top">
     <div class="bar">
       <h1>Training &amp; Recovery</h1>
-      <nav aria-label="Sections">
-        <a href="#today">Today</a><a href="#race">Race</a><a href="#season">Season</a><a href="#load">Load</a><a href="#sleep">Sleep</a>
-        <a href="#recovery">Recovery</a><a href="#training">Training</a><a href="#insights">Insights</a><a href="#bike">Bike</a><a href="#device">Data</a>
-      </nav>
       <div class="tools">
         <button type="button" class="chip" id="install" hidden>Install</button>
         <a class="chip" id="ride-link" href="ride.html">Ride mode</a>
@@ -37,6 +33,7 @@
           <button type="button" class="chip" data-theme-pick="light" aria-pressed="false"><span class="long">Light</span><span class="short" aria-hidden="true">☀</span><span class="sr">Light</span></button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false"><span class="long">Dark</span><span class="short" aria-hidden="true">☾</span><span class="sr">Dark</span></button>
         </div>
       </div>
+      <nav id="tabs" class="tabs" aria-label="Sections" hidden></nav>
     </div>
   </header>
   <section id="databar" class="databar" aria-label="Data on this device" hidden></section>
