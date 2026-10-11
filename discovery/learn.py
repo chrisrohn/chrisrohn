@@ -13,7 +13,9 @@ they rejected. "Reached the screen" means it ranked within `shown_rank` of that 
 shortlist, so a source that emits 900 tracks a day is not punished for the 850 nobody ever saw.
 
 Each source, tag, artist and artist kind then gets a smoothed keep rate against the overall keep rate, expressed as
-a bounded log2 ratio that score.py adds to the score. The artist kind is how the profile knows the act — `direct`
+a bounded log2 ratio that score.py adds to the score. The bound grows with the evidence: a feature seen a handful of
+times can only nudge a score (four keeps from a blog when you keep a fifth of everything is a hint, not a verdict),
+and it takes `2 × prior` sightings to earn the full `max_adjust`. The artist kind is how the profile knows the act — `direct`
 (you play them), `saved` (in your playlists), `similar`, `genre`, or `none` — banded by affinity (`kind_band`):
 on 2026-09-18 the acts you play kept at 32%, similar artists at 8% and genre acts at 5%, while an act with ten
 songs in the playlists kept at 42% and one with a single song at 5%, and no fixed weight can hold all of that. Old outcomes fade with a half-life (`half_life_days`) so last season's
@@ -198,7 +200,8 @@ def learn(outs: list[dict], cfg: dict | None = None, *, today: date | None = Non
     for kind, table in counts.items():
         for name, (n, k, shown, raw_k) in table.items():
             rate = (k + prior * base) / (n + prior)
-            adj = max(-cap, min(cap, math.log2(rate / base))) if shown >= min_n else 0.0
+            bound = cap * min(1.0, shown / (2 * prior)) if prior > 0 else cap    # thin evidence moves a score a little: the full cap after 2 × prior sightings
+            adj = max(-bound, min(bound, math.log2(rate / base))) if shown >= min_n else 0.0
             result[kind][name] = {"n": int(shown), "k": int(raw_k), "rate": round(rate, 4), "adj": round(adj, 3)}
     return result
 

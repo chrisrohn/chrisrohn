@@ -4,7 +4,8 @@
  * The same maths as discovery/learn.py, on the ratings this device and its Drive mirror know: every rated track kept
  * the sources, tags and artist it had when it was rated, so each source, blog, tag and artist gets a smoothed keep
  * rate against the account's overall keep rate. Tracks that have sat unrated in the feed for a few days count as a
- * weak pass. The bounded log2 ratio is added to the build's score and drives the default sort. The build learns the
+ * weak pass. The bounded log2 ratio is added to the build's score and drives the default sort; the bound grows with the
+ * evidence, so a feature seen a handful of times only nudges a score. The build learns the
  * same thing from the playlists a few days later; here it is immediate, and it knows about local skips. */
 import { state, items, hiddenBy } from "./state.js";
 
@@ -85,7 +86,8 @@ export function learnLocal() {
     }
     for (const kind of FAMILIES) for (const [name, [n, k, shown]] of Object.entries(counts[kind])) {
       const rate = (k + PRIOR * base) / (n + PRIOR);
-      learned[kind][name] = { n: shown, k, rate, adj: shown >= MIN_EXPOSURES ? Math.max(-CAP, Math.min(CAP, Math.log2(rate / base))) : 0 };
+      const bound = CAP * Math.min(1, shown / (2 * PRIOR));   // thin evidence moves a score a little: the full cap after 2 × PRIOR sightings
+      learned[kind][name] = { n: shown, k, rate, adj: shown >= MIN_EXPOSURES ? Math.max(-bound, Math.min(bound, Math.log2(rate / base))) : 0 };
     }
   }
   cache = { version, learned };

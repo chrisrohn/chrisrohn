@@ -478,7 +478,7 @@ Everything lives in `discovery/config.yaml`:
 - `ranking.weights` — how much artist affinity vs. tags vs. editorial picks vs. freshness vs. what you kept matter;
   `freshness_days` is how long a release keeps its freshness bonus, `undated_freshness` what a dateless item gets.
 - `learn` — the outcome learning: `grace_days` before a shown track is judged, `pass_weight` for tracks never filed,
-  `prior` pseudo-observations before a source or tag moves anything, `min_exposures`, `max_adjust`.
+  `prior` pseudo-observations before a source or tag moves anything, `min_exposures`, `max_adjust` (the full clamp after 2 × `prior` sightings: thin evidence only nudges).
 - `profile.everynoise_genres` + `python -m discovery seed-everynoise` — harvest the frozen Everynoise genre pages
   as one-time seed artists (commit `data/seeds_everynoise.json`).
 
