@@ -199,7 +199,8 @@ def readiness(today: str, days: dict[str, dict], sleep: dict | None, form: dict 
         if abs(z[key]) >= 1:
             word = "above" if delta > 0 else "below"
             tone = "good" if good > 0 else "bad"
-            reasons.append({"tone": tone, "text": f"{label} {value:g}{(' ' + unit) if unit else ''} — {abs(delta):.1f} {word} your 60-day norm ({mean:.1f} ± {sd:.1f})"})
+            reasons.append({"tone": tone, "dir": "up" if delta > 0 else "down",
+                            "text": f"{label} {value:g}{(' ' + unit) if unit else ''} — {abs(delta):.1f} {word} your 60-day norm ({mean:.1f} ± {sd:.1f})"})
     weights = {k: (custom or {}).get(k, MARKERS[k][1]) for k in comps}
     if sleep:
         comps["sleep"] = sleep["score"]
@@ -216,11 +217,12 @@ def readiness(today: str, days: dict[str, dict], sleep: dict | None, form: dict 
         if form["tsb"] < -10:
             p = min(20, (-10 - form["tsb"]) * 0.6)
             penalty += p
-            reasons.append({"tone": "bad", "text": f"Form {form['tsb']:+.0f}: carrying real fatigue (−{p:.0f})"})
+            reasons.append({"tone": "bad", "dir": "down",
+                            "text": f"Form {form['tsb']:+.0f}: {'overreaching' if form['tsb'] < -30 else 'productive fatigue, still in the legs'} (−{p:.0f})"})
         if form.get("acwr") and form["acwr"] > 1.3:
             p = min(15, (form["acwr"] - 1.3) * 40)
             penalty += p
-            reasons.append({"tone": "bad", "text": f"Acute:chronic load {form['acwr']:.2f} — a spike over your 4-week norm (−{p:.0f})"})
+            reasons.append({"tone": "bad", "dir": "up", "text": f"Acute:chronic load {form['acwr']:.2f} — a spike over your 4-week norm (−{p:.0f})"})
     score = clamp(score - penalty)
     illness = z.get("rhr", 0) >= 2 and (z.get("resp", 0) >= 1.5 or z.get("sleep_stress", 0) >= 1.5)
     if not reasons:

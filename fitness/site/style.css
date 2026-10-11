@@ -148,8 +148,11 @@ h3 { margin-bottom: var(--sp-3); }
 .badge.unknown i { background: var(--muted); }
 .reasons { list-style: none; margin: 0; padding: var(--sp-3) 0 0; display: grid; gap: var(--sp-2); border-top: var(--rule-hair) solid var(--ink); max-width: 60ch; }
 .reasons li { display: grid; grid-template-columns: var(--sp-5) 1fr; align-items: baseline; text-wrap: pretty; }
-.reasons li::before { content: "▲"; font-size: var(--fs-label); color: var(--good-ink); }
-.reasons li.bad::before { content: "▼"; color: var(--crit); }
+.reasons li::before { content: "●"; font-size: var(--fs-label); color: var(--good-ink); }
+.reasons li.up::before { content: "▲"; }
+.reasons li.down::before { content: "▼"; }
+.reasons li.bad::before { color: var(--crit); }
+.meter .raw { color: var(--ink-2); font-weight: 400; margin-left: var(--sp-1); }
 
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--sp-5); }
 .tile { border-top: var(--rule-hair) solid var(--ink); padding: var(--sp-2) 0 var(--sp-4); display: grid; gap: var(--sp-1); align-content: start; }

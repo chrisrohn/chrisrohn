@@ -245,10 +245,16 @@ window.startDashboard = D => {
   const shortName = name => name.replace(/^Bell's /, "").replace(/ Cometh Challenge$/, "");
   const LEVEL = { hard: "Go hard", moderate: "Train", easy: "Easy", rest: "Rest", unknown: "Waiting for data" };
   const formWord = t => t == null ? "" : t > 15 ? "very fresh" : t > 5 ? "fresh" : t > -10 ? "neutral" : t > -30 ? "productive fatigue" : "overreaching";
-  const tile = (k, v, unit, d, tone) => `<div class="tile"><span class="k">${esc(k)}</span><span class="v num">${v}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="d">${tone ? `<span class="tag ${tone}">${tone === "good" ? "▲" : "▼"}</span> ` : ""}${d}</span></div>`;
+  // colour says good or bad; the glyph says which way the number moved (● when it has no direction)
+  const tile = (k, v, unit, d, tone, dir = "") => `<div class="tile"><span class="k">${esc(k)}</span><span class="v num">${v}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="d">${tone ? `<span class="tag ${tone}" aria-hidden="true">${dir === "up" ? "▲" : dir === "down" ? "▼" : "●"}</span> ` : ""}${d}</span></div>`;
   const COMP = { sleep: "Sleep score", rhr: "Resting HR", sleep_stress: "Overnight stress", bb_wake: "Body Battery at wake", resp: "Respiration" };
   const SLEEP_PARTS = { duration: "Duration", deep: "Deep sleep", rem: "REM sleep", continuity: "Continuity", calm: "Overnight calm" };
-  const meters = (obj, names) => `<div class="meters">${Object.entries(obj).map(([k, v]) => `<div class="meter"><span>${esc(names[k] || k)}</span><span class="track"><span class="fill" style="display:block;width:${Math.max(2, v)}%"></span></span><b class="num">${v}</b></div>`).join("")}</div>`;
+  const raw = k => {   // today's reading for a readiness marker, as recorded (Body Battery 5, not its score)
+    if (k === "sleep") return now.sleep ? `${now.sleep.score}` : "";
+    const M = D.markers && D.markers[k], x = M && M.series.find(r => r.date === D.today);
+    return x && x.v != null ? `${x.v}${M.unit ? ` ${M.unit}` : ""}` : "";
+  };
+  const meters = (obj, names) => `<div class="meters">${Object.entries(obj).map(([k, v]) => `<div class="meter"><span>${esc(names[k] || k)}${raw(k) && k !== "sleep" ? ` <small class="raw">${esc(raw(k))}</small>` : ""}</span><span class="track"><span class="fill" style="display:block;width:${Math.max(2, v)}%"></span></span><b class="num">${v}</b></div>`).join("")}</div>`;
 
   // a tag marks where a phase (or the trainer season) starts, not every row inside it
   const chipFor = (d, prev) => (!prev || prev.phase !== d.phase || prev.indoor !== d.indoor)
@@ -549,14 +555,14 @@ window.startDashboard = D => {
         <span class="badge ${esc(rec.level)}"><i></i>${esc(LEVEL[rec.level] || rec.level)}</span>
         <div class="title">${esc(rec.title)}</div>
         <p class="detail">${esc(rec.detail)}</p>
+        ${adjustedBlock()}
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
-        ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
+        ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""} ${r.dir || ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${planB(pToday, rec, rd)}
         ${overnightBlock()}
         ${weatherBlock()}
         ${bedBlock()}
         ${weekBlock()}
-        ${adjustedBlock()}
         ${commuteBlock()}
         ${fuelBlock()}
         ${D.phone_href || D.ride_qr ? `<details class="phone"><summary>Phone app</summary>
@@ -570,14 +576,14 @@ window.startDashboard = D => {
       </div>
       <div class="card">
         <div class="tiles">
-          ${tile("Readiness", rd ? rd.score : "—", "/100", rAvg != null && rd ? `${signed(rd.score - rAvg)} vs 7-day avg` : "needs 14 nights", rd ? (rd.score >= 60 ? "good" : "bad") : "")}
+          ${tile("Readiness", rd ? rd.score : "—", "/100", rAvg != null && rd ? `${signed(rd.score - rAvg)} vs 7-day avg` : "needs 14 nights", rd ? (rd.score >= 60 ? "good" : "bad") : "", rd && rAvg != null ? (rd.score - rAvg >= 0.5 ? "up" : rd.score - rAvg <= -0.5 ? "down" : "") : "")}
           ${tile("Sleep score", sl ? sl.score : "—", "", sl ? `${esc(sl.label)} · ${hrs(sl.hours)}` : "no sleep logged", sl ? (sl.score >= 80 ? "good" : sl.score < 60 ? "bad" : "") : "")}
           ${tile("Form (TSB)", signed(form.tsb), "", esc(formWord(form.tsb)))}
           ${tile("Fitness (CTL)", r0(form.ctl), "", form.ramp != null ? `${signed(form.ramp)} this week` : "")}
           ${tile("Fatigue (ATL)", r0(form.atl), "", form.acwr != null ? `ACWR ${form.acwr.toFixed(2)}${form.acwr > 1.3 ? " · spike" : form.acwr < 0.8 ? " · detraining" : " · sweet spot"}` : "")}
           ${tile("Sleep debt", now.sleep_debt == null ? "—" : now.sleep_debt.toFixed(1), "h", `last 7 nights vs ${D.need_hours} h need`, now.sleep_debt != null ? (now.sleep_debt > 3 ? "bad" : "good") : "")}
         </div>
-        ${rd ? `<h3 class="mt-6">What went into readiness</h3>${meters(rd.components, COMP)}${personalNote()}` : ""}
+        ${rd ? `<h3 class="mt-6">What went into readiness</h3>${meters(rd.components, COMP)}<p class="sub mt-3">Each bar is that marker's score out of 100, where 75 is your normal; today's actual reading is beside its name.</p>${personalNote()}` : ""}
       </div>
     </section>`);
 

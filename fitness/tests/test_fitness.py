@@ -887,3 +887,16 @@ def test_a_missed_commute_workout_still_owes_its_workout(cfg):
     a = adapt(date(2026, 9, 30), 6, c, {}, set(), state)                          # Tuesday's ride didn't happen
     assert any("and with it the week's workout" in n for n in a["notes"])
     assert "key" in a["roles"].values() or any("No free day" in n for n in a["notes"])
+
+
+def test_readiness_reasons_say_which_way_each_marker_moved():
+    days = {}
+    for i in range(30):
+        d = (date(2026, 9, 1) + timedelta(days=i)).isoformat()
+        days[d] = {"rhr": 50 + (i % 3), "bb_wake": 60 + (i % 5) * 3, "sleep": {"avg_stress": 20 + (i % 4), "resp": 14 + (i % 2) * 0.4}}
+    days["2026-10-01"] = {"rhr": 51, "bb_wake": 5, "sleep": {"avg_stress": 21, "resp": 16}}
+    r = m.readiness("2026-10-01", days, None, {"tsb": -14, "acwr": 1.0})
+    by = {x["text"].split(" ")[0]: x for x in r["reasons"]}
+    assert by["Body"]["dir"] == "down" and by["Body"]["tone"] == "bad"
+    assert by["Sleeping"]["dir"] == "up" and by["Sleeping"]["tone"] == "bad"
+    assert by["Form"]["text"].startswith("Form -14: productive fatigue")

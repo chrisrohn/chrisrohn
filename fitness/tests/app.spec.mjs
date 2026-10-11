@@ -160,6 +160,24 @@ test.describe("installable app", () => {
     expect(problems).toEqual([]);
   });
 
+  test("the right-hand numbers say the same thing as the call: direction, raw readings, the reason for the call", async ({ page }) => {
+    const rd = { ...DATA.now.readiness, score: 63, components: { rhr: 65, bb_wake: 48, resp: 38, sleep: 82 },
+      reasons: [{ tone: "bad", dir: "down", text: "Body Battery at wake 5 — 43.9 below your 60-day norm (48.9 ± 20.7)" },
+                { tone: "bad", dir: "up", text: "Sleeping respiration 16 brpm — 2.0 above your 60-day norm (14.0 ± 0.7)" }] };
+    const readiness = [...DATA.readiness.slice(0, -8), ...Array.from({ length: 7 }, (_, i) => ({ date: `x${i}`, score: 75 })), { date: DATA.today, score: 63 }];
+    const markers = { ...DATA.markers, bb_wake: { ...DATA.markers.bb_wake, series: [...DATA.markers.bb_wake.series.slice(0, -1), { date: DATA.today, v: 5, mean: 48.9, sd: 20.7 }] } };
+    const plan = { ...DATA.plan, adjustments: ["Today's long ride didn't happen."] };
+    await page.goto(phoneLink({ ...DATA, readiness, markers, plan, now: { ...DATA.now, readiness: rd } }));
+    const tile = page.locator(".tile").filter({ hasText: "Readiness" });
+    await expect(tile).toContainText("−12 vs 7-day avg");
+    await expect(tile.locator(".tag")).toHaveText("▼");                                    // down, not a green "up"
+    await expect(page.locator(".meter").filter({ hasText: "Body Battery at wake" }).locator(".raw")).toHaveText("5");
+    await expect(page.locator(".reasons li").nth(1)).toHaveClass(/up/);                   // breathing rate: above normal, and bad
+    const call = page.locator("#today .call");
+    expect(await call.locator(".adjusted").evaluate(el => el.compareDocumentPosition(document.querySelector(".week-ahead")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+    expect(await axe(page)).toEqual([]);
+  });
+
   test("opens offline once the service worker has it", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
