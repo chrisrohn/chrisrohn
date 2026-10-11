@@ -25,6 +25,7 @@
   ],
   "shortcuts": [
     { "name": "Ride mode", "short_name": "Ride", "description": "Live heart rate, today's session as timed steps", "url": "./ride.html?source=shortcut", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Today", "description": "Today's call", "url": "./?source=shortcut#today", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+    { "name": "Today", "description": "Today's call", "url": "./?source=shortcut#today", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "This week", "short_name": "Week", "description": "The next 7 days and race day", "url": "./?source=shortcut#plan", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

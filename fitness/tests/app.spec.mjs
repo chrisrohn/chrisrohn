@@ -54,12 +54,13 @@ test.describe("installable app", () => {
   test("a phone link brings the dashboard, keeps it on the device, and hands ride mode its plan", async ({ page }) => {
     const problems = watch(page);
     await page.goto(phoneLink(DATA));
-    await expect(page.locator("#load")).toBeVisible();
-    await expect(page.locator("#season")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     expect(new URL(page.url()).hash).toBe("");                                   // the data leaves the address bar at once
+    await page.locator("#tab-plan").click();
+    await expect(page.locator("#season")).toBeVisible();
     await expect(page.locator("#databar")).toContainText("Data from");
     await page.reload();                                                         // kept on this device
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     await page.goto("/fitness/ride.html");                                       // ride mode reads the same copy
     await expect(page.locator("#day option").first()).toContainText(DATA.ride.days[0].title);
     await page.goto("/fitness/");
@@ -68,7 +69,7 @@ test.describe("installable app", () => {
     await page.locator("#import [data-action=forget]").click();
     await expect(page.locator(".welcome")).toBeVisible();
     await page.goto(phoneLink(DATA));                                            // a link opened while the app is up
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     expect(problems).toEqual([]);
   });
 
@@ -76,7 +77,7 @@ test.describe("installable app", () => {
     await page.goto("/fitness/");
     await page.locator(".welcome [data-action=import]").click();
     await page.locator("#import-file").setInputFiles({ name: "fitness-data.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(DATA)) });
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     await page.waitForLoadState("load");
     expect(await axe(page)).toEqual([]);
   });
@@ -97,7 +98,7 @@ test.describe("installable app", () => {
   test("says what the plan did about a session that didn't happen", async ({ page }) => {
     const moved = { ...DATA, plan: { ...DATA.plan, adjustments: ["Saturday's long ride didn't happen: it's on today instead."] } };
     await page.goto(phoneLink(moved));
-    await expect(page.locator(".adjusted")).toContainText("Saturday's long ride didn't happen: it's on today instead.");
+    await expect(page.locator("#today .adjusted")).toContainText("Saturday's long ride didn't happen: it's on today instead.");
     expect(await axe(page)).toEqual([]);
   });
 
@@ -106,6 +107,7 @@ test.describe("installable app", () => {
     await page.goto(phoneLink({ ...DATA, plan: { ...DATA.plan, days }, now: { ...DATA.now, last_night: null } }));
     await expect(page.locator(".plan-b")).toContainText("Rain or short on time");
     await expect(page.locator(".overnight")).toContainText("Last night isn't in yet");
+    await page.locator(".tomorrow [data-tab=plan]").click();                   // tomorrow's line opens the week
     const week = page.locator(".week-ahead li");
     await expect(week).toHaveCount(7);
     await expect(week.first()).toContainText("Today");
@@ -123,11 +125,12 @@ test.describe("installable app", () => {
     await expect(page.locator(".weather")).toContainText("Best window · 5:00 PM–6:00 PM");
     await expect(page.locator(".weather")).toContainText("Wear: Arm and knee warmers");
     await expect(page.locator(".week-ahead li").nth(2).locator(".wx")).toContainText("70%");
+    await page.locator("#tab-plan").click();
     await expect(page.locator("#race .race-day").first()).toContainText("Race morning");
+    await page.locator("#tab-ride").click();
     await expect(page.locator("#bike .upkeep li").first()).toBeVisible();
     await expect(page.locator("#bike")).toContainText("Re-drip the chain");
     await expect(page.locator("#bike [data-action=service]").first()).toBeHidden();      // no sync to log it with
-    await expect(page.locator(".bar nav a[href='#race']")).toBeVisible();
     expect(await axe(page)).toEqual([]);
     expect(problems).toEqual([]);
   });
@@ -143,6 +146,8 @@ test.describe("installable app", () => {
     const days = DATA.plan.days.map((d, i) => i === 1 ? trainer : d);
     await page.goto(phoneLink({ ...DATA, fuel: { ...DATA.fuel, kitchen }, rides, weight: null, plan: { ...DATA.plan, days },
       now: { ...DATA.now, bedtime: { bed: "9:45 PM", wake: "6:00 AM", need: 8, reasons: ["tomorrow's key session"], workday: true, ride_in: true } } }));
+    await expect(page.locator(".fuel-line")).toContainText("Meals");
+    await page.locator(".fuel-line [data-tab=fuel]").click();
     await page.locator(".kitchen summary").click();
     await expect(page.locator(".kitchen")).toContainText("Frozen broccoli");
     await expect(page.locator(".kitchen")).toContainText("12 tbsp");
@@ -150,6 +155,7 @@ test.describe("installable app", () => {
     await expect(page.locator("#training")).toContainText("30 of 36 planned minutes at 150+ bpm");
     await expect(page.locator(".tonight")).toContainText("Lights out by 9:45 PM: up around 6:00 AM for the ride in");
     await expect(page.locator(".fuel")).toContainText("Weigh in now and then");
+    await page.locator("#tab-plan").click();
     await page.locator(".week-ahead li").nth(1).locator("summary").click();
     const [file] = await Promise.all([page.waitForEvent("download"), page.locator("[data-zwo]").click()]);
     expect(file.suggestedFilename()).toMatch(/trainer-workout\.zwo$/);
@@ -160,17 +166,82 @@ test.describe("installable app", () => {
     expect(problems).toEqual([]);
   });
 
+  test("the right-hand numbers say the same thing as the call: direction, raw readings, the reason for the call", async ({ page }) => {
+    const rd = { ...DATA.now.readiness, score: 63, components: { rhr: 65, bb_wake: 48, resp: 38, sleep: 82 },
+      reasons: [{ tone: "bad", dir: "down", text: "Body Battery at wake 5 — 43.9 below your 60-day norm (48.9 ± 20.7)" },
+                { tone: "bad", dir: "up", text: "Sleeping respiration 16 brpm — 2.0 above your 60-day norm (14.0 ± 0.7)" }] };
+    const readiness = [...DATA.readiness.slice(0, -8), ...Array.from({ length: 7 }, (_, i) => ({ date: `x${i}`, score: 75 })), { date: DATA.today, score: 63 }];
+    const markers = { ...DATA.markers, bb_wake: { ...DATA.markers.bb_wake, series: [...DATA.markers.bb_wake.series.slice(0, -1), { date: DATA.today, v: 5, mean: 48.9, sd: 20.7 }] } };
+    const plan = { ...DATA.plan, adjustments: ["Today's long ride didn't happen."] };
+    await page.goto(phoneLink({ ...DATA, readiness, markers, plan, now: { ...DATA.now, readiness: rd } }));
+    const tile = page.locator("#panel-today .tile").filter({ hasText: "Readiness" });
+    await expect(tile).toContainText("−12 vs 7-day avg");
+    await expect(tile.locator(".tag")).toHaveText("▼");                                    // down, not a green "up"
+    await expect(page.locator(".meter").filter({ hasText: "Body Battery at wake" }).locator(".raw")).toHaveText("5");
+    await expect(page.locator(".reasons li").nth(1)).toHaveClass(/up/);                   // breathing rate: above normal, and bad
+    const call = page.locator("#today .call");
+    expect(await call.locator(".adjusted").evaluate(el => el.compareDocumentPosition(document.querySelector(".week-ahead")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+    expect(await axe(page)).toEqual([]);
+  });
+
+  test("five tabs: Today first, a bar under the thumb on a phone, every old section link lands on its tab", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const problems = watch(page);
+    await page.goto(phoneLink(DATA));
+    const tabs = page.getByRole("tab");
+    await expect(tabs).toHaveText([/^Today/, /^Plan/, /^Fuel/, /^Body/, /^Ride/]);
+    await expect(page.locator("#tab-today")).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#panel-today .call")).toBeVisible();
+    await expect(page.locator("#panel-plan")).toBeHidden();
+    const bar = await page.locator("#tabs").boundingBox();
+    expect(bar && bar.y + bar.height).toBeGreaterThan(800);                        // along the bottom of the screen
+    expect(await axe(page)).toEqual([]);
+    for (const [id, inside] of [["plan", ".week-ahead"], ["fuel", "#fuel"], ["body", "#load"], ["ride", "#ride-mode"]]) {
+      await page.locator(`#tab-${id}`).tap();
+      await expect(page.locator(`#panel-${id} ${inside}`).first()).toBeVisible();
+      await expect(page.locator("#panel-today")).toBeHidden();
+      expect(new URL(page.url()).hash).toBe(`#${id}`);
+      expect(await axe(page)).toEqual([]);
+    }
+    await page.locator("#tab-ride").focus();
+    await page.keyboard.press("ArrowRight");                                      // wraps round to Today
+    await expect(page.locator("#tab-today")).toBeFocused();
+    await expect(page.locator("#panel-today")).toBeVisible();
+    expect(new URL(page.url()).hash).toBe("");
+    await page.goto("/fitness/#season");                                         // a section's own link opens its tab
+    await expect(page.locator("#tab-plan")).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#season")).toBeVisible();
+    await page.evaluate(() => { location.hash = "#bike"; });
+    await expect(page.locator("#tab-ride")).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#bike")).toBeVisible();
+    await page.reload();                                                          // the tab survives a reload
+    await expect(page.locator("#tab-ride")).toHaveAttribute("aria-selected", "true");
+    expect(problems).toEqual([]);
+    await ctx.close();
+  });
+
+  test("a dot on the tab that has news: the plan changed, a bike job is due", async ({ page }) => {
+    const moved = { ...DATA, plan: { ...DATA.plan, adjustments: ["Saturday's long ride didn't happen: it's on today instead."] } };
+    await page.goto(phoneLink(moved));
+    await expect(page.locator("#tab-plan .dot")).toHaveCount(1);
+    await expect(page.locator("#tab-plan")).toContainText("the plan changed");
+    await expect(page.locator("#tab-fuel .dot")).toHaveCount(0);
+    const bar = await page.locator("#tabs").boundingBox();
+    expect(bar && bar.y).toBeLessThan(200);                                       // a wide screen: the band's second tier
+  });
+
   test("opens offline once the service worker has it", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     await page.goto(phoneLink(DATA));
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     await page.evaluate(async () => { await navigator.serviceWorker.ready; });
     await page.reload();                                                         // now under the worker's control
     expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
     await ctx.setOffline(true);
     await page.reload();
-    await expect(page.locator("#load")).toBeVisible();
+    await expect(page.locator("#tab-today")).toBeVisible();
     await page.goto("/fitness/ride.html");
     await expect(page.locator("#btn-start")).toBeVisible();
     await ctx.close();

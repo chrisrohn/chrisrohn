@@ -437,7 +437,7 @@ learn:
   half_life_days: 21     # an outcome this old counts half; last season's taste does not outweigh this month's
   prior: 8               # pseudo-observations at the overall keep rate before a source / tag / artist moves the score
   min_exposures: 3       # fewer sightings than this: no opinion yet
-  max_adjust: 1.5        # the log2 ratio is clamped to ±this, so one lucky blog can't dominate
+  max_adjust: 1.5        # the log2 ratio is clamped to ±this (reached after 2 × prior sightings; less before), so one lucky blog can't dominate
   explore: 0.4           # UCB exploration: explore · sqrt(ln N / (n + 1)) per feature, so the unfamiliar gets a look
   explore_max: 0.6       # … capped here, so a complete unknown never outranks a proven favourite on novelty alone
 

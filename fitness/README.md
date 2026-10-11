@@ -41,14 +41,28 @@ The **Data** section of the page shows how many of the last 30 days actually cam
    later with this morning's numbers. If last night still isn't in Garmin, the Today card says so, with a *Sync now*.
 3. **Or don't open anything.** With the morning notification on (Settings → *Morning notification*), the call
    arrives on its own once last night's sleep is in.
-4. **Read the call.** The Today card has:
+4. **Read the call.** The app opens on **Today**, one of five tabs along the bottom of the phone (along the top on a
+   wide screen), so nothing needs scrolling to find:
+
+   | Tab | What's on it |
+   | --- | --- |
+   | **Today** | The call and why, Plan B, the weather, tonight's bedtime, tomorrow in a line, and readiness, sleep, form and fitness at a glance |
+   | **Plan** | The next 7 days, what the plan changed, race day, the season to the start line |
+   | **Fuel** | Today's and tomorrow's meals, bottles for the weather, the week's shopping and Sunday prep, weight |
+   | **Body** | All the numbers: readiness and its parts, load, sleep, recovery markers, what your data says, the device |
+   | **Ride** | Ride mode, the inside of your rides, and the bike: chain, tires, pressures |
+
+   A small red dot on a tab means news there (the plan changed, a bike job is due, an illness watch). Old section
+   links still work: `#bike` opens the Ride tab at the bike, `#season` the Plan tab at the season.
+
+   The Today tab has:
    - **The call:** the plan's session (or the commute), eased by readiness when the morning says so, never made harder.
    - **Plan B:** what to do instead if it rains or the day runs short, so there's always a sensible option.
-   - **The next 7 days:** tap any day for its session and its Plan B. Every sync rebuilds them from what you rode,
-     slept and recovered: a missed day moves, a good week grows.
+   - **Tomorrow** in a line; **The week →** opens the next 7 days on Plan: tap any day for its session and its
+     Plan B. Every sync rebuilds them from what you rode, slept and recovered: a missed day moves, a good week grows.
    - **Weather:** on a commute day, each leg's weather, what to wear, lights, and the wind home. On other days, the
      best window to ride today.
-   - **Fuel:** today's meals around the riding.
+   - **Fuel:** today's carbs and protein in a line; **Meals →** opens the Fuel tab.
 
 Work days are Monday to Friday except US federal holidays (`commute.holidays = "us-federal"`, `""` for none): no
 commute is ever booked or suggested on a weekend or a holiday.
@@ -244,7 +258,7 @@ to *Never* for rides, in case the browser ignores the keep-awake request.
 in it, and it's `noindex`. A strict Content-Security-Policy lets only its own scripts run and nothing load,
 because it shares an origin with the music app. HTTPS is what phones require for Bluetooth and GPS.
 
-**Getting the week onto the phone:** open the dashboard, then **Today → Ride mode on your phone**, and scan the QR
+**Getting the week onto the phone:** open the dashboard, then **Body → Phone app**, and scan the QR
 code. You can also tap **copy the link** and send it to yourself. The link carries your HR anchors and the next 7
 days of sessions, compressed into its `#fragment`, which browsers never send to a server. The phone keeps that
 plan, so the page works with no signal at the trailhead. Rescan when the plan changes. A link that won't decode
@@ -467,7 +481,7 @@ and it opens offline. The hosted copy holds no one's data; yours arrives from th
 1. **Install.** iPhone: open it in Safari → **Share** → **Add to Home Screen**. Android: Chrome → **Install**
    (the button in the top bar, or the ⋮ menu). Desktop Chrome / Edge: the install icon in the address bar.
 2. **Get your data in** with the [cloud sync](#cloud-sync-no-computer), or by hand: on a computer,
-   `python -m fitness run`, then **Today → Phone app**:
+   `python -m fitness run`, then **Body → Phone app**:
    - **Copy phone link** and send it to yourself (AirDrop, Messages, email). On the phone, open the app → **Import
      data** → paste it. The data rides after the `#` in the link, which browsers never send to a server.
    - Or **Save data file**, put it in iCloud Drive / Google Drive, and pick it under **Import data**. Set

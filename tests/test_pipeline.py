@@ -1327,6 +1327,22 @@ def test_resolve_all_redoes_a_flagged_video_and_remembers_the_refusal(monkeypatc
     assert util.read_json(resolve.YT_CACHE, {})[again.key]["not"] == ["vbad", "vgood"]
 
 
+def test_thin_evidence_only_nudges():
+    """Four keeps from one blog, when the curator keeps a fifth of everything, are a hint: the bound on a feature's
+    adjustment grows with its sightings and reaches max_adjust at 2 × prior."""
+    from discovery import learn
+
+    shown = "2026-09-08"
+    outs = [{"id": f"k{i}", "a": f"Act {i}", "s": ["rss:A"], "t": [], "shown": shown, "verdict": "kept"} for i in range(4)]
+    outs += [{"id": f"p{i}", "a": f"Other {i}", "s": ["rss:B"], "t": [], "shown": shown, "verdict": "pass"} for i in range(40)]
+    outs += [{"id": f"s{i}", "a": f"Skip {i}", "s": ["rss:C"], "t": [], "shown": shown, "verdict": "skipped"} for i in range(3)]
+    learned = learn.learn(outs, {"learn": {"half_life_days": 0}}, today=date(2026, 9, 10))
+    assert 0 < learned["sources"]["rss:A"]["adj"] <= 1.5 * 4 / 16 + 1e-9                     # a nudge, not yet a reason line
+    assert learn.adjustment(learned, ["rss:A"], [], "New Act")[1] == []
+    many = learn.learn(outs * 4, {"learn": {"half_life_days": 0}}, today=date(2026, 9, 10))   # sixteen keeps: the full say
+    assert many["sources"]["rss:A"]["adj"] > 0.5 and learn.adjustment(many, ["rss:A"], [], "New Act")[1]
+
+
 def test_learning_decays_and_explores():
     from discovery import learn
 

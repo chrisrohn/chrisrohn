@@ -245,10 +245,16 @@ window.startDashboard = D => {
   const shortName = name => name.replace(/^Bell's /, "").replace(/ Cometh Challenge$/, "");
   const LEVEL = { hard: "Go hard", moderate: "Train", easy: "Easy", rest: "Rest", unknown: "Waiting for data" };
   const formWord = t => t == null ? "" : t > 15 ? "very fresh" : t > 5 ? "fresh" : t > -10 ? "neutral" : t > -30 ? "productive fatigue" : "overreaching";
-  const tile = (k, v, unit, d, tone) => `<div class="tile"><span class="k">${esc(k)}</span><span class="v num">${v}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="d">${tone ? `<span class="tag ${tone}">${tone === "good" ? "▲" : "▼"}</span> ` : ""}${d}</span></div>`;
+  // colour says good or bad; the glyph says which way the number moved (● when it has no direction)
+  const tile = (k, v, unit, d, tone, dir = "") => `<div class="tile"><span class="k">${esc(k)}</span><span class="v num">${v}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="d">${tone ? `<span class="tag ${tone}" aria-hidden="true">${dir === "up" ? "▲" : dir === "down" ? "▼" : "●"}</span> ` : ""}${d}</span></div>`;
   const COMP = { sleep: "Sleep score", rhr: "Resting HR", sleep_stress: "Overnight stress", bb_wake: "Body Battery at wake", resp: "Respiration" };
   const SLEEP_PARTS = { duration: "Duration", deep: "Deep sleep", rem: "REM sleep", continuity: "Continuity", calm: "Overnight calm" };
-  const meters = (obj, names) => `<div class="meters">${Object.entries(obj).map(([k, v]) => `<div class="meter"><span>${esc(names[k] || k)}</span><span class="track"><span class="fill" style="display:block;width:${Math.max(2, v)}%"></span></span><b class="num">${v}</b></div>`).join("")}</div>`;
+  const raw = k => {   // today's reading for a readiness marker, as recorded (Body Battery 5, not its score)
+    if (k === "sleep") return now.sleep ? `${now.sleep.score}` : "";
+    const M = D.markers && D.markers[k], x = M && M.series.find(r => r.date === D.today);
+    return x && x.v != null ? `${x.v}${M.unit ? ` ${M.unit}` : ""}` : "";
+  };
+  const meters = (obj, names) => `<div class="meters">${Object.entries(obj).map(([k, v]) => `<div class="meter"><span>${esc(names[k] || k)}${raw(k) && k !== "sleep" ? ` <small class="raw">${esc(raw(k))}</small>` : ""}</span><span class="track"><span class="fill" style="display:block;width:${Math.max(2, v)}%"></span></span><b class="num">${v}</b></div>`).join("")}</div>`;
 
   // a tag marks where a phase (or the trainer season) starts, not every row inside it
   const chipFor = (d, prev) => (!prev || prev.phase !== d.phase || prev.indoor !== d.indoor)
@@ -319,6 +325,70 @@ window.startDashboard = D => {
     return `<p class="tonight"><span class="label">Tonight</span> Lights out by <b>${esc(B.bed)}</b>: up around ${esc(B.wake)}${B.ride_in ? " for the ride in" : ""}, ${B.need} h of sleep and 15 min to fall asleep${B.reasons.length ? `; earlier for ${esc(B.reasons.join(" and "))}` : ""}.</p>`;
   }
 
+  // tomorrow in a line, so the Today tab carries the next step too (the full week is on Plan)
+  function tomorrowLine() {
+    const t = plan && plan.days[1];
+    if (!t) return "";
+    const w = t.wx ? ` · ${sky(t.wx.code)} ${deg(t.wx.hi)}${t.wx.pop >= 30 ? ` ${t.wx.pop}%` : ""}` : "";
+    return `<p class="tomorrow"><span class="label">Tomorrow</span> <b>${esc(t.title)}</b>${t.minutes ? ` · ${dur(t.minutes * 60)}` : ""}${w} <a href="#plan" data-tab="plan">The week →</a></p>`;
+  }
+  // the day's eating in a line, with the meals one tap away on Fuel
+  function fuelLine() {
+    const T = D.fuel && D.fuel.today;
+    if (!T) return "";
+    return `<p class="fuel-line"><span class="label">Fuel · ${esc(T.label)}</span> ${T.carbs_g ? `${T.carbs_g} g carbs · ${T.protein_g} g protein` : `${T.carbs_per_kg} g carbs per kg`} <a href="#fuel" data-tab="fuel">Meals →</a></p>`;
+  }
+
+  // the tabs: Today, Plan, Fuel, Body, Ride. A bar at the bottom on a phone (where the thumb is), along the top on a
+  // wide screen. Every old section link (#season, #bike…) still lands on the right tab, and the tab survives a reload.
+  const TABS = [["today", "Today"], ["plan", "Plan"], ["fuel", "Fuel"], ["body", "Body"], ["ride", "Ride"]];
+  const HOME = { today: "today", plan: "plan", week: "plan", race: "plan", season: "plan", fuel: "fuel", kitchen: "fuel", body: "body", numbers: "body",
+    load: "body", sleep: "body", recovery: "body", insights: "body", device: "body", "phone-app": "body", ride: "ride", training: "ride", bike: "ride" };
+  const ss = { get(k) { try { return sessionStorage.getItem(k); } catch { return null; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* private mode */ } } };
+  function tabs() {
+    const nav = document.getElementById("tabs");
+    if (!nav) return;
+    const due = (D.bike && D.bike.items || []).some(i => i.status === "due");
+    const changed = !!((plan && plan.adjustments) || []).length;
+    const dot = { plan: changed ? "the plan changed" : "", ride: due ? "a bike job is due" : "", body: now.readiness && now.readiness.illness ? "illness watch" : "" };
+    nav.hidden = false;
+    nav.innerHTML = `<div class="tabs-in" role="tablist">${TABS.map(([id, label]) => `<button type="button" role="tab" id="tab-${id}" aria-controls="panel-${id}" data-tab="${id}">${label}${dot[id] ? `<i class="dot" title="${esc(dot[id])}"></i><span class="sr"> (${esc(dot[id])})</span>` : ""}</button>`).join("")}</div>`;
+    const hash = location.hash.slice(1);
+    show(HOME[hash] || (TABS.some(t => t[0] === ss.get("fitness-tab")) ? ss.get("fitness-tab") : "today"), HOME[hash] && hash !== HOME[hash] ? hash : "");
+  }
+  function show(id, anchor = "") {
+    for (const [t] of TABS) {
+      const on = t === id, b = document.getElementById(`tab-${t}`), pnl = document.getElementById(`panel-${t}`);
+      if (b) { b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; }
+      if (pnl) pnl.hidden = !on;
+    }
+    ss.set("fitness-tab", id);
+    const hash = anchor || (id === "today" ? "" : id);              // Today is home: a clean address
+    if (location.hash.slice(1) !== hash) history.replaceState(null, "", `${location.pathname}${location.search}${hash ? `#${hash}` : ""}`);
+    const el = anchor && document.getElementById(anchor);
+    if (el) el.scrollIntoView({ block: "start" }); else window.scrollTo(0, 0);
+  }
+  document.addEventListener("click", e => {
+    const t = e.target instanceof Element ? e.target.closest("[data-tab]") : null;
+    if (!t) return;
+    e.preventDefault();
+    show(/** @type {HTMLElement} */ (t).dataset.tab || "today");
+    if (t.getAttribute("role") === "tab") /** @type {HTMLElement} */ (t).focus();
+  });
+  document.addEventListener("keydown", e => {   // arrow keys move along the tab bar, as a tab list should
+    const t = e.target instanceof Element ? e.target.closest("[role=tab]") : null;
+    if (!t || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    const i = TABS.findIndex(([id]) => id === /** @type {HTMLElement} */ (t).dataset.tab);
+    const j = e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + TABS.length) % TABS.length;
+    e.preventDefault();
+    show(TABS[j][0]);
+    document.getElementById(`tab-${TABS[j][0]}`).focus();
+  });
+  window.addEventListener("hashchange", () => {
+    const h = location.hash.slice(1);
+    if (HOME[h]) show(HOME[h], h !== HOME[h] ? h : "");
+  });
+
   // the call above is only as good as last night's data: say when the watch hasn't handed it over yet
   function overnightBlock() {
     if (now.last_night || D.today !== isoToday()) return "";
@@ -371,7 +441,7 @@ window.startDashboard = D => {
   function mealsHTML(day) {
     return `<dl class="meals">${day.meals.map(m => `<dt>${esc(m.slot)}</dt><dd>${esc(m.what)}${m.base ? `<span class="base">${esc(m.base)}</span>` : ""}<span class="sub">${esc(m.why)}</span></dd>`).join("")}</dl>`;
   }
-  function fuelBlock() {
+  function fuelBlock(full = false) {
     const F = D.fuel;
     if (!F || !F.today) return "";
     const T = F.today, N = F.tomorrow;
@@ -386,7 +456,7 @@ window.startDashboard = D => {
       <p class="sub">${targets}</p>${weight}
       ${mealsHTML(T)}
       ${N ? `<details class="fuel-next"><summary>Tomorrow · ${esc(N.label)}</summary>${mealsHTML(N)}</details>` : ""}
-      ${kitchenHTML(F.kitchen)}</div>`;
+      ${kitchenHTML(F.kitchen, full)}</div>`;
   }
   const pToday0 = () => plan && plan.days[0];
 
@@ -441,10 +511,10 @@ window.startDashboard = D => {
   });
 
   // the week's shopping and prep for the Blueprint meals (fitness/grocery.py)
-  function kitchenHTML(K) {
+  function kitchenHTML(K, open = false) {
     if (!K) return "";
     const list = rows => `<ul class="plain shop">${rows.map(r => `<li><span>${esc(r.item)}</span><b>${esc(r.amount)}</b></li>`).join("")}</ul>`;
-    return `<details class="fuel-next kitchen"><summary>Shopping &amp; prep · ${fmtDow(K.from)} – ${fmtDow(K.to)}</summary>
+    return `<details class="fuel-next kitchen"${open ? " open" : ""}><summary>Shopping &amp; prep · ${fmtDow(K.from)} – ${fmtDow(K.to)}</summary>
       <p class="sub">${K.pudding} Nutty Pudding${K.pudding === 1 ? "" : "s"} (${K.pudding_days.join(", ")}) and ${K.veggie} Super Veggie${K.veggie === 1 ? "" : "s"} (${K.veggie_days.join(", ")})${K.chicken ? ", with chicken" : ""}: the fuel plan's next seven days.</p>
       <h3>Buy</h3>${list(K.buy)}
       <h3>Check you have</h3>${list(K.check)}
@@ -540,54 +610,62 @@ window.startDashboard = D => {
     const rd = now.readiness, sl = now.sleep, pToday = plan && plan.days[0], rec = todayCall(pToday), next = plan && plan.races[0];
     const last7 = D.readiness.slice(-8, -1).map(r => r.score);
     const rAvg = mean(last7);
-    const html = [];
+    const readinessTile = tile("Readiness", rd ? rd.score : "—", "/100", rAvg != null && rd ? `${signed(rd.score - rAvg)} vs 7-day avg` : "needs 14 nights", rd ? (rd.score >= 60 ? "good" : "bad") : "", rd && rAvg != null ? (rd.score - rAvg >= 0.5 ? "up" : rd.score - rAvg <= -0.5 ? "down" : "") : "");
+    const sleepTile = tile("Sleep score", sl ? sl.score : "—", "", sl ? `${esc(sl.label)} · ${hrs(sl.hours)}` : "no sleep logged", sl ? (sl.score >= 80 ? "good" : sl.score < 60 ? "bad" : "") : "");
 
-    // today
-    html.push(`<section id="today" class="hero" aria-labelledby="today-h"><h2 class="sr" id="today-h">Today</h2>
+    // today: the call and everything that bears on it, on one screen
+    const todaySec = `<section id="today" class="hero" aria-labelledby="today-h"><h2 class="sr" id="today-h">Today</h2>
       <div class="card call">
         <span class="sub">Today · ${fmtDow(D.today)}${next ? ` · ${esc(shortName(next.name))} in ${next.days_out} day${next.days_out === 1 ? "" : "s"}` : ""}${pToday && pToday.indoor ? " · trainer season" : ""}</span>
         <span class="badge ${esc(rec.level)}"><i></i>${esc(LEVEL[rec.level] || rec.level)}</span>
         <div class="title">${esc(rec.title)}</div>
         <p class="detail">${esc(rec.detail)}</p>
+        ${adjustedBlock()}
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
-        ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
+        ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""} ${r.dir || ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${planB(pToday, rec, rd)}
         ${overnightBlock()}
         ${weatherBlock()}
         ${bedBlock()}
-        ${weekBlock()}
-        ${adjustedBlock()}
         ${commuteBlock()}
-        ${fuelBlock()}
-        ${D.phone_href || D.ride_qr ? `<details class="phone"><summary>Phone app</summary>
+        ${rd && rd.illness ? `<p class="sub"><b>Illness watch:</b> elevated resting HR plus breathing rate or overnight stress is the classic early sign of a cold. Rest beats a workout here.</p>` : ""}
+        ${tomorrowLine()}
+      </div>
+      <div class="card">
+        <div class="tiles four">
+          ${readinessTile}
+          ${sleepTile}
+          ${tile("Form (TSB)", signed(form.tsb), "", esc(formWord(form.tsb)))}
+          ${tile("Fitness (CTL)", r0(form.ctl), "", form.ramp != null ? `${signed(form.ramp)} this week` : "")}
+        </div>
+        ${fuelLine()}
+      </div>
+    </section>`;
+
+    const phone = D.phone_href || D.ride_qr ? `<section class="card" id="phone-app"><div class="head"><h2>Phone app</h2></div>
+        ${D.phone_href || D.ride_qr ? `<details class="phone" open><summary>Phone app</summary>
           <div class="phone-in">
             ${D.phone_href ? `<p>The whole dashboard, in the app on your phone: <button type="button" class="chip" data-copy="phone">Copy phone link</button> <button type="button" class="chip" data-save="1">Save data file</button></p>
             <p class="sub">Send the link to yourself (AirDrop, Messages, email) and paste it under <b>Import data</b> in the app, or put the file in iCloud Drive / Google Drive and pick it there. It carries this build's numbers after the <b>#</b>, which never reaches the server; the app keeps them on the phone, offline.</p>` : ""}
             ${D.ride_qr ? `<div class="qr"><div class="qrimg" role="img" aria-label="QR code that opens ride mode with this week's sessions">${D.ride_qr}</div>
             <p class="sub"><b>Just ride mode:</b> scan this with the phone on your bars, or <button type="button" class="chip" data-copy="ride">copy the ride link</button>. It opens ride mode with your HR zones and the next 7 days of sessions.</p></div>` : ""}
-          </div></details>` : ""}
-        ${rd && rd.illness ? `<p class="sub"><b>Illness watch:</b> elevated resting HR plus breathing rate or overnight stress is the classic early sign of a cold. Rest beats a workout here.</p>` : ""}
-      </div>
-      <div class="card">
+          </div></details>` : ""}</section>` : "";
+
+    // body: every number, what went into readiness, then sleep, recovery, load and insights below
+    const bodyTop = `<section id="numbers" class="card"><div class="head"><h2>Readiness &amp; load</h2><span class="sub">this morning</span></div>
         <div class="tiles">
-          ${tile("Readiness", rd ? rd.score : "—", "/100", rAvg != null && rd ? `${signed(rd.score - rAvg)} vs 7-day avg` : "needs 14 nights", rd ? (rd.score >= 60 ? "good" : "bad") : "")}
-          ${tile("Sleep score", sl ? sl.score : "—", "", sl ? `${esc(sl.label)} · ${hrs(sl.hours)}` : "no sleep logged", sl ? (sl.score >= 80 ? "good" : sl.score < 60 ? "bad" : "") : "")}
+          ${readinessTile}
+          ${sleepTile}
           ${tile("Form (TSB)", signed(form.tsb), "", esc(formWord(form.tsb)))}
           ${tile("Fitness (CTL)", r0(form.ctl), "", form.ramp != null ? `${signed(form.ramp)} this week` : "")}
           ${tile("Fatigue (ATL)", r0(form.atl), "", form.acwr != null ? `ACWR ${form.acwr.toFixed(2)}${form.acwr > 1.3 ? " · spike" : form.acwr < 0.8 ? " · detraining" : " · sweet spot"}` : "")}
           ${tile("Sleep debt", now.sleep_debt == null ? "—" : now.sleep_debt.toFixed(1), "h", `last 7 nights vs ${D.need_hours} h need`, now.sleep_debt != null ? (now.sleep_debt > 3 ? "bad" : "good") : "")}
         </div>
-        ${rd ? `<h3 class="mt-6">What went into readiness</h3>${meters(rd.components, COMP)}${personalNote()}` : ""}
-      </div>
-    </section>`);
-
-    // season
-    html.push(raceHTML());
-    html.push(seasonHTML());
-
+        ${rd ? `<h3 class="mt-6">What went into readiness</h3>${meters(rd.components, COMP)}<p class="sub mt-3">Each bar is that marker's score out of 100, where 75 is your normal; today's actual reading is beside its name.</p>${personalNote()}` : ""}
+    </section>`;
 
     // load
-    html.push(`<section id="load" class="card"><div class="head"><h2>Fitness, fatigue &amp; form</h2><span class="sub">last ${D.pmc.length} days${next ? ` + plan to ${esc(shortName(next.name))}` : ""}</span></div>
+    const load = (`<section id="load" class="card"><div class="head"><h2>Fitness, fatigue &amp; form</h2><span class="sub">last ${D.pmc.length} days${next ? ` + plan to ${esc(shortName(next.name))}` : ""}</span></div>
       <div id="c-pmc"></div><h3 class="mt-6">Form (TSB)</h3><div id="c-tsb"></div></section>`);
 
     // sleep
@@ -597,7 +675,7 @@ window.startDashboard = D => {
     const bedAvg = mean(beds);
     const bedTxt = bedAvg == null ? "—" : (() => { const mm = (Math.round(bedAvg) + 720) % 1440; const h = Math.floor(mm / 60); return `${(h % 12) || 12}:${String(mm % 60).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`; })();
     const garminNights = D.sleep.filter(s => s.garmin_score != null).length;
-    html.push(`<section id="sleep" class="card"><div class="head"><h2>Sleep</h2><span class="sub">scored here from stages, duration, wake-ups and overnight stress</span></div>
+    const sleepSec = (`<section id="sleep" class="card"><div class="head"><h2>Sleep</h2><span class="sub">scored here from stages, duration, wake-ups and overnight stress</span></div>
       <div class="kpis"><span>30-night average <b>${r0(mean(scored.map(s => s.score)))}</b></span><span>Duration <b>${hrs(mean(scored.map(s => s.hours)))}</b></span>
         <span>Typical bedtime <b>${bedTxt}</b></span><span>Regularity <b>±${now.regularity_min ?? "—"} min</b></span>
         <span>Garmin-scored nights <b>${garminNights}</b></span></div>
@@ -606,7 +684,7 @@ window.startDashboard = D => {
     </section>`);
 
     // recovery
-    html.push(`<section id="recovery" class="card"><div class="head"><h2>Recovery markers</h2><span class="sub">shaded: your 60-day normal (mean ± 1 SD)</span></div>
+    const recovery = (`<section id="recovery" class="card"><div class="head"><h2>Recovery markers</h2><span class="sub">shaded: your 60-day normal (mean ± 1 SD)</span></div>
       <div class="grid four">${Object.keys(D.markers).map(k => `<div><h3>${esc(D.markers[k].label)}</h3><div id="c-m-${k}"></div></div>`).join("")}</div>
       <h3 class="mt-6">Readiness</h3><div id="c-ready"></div></section>`);
 
@@ -614,7 +692,7 @@ window.startDashboard = D => {
     const z = D.zones;
     const zt = z ? z.seconds.reduce((a, b) => a + b, 0) : 0;
     const zp = z ? z.seconds.map(s => s / zt * 100) : [];
-    html.push(`<section id="training" class="card"><div class="head"><h2>Training</h2><span class="sub">${D.ytd.rides} rides this year · ${D.ytd.hours} h · ${dist(D.ytd.km * 1000)} · ${elev(D.ytd.elev_m)}</span></div>
+    const training = (`<section id="training" class="card"><div class="head"><h2>Training</h2><span class="sub">${D.ytd.rides} rides this year · ${D.ytd.hours} h · ${dist(D.ytd.km * 1000)} · ${elev(D.ytd.elev_m)}</span></div>
       ${D.indoor ? `<div class="kpis"><span>Trainer season ${fmtD(D.indoor.start)} – ${fmtD(D.indoor.end)}${D.indoor.current ? " (on now)" : ""}: <b>${D.indoor.rides}</b> rides · <b>${D.indoor.hours} h</b>${D.indoor.avg_np ? ` · avg NP <b>${D.indoor.avg_np} W</b>` : ""}${D.indoor.ftp_start && D.indoor.ftp_end ? ` · best-effort FTP <b>${D.indoor.ftp_start} → ${D.indoor.ftp_end} W</b>` : ""}${D.indoor.outdoor_rides ? ` · ${D.indoor.outdoor_rides} outdoor` : ""}</span></div>` : ""}
       <div class="grid"><div><h3>Weekly hours</h3><div id="c-weeks"></div></div>
       <div><h3>Heart-rate zones, last ${z ? z.days : 28} days</h3>${z ? `<div class="zones" role="img" aria-label="Time in zones">${zp.map((p, i) => `<div style="flex:${p};background:var(--z${i + 1})" title="Zone ${i + 1}: ${p.toFixed(0)}%"></div>`).join("")}</div>
@@ -627,21 +705,29 @@ window.startDashboard = D => {
       </tbody></table></div>${D.recent.some(a => a.load_src === "duration") ? `<p class="sub mt-3">* No heart rate: load estimated from duration.</p>` : ""}</section>`);
 
     // insights
-    html.push(`<section id="insights" class="card"><div class="head"><h2>What your data says</h2><span class="sub">rank correlations over your own history</span></div>
+    const insights = (`<section id="insights" class="card"><div class="head"><h2>What your data says</h2><span class="sub">rank correlations over your own history</span></div>
       ${D.insights.length ? `<ul class="insights">${D.insights.map(i => `<li>${esc(i.text)}</li>`).join("")}</ul>` : `<p class="empty">Nothing clears the bar yet: an insight needs 30+ paired days and a real effect (|ρ| ≥ 0.2).</p>`}</section>`);
 
     // data
     const th = D.athlete;
-    html.push(bikeHTML());
-    html.push(`<section id="device" class="card"><div class="head"><h2>What the Venu Sq gives you</h2><span class="sub">last 30 days of data actually received</span></div>
+    const device = (`<section id="device" class="card"><div class="head"><h2>What the Venu Sq gives you</h2><span class="sub">last 30 days of data actually received</span></div>
       <div class="scrollx" tabindex="0" role="region" aria-label="Signals received"><table class="tbl"><thead><tr><th>Signal</th><th class="r">Days</th><th>Hardware</th><th>Note</th></tr></thead><tbody>
       ${D.coverage.map(c => `<tr><td>${esc(c.field)}</td><td class="r">${c.days}/${c.of}</td><td>${esc(c.device)}</td><td class="sub">${esc(c.note)}</td></tr>`).join("")}</tbody></table></div>
       <div class="kpis mt-4"><span>Max HR <b>${th.max_hr}</b></span><span>Resting HR <b>${r0(th.rest_hr)}</b></span><span>LTHR <b>${th.lthr}</b></span><span>FTP <b>${th.ftp || "—"}</b></span>
       ${th.estimated.length ? `<span class="muted">${esc(listOf(th.estimated.map(k => ({ max_hr: "max HR", resting_hr: "resting HR", lthr: "LTHR", ftp: "FTP" })[k] || k)))} estimated from your data; set ${th.estimated.length === 1 ? "it" : "them"} in fitness/config.toml</span>` : ""}</div>
       <p class="sub">${D.counts.days} days of wellness, ${D.counts.activities} activities since ${fmtD(D.counts.first)}, ${D.counts.first.slice(0, 4)}. Built ${esc(D.generated.replace("T", " "))}.</p></section>`);
 
-    app.innerHTML = html.join("");
-    for (const a of document.querySelectorAll(".bar nav a[href^='#']")) a.hidden = !document.getElementById(a.getAttribute("href").slice(1));
+    // five tabs: the day at a glance, then the plan, food, body and riding, each one tap away
+    const panels = {
+      today: todaySec,
+      plan: `<section id="week" class="card"><div class="head"><h2>This week</h2></div>${adjustedBlock()}${weekBlock()}</section>${raceHTML()}${seasonHTML()}`,
+      fuel: `<section id="fuel" class="card"><div class="head"><h2>Fuel</h2></div>${fuelBlock(true) || `<p class="empty">The fuel plan needs the season plan (a race in config.toml).</p>`}</section>`,
+      body: bodyTop + load + sleepSec + recovery + insights + device + phone,
+      ride: `<section id="ride-mode" class="card ride-cta"><div class="head"><h2>Ride</h2></div><p><a class="chip big-chip primary" href="${esc(D.ride_href || "ride.html")}">Open ride mode</a> <span class="sub">Live heart rate, today's session as timed steps, the weather on your line.</span></p></section>`
+        + training + bikeHTML(),
+    };
+    app.innerHTML = Object.entries(panels).map(([id, inner]) => `<div class="panel" id="panel-${id}" role="tabpanel" aria-labelledby="tab-${id}" tabindex="-1">${inner}</div>`).join("");
+    tabs();
     document.getElementById("foot").innerHTML = `<p><b>How the numbers work.</b> TSS from power (when an FTP is set), else heart-rate TSS (Banister TRIMP, 1 h at threshold HR = 100), else a duration estimate. Fitness/fatigue are 42/7-day exponentially weighted load; form is yesterday's fitness minus fatigue. Readiness compares last night's resting HR, overnight stress (the Venu Sq's HRV-derived signal), Body Battery and breathing rate with your own 60-day normal, blends in the sleep score, and takes points off for deep fatigue or a load spike.</p>
       <p>This is a personal analysis tool, not medical advice. Private data: keep this page off the public web.</p>`;
     charts();

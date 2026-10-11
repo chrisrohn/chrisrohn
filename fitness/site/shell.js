@@ -322,7 +322,7 @@
   }
 
   function welcome() {
-    const nav = document.querySelector(".bar nav");
+    const nav = document.getElementById("tabs");
     if (nav) nav.hidden = true;
     const seg = $("units-seg");
     if (seg) seg.hidden = true;
