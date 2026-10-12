@@ -242,6 +242,8 @@ session that the playlist's owner approved in that browser.
   nothing and no copy is ever downloaded; a dropped connection is retried by itself — on the spot, then on a widening
   delay, and at once when the network or the app comes back — and what is still waiting shows in ⚙ rather than
   interrupting the rating. Nothing is lost if the tab closes mid-push: it goes up on the next visit.
+  Give the same token **Actions: read and write** too and the late-feed bar gets a *run it now* button that starts
+  the Discover workflow from the site (without it, the bar links to the workflow page's *Run workflow* instead).
 - **≠ Wrong video** is the third verdict, on every card, in the player and on the phone deck (`x`): the title the card
   shows is not what the YouTube match plays (a mis-resolved upload). It hides the card without judging the song —
   free, never filed on YouTube, kept out of the keep rates — and, through the ratings file, tells the daily build to
@@ -504,7 +506,7 @@ npm run lighthouse               # Lighthouse CI on dist/ (lighthouserc.json): p
 ```
 
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
-`render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `concerts` (the Concerts tab), `videos` (the Video tab), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
+`render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `concerts` (the Concerts tab), `videos` (the Video tab), `buildstatus` (what the Discover workflow is doing while the day's feed is late), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
 `discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/concerts.py` (the concert list), `discovery/videos.py` (the Video tab's list), `discovery/learn.py` (what the playlists teach the
 ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js` (minified, with a source map), minifies `style.css` and `theme.js` into hashed copies of their own, rewrites every page and `sw.js` to those names, writes `sitemap.xml`, and copies the rest of `site/` (`robots.txt`, `404.html`, the data) into `dist/`, which is what
@@ -515,15 +517,21 @@ lockfile with `cd discovery && pip-compile --generate-hashes --strip-extras -o r
 
 **Discover** is scheduled three times a morning — 02:07, 04:29 and 06:47 New York — because GitHub runs cron on a
 best-effort queue and routinely holds a job back for hours (a single 06:15 slot started 5h34 late on 2026-09-07 and
-4h16 late on 2026-09-08, so there was no feed to read at breakfast). Its `check` job asks whether
-`site/data/history/<today>.json` is already on `main`; if it is, the slot stops without doing any work, so a normal
+4h16 late on 2026-09-08, so there was no feed to read at breakfast). Its `check` job asks whether a `feed:` data
+commit has reached `main` since midnight New York (not the UTC day, which starts at 20:00 there: an evening pipeline
+push would otherwise stand in for the next morning's build); if one has, the slot stops without doing any work, so a normal
 morning is still exactly one build and a slot that was delayed, dropped or killed at the 45-minute timeout is simply
 retried by the next one. A push to `discovery/**` and a manual run always build.
 
 A build that does not finish opens (or comments on) one **build-failure** issue — including one killed at the
 timeout, which ends as *cancelled* rather than *failed* and used to pass in silence. Meanwhile the site says on the
 page that the day's build has not landed yet, keeps checking for it every four minutes and swaps it in when it
-arrives; past 36 hours that notice turns into the louder "the daily build has not run since…" banner.
+arrives; past 36 hours that notice turns into the louder "the daily build has not run since…" banner. Both say what
+the workflow is doing about it, read from the public Actions API every three minutes while the bar is up
+(`site/src/buildstatus.js`): building now (on which step, and about how long is left, timed from recent builds),
+queued for a runner, the last attempt failed or was cut short, or no slot has fired yet and which one is next — with
+a link to the run, and for the owner a way to start one (see the GitHub token above). Its copy of the three slot
+times, `SLOTS_UTC`, has to follow any change to the `schedule:` in `discover.yml`.
 
 The installable app is `site/manifest.webmanifest` (icons in `site/icons/`, the install-dialog pictures in
 `site/screenshots/`) plus `site/sw.js` (network first with a cached fallback for the shell and the feed, a capped
