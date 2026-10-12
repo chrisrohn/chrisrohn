@@ -316,6 +316,16 @@ The watch keeps recording the official file, and ride mode uploads nothing.
 **Bluefy** browser and open ride mode in it. GPS, steps and cues work in any browser. On iPhone, also set Auto-Lock
 to *Never* for rides, in case the browser ignores the keep-awake request.
 
+**Sensor not in the picker?** (e.g. a Garmin HRM-Pro Plus that shows in the phone's Bluetooth list)
+- **Forget it in the phone's Bluetooth settings.** A strap the phone itself is connected to stops advertising, so the
+  browser can't find it. Sensors pair inside ride mode, never in the phone's settings.
+- **Free a Bluetooth slot.** Close Garmin Connect, Zwift or other apps using it; the watch can stay on it over ANT+.
+- **Wake it.** Wear the strap with the pads wet (it sleeps until it feels a heartbeat); spin a cadence or speed sensor.
+- **Android:** allow Chrome *Nearby devices* and keep Location on.
+- Still missing? Tap **Show all nearby devices** under the hint, which lists everything in range.
+
+Once connected, a sensor is remembered and reconnects by itself when it's back in range (Chrome).
+
 **Where it lives: <https://chrisrohn.com/fitness/ride.html>**, inside the installed app. The site build
 (`fitness/build-app.mjs`, called from `build.mjs`) publishes it with the rest of chrisrohn.com. It's a data-free page: no zones, plan or history are
 in it, and it's `noindex`. A strict Content-Security-Policy lets only its own scripts run and nothing load,
