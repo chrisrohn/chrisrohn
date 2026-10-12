@@ -42,7 +42,7 @@ export const state = {
   rated: LS.get("id:rated", {}),          // local mirror of what this account rated
   auth: loadAuth(),
   playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL...", "__loaded_at": ms}
-  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60, autoplay: true, shuffle: false, introDismissed: false, ghToken: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
+  settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60, autoplay: true, shuffle: false, background: true, introDismissed: false, ghToken: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
   badVideos: LS.get("id:badvideos", {}),   // videoId → when YouTube refused to embed it here (autoplay steps over these)
   videoMarks: LS.get("id:videos", {}),     // video id → the Video tab's decision on it (approved, passed, undone), mirrored with the ratings
   videoVersion: 0, videos: null, videosState: "idle", videosPage: 1, videosQT: null, mvHeld: null, mvAt: 0,
