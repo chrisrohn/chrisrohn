@@ -1045,6 +1045,31 @@ def test_catalog_reviews_the_whole_play_history(monkeypatch, sandbox):
     assert payload["history"]["waiting"] == 3 and payload["count"] == 1
 
 
+def test_scrobble_walk_fills_a_queued_gap_and_counts_only_the_whole_log():
+    """A span queued as a gap is read top down before the plays since the last run; a page bounded by `to` counts the
+    plays below that time, not the log, so the total stays unknown rather than wrong."""
+    from discovery import catalog
+
+    calls = []
+
+    class FakeLastFm:
+        enabled = True
+
+        def recent_tracks(self, user, *, from_uts=None, to_uts=None):
+            calls.append((from_uts, to_uts))
+            if (from_uts, to_uts) == (1_500_000_000, 1_690_000_000):
+                return [{"artist": {"#text": "Jungle"}, "name": "Fire", "date": {"uts": "1600000000"}}], {"total": "1"}
+            return [], {"total": "0"}
+
+    state = {"scrobbles": {"newest": 1_699_000_000, "oldest": 1_400_000_000, "complete": False, "gap": {"lo": 1_499_999_999, "hi": 1_690_000_000}, "total": None, "tracks": {}}}
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(catalog.time, "time", lambda: 1_700_000_000)
+        sc = catalog.walk_scrobbles(FakeLastFm(), "u", state, 10)
+    assert calls == [(1_500_000_000, 1_690_000_000), (1_500_000_000, 1_599_999_999), (1_699_000_001, 1_700_000_000), (None, 1_399_999_999)]
+    assert sc["tracks"] == {catalog.history_key("Jungle", "Fire"): [1_600_000_000, 1_600_000_000]}
+    assert sc["complete"] and sc["gap"] is None and sc["total"] is None and sc["newest"] == 1_700_000_000
+
+
 def test_resolver_prefers_the_audio_track_and_the_original_issue():
     from discovery.resolve import ATV, _pick, album_year, audio_counterpart, prefer_audio
 
