@@ -284,7 +284,7 @@
     if (act === "reload") location.reload();
     if (act === "forget") {
       e.preventDefault();
-      if (confirm("Remove the dashboard data from this device?")) { ls.set("fitness-dashboard", null); ls.set("fitness-ride-config", null); location.reload(); }
+      if (confirm("Remove the dashboard data from this device?")) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin"]) ls.set(k, null); location.reload(); }
     }
   });
   // Silca's numbers for a surface: a "service" run stores them with today's weight, so the app knows when to recalculate

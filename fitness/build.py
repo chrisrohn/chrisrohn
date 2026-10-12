@@ -9,7 +9,7 @@ import re
 import shutil
 import statistics
 import zlib
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -75,6 +75,9 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     hour = now.hour if now.date() == today else 6
     commute_days = {date.fromisoformat(a["start"][:10]) for a in acts if a.get("commute")}
     adjust = adapt(today, hour, cfg, load, commute_days, by_day)
+    monday = _iso(today - timedelta(days=today.weekday()))
+    lifted = sorted({a["start"][:10] for a in acts if a["group"] == "strength" and a["start"][:10] >= monday})
+    adjust["strength_done"] = len(lifted)                                 # this week's strength quota counts what's logged
     plan = season(today, state["ctl"], state["atl"], cfg, done_today=load.get(t, 0), adapt=adjust)
     # every other distance option of every race, so the page can compare "100k or 50k?" side by side
     variants = {}
@@ -211,6 +214,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "bike": upkeep,
         "rides": _inside_rides(acts, traces, th, adjust, today),
         "recap": _recap(acts, by_day, adjust, plan, today),
+        "strength": _strength_log(acts, plan, lifted, today),
         "race_day": races_soon,
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
@@ -300,6 +304,16 @@ def _recap(acts: list[dict], by_day: dict, adjust: dict, plan: dict | None, toda
                                    fitness) if x)
     return {"week": _iso(monday), "title": f"Your week: {done_h} h ridden" + (f" of {planned_h} planned" if planned_h else ""),
             "body": (body + ". " if body else "") + ahead}
+
+
+def _strength_log(acts: list[dict], plan: dict | None, lifted: list[str], today: date) -> dict:
+    """Strength this week (logged as a Garmin or Strava strength workout) against the plan's, and the last 8 weeks'."""
+    sunday = _iso(today + timedelta(days=6 - today.weekday()))
+    ahead = [d["date"] for d in (plan or {}).get("days", []) if d.get("strength") and d["date"] <= sunday and d["date"] not in lifted]
+    since = _iso(today - timedelta(days=today.weekday() + 7 * 8))
+    weeks = Counter(_iso(date.fromisoformat(d) - timedelta(days=date.fromisoformat(d).weekday()))
+                    for d in {a["start"][:10] for a in acts if a["group"] == "strength" and since <= a["start"][:10] < _iso(today - timedelta(days=today.weekday()))})
+    return {"done": lifted, "ahead": ahead, "per_week_8": round(sum(weeks.values()) / 8, 1)}
 
 
 def _inside_rides(acts: list[dict], traces: dict[str, str] | None, th: dict, adjust: dict, today: date) -> dict | None:

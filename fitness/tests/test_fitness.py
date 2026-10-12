@@ -921,3 +921,48 @@ def test_readiness_reasons_say_which_way_each_marker_moved():
     assert by["Body"]["dir"] == "down" and by["Body"]["tone"] == "bad"
     assert by["Sleeping"]["dir"] == "up" and by["Sleeping"]["tone"] == "bad"
     assert by["Form"]["text"].startswith("Form -14: productive fatigue")
+
+
+def test_strength_rides_along_all_season(cfg):
+    p = season(date(2026, 10, 8), 45.0, 50.0, cfg)
+    days, race_days = p["days"], {d["date"] for d in p["days"] if d["phase"] == "race"}
+    lifts = [i for i, d in enumerate(days) if d.get("strength")]
+    assert lifts
+    for i in lifts:
+        d, nxt = days[i], days[i + 1]
+        assert d["phase"] in ("base", "build") and d["role"] in ("key", "endurance", "easy", "commute")
+        assert nxt["role"] not in ("long", "key", "race", "openers") and nxt.get("commute") != "workout"   # fresh legs tomorrow
+        assert i + 1 not in lifts                                                                       # never two days running
+        assert all((date.fromisoformat(r) - date.fromisoformat(d["date"])).days >= 10 for r in race_days if r > d["date"])
+    weeks: dict[str, list[dict]] = {}
+    for d in days:
+        day = date.fromisoformat(d["date"])
+        weeks.setdefault((day - timedelta(days=day.weekday())).isoformat(), []).append(d)
+    full = lambda ph: [w for w in weeks.values() if len(w) == 7 and all(d["phase"] == ph and not d["recovery_week"] for d in w)]   # noqa: E731
+    assert all(sum(1 for d in w if d.get("strength")) == 2 for w in full("base"))                 # the trainer base: two heavy
+    assert all(sum(1 for d in w if d.get("strength")) == 1 for w in full("build"))                # the race season: one keeps it
+    base_lift = next(d for d in days if d.get("strength") and d["phase"] == "base" and not d["recovery_week"])
+    assert base_lift["role"] == "key" and "heavy" in base_lift["strength"]["title"]
+    light = [d for d in days if d.get("strength") and d["recovery_week"]]
+    assert light and all(d["strength"]["title"] == "Strength · light" for d in light)
+    assert not any(d.get("strength") for d in days if d["phase"] in ("taper", "recovery", "transition", "race", "openers"))
+
+
+def test_strength_already_lifted_this_week_counts(cfg):
+    monday = date(2027, 1, 11)                                      # a trainer-base week: two sessions planned
+    week = lambda p: [d for d in p["days"][:7] if d.get("strength")]   # noqa: E731
+    assert len(week(season(monday, 45.0, 50.0, cfg))) == 2
+    assert len(week(season(monday, 45.0, 50.0, cfg, adapt={"strength_done": 1, "roles": {}, "no_commute": set()}))) == 1
+
+
+def test_strength_log_reaches_the_page(tmp_path, cfg):
+    today = date(2027, 1, 13)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=120)
+        acts = store.activities() + [activity(id="lift", source="garmin", start=datetime(2027, 1, 11, 18), kind="strength_training",
+                                              name="Strength", duration_s=2400)]
+        data = build.assemble(cfg, store.days(), acts, today)
+    assert data["strength"]["done"] == ["2027-01-11"]
+    assert all(d >= "2027-01-13" for d in data["strength"]["ahead"])
+    planned = [d for d in data["plan"]["days"][:5] if d.get("strength")]
+    assert len(planned) == 1                                        # Monday's session counted against the week's two

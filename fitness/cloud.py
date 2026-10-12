@@ -120,9 +120,18 @@ def message(data: dict, test: bool = False) -> dict:
     now = data["now"]
     rec = now["recommendation"]
     bits = [f"Readiness {now['readiness']['score']}" if now.get("readiness") else None,
-            (now.get("weather") or {}).get("summary"), rec["detail"].split(". ")[0].rstrip(".")]
+            (now.get("weather") or {}).get("summary"), rec["detail"].split(". ")[0].rstrip("."), _lift(data)]
     body = " · ".join(b for b in bits if b)
     return {"title": ("Test · " if test else "") + rec["title"], "body": body[:230], "tag": "today", "url": "./?source=push#today"}
+
+
+def _lift(data: dict) -> str | None:
+    """Today's strength session, when the plan has one and the morning hasn't eased the day below it."""
+    day = ((data.get("plan") or {}).get("days") or [None])[0]
+    lift = (day or {}).get("strength")
+    if not lift or data["now"]["recommendation"].get("level") in ("rest", "easy") and day.get("level") not in ("rest", "easy"):
+        return None
+    return f"+ {lift['title']} after"
 
 
 def notify(store: Store, data: dict, now: datetime, action: str, send: Callable | None = None) -> dict:

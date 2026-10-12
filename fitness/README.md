@@ -57,6 +57,9 @@ The **Data** section of the page shows how many of the last 30 days actually cam
 
    The Today tab has:
    - **The call:** the plan's session (or the commute), eased by readiness when the morning says so, never made harder.
+   - **How do you feel?** Four taps and a neck check (see [The morning check-in](#the-morning-check-in)).
+   - **Plus strength:** on the days the plan books it, the session to do after the ride (see
+     [Strength all season](#strength-all-season)).
    - **Plan B:** what to do instead if it rains or the day runs short, so there's always a sensible option.
    - **Tomorrow** in a line; **The week →** opens the next 7 days on Plan: tap any day for its session and its
      Plan B. Every sync rebuilds them from what you rode, slept and recovered: a missed day moves, a good week grows.
@@ -114,6 +117,22 @@ tomorrow (work day or not, from the last six weeks). If you're commuting tomorro
 in when that's earlier. Then it takes off your sleep need and 15 minutes to fall asleep. Lights out comes 30 minutes
 earlier with more than 3 hours of sleep debt this week, and 15 earlier before a hard day.
 
+### The morning check-in
+
+The watch can't tell you how your legs feel. A morning check-in asks, under the call: **legs**, **energy**, **life
+stress** and **mood** on a 1–5 scale, and **feeling sick?** It takes four seconds and is the most sensitive early
+read there is: subjective wellness tracks training load, fatigue and coming illness better than resting HR or heart
+rate measures do (Saw, Main & Gastin 2016, a systematic review of 56 studies).
+
+- **Readiness** becomes 70% the watch, 30% you (3 is your normal = 75, each step 15 points); the tile shows both.
+- **The call** can only get easier: the blended score's band (the same 75 / 60 / 45 as readiness), legs very sore
+  or energy drained cap the day at easy, and the **neck check** decides sickness: a head cold rides easy at most,
+  anything below the neck (chest, fever, aches) rests.
+- **Strength** is skipped on a day the call came down from the plan: heavy sets want fresh legs.
+- **Body → Recovery markers** draws *How you felt* over the readiness chart, so you can see the two agree or not.
+- **Private:** it stays on the phone (`fitness-checkin`, the last 90 mornings) and *Remove from this device*
+  clears it with the rest.
+
 ### The week so far
 
 If you've already ridden a lot since Monday, the rest of the week shrinks (down to half) so the week lands on its
@@ -141,6 +160,8 @@ history:
   December and again in February. Every 4th week is an easy week. The indoor base adds at most
   `plan.base_ramp` CTL a week, then the outdoor build in March adds at most `plan.max_ramp`. Between Iceman and
   Dec 1 there's a recovery week, then transition: strength twice a week and unstructured riding.
+- **Strength all season.** See [Strength all season](#strength-all-season): the transition teaches the lifts, the
+  trainer base lifts heavy, the build keeps it.
 - **The history.** Rides recorded as Strava *Virtual Ride*, flagged *trainer*, or with Zwift / MyWoosh in the
   name count as indoor. They get their own color in the weekly-hours chart, and the Training section shows the
   season's rides, hours, average power and how your best-effort FTP moved.
@@ -154,6 +175,30 @@ history:
 - **FTP.** Zwift and MyWoosh send trainer power, so with an FTP set, those rides are scored from power. Leave
   `ftp = 0` and the site estimates FTP from your best 20–90 minute power ride of the last year. After each ramp
   test, put the real number in `config.toml`.
+
+## Strength all season
+
+Heavy, low-rep leg work makes a cyclist more economical and more powerful late in a race without adding bulk
+(Rønnestad & Mujika 2014 review; Vikmoen et al. 2016), and one session a week keeps the gains through a race season
+(Rønnestad et al. 2010). Riding doesn't load bone, and masters cyclists lose it, so each session carries a few jumps
+(Nichols & Rauh 2011). The plan books it like this:
+
+| Phase | Strength | What |
+|---|---|---|
+| Transition (after Iceman) | The day's session, twice a week | Learn the lifts: 3 × 8–10 with 2 reps in reserve, a little heavier each week |
+| Trainer base (Dec–Feb) | **2 a week**, after the ride | **Strength A / B · heavy:** squat or leg press / trap-bar deadlift 4 × 4–6, single-leg work, calf raises, rows, box jumps, core (35 min) |
+| Build (Mar–) | **1 a week**, after the ride | **Strength · keep it:** 3 × 4 at the winter weight, step-ups, box jumps, core (25 min) |
+| A recovery week | 1 | **Strength · light:** bodyweight, glute bridges, core and mobility (20 min) |
+| Taper, race week, the week after a race | None | The last heavy session is 10+ days before the start |
+
+- **Where it goes:** on the hard days, after the ride, so the easy days stay easy (key sessions first, then
+  endurance, easy and commute days). Never the day before a long ride, a key session or a race, and never two days
+  running.
+- **What's logged counts:** a Garmin or Strava strength workout since Monday comes off the week's quota, and the
+  Training section shows your strength sessions a week over the last 8 weeks.
+- **On the phone:** the Today card says what to lift and how many of the week's are done; the week list marks the
+  days with **+ strength**; the morning notification adds it to the body. When readiness or the check-in brings the
+  day down from the plan, the card says to skip the lifting.
 
 ## Bike commuting
 

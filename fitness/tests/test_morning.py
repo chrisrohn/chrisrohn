@@ -206,6 +206,16 @@ def test_the_morning_notification_goes_once_then_once_more_if_the_call_changes(t
     assert cloud.message(data, test=True)["title"].startswith("Test · ")
 
 
+def test_the_notification_mentions_the_strength_session_unless_the_morning_eased_the_day():
+    from fitness import cloud
+    lift = {"title": "Strength A · heavy", "minutes": 35, "detail": "After the ride: back squat 4 × 4–6"}
+    data = {"today": "2027-01-12", "plan": {"days": [{"level": "hard", "strength": lift}]},
+            "now": {"readiness": {"score": 80}, "recommendation": {"level": "hard", "title": "Trainer workout", "detail": "Zwift: sweet spot."}}}
+    assert cloud.message(data)["body"].endswith("+ Strength A · heavy after")
+    eased = {**data, "now": {**data["now"], "recommendation": {"level": "easy", "title": "Keep it easy", "detail": "Z1–Z2 only."}}}
+    assert "Strength" not in cloud.message(eased)["body"]
+
+
 # ── the bike ─────────────────────────────────────────────────────────────────────────────────────────────
 
 def _ride(day: date, hour: int, miles: float, indoor: bool = False) -> dict:

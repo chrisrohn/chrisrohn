@@ -184,6 +184,43 @@ test.describe("installable app", () => {
     expect(await axe(page)).toEqual([]);
   });
 
+  test("the morning check-in eases the call (never hardens it), skips the lifting and stays on the phone", async ({ page }) => {
+    const problems = watch(page);
+    const lift = { title: "Strength A · heavy", minutes: 35, detail: "After the ride: back squat or leg press 4 × 4–6 heavy" };
+    const days = DATA.plan.days.map((d, i) => i === 0 ? { ...d, role: "key", level: "hard", commute: null, title: "Key session", session: "Sweet spot: 3 × 12 min", strength: lift } : d);
+    const now = { ...DATA.now, readiness: { ...DATA.now.readiness, score: 82, illness: false }, base_call: { level: "hard", title: "Green light — key session", detail: "Recovered." } };
+    await page.goto(phoneLink({ ...DATA, commute: null, plan: { ...DATA.plan, days }, now, strength: { done: [], ahead: [DATA.today], per_week_8: 1.5 } }));
+    const call = page.locator("#today .call");
+    await expect(call.locator(".title")).toHaveText("Key session");
+    await expect(call.locator(".lift")).toContainText("Strength A · heavy · 35 min");
+    await expect(call.locator(".lift")).toContainText("Strength this week: 0 of 1");
+    await expect(call.locator(".checkin")).toHaveAttribute("open", "");
+    expect(await axe(page)).toEqual([]);
+    for (const [k, v] of [["legs", "5"], ["energy", "5"], ["stress", "4"], ["mood", "4"], ["sick", "none"]]) await call.locator(`[data-feel=${k}][data-v="${v}"]`).click();
+    await expect(call.locator(".title")).toHaveText("Key session");                             // feeling great never adds to the plan
+    await expect(call.locator(".checkin")).not.toHaveAttribute("open", "");                     // answered: folded away
+    await expect(call.locator(".checkin summary")).toContainText("Legs fresh");
+    await expect(page.locator("#panel-today .tile").filter({ hasText: "Readiness" })).toContainText("watch 82 · feel 98");
+    await call.locator(".checkin summary").click();
+    await call.locator("[data-feel=legs][data-v='1']").click();
+    await expect(call.locator(".title")).toHaveText("Keep it easy");
+    await expect(call.locator(".reasons li").first()).toContainText("Check-in: legs very sore");
+    await expect(call.locator(".lift")).toContainText("Skip the lifting today");
+    await call.locator("[data-feel=sick][data-v=below]").click();
+    await expect(call.locator(".title")).toHaveText("Rest today");
+    await expect(call.locator(".detail")).toContainText("symptoms below the neck");
+    await expect(page.locator("[data-feel=sick][data-v=below]")).toHaveAttribute("aria-pressed", "true");
+    await page.reload();                                                                       // kept on this device
+    await expect(call.locator(".title")).toHaveText("Rest today");
+    expect(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("fitness-checkin") || "{}")))).toHaveLength(1);
+    await page.locator("#tab-body").click();
+    await expect(page.locator("#recovery")).toContainText("How you felt");
+    await page.locator("#tab-plan").click();
+    await expect(page.locator(".week-ahead li").first()).toContainText("+ strength");
+    expect(await axe(page)).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
   test("five tabs: Today first, a bar under the thumb on a phone, every old section link lands on its tab", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
