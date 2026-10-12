@@ -178,10 +178,12 @@ def walk_scrobbles(lastfm: LastFm, user: str, state: dict, pages: int, deadline:
             continue
         if sc.get("complete"):
             break
-        rows, attr = lastfm.recent_tracks(user, to_uts=(int(sc["oldest"]) - 1) if sc["oldest"] else None)
+        to_uts = (int(sc["oldest"]) - 1) if sc["oldest"] else None
+        rows, attr = lastfm.recent_tracks(user, to_uts=to_uts)
         left -= 1
         fetched += 1
-        if sc.get("total") is None and str(attr.get("total") or "").isdigit():
+        # only the top of the log counts every play: a page bounded by `to` counts the plays below that time
+        if sc.get("total") is None and to_uts is None and str(attr.get("total") or "").isdigit():
             sc["total"] = int(attr["total"])
         if not rows:
             sc["complete"] = True
