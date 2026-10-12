@@ -44,6 +44,9 @@ export const state = {
   playlists: LS.get("id:playlists", {}),  // {"2026": "PL...", "__skipped": "PL...", "__loaded_at": ms}
   settings: Object.assign({ audition: false, auditionSeconds: 30, auditionStart: 25, deck: null, skipsInYouTube: null, dupesDone: [], shortlistSize: 60, autoplay: true, shuffle: false, background: true, introDismissed: false, ghToken: null }, LS.get("id:settings", {})),   // deck: null = auto (phones)
   badVideos: LS.get("id:badvideos", {}),   // videoId → when YouTube refused to embed it here (autoplay steps over these)
+  videoMarks: LS.get("id:videos", {}),     // video id → the Video tab's decision on it (approved, passed, undone), mirrored with the ratings
+  videoVersion: 0, videos: null, videosState: "idle", videosPage: 1, videosQT: null, mvHeld: null, mvAt: 0,
+  videoTracks: [],                          // the Video tab's videos as playable cards (videos.js), indexed below under "video:" ids
   badVersion: 0,                            // bumps whenever badVideos changes (a count can stay the same while an entry is swapped)
   ratedVersion: 0,                          // bumps whenever `rated` is persisted with a change: the personal ranking recomputes
   playingId: null, shuffleOrder: [], shuffleFor: "", lastRated: null, shareIn: null,
@@ -52,10 +55,13 @@ export const state = {
   quota: LS.get("id:quota", { day: "", units: 0 }),   // YouTube API units spent today by this account's devices (resets midnight Pacific)
   // "new releases only" is on for a first visit: radio and recommendation sources surface catalogue too
   // "shortlist" keeps the day to the top N (⚙ sets N); "show all" on the list or the deck lifts it for that visit
-  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: true, shortlist: true, catYear: "", catSort: "score", catSourcesOff: [] }, LS.get("id:filters", {})),
+  filters: Object.assign({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyKnown: false, onlyRecent: true, shortlist: true, catYear: "", catSort: "score", catSourcesOff: [], conWhen: "", conRadius: "", conSort: "date" }, LS.get("id:filters", {})),
   view: "feed",
   catalog: null,                            // data/catalog.json: earlier years' candidates, loaded when the Catalog tab is first opened
   catalogState: "idle",                     // idle | loading | ready | missing | failed
+  concerts: null,                           // data/concerts.json: upcoming shows near Detroit by the artists played this year, loaded when the Concerts tab is first opened
+  concertsState: "idle",                    // idle | loading | ready | missing | failed
+  concertTracks: [],                        // each listed act's most popular song as a playable item (concerts.js), indexed below
   index: new Map(),                         // id → item, across the feed and the catalog
   shortlistHidden: 0,                       // how many tracks the shortlist is holding back under the current filters
   focusId: null,                            // ?t=<id> from a permalink: focus that card once the feed is in
@@ -82,8 +88,10 @@ export const items = () => (state.feed && state.feed.items) || [];
 export const catalogItems = () => (state.catalog && state.catalog.items) || [];
 /** @returns {FeedItem[]} */
 export const allItems = () => items().concat(catalogItems());
-/** Rebuild the id index after either payload changes. */
-export function reindex() { state.index = new Map(allItems().map(i => [i.id, i])); }
+/** Rebuild the id index after any payload changes. The concert rows' songs go in first, so a song that is also in
+ * the feed or the catalog keeps that card (with its year, sources and thumbs) and the row plays the same item. The
+ * Video tab's cards have ids of their own ("video:<id>"): a kept song's card plays the audio track, its video card the video. */
+export function reindex() { state.index = new Map([...state.videoTracks, ...state.concertTracks, ...allItems()].map(i => [i.id, i])); }
 /** @param {string} id */
 export const byId = id => state.index.get(id);
 /** A rating that still counts: an "undone" record is a tombstone, not a decision. @param {string} id */
@@ -124,7 +132,7 @@ export function reconcileRated() {
 const written = {};
 export function persist() {
   const keep = { "id:rated": state.rated, "id:auth": state.auth && { email: state.auth.email, name: state.auth.name, picture: state.auth.picture, hash: state.auth.hash },
-    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync, "id:badvideos": state.badVideos,
+    "id:playlists": state.playlists, "id:filters": state.filters, "id:settings": state.settings, "id:quota": state.quota, "id:sync": state.sync, "id:badvideos": state.badVideos, "id:videos": state.videoMarks,
     "id:gh": { ghAt: state.ghAt, ghDirty: state.ghDirty, ghSha: state.ghSha } };
   for (const [k, v] of Object.entries(keep)) { const j = JSON.stringify(v ?? null); if (written[k] !== j) { written[k] = j; LS.set(k, v ?? null); if (k === "id:rated") state.ratedVersion++; } }
   const tok = state.auth && state.auth.access_token ? { access_token: state.auth.access_token, expires_at: state.auth.expires_at } : null;
@@ -135,6 +143,7 @@ export function clearLocalState() { for (const k of LS.keys()) LS.del(k); for (c
 // file it cannot open.
 export function forgetAccount() {
   state.rated = {}; state.playlists = {}; state.sync = { fileId: null, at: 0 }; state.library = null; state.notOwner = false; state.lastAuthError = null;
+  state.videoMarks = {}; state.videoVersion++; state.mvHeld = null; state.mvAt = 0;
   state.ghDirty = false; state.ghSha = null; state.ghFails = 0; state.ghErr = null; state.ghSaid = null;
   clearTimeout(state.syncTimer); clearTimeout(state.ghTimer); clearTimeout(state.ghRetry); state.ghTimer = state.ghRetry = null;
 }

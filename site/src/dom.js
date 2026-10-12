@@ -30,7 +30,7 @@ export const canShare = () => typeof navigator.share === "function";
 export async function shareTrack(it) {
   const title = `${it.artist} - ${it.display_title || it.title}`;
   const yt = it.youtube && it.youtube.videoId ? "https://music.youtube.com/watch?v=" + it.youtube.videoId : (safeUrl(Object.values(it.links || {})[0]) || "");
-  const url = it._pick ? (yt || location.origin) : permalink(it.id);
+  const url = it._pick || it._video ? (yt || location.origin) : permalink(it.id);   // a pick or a video has no card of its own here
   try { await navigator.share({ title, text: `${title} · via Chris Rohn's New Music${yt && url !== yt ? ` · ${yt}` : ""}`, url }); }
   catch (e) {
     if (/** @type {Error} */ (e).name === "AbortError") return;
@@ -50,5 +50,7 @@ export function toast(msg, err = false, action) {
   if (action) { const b = document.createElement("button"); b.className = "btn ghost"; b.textContent = action.label; b.addEventListener("click", () => { t.style.display = "none"; action.fn(); }); t.appendChild(b); }
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = "none"; }, err ? 7000 : (action ? 8000 : 2600));
 }
+/** True while a toast with an action (Undo, Sign in) is on screen: a background notice must not replace it. */
+export function toastBusy() { const t = $(".toast"); return !!(t && t.style.display !== "none" && t.querySelector("button")); }
 /** The screen reader's line: what changed on the page, said once, politely. @param {string} msg */
 export function announce(msg) { const l = $("#live"); if (!l || l.textContent === msg) return; l.textContent = msg; }

@@ -1,0 +1,902 @@
+"""Offline tests for the fitness insights site: the models, the planner, the parsers and the end-to-end build."""
+from __future__ import annotations
+
+import json
+import sys
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]   # the repo root, so `import fitness` works from anywhere
+sys.path.insert(0, str(ROOT))
+
+from fitness import build, config, demo  # noqa: E402
+from fitness import metrics as m  # noqa: E402
+from fitness.activities import activity, classify, merge  # noqa: E402
+from fitness.config import nth_weekday, race_dates  # noqa: E402
+from fitness.garmin import parse_activity, parse_day  # noqa: E402
+from fitness.plan import in_indoor, roles, season, upcoming  # noqa: E402
+from fitness.store import Store  # noqa: E402
+from fitness.strava import parse_api, parse_export  # noqa: E402
+from fitness.workouts import LIBRARY, steps_for  # noqa: E402
+
+TH = {"max_hr": 185, "rest_hr": 50, "lthr": 165, "ftp": 0, "sex": "male"}
+
+
+@pytest.fixture
+def cfg():
+    return config.load()
+
+
+def test_config_loads_races(cfg):
+    names = [r["name"] for r in cfg["races"]]
+    assert "Barry-Roubaix" in names and any("Iceman" in n for n in names)
+    barry = next(r for r in cfg["races"] if r["name"] == "Barry-Roubaix")
+    assert barry["date"] == date(2027, 4, 17) and set(barry["options"]) == {"100k", "50k"} and barry["distance"] == "100k"
+    assert len(cfg["plan"]["weekly_pattern"]) == 7
+
+
+def test_legacy_single_race_config(tmp_path):
+    path = tmp_path / "c.toml"
+    path.write_text('[race]\nname = "Old"\ndate = 2026-11-07\ndistance_mi = 30\ntarget_tsb = [10, 20]\n')
+    cfg = config.load(path)
+    assert cfg["races"][0]["name"] == "Old" and cfg["races"][0]["options"]["race"]["km"] == 48
+
+
+def test_nth_weekday_and_rollover():
+    assert nth_weekday("3rd Sat Apr", 2027) == date(2027, 4, 17)
+    assert nth_weekday("1st Sat Nov", 2026) == date(2026, 11, 7)
+    race = {"date": date(2026, 4, 18), "every": "3rd Sat Apr"}
+    assert race_dates(race, date(2026, 10, 8)) == (date(2026, 4, 18), date(2027, 4, 17))
+    assert race_dates({"date": date(2026, 4, 18), "every": ""}, date(2026, 10, 8)) == (date(2026, 4, 18), date(2026, 4, 18))
+
+
+def test_indoor_window_wraps_the_new_year_and_leap_day(cfg):
+    assert in_indoor(date(2026, 12, 1), cfg) and in_indoor(date(2027, 1, 15), cfg) and in_indoor(date(2028, 2, 29), cfg)
+    assert not in_indoor(date(2026, 11, 30), cfg) and not in_indoor(date(2027, 3, 1), cfg)
+
+
+def test_hr_tss_is_100_for_an_hour_at_threshold():
+    a = activity(id="x", source="garmin", start=datetime(2026, 1, 1, 8), kind="road_biking", duration_s=3600, avg_hr=165)
+    load, src = m.session_load(a, TH)
+    assert src == "hr" and load == pytest.approx(100, abs=0.5)
+
+
+def test_power_tss_wins_when_ftp_set():
+    a = activity(id="x", source="strava", start=datetime(2026, 1, 1, 8), kind="Ride", duration_s=7200, avg_hr=150, np=200)
+    load, src = m.session_load(a, {**TH, "ftp": 250})
+    assert src == "power" and load == pytest.approx(2 * 0.8 ** 2 * 100)
+
+
+def test_duration_fallback_without_hr():
+    a = activity(id="x", source="strava", start=datetime(2026, 1, 1, 8), kind="Walk", duration_s=3600)
+    assert m.session_load(a, TH)[1] == "duration"
+
+
+def test_pmc_converges_to_constant_load():
+    load = {(date(2026, 1, 1) + timedelta(days=i)).isoformat(): 60.0 for i in range(400)}
+    rows = m.pmc(load)
+    assert rows[-1]["ctl"] == pytest.approx(60, abs=0.5)
+    assert rows[-1]["tsb"] == pytest.approx(0, abs=0.5)
+    assert rows[-1]["acwr"] == pytest.approx(1.0)
+
+
+def test_sleep_score_bands():
+    great = {"total": 8 * 3600, "deep": 0.2 * 8 * 3600, "rem": 0.24 * 8 * 3600, "awake": 300, "awake_count": 1, "avg_stress": 12}
+    short = {**great, "total": 5 * 3600, "awake": 3600, "awake_count": 6, "avg_stress": 35}
+    assert m.sleep_score(great, 8)["score"] == 100
+    assert m.sleep_score(short, 8)["label"] == "Poor"
+    assert m.sleep_score(None, 8) is None
+    no_stages = {"total": 7 * 3600, "awake": 600}
+    assert set(m.sleep_score(no_stages, 8)["parts"]) == {"duration", "continuity"}
+
+
+def _days(n=60, **last):
+    days = {}
+    for i in range(n):
+        d = (date(2026, 9, 1) + timedelta(days=i)).isoformat()
+        days[d] = {"rhr": 50 + (i % 3) - 1, "bb_wake": 80 + (i % 5), "sleep": {"total": 27000, "avg_stress": 18 + (i % 4), "resp": 14.0 + (i % 2) * 0.2}}
+    k = max(days)
+    days[k] = {**days[k], **{x: v for x, v in last.items() if x != "sleep"}}
+    days[k]["sleep"] = {**days[k]["sleep"], **last.get("sleep", {})}
+    return days, k
+
+
+def test_readiness_normal_day_is_green():
+    days, k = _days(rhr=50, bb_wake=82, sleep={"avg_stress": 19.5, "resp": 14.1})
+    r = m.readiness(k, days, {"score": 85, "label": "Good", "hours": 7.5}, {"tsb": 0, "acwr": 1.0})
+    assert r["score"] >= 75 and not r["illness"]
+
+
+def test_readiness_flags_illness():
+    days, k = _days(rhr=58, sleep={"resp": 16.0, "avg_stress": 35})
+    r = m.readiness(k, days, {"score": 70, "label": "Fair", "hours": 7}, None)
+    assert r["illness"]
+    assert m.recommend(r)["level"] == "rest"
+
+
+def test_readiness_needs_baseline():
+    days, k = _days(n=10)
+    assert m.readiness(k, days, None, None) is None
+
+
+def test_readiness_only_ever_eases_the_plan():
+    plan_day = {"level": "hard", "title": "Key session", "session": "VO2", "minutes": 75}
+    assert m.recommend({"score": 50, "illness": False}, plan_day)["level"] == "easy"
+    assert m.recommend({"score": 90, "illness": False}, {**plan_day, "level": "rest"})["level"] == "rest"
+    assert m.recommend({"score": 90, "illness": False}, plan_day)["detail"] == "VO2 — about 1h15"
+
+
+def test_spearman_and_insights():
+    assert m.spearman([1, 2, 3, 4], [10, 20, 30, 40]) == pytest.approx(1)
+    rows = [(x, 90 - x * 0.5) for x in range(40)]
+    out = m.insights({"load→sleep": rows})
+    assert out and out[0]["rho"] == pytest.approx(-1) and "lowers" in out[0]["text"]
+    assert m.insights({"load→sleep": rows[:10]}) == []
+
+
+def test_roles_from_pattern():
+    assert roles([0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9]) == ["rest", "key", "endurance", "key", "easy", "long", "endurance"]
+
+
+def test_season_plans_both_races(cfg):
+    p = season(date(2026, 10, 8), 45.0, 50.0, cfg)
+    iceman, barry = p["races"]
+    assert iceman["date"] == "2026-11-07" and barry["date"] == "2027-04-17" and barry["option"] == "100k"
+    assert iceman["in_band"] and barry["in_band"], (iceman["race_tsb"], barry["race_tsb"])
+    by_date = {d["date"]: d for d in p["days"]}
+    assert by_date["2026-11-07"]["phase"] == "race" and by_date["2026-11-06"]["phase"] == "openers"
+    assert by_date["2026-11-10"]["phase"] == "recovery"                       # the week after Iceman
+    assert by_date["2026-11-20"]["phase"] == "transition"
+    assert by_date["2027-01-12"]["phase"] == "base" and by_date["2027-01-12"]["indoor"]
+    assert by_date["2027-03-09"]["phase"] == "build" and not by_date["2027-03-09"]["indoor"]
+    assert by_date["2027-04-17"]["title"].startswith("Race day — Barry-Roubaix (Killer")
+    indoor = [d for d in p["days"] if d["indoor"]]
+    assert indoor and all(d["date"][5:] >= "12-01" or d["date"][5:] <= "02-29" for d in indoor)
+    assert any(d["title"] == "FTP ramp test" and d["date"].startswith("2026-12") for d in indoor)
+    assert any(d["title"] == "FTP ramp test" and d["date"].startswith("2027-02") for d in indoor)
+    assert all(d["minutes"] <= cfg["indoor"]["long_ride_h"] * 60 + 5 for d in indoor)   # no 4-hour trainer rides
+    assert any(w["recovery_week"] and w["phase"] == "base" for w in p["weeks"])
+    assert barry["build_start"] == "2027-03-01" and barry["peak_week_h"] > 0
+
+
+def test_season_distance_choice(cfg):
+    long = season(date(2026, 10, 8), 45.0, 50.0, cfg)["races"][1]
+    short = season(date(2026, 10, 8), 45.0, 50.0, cfg, choices={"Barry-Roubaix": "50k"})["races"][1]
+    assert short["option"] == "50k" and short["label"].startswith("Thriller")
+    assert short["target_ctl"] < long["target_ctl"] and short["peak_week_h"] < long["peak_week_h"]
+    assert upcoming(cfg, date(2026, 10, 8), {"Barry-Roubaix": "nonsense"})[0][1]["option"] == "100k"
+
+
+def test_season_none_without_races(cfg):
+    assert season(date(2026, 10, 8), 45, 50, {**cfg, "races": []}) is None
+
+
+def test_indoor_detection():
+    z = activity(id="s", source="strava", start=datetime(2027, 1, 5, 18), kind="Ride", name="Zwift - Watopia", duration_s=3600)
+    w = activity(id="w", source="strava", start=datetime(2027, 1, 5, 18), kind="Ride", name="MyWoosh - Belgium", duration_s=3600)
+    v = activity(id="v", source="strava", start=datetime(2027, 1, 5, 18), kind="VirtualRide", duration_s=3600)
+    t = activity(id="t", source="strava", start=datetime(2027, 1, 5, 18), kind="Ride", duration_s=3600, trainer=True)
+    o = activity(id="o", source="strava", start=datetime(2027, 1, 5, 18), kind="GravelRide", duration_s=3600)
+    assert z["indoor"] and w["indoor"] and v["indoor"] and t["indoor"] and not o["indoor"] and "trainer" not in t
+
+
+def test_estimate_ftp_from_trainer_rides():
+    acts = [activity(id=f"s{i}", source="strava", start=datetime(2027, 1, 5 + i, 18), kind="VirtualRide", duration_s=m_ * 60, np=np_)
+            for i, (m_, np_) in enumerate([(20, 260), (60, 240), (120, 300), (10, 400)])]
+    assert m.estimate_ftp(acts, date(2027, 2, 1)) == 247   # 20 min × 0.95 vs 60 min × 1.0; the 2 h and 10 min rides don't count
+    assert m.thresholds({"athlete": {**config.DEFAULTS["athlete"]}}, acts, {}, date(2027, 2, 1))["ftp"] == 247
+
+
+def test_classify():
+    assert classify("mountain_biking") == ("ride", True)
+    assert classify("MountainBikeRide") == ("ride", True)
+    assert classify("Fat Bike Ride")[0] == "ride"
+
+
+def test_merge_garmin_and_strava_twins():
+    g = activity(id="garmin:1", source="garmin", start=datetime(2026, 9, 1, 8), kind="mountain_biking", name="Kalkaska Mountain Biking", duration_s=3600)
+    s = activity(id="strava:9", source="strava", start=datetime(2026, 9, 1, 8, 1), kind="MountainBikeRide", name="Vasa loop", duration_s=3500, np=210)
+    other = activity(id="strava:10", source="strava", start=datetime(2026, 9, 2, 8), kind="Ride", duration_s=3600)
+    out = merge([other, s, g])   # a Strava-only ride listed first used to crash the merge
+    assert [a["id"] for a in out] == ["garmin:1", "strava:10"]
+    assert out[0]["np"] == 210 and out[0]["name"] == "Vasa loop" and out[0]["links"] == {"strava": "strava:9"}
+
+
+def test_parse_garmin_day_venu_sq_shape():
+    summary = {"restingHeartRate": 51, "averageStressLevel": 28, "bodyBatteryHighestValue": 88, "bodyBatteryAtWakeTime": 85, "totalSteps": 9000,
+               "moderateIntensityMinutes": 10, "vigorousIntensityMinutes": 20}
+    sleep = {"dailySleepDTO": {"sleepTimeSeconds": 26000, "deepSleepSeconds": 5000, "lightSleepSeconds": 15000, "remSleepSeconds": 6000,
+                               "awakeSleepSeconds": 900, "sleepStartTimestampLocal": 1759876200000, "sleepEndTimestampLocal": 1759903200000,
+                               "avgSleepStress": 17.0, "averageRespirationValue": 13.9, "sleepScores": None}, "restlessMomentsCount": 40}
+    d = parse_day(summary, sleep)
+    assert d["rhr"] == 51 and d["bb_wake"] == 85 and d["intensity_min"] == 50
+    assert d["sleep"]["start"] == "2025-10-07T22:30" and d["sleep"]["garmin_score"] is None and d["sleep"]["avg_stress"] == 17.0
+    assert parse_day({}, {}) == {"empty": True}
+
+
+def test_parse_garmin_activity():
+    a = parse_activity({"activityId": 5, "startTimeLocal": "2026-09-01 07:30:00", "activityType": {"typeKey": "mountain_biking"}, "duration": 3700,
+                        "movingDuration": 3600, "distance": 30000, "averageHR": 150, "hrTimeInZone_2": 1200})
+    assert a["id"] == "garmin:5" and a["offroad"] and a["hr_zones"] == [None, 1200, None, None, None]
+
+
+def test_parse_strava_api_ignores_estimated_power():
+    a = parse_api({"id": 3, "start_date_local": "2026-09-01T07:30:00Z", "sport_type": "GravelRide", "elapsed_time": 3700, "moving_time": 3600,
+                   "average_watts": 180, "weighted_average_watts": 195, "device_watts": False})
+    assert a["start"] == "2026-09-01T07:30:00" and a["np"] is None and a["offroad"]
+
+
+def test_parse_strava_export_duplicate_headers():
+    csv = ('Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time,Distance,Max Heart Rate,Relative Effort,Elapsed Time,Moving Time,Distance,'
+           'Elevation Gain,Average Heart Rate,Average Watts,Device Watts,Weighted Average Power\n'
+           '77,"Nov 2, 2024, 3:00:00 PM",Iceman!,Mountain Bike Ride,7300,48.9,180,250,7300,7200,48900.5,575,163,,false,\n')
+    (a, _), = parse_export(csv, "America/Detroit")
+    assert a["start"] == "2024-11-02T11:00:00" and a["distance_m"] == 48900.5 and a["avg_hr"] == 163 and a["offroad"] and a["suffer_score"] == 250
+
+
+def test_build_end_to_end(tmp_path, cfg):
+    today = date(2026, 10, 8)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=330)   # reaches back into last winter's trainer season
+        data = build.assemble(cfg, store.days(), store.activities(), today)
+    assert data["now"]["readiness"] and data["plan"]["days"][-1]["date"] == "2027-04-17"
+    assert len(data["sleep"]) == build.SLEEP_DAYS and len(data["weeks"]) == build.WEEKS
+    assert {c["field"] for c in data["coverage"]} >= {"Garmin Sleep Score", "Overnight HRV (ms)"}
+    assert set(data["variants"]) == {"Barry-Roubaix|50k"} and data["now"]["base_call"]["level"] in ("hard", "moderate", "easy", "rest")
+    assert data["indoor"]["rides"] > 0 and data["indoor"]["avg_np"]
+    assert [e["date"][:4] for e in data["editions"]["Barry-Roubaix"]] == ["2025", "2026"]
+    out = build.render(data, tmp_path / "index.html")
+    html = out.read_text()
+    assert "/*__APP__*/" not in html and "__DATA__" not in html
+    payload = html.split('<script type="application/json" id="data">')[1].split("</script>")[0]
+    assert json.loads(payload)["today"] == "2026-10-08"
+
+
+def test_every_library_session_has_steps(cfg):
+    from fitness.plan import SESSIONS
+    assert set(LIBRARY) == {(name, i) for name, lib in SESSIONS.items() for i in range(len(lib))}
+    for key, make in LIBRARY.items():
+        steps = make()
+        assert steps and all(s["min"] > 0 and 0 <= s["lo"] < s["hi"] for s in steps), key
+
+
+def test_steps_fill_to_planned_time():
+    st = steps_for(("mtb", 2), "Key session", 120)
+    assert round(sum(s["min"] for s in st)) == 120 and st[-1]["name"] == "Cool-down" and st[-2]["name"] == "Endurance"
+    assert [s["min"] for s in steps_for(None, "Recovery spin", 45)] == [45]
+    assert steps_for(None, "Rest", 0) == [] and steps_for(None, "Strength", 45) == []
+    race = steps_for(None, "Race day — Barry-Roubaix (Killer · 62 mi)", 0, race_hours=3.75)
+    assert race[-1]["min"] == 225 and "Eat" in race[-1]["cue"]
+    assert any("feel" in s["cue"] for s in steps_for(("indoor_late", 2), "Trainer workout", 70))   # 30/30s are ridden by feel
+
+
+def test_ride_page_and_link(tmp_path, cfg):
+    import base64
+    import zlib
+    today = date(2026, 10, 8)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=120)
+        data = build.assemble(cfg, store.days(), store.activities(), today)
+    ride = data["ride"]
+    assert ride["units"] == data["units"] == "imperial"
+    assert ride["lthr"] and 1 <= len({d["date"] for d in ride["days"]}) <= 7 and ride["days"][0]["date"] == "2026-10-08" and ride["days"][0]["steps"]
+    titles = [d["title"] for d in ride["days"]]
+    i = titles.index("Commute in")
+    assert titles[i + 1] == "Commute home" and ride["days"][i]["check"] and ride["commute"]["in"]
+    build.render(data, tmp_path / "index.html", cfg)
+    page = (tmp_path / "ride.html").read_text()
+    assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' in page
+    assert 'ride.html' in (tmp_path / "index.html").read_text()
+    link = build.ride_link(cfg, ride, "ride.html")
+    assert link.startswith("https://chrisrohn.com/fitness/ride.html#z=")
+    blob = link.split("#z=")[1]
+    assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == ride
+    assert len(link) < 2400   # small enough for a QR code a phone camera reads off a laptop screen
+    assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == "ride.html"
+    page = build.ride_page(None)
+    assert "__CSP__" not in page and "script-src 'sha256-" in page and "__RIDE_DATA__" not in page
+
+
+def test_installable_app_and_phone_link(tmp_path, cfg):
+    import base64
+    import zlib
+    today = date(2026, 10, 8)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=120)
+        data = build.assemble(cfg, store.days(), store.activities(), today)
+    export = tmp_path / "drive"
+    build.render(data, tmp_path / "index.html", {**cfg, "app": {**cfg["app"], "export_dir": str(export)}})
+    manifest = json.loads((tmp_path / "manifest.webmanifest").read_text())
+    assert manifest["display"] == "standalone" and manifest["start_url"].startswith("./") and manifest["scope"] == "./"
+    assert manifest["id"] == "/fitness/"   # resolved against the origin: "./" would be the music app's id at the root
+    assert {"192x192", "512x512"} <= {i["sizes"] for i in manifest["icons"]} and any("maskable" in i.get("purpose", "") for i in manifest["icons"])
+    assert all((tmp_path / i["src"]).exists() for i in manifest["icons"])
+    sw = (tmp_path / "sw.js").read_text()
+    assert "__VERSION__" not in sw and 'fitness-' in sw
+    html = (tmp_path / "index.html").read_text()
+    assert 'rel="manifest"' in html and "manifest-src 'self'" in html and "worker-src 'self'" in html and "/*__SHELL__*/" not in html
+    saved = json.loads((tmp_path / "fitness-data.json").read_text())
+    assert saved["today"] == "2026-10-08" and "ride_qr" not in saved and "phone_href" not in saved
+    assert (export / "fitness-data.json").read_text() == (tmp_path / "fitness-data.json").read_text()
+    link = build.phone_link(cfg, data)
+    assert link.startswith("https://chrisrohn.com/fitness/#d=")
+    blob = link.split("#d=")[1]
+    assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == saved
+    assert build.phone_link({**cfg, "app": {"url": ""}}, data) is None
+
+
+# ── commuting ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def _commute(day: date, hour: float, km: float = 30.2, flag: bool | None = None, hr: float = 135, speed: float = 27.0, kind: str = "road_biking"):
+    start = datetime.combine(day, datetime.min.time()) + timedelta(hours=hour)
+    return activity(id=f"x{day}{hour}{km}", source="strava" if flag else "garmin", start=start, kind=kind, duration_s=km / speed * 3600,
+                    distance_m=km * 1000, avg_hr=hr, commute=flag)
+
+
+def test_commute_detection(cfg):
+    tue = date(2026, 9, 15)
+    acts = [_commute(tue, 7), _commute(tue, 16.75), _commute(tue + timedelta(days=4), 9),       # Sat: not a commute
+            _commute(tue, 12), _commute(tue, 7.5, km=60), _commute(tue, 22, flag=True)]          # noon, too long; Strava's flag wins
+    m.mark_commutes(acts, cfg)
+    assert [a.get("commute", False) for a in acts] == [True, True, False, False, False, True]
+    assert acts[0]["leg"] == "in" and acts[1]["leg"] == "home"
+
+
+def test_commute_profile_learns_cost_and_hr_at_speed(cfg):
+    acts = []
+    for i in range(20):
+        day = date(2026, 6, 2) + timedelta(days=7 * (i // 2) + (i % 2) * 2)
+        sp = 25 + (i % 5)
+        acts += [_commute(day, 7, speed=sp, hr=100 + 1.5 * sp), _commute(day, 17, speed=sp - 1, hr=104 + 1.5 * (sp - 1))]
+    m.mark_commutes(acts, cfg)
+    th = {**TH, "lthr": 165}
+    for a in acts:
+        a["load"], a["load_src"] = m.session_load(a, th)
+    prof = m.commute_profile(acts, cfg, date(2026, 10, 8))
+    a, b = prof["legs"]["in"]["model"]
+    assert b == pytest.approx(1.5, abs=0.01) and a == pytest.approx(100, abs=0.5)
+    assert prof["legs"]["in"]["rides"] == 20 and prof["legs"]["home"]["load"] > 0 and len(prof["series"]) == 40
+
+
+def test_commute_profile_defaults_without_history(cfg):
+    prof = m.commute_profile([], cfg, date(2026, 10, 8))
+    assert prof["legs"]["in"]["minutes"] == round(30 / 26 * 60) and prof["legs"]["in"]["model"] is None
+    assert m.commute_profile([], {**cfg, "commute": {**cfg["commute"], "enabled": False}}, date(2026, 10, 8)) is None
+
+
+def test_planner_books_commutes_inside_the_week(cfg):
+    p = season(date(2026, 10, 8), 45.0, 50.0, cfg)
+    days = {d["date"]: d for d in p["days"]}
+    lo, hi = cfg["commute"]["per_week"]
+    allowed = {"mon", "tue", "wed", "thu", "fri"} & set(cfg["commute"]["days"])
+    for w in p["weeks"]:
+        assert w["commutes"] <= hi
+        if w["phase"] == "build" and w["days"] == 7:
+            assert w["commutes"] >= lo
+    for d in p["days"]:
+        if d["commute"]:
+            dt = date.fromisoformat(d["date"])
+            assert ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][dt.weekday()] in allowed
+            assert not d["indoor"] and d["phase"] not in ("race", "openers", "base")
+            assert (date(2026, 11, 7) - dt).days >= 3 or dt > date(2026, 11, 7)
+            if d["phase"] == "taper":
+                assert d["commute"] == "easy"
+    first = next(d for d in p["days"] if d["commute"])
+    assert first["legs"] and [leg["leg"] for leg in first["legs"]] == ["in", "home"] and all(leg["check"] for leg in first["legs"])
+    assert days["2027-01-12"]["commute"] is None                       # no commuting through the trainer winter
+    winter = season(date(2026, 10, 8), 45.0, 50.0, {**cfg, "commute": {**cfg["commute"], "winter": True}})
+    assert any(d["commute"] for d in winter["days"] if d["date"].startswith("2027-01"))
+
+
+def test_commute_call(cfg):
+    prof = m.commute_profile([], cfg, date(2026, 10, 8))
+    th = {**TH, "lthr": 165}
+    thu = date(2026, 10, 8)
+    planned = {"role": "commute", "commute": "workout", "commute_workout": "2 × 15 min sweet spot", "level": "hard"}
+    ok = {"score": 82, "illness": False}
+    assert m.commute_call(ok, planned, thu, cfg, prof, th)["verdict"] == "ride"
+    assert m.commute_call({"score": 55, "illness": False}, planned, thu, cfg, prof, th)["verdict"] == "easy"
+    assert m.commute_call({"score": 40, "illness": False}, planned, thu, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call({"score": 80, "illness": True}, planned, thu, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call(ok, {"role": "rest"}, thu, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call(ok, {"role": "endurance"}, thu, cfg, prof, th)["verdict"] == "optional"
+    assert m.commute_call(ok, planned, date(2026, 10, 10), cfg, prof, th) is None   # Saturday: not a commute day
+    assert "under 134 bpm" in m.commute_call({"score": 55, "illness": False}, planned, thu, cfg, prof, th)["detail"]
+
+
+# ── the GitHub Actions sync ───────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def cloud_dir(tmp_path, monkeypatch):
+    import time as _time
+
+    from fitness import cloud
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", data)
+    monkeypatch.setattr(config, "DB_PATH", data / "fitness.db")
+    monkeypatch.setattr(config, "STRAVA_TOKEN", data / "strava_token.json")
+    for k in ("GARMIN_EMAIL", "GARMIN_PASSWORD", "STRAVA_CLIENT_ID", "STRAVA_CLIENT_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("TZ", "UTC")
+    yield cloud, data
+    monkeypatch.undo()
+    _time.tzset()
+
+
+def test_cloud_run_writes_the_apps_two_files(tmp_path, cfg, cloud_dir):
+    cloud, data = cloud_dir
+    with Store(data / "fitness.db") as store:
+        demo.populate(store, date(2026, 10, 8), days=120)
+    out = tmp_path / "state"
+    status = cloud.run(cfg, out=out, today=date(2026, 10, 8))
+    saved = json.loads((out / "fitness-data.json").read_text())
+    assert saved["today"] == "2026-10-08" and saved["ride"]["days"] and "ride_qr" not in saved
+    assert json.loads((out / "status.json").read_text()) == status
+    assert status["ok"] and status["garmin"]["days"] > 100 and status["garmin"]["last"] == "2026-10-08"
+    assert status["strava"]["activities"] > 0 and not status["garmin"]["connected"] and not status["strava"]["connected"]
+
+
+def test_cloud_run_reports_what_needs_doing(tmp_path, cfg, cloud_dir):
+    cloud, _ = cloud_dir
+    status = cloud.run(cfg, action="connect-strava", code="", out=tmp_path)
+    assert not status["ok"] and "authorization code" in status["strava"]["error"]
+    status = cloud.run(cfg, action="connect-garmin", out=tmp_path)
+    assert "GARMIN_EMAIL" in status["garmin"]["error"] and not (tmp_path / "fitness-data.json").exists()
+
+
+def test_garmin_code_comes_from_a_run_named_after_it():
+    from datetime import UTC
+
+    from fitness import cloud
+    since = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+    pages = iter([
+        {"workflow_runs": [{"display_title": "garmin-code 111111", "created_at": "2026-10-09T11:59:00Z"}]},   # an older attempt
+        {"workflow_runs": [{"display_title": "sync", "created_at": "2026-10-09T12:01:00Z"},
+                           {"display_title": "garmin-code 482913", "created_at": "2026-10-09T12:02:00Z"}]},
+    ])
+    asked = []
+    code = cloud.wait_for_code("training.yml", since, fetch=lambda p: (asked.append(p), next(pages))[1], sleep=lambda s: None)
+    assert code == "482913" and asked[0] == "/actions/workflows/training.yml/runs?event=workflow_dispatch&per_page=20"
+
+
+def test_workflow_file_from_the_callers_ref(monkeypatch):
+    from fitness import cloud
+    monkeypatch.setenv("GITHUB_WORKFLOW_REF", "chrisrohn/training-data/.github/workflows/training.yml@refs/heads/main")
+    assert cloud.workflow_file() == "training.yml"
+
+
+def test_strava_errors_never_echo_the_reply():
+    from fitness.strava import _problem
+    assert _problem({"message": "Bad Request", "errors": [{"resource": "AuthorizationCode", "field": "code", "code": "invalid"}]}) == "Bad Request (code invalid)"
+    assert "secret" not in _problem({"access_token": "secret", "refresh_token": "secret"})
+
+
+def test_strava_client_secret_is_never_written_to_disk(tmp_path, monkeypatch):
+    import time as _time
+
+    from fitness import strava
+    path = tmp_path / "strava_token.json"
+    monkeypatch.setattr(strava, "STRAVA_TOKEN", path)
+    monkeypatch.setenv("STRAVA_CLIENT_SECRET", "from-env")
+    sent = []
+
+    class Reply:
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class Requests:
+        @staticmethod
+        def post(url, timeout, data):
+            sent.append(data)
+            return Reply({"access_token": "new", "refresh_token": "r2", "expires_at": _time.time() + 3600})
+
+    monkeypatch.setattr(strava, "_requests", lambda: Requests)
+    strava.exchange("4242", "from-env", "code")
+    assert "client_secret" not in json.loads(path.read_text())
+    path.write_text(json.dumps({"client_id": "4242", "client_secret": "legacy", "refresh_token": "r1", "expires_at": 0, "access_token": "old"}))
+    assert strava._access_token() == "new"
+    assert sent[-1]["client_secret"] == "from-env" and sent[-1]["grant_type"] == "refresh_token"
+    assert "client_secret" not in json.loads(path.read_text())          # an older file is cleaned up on its next refresh
+
+
+def test_cloud_imports_an_uploaded_strava_export_once(tmp_path, cfg, cloud_dir):
+    cloud, data = cloud_dir
+    inbox = tmp_path / "inbox" / "strava"
+    inbox.mkdir(parents=True)
+    (inbox / "activities.csv").write_text(
+        'Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time,Distance,Max Heart Rate,Relative Effort,Elapsed Time,Moving Time,Distance,'
+        'Elevation Gain,Average Heart Rate,Average Watts,Device Watts,Weighted Average Power,Commute\n'
+        '77,"Nov 2, 2024, 3:00:00 PM",Iceman!,Mountain Bike Ride,7300,48.9,180,250,7300,7200,48900.5,575,163,,false,,false\n'
+        '78,"Jan 9, 2025, 11:00:00 PM",Zwift - Watopia,Virtual Ride,3600,30.1,170,80,3600,3600,30100,200,140,190,true,200,false\n')
+    status = cloud.run(cfg, out=tmp_path / "state", today=date(2026, 10, 8), inbox=tmp_path / "inbox")
+    assert status["ok"] and status["strava"]["activities"] == 2 and status["strava"]["export"]["rows"] == 2
+    assert status["strava"]["export"]["file"] == "activities.csv" and (tmp_path / "state" / "fitness-data.json").exists()
+    with Store(data / "fitness.db") as store:
+        acts = {a["id"]: a for a in store.activities()}
+    assert acts["strava:78"]["indoor"] and acts["strava:78"]["avg_power"] == 190
+    (inbox / "activities.csv").unlink()                                              # gone from the repository: still remembered
+    again = cloud.run(cfg, out=tmp_path / "state", today=date(2026, 10, 8), inbox=tmp_path / "inbox")
+    assert again["strava"]["export"]["rows"] == 2 and again["strava"]["activities"] == 2
+
+
+def test_merge_matches_an_out_of_town_ride_by_its_utc_start():
+    # ridden in Colorado: Garmin keeps Mountain time, Strava's export is UTC shown in Detroit time two hours later
+    g = activity(id="garmin:5", source="garmin", start=datetime(2026, 7, 4, 9), kind="mountain_biking", duration_s=7200, avg_hr=150,
+                 start_utc="2026-07-04T15:00:00")
+    s = activity(id="strava:55", source="strava", start=datetime(2026, 7, 4, 11), kind="MountainBikeRide", name="Monarch Crest", duration_s=7300,
+                 start_utc="2026-07-04T15:00:00")
+    home = activity(id="strava:56", source="strava", start=datetime(2026, 7, 4, 9, 2), kind="Ride", duration_s=7200,   # same local clock,
+                    start_utc="2026-07-04T13:02:00")                                                               # but a different ride
+    out = merge([s, g, home])
+    assert [a["id"] for a in out] == ["garmin:5", "strava:56"] and out[0]["name"] == "Monarch Crest"
+
+
+def test_merge_folds_the_watch_and_zwift_copies_of_one_trainer_ride():
+    watch = activity(id="garmin:7", source="garmin", start=datetime(2026, 12, 9, 18), kind="indoor_cycling", name="Indoor Cycling",
+                     duration_s=3600, avg_hr=142, start_utc="2026-12-09T23:00:00")
+    zwift = activity(id="garmin:8", source="garmin", start=datetime(2026, 12, 9, 18, 2), kind="virtual_ride", name="Zwift - Watopia",
+                     duration_s=3480, avg_power=185, np=196, start_utc="2026-12-09T23:02:00")
+    strava = activity(id="strava:80", source="strava", start=datetime(2026, 12, 9, 18, 2), kind="VirtualRide", name="Zwift - Watopia",
+                      duration_s=3480, avg_power=185, start_utc="2026-12-09T23:02:00")
+    later = activity(id="garmin:9", source="garmin", start=datetime(2026, 12, 9, 20), kind="walking", duration_s=1800, avg_hr=95)
+    out = merge([zwift, strava, later, watch])
+    assert [a["id"] for a in out] == ["garmin:7", "garmin:9"]
+    ride = out[0]
+    assert ride["avg_hr"] == 142 and ride["np"] == 196 and ride["indoor"] and ride["name"] == "Zwift - Watopia"
+    assert ride["links"] == {"garmin": "garmin:8", "strava": "strava:80"}
+
+
+def test_merge_falls_back_to_the_local_clock_for_records_without_utc():
+    old = activity(id="garmin:1", source="garmin", start=datetime(2025, 5, 1, 7), kind="road_biking", duration_s=3600, avg_hr=140)
+    s = activity(id="strava:2", source="strava", start=datetime(2025, 5, 1, 7, 3), kind="Ride", duration_s=3500, start_utc="2025-05-01T11:03:00")
+    assert [a["id"] for a in merge([s, old])] == ["garmin:1"]
+
+
+def test_parsers_keep_the_utc_start():
+    csv = ('Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time\n'
+           '77,"Nov 2, 2024, 3:00:00 PM",Iceman!,Mountain Bike Ride,7300\n')
+    (a, _), = parse_export(csv, "America/Detroit")
+    assert a["start"] == "2024-11-02T11:00:00" and a["start_utc"] == "2024-11-02T15:00:00"
+    g = parse_activity({"activityId": 1, "startTimeLocal": "2026-07-04 09:00:00", "startTimeGMT": "2026-07-04 15:00:00",
+                        "activityType": {"typeKey": "cycling"}, "duration": 60})
+    assert g["start_utc"] == "2026-07-04T15:00:00"
+
+
+def test_parse_strava_export_power_and_commutes_in_newer_exports():
+    # newer exports: no "Device Watts", Strava's estimated watts on every ride, and a second numeric "Commute" column
+    csv = ('Activity ID,Activity Date,Activity Name,Activity Type,Elapsed Time,Commute,Average Watts,Weighted Average Power,Commute\n'
+           '1,"Jan 9, 2025, 11:00:00 PM",Zwift - Watopia,Virtual Ride,3600,true,190,200,1.0\n'
+           '2,"May 9, 2025, 11:00:00 AM",Morning Ride,Ride,4000,false,150,,0.0\n')
+    (z, _), (r, _) = parse_export(csv, "America/Detroit")
+    assert z["avg_power"] == 190 and z["np"] == 200 and z["indoor"] and z["commute"]
+    assert r["avg_power"] is None and r["np"] is None and not r.get("commute")   # an estimate is not a measurement
+
+
+# ── fuel ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+def _fuel_day(role, minutes=0, load=0, level=None, **kw):
+    return {"role": role, "minutes": minutes, "load": load, "level": level or role, **kw}
+
+
+def test_fuel_tiers():
+    from fitness.fuel import tier
+    assert tier(None) == "rest" and tier(_fuel_day("rest")) == "rest"
+    assert tier(_fuel_day("easy", 45, 20, "easy")) == "easy" and tier(_fuel_day("endurance", 60, 50, "moderate")) == "moderate"
+    assert tier(_fuel_day("key", 55, 65, "hard")) == "hard" and tier(_fuel_day("long", 180, 140, "hard")) == "long"
+    assert tier(_fuel_day("race", 170, 220, "hard")) == "race"
+    # two easy hours of commuting score a high load but eat like a training day, not a hard one
+    assert tier(_fuel_day("commute", 139, 95, "easy", commute="easy")) == "moderate" and tier(_fuel_day("key", 60, 85)) == "hard"
+
+
+def test_fuel_targets_fit_the_days_burn(cfg):
+    from fitness.fuel import burn, day_plan
+    body = {"kg": 83.9, "height_cm": 183, "age": 45, "sex": "male"}
+    b = burn("moderate", 139, body, "easy")
+    assert 2300 < b["base"] < 2500 and 1100 < b["ride"] < 1250
+    commute = day_plan(_fuel_day("commute", 139, 95, "easy", commute="easy"), None, date(2026, 10, 9), cfg, 83.9, body)
+    assert commute["label"] == "Training day" and commute["carbs_g"] == 420 and commute["kcal"] < commute["burn"]["total"]
+    assert "After the ride" not in {m["slot"] for m in commute["meals"]}                       # no recovery shake after an easy commute
+    key = day_plan(_fuel_day("key", 60, 85, "hard"), None, date(2026, 10, 14), cfg, 83.9, body)
+    assert key["carbs_g"] * 4 + key["protein_g"] * 4 <= key["burn"]["total"]                     # capped by the burn, not just g/kg
+
+
+def test_fuel_blueprint_meals_when_they_fit_and_a_vegetarian_base_for_the_rest(cfg):
+    from fitness.fuel import day_plan
+    rest = day_plan(_fuel_day("rest"), None, date(2026, 10, 12), cfg, 78)            # a Monday
+    slots = {m["slot"]: m for m in rest["meals"]}
+    assert slots["Breakfast"]["what"].startswith("Nutty Pudding") and slots["Lunch"]["what"].startswith("Super Veggie with the lentils")
+    assert rest["carbs_g"] == 230 and rest["protein_g"] == 140
+    dinner = slots["Dinner"]
+    assert "Lighter" in dinner["what"] and dinner["base"].startswith("Vegetarian base: up to ~") and "tofu" in dinner["base"]
+    assert not any(w in " ".join(m["what"] + m.get("base", "") for m in rest["meals"]) for w in ("chicken", "fish", "steak"))
+    hard = day_plan(_fuel_day("commute", 135, 120, "hard", commute="workout", commute_workout="2 × 15 min"), None, date(2026, 10, 13), cfg, 78)
+    slots = {m["slot"]: m["what"] for m in hard["meals"]}
+    assert "banana" in slots["Breakfast"] and "45 min before you leave" in slots["Breakfast"]
+    assert "lentils" in slots["Lunch"] and "black rice" in slots["Lunch"] and "ride home" in slots["Snack"]
+    assert "On the bike" not in slots                                                    # two hour-long legs: no on-bike fuel needed
+    sun = day_plan(_fuel_day("rest"), None, date(2026, 10, 18), cfg, 78)              # a rest Sunday still gets the Blueprint meals
+    assert {m["slot"]: m["what"] for m in sun["meals"]}["Breakfast"].startswith("Nutty Pudding")
+
+
+def test_fuel_race_eve_and_race_morning_drop_the_fiber(cfg):
+    from fitness.fuel import day_plan
+    race = _fuel_day("race", 170, 220, "hard")
+    eve = day_plan(_fuel_day("openers", 40, 30, "easy"), race, date(2026, 11, 6), cfg, 78)
+    slots = {m["slot"]: m for m in eve["meals"]}
+    assert eve["tier"] == "load" and eve["carbs_g"] == 620 and "Not the Super Veggie" in slots["Lunch"]["why"]
+    assert "carb night" in slots["Dinner"]["what"] and "beans" not in slots["Dinner"]["base"]
+    day = day_plan(race, None, date(2026, 11, 7), cfg, 78)
+    slots = {m["slot"]: m for m in day["meals"]}
+    assert "Not the Pudding" in slots["Breakfast"]["why"] and "80 g carbs an hour" in slots["On the bike"]["what"]
+    assert "Infinit Go Far" in slots["On the bike"]["what"] and "gel" in slots["On the bike"]["what"]   # 80 g/h: a bottle an hour + a gel
+
+
+def test_fuel_weekend_long_ride_moves_the_pudding_after(cfg):
+    from fitness.fuel import day_plan
+    sat = day_plan(_fuel_day("long", 180, 140, "hard"), None, date(2026, 10, 17), cfg, 78)
+    slots = {m["slot"]: m["what"] for m in sat["meals"]}
+    assert "2–3 h before" in slots["Breakfast"] and "75 g carbs an hour" in slots["On the bike"]
+    assert slots["After the ride"].startswith("The Nutty Pudding") and slots["Lunch"].endswith("after the ride")
+    fri = day_plan(_fuel_day("easy", 45, 20, "easy"), _fuel_day("long", 180, 140, "hard"), date(2026, 10, 16), cfg, None)
+    assert fri["carbs_g"] is None and "long ride starts here" in {m["slot"]: m["what"] for m in fri["meals"]}["Dinner"]
+
+
+def test_bottles_for_go_far():
+    from fitness.fuel import RIDE_FUEL, bottles, on_bike_rate
+    two_hours = bottles(100, on_bike_rate(100), RIDE_FUEL)
+    assert two_hours["servings"] == 1 and "plain water" in two_hours["setup"] and "¼ of a bottle every 20 min" in two_hours["sips"]
+    barry = bottles(225, on_bike_rate(225, race=True), RIDE_FUEL)                     # Barry-Roubaix Killer, ~3¾ h
+    assert barry["servings"] == 4 and "2 servings of powder in a bag" in barry["setup"] and barry["top_up"] == 14
+    assert "⅓ of a bottle every 20 min (~22 g carbs)" in barry["sips"] and barry["sodium"] == 379
+
+
+def test_fuel_reaches_the_page_with_the_garmin_weight(tmp_path, cfg):
+    today = date(2026, 10, 8)
+    with Store(tmp_path / "d.db") as store:
+        demo.populate(store, today, days=120)
+        profile = json.loads(store.get("profile"))
+        data = build.assemble(cfg, store.days(), store.activities(), today, profile)
+    assert data["fuel"]["weight_kg"] == 78.0 and data["fuel"]["today"]["date"] == "2026-10-08" and data["fuel"]["tomorrow"]["meals"]
+    assert data["fuel"]["recipes"]["pudding"]["kcal"] == 620
+
+
+def test_garmin_profile_weight(tmp_path):
+    from fitness.garmin import _profile
+
+    class Client:
+        @staticmethod
+        def get_user_profile():
+            return {"userData": {"weight": 78350.0, "height": 180.3, "birthDate": "1980-05-02", "gender": "MALE"}}
+
+    with Store(tmp_path / "d.db") as store:
+        _profile(Client, store)
+        assert json.loads(store.get("profile")) == {"weight_kg": 78.3, "height_cm": 180.3, "birth_year": 1980}
+
+
+def test_bladder_only_when_theres_no_refill():
+    from fitness.fuel import RIDE_FUEL, bottles, on_bike_rate
+    short = bottles(110, on_bike_rate(110), RIDE_FUEL, cages=2, bladder_l=2)
+    assert short["no_refill"] == ""                                                    # two cages cover it: no bladder
+    long = bottles(240, on_bike_rate(240), RIDE_FUEL, cages=2, bladder_l=2)
+    assert "refill" in long["setup"] and "2 servings into each bottle" in long["no_refill"] and "2 L bladder with water only" in long["no_refill"]
+    assert bottles(240, on_bike_rate(240), RIDE_FUEL, cages=2, bladder_l=0)["no_refill"] == ""
+
+
+def test_vegetarian_bases_are_plates_not_piles():
+    from fitness.fuel import base
+    line = base(180, 40)
+    assert "5 corn tortillas + 2½ cups cooked rice" in line and "175 g extra-firm tofu + 1 cup black beans" in line and "4 cups cooked pasta /" in line and "3 eggs + " in base(150, 30, low_fiber=True)
+    assert "beans" not in base(150, 30, low_fiber=True) and "Blocks:" in base(40, 24, kind="snack")
+
+
+# ── when the plan doesn't happen ──────────────────────────────────────────────────────────────────────────────
+
+def _week_state(ctl=55.0):
+    return {(date(2026, 10, 11) - timedelta(days=i)).isoformat(): {"ctl": ctl, "atl": ctl} for i in range(3)}
+
+
+def _days_of(plan_):
+    return {d["date"]: d for d in plan_["days"]}
+
+
+def test_missed_long_ride_moves_to_sunday(cfg):
+    from fitness.plan import adapt
+    loads = {"2026-10-13": 80, "2026-10-15": 65, "2026-10-17": 0}          # Saturday's long ride didn't happen
+    a = adapt(date(2026, 10, 18), 6, cfg, loads, {date(2026, 10, 13)}, _week_state())
+    assert a["roles"] == {date(2026, 10, 18): "long"} and "Saturday's long ride didn't happen: it's on today instead." in a["notes"]
+    sunday = season(date(2026, 10, 18), 55, 55, cfg, adapt=a)["days"][0]
+    assert sunday["role"] == "long" and sunday["minutes"] >= 90
+
+
+def test_long_ride_not_logged_by_evening_moves_to_tomorrow(cfg):
+    from fitness.plan import adapt
+    a = adapt(date(2026, 10, 17), 20, cfg, {"2026-10-13": 80, "2026-10-15": 65}, {date(2026, 10, 13)}, _week_state())
+    assert a["roles"] == {date(2026, 10, 17): "rest", date(2026, 10, 18): "long"}
+    days = _days_of(season(date(2026, 10, 17), 55, 55, cfg, adapt=a))
+    assert days["2026-10-17"]["role"] == "rest" and days["2026-10-18"]["role"] == "long"
+
+
+def test_missed_commute_is_rebooked_and_none_is_doubled(cfg):
+    from fitness.plan import adapt
+    a = adapt(date(2026, 10, 15), 6, cfg, {}, set(), _week_state())              # Tuesday's commute didn't happen
+    assert any(n.startswith("Tuesday's commute didn't happen") for n in a["notes"]) and a["commutes_done"] == 0
+    rest_of_week = [d for d in season(date(2026, 10, 15), 55, 55, cfg, adapt=a)["days"] if d["date"] <= "2026-10-18"]
+    assert any(d["commute"] for d in rest_of_week)                                # the week's one commute is rebooked
+    done = adapt(date(2026, 10, 15), 6, cfg, {"2026-10-13": 80}, {date(2026, 10, 13), date(2026, 10, 14)}, _week_state())
+    assert done["commutes_done"] == 2 and not any("commute" in n for n in done["notes"])
+
+
+def test_no_ride_in_by_ten_means_no_commute_today(cfg):
+    from fitness.plan import adapt
+    a = adapt(date(2026, 10, 13), 11, cfg, {}, set(), _week_state())
+    assert date(2026, 10, 13) in a["no_commute"] and a["notes"][0].startswith("No ride in this morning, so no commute today")
+    today = season(date(2026, 10, 13), 55, 55, cfg, adapt=a)["days"][0]
+    assert not today["commute"] and today["role"] == "key"                      # the session the commute replaced is back
+    early = adapt(date(2026, 10, 13), 7, cfg, {}, set(), _week_state())
+    assert not early["no_commute"]                                               # 7 am: still time to ride in
+
+
+def test_missed_key_session_with_no_room_is_dropped_not_crammed(cfg):
+    from fitness.plan import adapt
+    cfg = {**cfg, "commute": {**cfg["commute"], "enabled": False}}            # Thursday is a key session, not a commute
+    a = adapt(date(2026, 10, 16), 6, cfg, {"2026-10-13": 80}, set(), _week_state())   # Thursday's key session missed
+    assert not a["roles"] and any("Thursday's key session didn't happen. No free day" in n for n in a["notes"])
+
+
+# ── fitted to how you ride ────────────────────────────────────────────────────────────────────────────────
+
+def _habit_acts(today=date(2026, 10, 8)):
+    """12 weeks: Tue/Thu commutes (2 legs), a Wednesday hour, a 2-hour Saturday; never Monday or Friday."""
+    acts = []
+    monday = today - timedelta(days=today.weekday())
+    for w in range(1, 13):
+        wk = monday - timedelta(weeks=w)
+        for dow in (1, 3):
+            acts += [_commute(wk + timedelta(days=dow), 7), _commute(wk + timedelta(days=dow), 17)]
+        acts.append(activity(id=f"w{w}", source="garmin", start=datetime.combine(wk + timedelta(days=2), datetime.min.time()) + timedelta(hours=18),
+                             kind="road_biking", duration_s=3600, avg_hr=140))
+        acts.append(activity(id=f"s{w}", source="garmin", start=datetime.combine(wk + timedelta(days=5), datetime.min.time()) + timedelta(hours=9),
+                             kind="gravel_cycling", duration_s=7200, avg_hr=138))
+    return acts
+
+
+def test_habits_read_the_week_you_actually_ride(cfg):
+    acts = _habit_acts()
+    m.mark_commutes(acts, cfg)
+    th = {**TH, "lthr": 165}
+    for a in acts:
+        a["load"], _ = m.session_load(a, th)
+    h = m.habits(acts, date(2026, 10, 8))
+    p = [d["p"] for d in h["days"]]
+    assert p == [0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0] and h["days"][5]["minutes"] == 120 and h["long_min"]["p75"] == 120
+    assert h["commutes"]["median"] == 2 and h["days"][1]["commute_p"] == 1.0 and h["hours"]["median"] > 6
+    assert m.habits(acts[:20], date(2026, 10, 8)) is None                       # under 6 weeks of riding: not yet
+
+
+def test_fit_shapes_the_plan_to_the_habits(cfg):
+    from fitness.plan import fit
+    days = [{"p": 0.0, "minutes": 0, "commute_p": 0}, {"p": 1, "minutes": 130, "commute_p": 1}, {"p": 1, "minutes": 60, "commute_p": 0},
+            {"p": 1, "minutes": 130, "commute_p": 0.8}, {"p": 0.1, "minutes": 30, "commute_p": 0}, {"p": 1, "minutes": 120, "commute_p": 0},
+            {"p": 0.1, "minutes": 40, "commute_p": 0}]
+    h = {"weeks": 12, "days": days, "hours": {"median": 6, "p75": 6.5}, "load": {"median": 330, "p75": 350},
+         "long_min": {"median": 110, "p75": 120}, "commutes": {"median": 2, "p25": 1, "p75": 2}}
+    fitted, notes = fit(cfg, h)
+    pat = fitted["plan"]["weekly_pattern"]
+    assert pat[0] == 0.0 and pat.count(0.0) == 1 and max(range(7), key=lambda i: pat[i]) in (1, 3, 5)
+    assert 0 < pat[4] < 0.6 and 0 < pat[6] < 0.6          # rarely ridden: light options, not forced rest
+    assert fitted["plan"]["cap_mean"] == pytest.approx(350 * 1.15 / 7)
+    assert all(o["long_ride_h"] <= 2.5 for r in fitted["races"] for o in r["options"].values())
+    assert fitted["commute"]["per_week"] == [1, 2] and fitted["commute"]["days"][:2] == ["tue", "thu"]
+    assert any(n.startswith("Rest day: Mondays.") for n in notes)
+    light, _ = fit(cfg, {**h, "load": {"median": 220, "p75": 250}})               # a lighter usual week: the cap has to bite
+    capped = season(date(2026, 10, 12), 20, 20, light)["weeks"][:2]                 # low fitness: the cap is above its safe growth
+    free = season(date(2026, 10, 12), 20, 20, {**light, "plan": {**light["plan"], "cap_mean": None}})["weeks"][:2]
+    assert all(c["load"] <= f["load"] for c, f in zip(capped, free, strict=True)) and sum(c["load"] for c in capped) < sum(f["load"] for f in free)
+    grown = season(date(2026, 10, 12), 45, 45, light)["weeks"][1]                  # fitter than the habits: the cap gives way
+    assert grown["load"] > 7 * light["plan"]["cap_mean"] * 1.2
+    assert fit({**cfg, "plan": {**cfg["plan"], "fit": False}}, h) == ({**cfg, "plan": {**cfg["plan"], "fit": False}}, [])
+
+
+def test_work_days_skip_weekends_and_federal_holidays(cfg):
+    from fitness.config import us_federal_holidays, workday
+    h = us_federal_holidays(2026)
+    assert len(h) == 11 and {date(2026, 7, 3), date(2026, 10, 12), date(2026, 11, 26), date(2026, 5, 25), date(2026, 1, 19)} <= h   # Jul 4 is a Saturday
+    assert date(2027, 12, 31) in us_federal_holidays(2027)                                  # New Year's 2028 is a Saturday
+    assert not workday(date(2026, 10, 12), cfg) and workday(date(2026, 10, 13), cfg) and not workday(date(2026, 10, 10), cfg)
+    assert workday(date(2026, 10, 12), {**cfg, "commute": {**cfg["commute"], "holidays": ""}})
+    s = season(date(2026, 9, 28), 50, 50, cfg)
+    assert all(workday(date.fromisoformat(d["date"]), cfg) for d in s["days"] if d["commute"])
+
+
+def test_a_rest_day_can_become_a_commute_when_the_week_needs_it(cfg):
+    c = {**cfg, "commute": {**cfg["commute"], "per_week": [3, 3], "days": ["tue", "thu"]}}
+    week = season(date(2026, 9, 28), 50, 50, c)["days"][:7]
+    by = {date.fromisoformat(d["date"]).weekday(): d for d in week}
+    assert by[0]["commute"] == "easy"                                   # Monday's rest day ridden easy
+    assert sum(d["role"] == "rest" for d in week) == 1 and by[4]["role"] == "rest"   # its rest moved to the lightest day
+    nxt = season(date(2026, 10, 12), 50, 50, c)["days"][0]             # Columbus Day: no work, no commute
+    assert not nxt["commute"]
+
+
+def test_weekend_skills_rides_match_the_next_race(cfg):
+    fall = season(date(2026, 9, 28), 50, 50, cfg)["days"][:14]
+    spring = season(date(2027, 3, 1), 55, 55, cfg)["days"][:14]
+    for days, words in ((fall, ("singletrack", "two-track", "remount", "start")), (spring, ("paceline", "descend", "rollers", "gel", "washboard"))):
+        skills = [d for d in days if d["title"] == "Skills ride"]
+        assert skills and all(date.fromisoformat(d["date"]).weekday() >= 5 and not d["indoor"] for d in skills)
+        assert all(any(w in d["session"].lower() for w in words) for d in skills)
+        assert len({d["session"] for d in skills}) == len(skills)       # it works through the list
+    winter = season(date(2026, 12, 7), 45, 45, cfg)["days"][:14]
+    assert not any(d["title"] == "Skills ride" for d in winter)
+
+
+def test_every_training_day_has_a_plan_b(cfg):
+    days = season(date(2026, 9, 28), 50, 50, cfg)["days"][:21]
+    for d in days:
+        if d["role"] in ("long", "key", "endurance", "easy", "commute"):
+            assert d["alt"], d
+    assert all("No ride in" in d["alt"] for d in days if d["commute"])
+    assert all("Rain" in d["alt"] for d in days if d["role"] == "long" and not d["indoor"])
+    race = next(d for d in season(date(2026, 11, 1), 55, 50, cfg)["days"] if d["role"] == "race")
+    assert race["alt"] is None
+
+
+def test_rest_day_morning_offers_an_easy_commute_when_recovered(cfg):
+    prof = {"legs": {"in": {"minutes": 70, "load": 50}, "home": {"minutes": 72, "load": 52}}, "climb_m": [10, 50]}
+    th = {"lthr": 160}
+    rest = {"role": "rest", "phase": "build", "commute": None, "level": "rest"}
+    mon = date(2026, 10, 5)
+    call = m.commute_call({"score": 78, "illness": False}, rest, mon, cfg, prof, th)
+    assert call["verdict"] == "optional" and "easy commute" in call["title"]
+    assert m.commute_call({"score": 62, "illness": False}, rest, mon, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call({"score": 78, "illness": False}, rest, mon, cfg, prof, th, room=False)["verdict"] == "skip"
+    assert m.commute_call({"score": 78, "illness": False}, {**rest, "phase": "taper"}, mon, cfg, prof, th)["verdict"] == "skip"
+    assert m.commute_call({"score": 90, "illness": False}, rest, date(2026, 10, 12), cfg, prof, th) is None   # Columbus Day
+
+
+def test_commutes_are_booked_against_the_week_not_the_day(cfg):
+    """A round trip costs two or three times a short session: it fits the week (the key session rides home, the
+    endurance days and long ride give a little), never a single day's share. Not in a taper."""
+    c = {**cfg, "plan": {**cfg["plan"], "weekly_pattern": [0.0, 1.1, 0.4, 1.0, 0.0, 0.9, 1.6], "cap_mean": 30.0},
+         "commute": {**cfg["commute"], "per_week": [1, 2], "days": ["tue", "thu", "wed", "mon", "fri"],
+                     "profile": {"legs": {"in": {"load": 65, "minutes": 67}, "home": {"load": 63, "minutes": 72}}, "climb_m": [10, 50]}}}
+    s = season(date(2026, 10, 9), 31, 48, c)
+    week = [d for d in s["days"] if "2026-10-12" <= d["date"] <= "2026-10-18"]
+    by = {date.fromisoformat(d["date"]).weekday(): d for d in week}
+    assert by[1]["commute"] == "workout" and sum(1 for d in week if d["commute"]) == 2   # Tuesday's session rides home
+    assert by[6]["role"] == "long" and by[6]["minutes"] >= 120                       # the long ride never drops below the race
+    assert sum(d["load"] for d in week) <= 1.25 * sum(d["load"] for d in season(date(2026, 10, 9), 31, 48, {**c, "commute": {**c["commute"], "enabled": False}})["days"][3:10])
+    race_week = [d for d in s["days"] if "2026-11-02" <= d["date"] <= "2026-11-07"]
+    assert not any(d["commute"] for d in race_week)
+    assert s["races"][0]["race_tsb"] >= 7                                                 # still arrives fresh
+
+
+def test_a_missed_commute_workout_still_owes_its_workout(cfg):
+    from fitness.plan import adapt
+    c = {**cfg, "commute": {**cfg["commute"], "per_week": [2, 2], "days": ["tue", "thu"]}}
+    planned = season(date(2026, 9, 28), 50, 50, c)["days"][:7]
+    tue = planned[1]
+    assert tue["commute"] == "workout"
+    state = {(date(2026, 9, 27) - timedelta(days=i)).isoformat(): {"ctl": 50.0, "atl": 50.0} for i in range(3)}
+    a = adapt(date(2026, 9, 30), 6, c, {}, set(), state)                          # Tuesday's ride didn't happen
+    assert any("and with it the week's workout" in n for n in a["notes"])
+    assert "key" in a["roles"].values() or any("No free day" in n for n in a["notes"])
+
+
+def test_readiness_reasons_say_which_way_each_marker_moved():
+    days = {}
+    for i in range(30):
+        d = (date(2026, 9, 1) + timedelta(days=i)).isoformat()
+        days[d] = {"rhr": 50 + (i % 3), "bb_wake": 60 + (i % 5) * 3, "sleep": {"avg_stress": 20 + (i % 4), "resp": 14 + (i % 2) * 0.4}}
+    days["2026-10-01"] = {"rhr": 51, "bb_wake": 5, "sleep": {"avg_stress": 21, "resp": 16}}
+    r = m.readiness("2026-10-01", days, None, {"tsb": -14, "acwr": 1.0})
+    by = {x["text"].split(" ")[0]: x for x in r["reasons"]}
+    assert by["Body"]["dir"] == "down" and by["Body"]["tone"] == "bad"
+    assert by["Sleeping"]["dir"] == "up" and by["Sleeping"]["tone"] == "bad"
+    assert by["Form"]["text"].startswith("Form -14: productive fatigue")

@@ -2,7 +2,7 @@
 /* Sign in with Google (Google Identity Services, token flow). Identity is remembered; the hour-long access token is
  * re-requested silently when needed. */
 import { state, persist, forgetAccount, SCOPES } from "./state.js";
-import { $, esc, toast } from "./dom.js";
+import { $, esc, toast, toastBusy } from "./dom.js";
 import { render } from "./render.js";
 import { pullRatings } from "./sync.js";
 import { refreshRecent, titleFor } from "./youtube.js";
@@ -106,13 +106,16 @@ export function needSignIn(msg = "Google sign-in needs a refresh") {
   toast(msg + (state.lastAuthError ? ` (${state.lastAuthError.why})` : ""), true, { label: "Sign in", fn: () => signIn().catch(e => toast(e.message, true)) });
 }
 // Keep the hour-long token alive while you're actively using the site: any tap or key press with less than five
-// minutes left refreshes it (at most once a minute), so rating never runs into an expired token.
+// minutes left refreshes it (at most once a minute), so rating never runs into an expired token. A refresh that
+// fails is a background notice: it waits behind a toast the curator is still acting on (an Undo) rather than
+// replacing it — the tap that started it may have been a verdict, and that verdict's toast comes first.
 export function keepAlive() {
   if (!isSignedIn() || state.signingIn || !(state.feed?.google && state.feed.google.client_id)) return;
   if (state.auth?.access_token && state.auth.expires_at > Date.now() + 5 * 60e3) return;
   if (Date.now() - (state.keepAliveAt || 0) < 60e3) return;
   state.keepAliveAt = Date.now();
-  signIn({ silent: true }).then(ok => { if (!ok) needSignIn(); });
+  const say = () => { if (toastBusy()) setTimeout(say, 3000); else needSignIn(); };
+  signIn({ silent: true }).then(ok => { if (!ok) say(); });
 }
 // Sign-out only forgets this device. It deliberately does NOT revoke the Google grant: revoking kills the tokens on
 // your other devices too (and can even race a fresh sign-in on this one). Disconnecting the site for good is a

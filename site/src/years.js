@@ -4,7 +4,8 @@ import { state } from "./state.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
-// The build already weighed every date it could find (catalogues, store dates, the YouTube album year); when it says
+// The build already weighed every date it could find (catalogues, store dates, the YouTube album year, the release
+// date YouTube Music states for the upload); when it says
 // "unknown" the only date left is the day a blog or channel mentioned the track, and that is not a release year.
 // null here makes the card show "year?" and Keep asks you to pick. Picks carry their playlist year in _year.
 /** @param {FeedItem} it @returns {number | null} */
@@ -22,7 +23,7 @@ export function fillYearSelect(ysel, it) {
   ysel.value = g == null ? "" : String(g); ysel.classList.toggle("unknown", g == null);
 }
 /** @type {Record<string, string>} */
-export const YEAR_SOURCE = { musicbrainz: "verified: MusicBrainz's earliest release of this exact recording (identified via ListenBrainz)", "musicbrainz-search": "verified: earliest MusicBrainz release matching artist + title", "musicbrainz-isrc": "verified: earliest MusicBrainz release sharing this track's ISRC", discogs: "verified: Discogs master (original issue) year", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "the release date the source itself stated", "ytmusic-year": "the release year YouTube Music states on the artist page", isrc: "from the ISRC registration year only", youtube: "from the YouTube album only", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — find year asks MusicBrainz, or pick the year yourself", pending: "not looked up yet — the next build will; Keep asks for the year meanwhile" };
+export const YEAR_SOURCE = { musicbrainz: "verified: MusicBrainz's earliest release of this exact recording (identified via ListenBrainz)", "musicbrainz-search": "verified: earliest MusicBrainz release matching artist + title", "musicbrainz-isrc": "verified: earliest MusicBrainz release sharing this track's ISRC", discogs: "verified: Discogs master (original issue) year", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "the release date the source itself stated", "ytmusic-year": "the release year YouTube Music states on the artist page", isrc: "from the ISRC registration year only", youtube: "from the YouTube album only", "ytmusic-date": "from the release date YouTube Music states for this upload only — the catalogues have no date", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — find year asks MusicBrainz, or pick the year yourself", pending: "not looked up yet — the next build will; Keep asks for the year meanwhile" };
 /** The badge text: verified year, unverified guess, reissue notice, or "year unknown". @param {FeedItem} it */
 export function yearBadge(it) {
   const conf = it.year_confidence || "low";

@@ -1,0 +1,38 @@
+name: CodeQL
+
+# Static analysis of the site's JavaScript and the pipeline's Python on every change, and weekly for new queries.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["data/**", "site/data/**", "site/feed.xml"]
+  pull_request:
+    branches: [main]
+    paths-ignore: ["data/**", "site/data/**", "site/feed.xml"]
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

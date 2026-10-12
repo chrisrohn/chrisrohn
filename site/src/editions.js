@@ -32,7 +32,9 @@ const label = text => { const t = text.replace(/\s+/g, " ").replace(/^[\s\-â€“â€
 /** The song title without its suffixes, the edition those suffixes make it, and what they said. @param {string | null | undefined} title @returns {Edition} */
 export function editionOf(title) {
   let t = String(title || "").replace(/\s+/g, " ").trim();
-  /** @type {string[]} */ const labels = []; /** @type {string[]} */ let featuring = []; let edition = "original";
+  /** @type {string[]} */ const labels = [];
+  /** @type {string[]} */ let featuring = [];
+  let edition = "original";
   for (let i = 0; i < 5; i++) {
     const m = TAIL_RE.exec(t); if (!m || m.index === 0) break;
     const chunk = (m[1] != null ? m[1] : m[2] || "").trim();

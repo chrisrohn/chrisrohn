@@ -1,0 +1,123 @@
+name: Concerts
+
+# Builds the concert list (site/data/concerts.json: upcoming shows within 80 miles of Detroit by every artist played
+# on Indie Discotheque in the last year, from Bandsintown, Resident Advisor and, each with a key, Ticketmaster,
+# SeatGeek, Edmtrain and JamBase; each act's most popular
+# song resolved on YouTube Music) and publishes the site. Its own job, in the afternoon after Catalog, so neither
+# waits on the other. Nothing here writes to your YouTube Music playlists: only a thumb pressed on the site does that.
+
+on:
+  schedule:
+    - cron: "33 17 * * *"      # 13:33 New York in summer: two hours after Catalog, never overlapping it
+  workflow_dispatch:
+
+concurrency:
+  group: discovery-data
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # the data commit
+      issues: write     # the build-failure issue
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: discovery/requirements.lock
+
+      # exact, hash-checked versions: a surprise ytmusicapi release can't land in the job unreviewed
+      - run: pip install --require-hashes -r discovery/requirements.lock
+
+      # the HTTP response cache is gitignored (it is big and churns); keep it between runs so Last.fm and Deezer
+      # answers from the last ~20 h are reused instead of re-fetched
+      - uses: actions/cache@v6
+        with:
+          path: |
+            data/cache/sources.json
+            data/cache/profile.json
+            data/cache/catalog.json
+            data/cache/concerts.json
+            data/cache/feed_etags.json
+          key: http-cache-${{ github.run_id }}
+          restore-keys: http-cache-
+
+      - name: Build the concert list
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}   # optional: Ticketmaster's free Discovery API
+          BANDSINTOWN_APP_ID: ${{ secrets.BANDSINTOWN_APP_ID }}       # the app_id Bandsintown issued you; without one its API answers 403, or empty for everyone
+          SEATGEEK_CLIENT_ID: ${{ secrets.SEATGEEK_CLIENT_ID }}       # optional: SeatGeek's free Platform API (the clubs Ticketmaster never lists)
+          JAMBASE_API_KEY: ${{ secrets.JAMBASE_API_KEY }}             # metered (1,000 calls a month free, then charged): JamBase Data, spent in date bands and held to its quota by a ledger
+          EDMTRAIN_API_KEY: ${{ secrets.EDMTRAIN_API_KEY }}           # optional: Edmtrain's free API (every electronic show in the configured states)
+        run: python -m discovery concerts
+
+      - name: Commit data
+        run: |
+          git config user.name "new-music-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A data site/data
+          if git diff --cached --quiet; then echo "no data changes"; exit 0; fi
+          git commit -m "concerts: $(date -u +%Y-%m-%d) [skip ci]"
+          pushed=0
+          for i in 1 2 3 4; do
+            if git pull --rebase origin main && git push origin HEAD:main; then pushed=1; break; fi
+            sleep $((i*5))
+          done
+          # four failed pushes must fail the job (and open the issue below), never pass quietly with the day's data lost
+          [ "$pushed" = 1 ] || { echo "::error::could not push the data commit after 4 attempts"; exit 1; }
+
+      - name: Pick up site changes merged while this build ran
+        run: git pull --rebase origin main || true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Build the site (dist/)
+        run: npm run build
+
+      # a failed build means the site keeps serving the previous list with nothing to say so: open (or update) one issue
+      - name: Report a failed build
+        if: failure()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const title = "Concerts build failed";
+            const body = `The **Concerts** workflow failed on ${new Date().toISOString().slice(0, 10)}: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nchrisrohn.com keeps serving the previous concert list until a run succeeds.`;
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: "open", labels: "build-failure", per_page: 1 });
+            if (open.length) await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
+            else await github.rest.issues.create({ ...context.repo, title, body, labels: ["build-failure"] });
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+          include-hidden-files: true   # dist/.nojekyll comes from site/; v4+ skips dotfiles by default
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # one Pages deployment at a time across Discover, Catalog, Concerts and Publish: two at once race for the same site
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

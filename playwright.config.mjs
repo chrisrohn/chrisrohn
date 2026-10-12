@@ -25,10 +25,15 @@ function browserPath() {
 const executablePath = browserPath();
 
 export default defineConfig({
-  testDir: "tests/site",
+  testDir: ".",
+  testMatch: ["tests/site/**/*.spec.mjs", "fitness/tests/**/*.spec.mjs"],   // the site, plus fitness's ride page
   timeout: 30_000,
-  retries: 0,
-  reporter: [["list"]],
+  // one retry on CI, for the runner rather than the app: a renderer that dies mid-navigation on a loaded GitHub
+  // runner ("Page crashed") is not a site bug, and must not block a deploy. The list reporter still marks the test
+  // flaky, so a real intermittent failure stays visible; locally a failure fails at once
+  retries: process.env.CI ? 1 : 0,
+  // the list in the terminal; on CI also GitHub annotations on the failing line, and an HTML report for the artifact
+  reporter: process.env.CI ? [["list"], ["github"], ["html", { open: "never", outputFolder: "playwright-report" }]] : [["list"]],
   use: {
     baseURL: "http://127.0.0.1:8765",
     headless: true,

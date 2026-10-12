@@ -24,7 +24,7 @@ export const audit = () => { if (!state.audit) state.audit = /** @type {Audit} *
 function save() { LS.set("id:audit", audit()); }
 export const region = () => (state.feed?.youtube && state.feed.youtube.region) || "US";
 /** @type {Record<string, string>} */
-export const WHY = { deleted: "deleted video", private: "private video", blocked: "blocked here", rejected: "upload rejected", dead: "not playable" };
+export const WHY = { deleted: "deleted video", private: "private video", blocked: "blocked here", rejected: "upload rejected", dead: "not playable", video: "the video, not the audio track" };
 
 /** Every playable-here failure found so far, newest year first. @returns {AuditRow[]} */
 export function auditRows() { return Object.values(audit().years).flatMap(y => y.dead).sort((a, b) => b.year.localeCompare(a.year) || (a.position - b.position)); }
@@ -109,7 +109,7 @@ export function renderAudit() {
 export async function findReplacements(artist, title, avoid) {
   const q = `${artist} ${editionOf(title).core}`.trim();
   const j = await yt("GET", "/search", { params: { part: "snippet", q, type: "video", videoCategoryId: "10", maxResults: 8, regionCode: region(), safeSearch: "none" }, why: `Cleanup: search YouTube for another upload of a track that cannot play in ${region()} (100 units)`, detail: q });
-  const ids = (j.items || []).map((/** @type {any} */ it) => it.id && it.id.videoId).filter((/** @type {string} */ v) => v && v !== avoid);
+  /** @type {string[]} */ const ids = (j.items || []).map((/** @type {any} */ it) => it.id && it.id.videoId).filter((/** @type {string} */ v) => v && v !== avoid);
   if (!ids.length) return [];
   const info = await videoDetails(ids, { why: "Cleanup: check the search results can play here and what they are (length, channel, views)", detail: q });
   return ids.map(v => ({ videoId: v, ...info[v] })).filter(r => !r.missing && !r.blocked)

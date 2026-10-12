@@ -1,35 +1,50 @@
-"""The catalog: songs for the years the playlists are thin on, drawn from your own listening.
+"""The catalog: the station's whole Last.fm play history, reviewed song by song.
 
-Where the feed hunts what is new, the catalog looks back. Candidates come from Last.fm: the tracks you have played
-most and the ones you loved but never filed, then the top tracks of the artists you play and of their similar
-artists (what is adjacent). Anything a year playlist or the Skipped playlist already holds is hidden. The rest is
-resolved on YouTube Music and given a verified release year in daily batches, on the same caches and budgets as
-the feed, and published to site/data/catalog.json for the Catalog tab, where each Keep files into its verified
-year. Nothing here spends YouTube API quota.
+Where the feed hunts what is new, the catalog looks back at what has already been played. The candidates are every
+track `station.lastfm_user` has ever scrobbled — user.getTopTracks over `overall`, every page, one row a track with
+its play count — flagged when loved, and dated by the scrobble log (user.getRecentTracks, walked newest to oldest a
+few hundred pages a run until the whole log is read, then kept up to date from the newest scrobble on), so each card
+says how often and how recently the station played it. Anything a year playlist or the Skipped playlist already holds
+is hidden. The rest is resolved on YouTube Music — the exact edition: "Song (X Remix)" is the remix or nothing, never
+the original the library most likely holds — and given a verified release year in daily batches, on the same caches
+and budgets as the feed, and published to site/data/catalog.json for the Catalog tab, the most played first, where
+each Keep files into its verified year. Nothing here spends YouTube API quota.
+
+Until 2026-09-18 the catalog also carried the top tracks of the artists you play and of their similar artists, and
+put loved tracks first: of the 914 such cards rated, the artists' hits were kept 1% of the time, the similar artists'
+hits and the loved tracks 0%. The history is the catalog.
 """
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta
+import time
+from datetime import UTC, date, datetime, timedelta
+from urllib.parse import quote
 
 from .learn import load_ratings, wrong_videos
 from .models import Item
 from .profile import LastFm, load_profile
-from .resolve import collapse_shared_videos, resolve_all
+from .resolve import AUDIO, LOOKUP, VIDEO, audio_summary, cached_states, collapse_shared_videos, drop_by_length, is_audio, resolve_all
 from .score import dedupe, score_items
-from .util import CACHE_DIR, DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, norm, read_json, read_versioned, safe_url, utcnow, write_json, write_versioned
+from .util import CACHE_DIR, DATA_DIR, SITE_DATA_DIR, Deadline, Http, log, norm, read_json, read_versioned, utcnow, write_json, write_versioned
 from .years import verify_years
 
 CATALOG_PATH = SITE_DATA_DIR / "catalog.json"
-STATE_PATH = DATA_DIR / "catalog_state.json"       # the candidate snapshot (refreshed weekly) and first_seen dates
+STATE_PATH = DATA_DIR / "catalog_state.json"       # first_seen dates (small, rewritten every run)
+HISTORY_PATH = DATA_DIR / "catalog_history.json"   # the play-history snapshot: {"v", "fetched_at", "rows": [[artist, title, plays, loved], …]}, refreshed weekly
+SCROBBLES_PATH = DATA_DIR / "catalog_scrobbles.json"   # the scrobble walk: {"newest", "oldest", "complete", "gap", "total", "tracks": {key: [first, last]}}
+HISTORY_VERSION = 2                                # 1: the old snapshot in catalog_state.json (top tracks, loved, your artists' and their neighbours' hits)
 TAGS_CACHE = CACHE_DIR / "artist_tags.json"        # artist → Last.fm top tags, kept for good (they hardly change)
 TAGS_CACHE_VERSION = 1
+HISTORY = "lastfm:history"                         # every candidate's source; loved tracks carry "lastfm:loved" as well
+LOVED = "lastfm:loved"
+RECENT_PLAY_YEARS = 8.0                            # a track last played this long ago has spent its recent-play bonus
 
 DEFAULTS = {
-    "enabled": True, "refresh_days": 7, "top_tracks": 3000, "loved_tracks": 2000, "artists_top_n": 150, "per_artist": 8,
-    "similar_top_n": 100, "per_similar": 5, "max_items": 2000, "time_budget_minutes": 35, "max_lookups_per_run": 800,
-    "max_year_lookups_per_run": 800, "tag_lookups_per_run": 300, "loved_bonus": 1.5, "year_chain": "fast",
-    "weights": {"affinity": 4.0, "saved": 2.0, "similar": 2.5, "tags": 1.2, "source_count": 0.6, "freshness": 0.0, "editorial": 0.0, "listens": 2.0, "playable": 0.3, "learned": 1.0},
+    "enabled": True, "refresh_days": 7, "history_tracks": 0, "loved_tracks": 0, "max_items": 2500, "time_budget_minutes": 35,
+    "max_lookups_per_run": 800, "max_year_lookups_per_run": 800, "tag_lookups_per_run": 300, "loved_bonus": 1.0, "year_chain": "fast",
+    "lookup_frontier": 2400, "scrobble_dates": True, "scrobble_pages_per_run": 600, "scrobble_minutes": 8,
+    "weights": {"affinity": 4.0, "saved": 2.0, "similar": 2.5, "tags": 1.2, "source_count": 0.0, "freshness": 0.0, "editorial": 0.0, "listens": 2.0, "learned": 1.0, "recent_play": 1.0},
 }
 
 
@@ -39,52 +54,180 @@ def _cfg(cfg: dict) -> dict:
     return c
 
 
-# ---------- candidates from Last.fm ----------
+# ---------- the history: keys, plays, dates ----------
 
-def _track(t: dict, source: str, plays: int = 0, loved: bool = False) -> dict | None:
+def history_key(artist: str, title: str) -> str:
+    """The id a play-history row has as a card: the same key a feed item gets (Rohn Standard Notation applied, so a
+    scrobble's "Song feat. B (X Remix)" and the card's "Song (X Remix)" are one), for joining the history to the
+    playlist rows and the resolver's cache."""
+    return Item(artist=artist, title=title).normalize_credit().key
+
+
+def _artist_name(t: dict) -> str:
     artist = t.get("artist")
-    name = (artist.get("name") or artist.get("#text")) if isinstance(artist, dict) else artist
-    title = t.get("name")
+    return str((artist.get("name") or artist.get("#text")) if isinstance(artist, dict) else artist or "")
+
+
+def _track(t: dict, plays: int = 0, loved: bool = False) -> list | None:
+    """A history row, compact: [artist, title, plays, loved] (a history of a couple of hundred thousand tracks is
+    committed with the data, so every byte a row does not need is left out; the Last.fm link is rebuilt)."""
+    name, title = _artist_name(t), t.get("name")
     if not name or not title:
         return None
-    return {"artist": str(name), "title": str(title), "sources": [source], "plays": int(plays or 0), "loved": loved, "url": safe_url(t.get("url"))}
+    try:
+        n = int(plays or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return [name, str(title), n, bool(loved)]
 
 
-def gather(cfg: dict, profile: dict, lastfm: LastFm) -> list[dict]:
-    """Every candidate the catalog will ever consider, as plain rows (the snapshot lives in catalog_state.json)."""
+def gather(cfg: dict, lastfm: LastFm) -> list[list]:
+    """Every track the station has ever played, as compact rows (the snapshot lives in catalog_history.json): the
+    whole of user.getTopTracks (`catalog.history_tracks` caps it; 0 = every page), most played first, the loved
+    tracks flagged."""
     c = _cfg(cfg)
     user = cfg["station"]["lastfm_user"]
-    rows: list[dict] = []
-    for t in lastfm.top_tracks(user, int(c["top_tracks"])):
-        r = _track(t, "lastfm:top tracks", plays=t.get("playcount", 0))
+    rows: dict[str, list] = {}
+    for t in lastfm.top_tracks(user, int(c["history_tracks"] or 0)):
+        r = _track(t, plays=t.get("playcount", 0))
         if r:
-            rows.append(r)
-    for t in lastfm.loved_tracks(user, int(c["loved_tracks"])):
-        r = _track(t, "lastfm:loved", loved=True)
-        if r:
-            rows.append(r)
-    artists = profile.get("artists") or {}
-    direct = sorted((e for e in artists.values() if e.get("kind") == "direct"), key=lambda e: -e.get("affinity", 0))[: int(c["artists_top_n"])]
-    similar = sorted((e for e in artists.values() if e.get("kind") == "similar"), key=lambda e: -e.get("affinity", 0))[: int(c["similar_top_n"])]
-    for bucket, source, per in ((direct, "lastfm:artist top", int(c["per_artist"])), (similar, "lastfm:similar top", int(c["per_similar"]))):
-        for e in bucket:
-            for t in lastfm.artist_top_tracks(e["name"], per):
-                r = _track(t, source)
-                if r:
-                    rows.append(r)
-    log.info("catalog: %d candidate rows from Last.fm (%d artists, %d similar)", len(rows), len(direct), len(similar))
-    return rows
+            rows.setdefault(history_key(r[0], r[1]), r)
+    loved = 0
+    for t in lastfm.loved_tracks(user, int(c["loved_tracks"] or 0)):
+        r = _track(t, loved=True)
+        if not r:
+            continue
+        rows.setdefault(history_key(r[0], r[1]), r)[3] = True
+        loved += 1
+    log.info("catalog: %d tracks in the Last.fm history (%d loved)", len(rows), loved)
+    return list(rows.values())
 
 
-def _items(rows: list[dict]) -> list[Item]:
+def load_history(path=None) -> dict:
+    """The play-history snapshot ({"fetched_at", "rows"}), or an empty one; a snapshot of another shape (the old
+    catalog's lists, in catalog_state.json) is not read, so the next run fetches the history."""
+    data = read_versioned(path or HISTORY_PATH, HISTORY_VERSION, {})
+    return data if isinstance(data, dict) and isinstance(data.get("rows"), list) else {"fetched_at": None, "rows": []}
+
+
+def history_plays(history: dict | None = None) -> dict[str, int]:
+    """{card id: plays} for every track in the play history, from the catalog's snapshot (no request): what the
+    Videos workflow orders the library by."""
+    h = history if history is not None else load_history()
+    out: dict[str, int] = {}
+    for r in (h.get("rows") or []):
+        try:
+            out[history_key(r[0], r[1])] = int(r[2] or 0)
+        except (IndexError, TypeError, ValueError):
+            continue
+    return out
+
+
+def walk_scrobbles(lastfm: LastFm, user: str, state: dict, pages: int, deadline: Deadline | None = None) -> dict:
+    """Read the scrobble log a few pages a run (200 plays a page) into state["scrobbles"]: for every track the first
+    and the last time it was played, as Unix times, keyed like the cards. The log is walked from the newest play
+    down until its beginning is reached ("complete"); after that each run first closes the gap between the newest
+    play it knows and now, top down, so a run cut short resumes exactly where it stopped and never skips a page.
+    Returns the walk's state."""
+    sc = state.setdefault("scrobbles", {"newest": None, "oldest": None, "complete": False, "gap": None, "total": None, "tracks": {}})
+    tracks: dict[str, list[int]] = sc.setdefault("tracks", {})
+    deadline = deadline or Deadline(None)
+
+    def absorb(rows: list[dict]) -> int:
+        low = None
+        for t in rows:
+            try:
+                uts = int((t.get("date") or {}).get("uts") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not uts:
+                continue
+            name, title = _artist_name(t), t.get("name")
+            if not name or not title:
+                continue
+            k = history_key(name, str(title))
+            cur = tracks.get(k)
+            tracks[k] = [min(cur[0], uts), max(cur[1], uts)] if cur else [uts, uts]
+            sc["oldest"] = uts if sc["oldest"] is None else min(sc["oldest"], uts)
+            sc["newest"] = uts if sc["newest"] is None else max(sc["newest"], uts)
+            low = uts if low is None else min(low, uts)
+        return low or 0
+
+    left = max(0, int(pages))
+    opened = sc["newest"] is None      # a first run has nothing to catch up on: the walk starts at the top of the log
+    fetched = 0
+    while left > 0 and not deadline.expired and lastfm.enabled:
+        if sc.get("gap") is None and sc["newest"] and not opened:
+            now = int(time.time())
+            opened = True
+            if now > int(sc["newest"]):
+                sc["gap"] = {"lo": int(sc["newest"]), "hi": now}      # the plays since the last walk, walked top down
+        if sc.get("gap"):
+            g = sc["gap"]
+            rows, _attr = lastfm.recent_tracks(user, from_uts=g["lo"] + 1, to_uts=g["hi"])
+            left -= 1
+            fetched += 1
+            if not rows:
+                sc["newest"] = max(int(sc["newest"] or 0), int(g["hi"]))
+                sc["gap"] = None
+                continue
+            low = absorb(rows)
+            g["hi"] = (low or g["hi"]) - 1
+            if g["hi"] <= g["lo"]:
+                sc["gap"] = None
+            continue
+        if sc.get("complete"):
+            break
+        rows, attr = lastfm.recent_tracks(user, to_uts=(int(sc["oldest"]) - 1) if sc["oldest"] else None)
+        left -= 1
+        fetched += 1
+        if sc.get("total") is None and str(attr.get("total") or "").isdigit():
+            sc["total"] = int(attr["total"])
+        if not rows:
+            sc["complete"] = True
+            break
+        absorb(rows)
+    if fetched:
+        log.info("catalog: %d pages of the scrobble log read; %d tracks dated, walked back to %s%s", fetched, len(tracks),
+                 datetime.fromtimestamp(sc["oldest"], tz=UTC).date().isoformat() if sc.get("oldest") else "?", " (the whole log)" if sc.get("complete") else "")
+    return sc
+
+
+def _items(rows: list[list]) -> list[Item]:
     out = []
     for r in rows:
-        it = Item(artist=r["artist"], title=r["title"], kind="track", sources=list(r.get("sources") or []), listen_count=int(r.get("plays") or 0),
-                  links={"last.fm": r["url"]} if r.get("url") else {})
+        try:
+            artist, title, plays, loved = r[0], r[1], int(r[2] or 0), bool(r[3])
+        except (IndexError, TypeError, ValueError):
+            continue
+        it = Item(artist=artist, title=title, kind="track", sources=[HISTORY] + ([LOVED] if loved else []), listen_count=plays,
+                  links={"last.fm": f"https://www.last.fm/music/{quote(artist)}/_/{quote(title)}"})
         it.normalize_credit()
-        it.blurb = "loved" if r.get("loved") else None      # private field: carried to the scoring pass, never published
+        it.blurb = "loved" if loved else None      # private field: carried to the scoring pass, never published
         out.append(it)
     return out
+
+
+def frontier(items: list[Item], ccfg: dict, avoid: dict[str, set[str]], size: int) -> tuple[list[Item], int]:
+    """The rows worth carrying through a run, with the resolver's cache read once (no requests): every row the cache
+    already pairs with an upload (a card, or a video waiting on its audio side), plus the first `size` rows that still
+    need a lookup, in the history's order (the most played first). The rest wait: a history of a couple of hundred
+    thousand tracks is looked up 800 a run, so scoring, tagging and dating all of it every run would be work for
+    nothing. Returns the rows and how many lookups still wait beyond the frontier."""
+    states = cached_states(items, ccfg, avoid=avoid)
+    out: list[Item] = []
+    lookups = waiting = 0
+    for it in items:
+        state = states.get(it.key, (LOOKUP, None))[0]
+        if state in (AUDIO, VIDEO):
+            out.append(it)
+        elif state == LOOKUP:
+            if lookups < size:
+                out.append(it)
+                lookups += 1
+            else:
+                waiting += 1
+    return out, waiting
 
 
 def _tags(items: list[Item], lastfm: LastFm, budget: int) -> None:
@@ -123,6 +266,15 @@ def _playlist_counts(profile: dict) -> dict[str, int]:
     return counts
 
 
+def _iso_day(uts: int | None) -> str | None:
+    if not uts:
+        return None
+    try:
+        return datetime.fromtimestamp(int(uts), tz=UTC).date().isoformat()
+    except (OverflowError, OSError, ValueError, TypeError):
+        return None
+
+
 def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict | None:
     c = _cfg(cfg)
     if not c.get("enabled", True):
@@ -130,36 +282,58 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
     profile = load_profile()
     http = Http("catalog", ttl_hours=72)
     lastfm = LastFm(http, os.environ.get("LASTFM_API_KEY"))
-    state = read_json(STATE_PATH, {"fetched_at": None, "candidates": [], "first_seen": {}})
-    fetched = state.get("fetched_at")
+    user = cfg["station"]["lastfm_user"]
+    state = read_json(STATE_PATH, {})
+    if not isinstance(state, dict):
+        state = {}
+    state.pop("candidates", None)          # the old catalog's snapshot lived here; the history has its own file now
+    state.pop("scrobbles", None)
+    state.pop("fetched_at", None)
+    history = load_history()
+    fetched = history.get("fetched_at")
     stale = not fetched or (utcnow() - datetime.fromisoformat(fetched)) > timedelta(days=int(c["refresh_days"]))
     if stale and lastfm.enabled:
-        state["candidates"] = gather(cfg, profile, lastfm)
-        state["fetched_at"] = utcnow().isoformat()
+        history = {"fetched_at": utcnow().isoformat(), "rows": gather(cfg, lastfm)}
+        write_versioned(HISTORY_PATH, HISTORY_VERSION, history)
     elif stale:
-        log.warning("catalog: LASTFM_API_KEY not set; using the last candidate snapshot (%d rows)", len(state.get("candidates") or []))
+        log.warning("catalog: LASTFM_API_KEY not set; using the last history snapshot (%d rows)", len(history.get("rows") or []))
+    minutes = float(c["time_budget_minutes"]) if deadline_minutes is None else min(float(c["time_budget_minutes"]), deadline_minutes)
+    deadline = Deadline(max(0.01, minutes))
+    # the scrobble log, a few hundred pages a run inside its own slice of the clock: what it has read so far dates
+    # the cards it has reached, and a track it has not reached yet is older than the oldest play it has read
+    walk = read_json(SCROBBLES_PATH, {})
+    walk = walk if isinstance(walk, dict) else {}
+    scrobbles = walk.get("scrobbles") or {}
+    if c.get("scrobble_dates", True) and lastfm.enabled:
+        scrobbles = walk_scrobbles(lastfm, user, walk, int(c["scrobble_pages_per_run"] or 0), Deadline(min(minutes, float(c["scrobble_minutes"] or 0) or minutes)))
+        write_json(SCROBBLES_PATH, walk, compact=True)
     http.save()
 
-    items = dedupe(_items(state.get("candidates") or []))
+    items = dedupe(_items(history.get("rows") or []))
     saved = profile.get("saved") or {}
     saved_videos = {v.get("videoId") for v in saved.values() if isinstance(v, dict) and v.get("videoId")}
     before = len(items)
     items = [i for i in items if i.key not in saved]
-    log.info("catalog: %d unique candidates, %d hidden (already in a playlist or skipped)", before, before - len(items))
+    to_review = len(items)
+    ccfg = {**cfg, "ranking": {**cfg["ranking"], "weights": c["weights"], "freshness_days": 1, "undated_freshness": 0.0},
+            "resolve": {**(cfg.get("resolve") or {}), "max_lookups_per_run": int(c["max_lookups_per_run"]), "max_year_lookups_per_run": int(c["max_year_lookups_per_run"]), "year_chain": c["year_chain"]}}
+    # a card the curator flagged as the wrong video is resolved again without that upload (data/ratings.json)
+    avoid = wrong_videos(load_ratings())
+    # the rows worth this run's work: what the cache already pairs with an upload, plus the next `lookup_frontier`
+    # rows to look up, the most played first; the rest of the history waits for the runs after
+    items, waiting = frontier(items, ccfg, avoid, int(c["lookup_frontier"] or 0) or len(items))
+    log.info("catalog: %d unique tracks in the history, %d hidden (already in a playlist or skipped), %d to review: %d carried this run, %d wait for a later one",
+             before, before - to_review, to_review, len(items), waiting)
 
     _tags(items, lastfm, int(c["tag_lookups_per_run"]))
     http.save()
-    ccfg = {**cfg, "ranking": {**cfg["ranking"], "weights": c["weights"], "freshness_days": 1, "undated_freshness": 0.0},
-            "resolve": {**(cfg.get("resolve") or {}), "max_lookups_per_run": int(c["max_lookups_per_run"]), "max_year_lookups_per_run": int(c["max_year_lookups_per_run"]), "year_chain": c["year_chain"]}}
-    items = _score(items, profile, ccfg, float(c["loved_bonus"]))[: int(c["max_items"])]
-
-    minutes = float(c["time_budget_minutes"]) if deadline_minutes is None else min(float(c["time_budget_minutes"]), deadline_minutes)
-    deadline = Deadline(max(0.01, minutes))
-    # a card the curator flagged as the wrong video is resolved again without that upload (data/ratings.json)
-    resolve_all(items, ccfg, deadline, avoid=wrong_videos(load_ratings()))
+    dates: dict[str, list[int]] = scrobbles.get("tracks") or {}
+    items = _score(items, profile, ccfg, c, dates)
+    resolve_all(items, ccfg, deadline, avoid=avoid)
     items = collapse_shared_videos(items)
-    items = [i for i in items if i.youtube and i.youtube.get("videoId") not in saved_videos]
-    items = _score(items, profile, ccfg, float(c["loved_bonus"]))
+    items = drop_by_length(items, ccfg)     # the same song-length range as the feed: no interludes, no DJ mixes
+    items = [i for i in items if is_audio(i.youtube) and i.youtube.get("videoId") not in saved_videos]   # every card plays its audio track
+    items = _score(items, profile, ccfg, c, dates)
     verify_years(items, ccfg, http, deadline)
     http.save()
 
@@ -167,7 +341,10 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
     this_year = date.today().year
     # a track whose year has not been looked up yet waits for a later run: the tab is for reviewing, not for guessing
     pending = sum(1 for i in items if i.year_source == "pending")
+    state.setdefault("first_seen", {})
     items = [i for i in items if i.year_source != "pending" and (i.year is None or first_year <= i.year <= this_year)]
+    playable = len(items)
+    items = items[: int(c["max_items"] or 0) or None]
     today_s = date.today().isoformat()
     first_seen: dict[str, str] = state.setdefault("first_seen", {})
     for it in items:
@@ -184,36 +361,65 @@ def build_catalog(cfg: dict, *, deadline_minutes: float | None = None) -> dict |
     years = {str(y): {"playlist": counts.get(str(y), 0), "candidates": per_year.get(str(y), 0)} for y in range(this_year, first_year - 1, -1)}
     payload = {
         "generated_at": utcnow().isoformat(),
-        "candidates": len(state.get("candidates") or []),
+        "candidates": len(history.get("rows") or []),
         "count": len(items),
+        "playable": playable,          # …of which the tab shows the best `catalog.max_items`
         "undated": per_year.get("?", 0),
         "pending": pending,
         "sources": sorted({s for i in items for s in i.sources}),
         "years": years,
-        "items": [_public(i, first_seen.get(i.key)) for i in items],
+        "audio": audio_summary(items),
+        # the play history behind the tab: how many tracks it holds, how many are still to look up, how far the
+        # scrobble log has been read
+        "history": {"fetched_at": history.get("fetched_at"), "tracks": len(history.get("rows") or []), "to_review": to_review, "waiting": waiting,
+                    "scrobbles": scrobbles.get("total"), "dated": sum(1 for i in items if i.key in dates), "walked_back_to": _iso_day(scrobbles.get("oldest")),
+                    "complete": bool(scrobbles.get("complete"))},
+        "items": [_public(i, first_seen.get(i.key), dates.get(i.key)) for i in items],
     }
     write_json(CATALOG_PATH, payload, compact=True)
-    log.info("catalog: %d playable candidates published (%d with no year found, %d more waiting for a year lookup)", len(items), per_year.get("?", 0), pending)
+    log.info("catalog: %d of %d playable candidates published (%d with no year found, %d more waiting for a year lookup, %d tracks still to look up)", len(items), playable, per_year.get("?", 0), pending, waiting)
     return payload
 
 
-def _score(items: list[Item], profile: dict, ccfg: dict, loved_bonus: float) -> list[Item]:
+def _month(iso: str | None) -> str:
+    try:
+        return datetime.fromisoformat(iso).strftime("%b %Y") if iso else ""
+    except ValueError:
+        return ""
+
+
+def _score(items: list[Item], profile: dict, ccfg: dict, c: dict, dates: dict[str, list[int]]) -> list[Item]:
+    """The feed's scoring with the catalog's weights, then what only the history knows: the plays are already in
+    (`listens`), a track played recently earns `recent_play` (fading over RECENT_PLAY_YEARS), a loved one
+    `loved_bonus`; the reasons say so on the card."""
     score_items(items, profile, ccfg)
+    w_recent = float((c.get("weights") or {}).get("recent_play", 0) or 0)
+    loved_bonus = float(c.get("loved_bonus", 0) or 0)
+    today = date.today()
     for it in items:
         if it.listen_count:
             it.reasons.append(f"{it.listen_count} plays")
+        span = dates.get(it.key)
+        if span and span[1]:
+            last = _iso_day(span[1])
+            if last:
+                age_years = (today - date.fromisoformat(last)).days / 365.25
+                bonus = w_recent * max(0.0, 1.0 - age_years / RECENT_PLAY_YEARS)
+                it.score = round(it.score + bonus, 3)
+                it.reasons.append(f"last played {_month(last)}")
         if it.blurb == "loved":
             it.score = round(it.score + loved_bonus, 3)
             it.reasons.append("loved on Last.fm")
-    items.sort(key=lambda i: (-i.score, i.artist_norm))
+    items.sort(key=lambda i: (-i.score, -i.listen_count, i.artist_norm))
     return items
 
 
-def _public(it: Item, first_seen: str | None) -> dict:
+def _public(it: Item, first_seen: str | None, span: list[int] | None) -> dict:
     from .build import _public_item
     d = _public_item(it, first_seen)
     d["plays"] = it.listen_count
     d["loved"] = it.blurb == "loved"
+    d["first_played"] = _iso_day(span[0]) if span else None
+    d["last_played"] = _iso_day(span[1]) if span else None
     d["release_date"] = None      # the catalog has no sighting date to show; the year badge is the date
     return d
-

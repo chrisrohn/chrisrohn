@@ -6,6 +6,7 @@ import { isOwner, guestsAllowed } from "./auth.js";
 import { pushRatings, pullRatings } from "./sync.js";
 import { loadLibraryPlaylists, refreshRecent } from "./youtube.js";
 import { dupesSummary, showCleanup } from "./dupes.js";
+import { videosSummary } from "./videos.js";
 import { startAudition, clearAudition, auditionOn, backgroundOn } from "./player.js";
 import { wireTheme } from "./theme.js";
 import { openStats } from "./stats.js";
@@ -52,6 +53,7 @@ function openSettings() {
   $("#s-feeds").innerHTML = rows.length ? rows.map(([n, h]) => `<span class="${h.ok ? (h.kept ? "ok" : "quiet") : "dead"}" title="${esc(h.error || "")}">${esc(n)} ${h.ok ? h.kept + "/" + h.entries : "✗"}</span>`).join("") : "<span class=\"muted\">no blog feed data yet</span>";
   $("#s-skips").checked = skipsInYouTube();
   $("#s-dupes-summary").textContent = dupesSummary();
+  $("#s-videos-summary").textContent = videosSummary();
   $("#settings").showModal();
 }
 export function wireSettings() {
@@ -65,6 +67,7 @@ export function wireSettings() {
   const bg = $("#s-background"); bg.checked = backgroundOn();
   bg.addEventListener("change", () => { state.settings.background = bg.checked; persist(); toast(bg.checked ? "The player keeps playing with the screen off or another app in front" : "The player pauses when the screen goes off or you leave the app"); });
   $("#s-cleanup").addEventListener("click", () => { $("#settings").close(); showCleanup(); });
+  $("#s-videos").addEventListener("click", () => { $("#settings").close(); const tab = $(".tab[data-view=videos]"); if (tab) tab.click(); });
   $("#s-skips").addEventListener("change", (/** @type {any} */ e) => { state.settings.skipsInYouTube = e.target.checked; persist(); });
   $("#s-export").addEventListener("click", exportCsv);
   $("#s-stats").addEventListener("click", () => { $("#settings").close(); openStats(); });

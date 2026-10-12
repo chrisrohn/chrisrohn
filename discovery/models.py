@@ -40,7 +40,8 @@ class Item:
     score: float = 0.0
     reasons: list[str] = field(default_factory=list)
     matched_artist: str | None = None
-    match_kind: str | None = None    # "direct" | "similar" | None
+    match_kind: str | None = None    # "direct" | "saved" | "similar" | "genre" | None
+    affinity: float | None = None    # the matched profile artist's affinity (0–1): learn.py bands it with the kind
 
     def normalize_credit(self) -> Item:
         """Apply Rohn Standard Notation: pull feat./remix info out of raw artist + title into fields."""

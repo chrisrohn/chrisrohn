@@ -60,9 +60,11 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
         reasons: list[str] = []
         s = 0.0
         entry, kind = _match_artist(it, profile)
+        it.matched_artist = it.match_kind = it.affinity = None
         if entry:
             it.matched_artist = entry["name"]
             it.match_kind = kind
+            it.affinity = round(float(entry.get("affinity") or 0), 3)
             if kind == "direct":
                 s += w["affinity"] * (0.5 + entry["affinity"])
                 reasons.append(f"you play {entry['name']}")
@@ -103,10 +105,8 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
             s += w["freshness"] * max(0.0, 1.0 - age / fresh_days)
         else:
             s += w["freshness"] * undated
-        if it.youtube:
-            s += float(w.get("playable", 0.3))
         # what the curator actually kept: sources, blogs, tags and artists with a track record (see learn.py)
-        adj, why = adjustment(learned, it.sources, it.tags, it.artist)
+        adj, why = adjustment(learned, it.sources, it.tags, it.artist, kind, it.affinity)
         if adj:
             s += float(w.get("learned", 1.0)) * adj
             reasons.extend(why)

@@ -6,7 +6,7 @@ import { state, allItems, decisionFor } from "./state.js";
 import { $, esc, sameName } from "./dom.js";
 import { isCurator } from "./auth.js";
 import { play } from "./player.js";
-import { searchFor, credit } from "./feed.js";
+import { searchFor, credit, sourceLabel } from "./feed.js";
 import { matchLabel } from "./years.js";
 import { scoreOf } from "./rank.js";
 import { openLayer } from "./url.js";
@@ -30,6 +30,12 @@ export function openArtist(name) {
   const neighbours = new Map();
   for (const i of allItems()) if (!sameName(i.artist, name) && similarNames(i).some(n => sameName(n, name))) neighbours.set(i.artist, (neighbours.get(i.artist) || 0) + 1);
   const rated = Object.entries(state.rated).filter(([, r]) => r && sameName(r.artist, name) && (r.decision === "up" || r.decision === "down"));
+  // upcoming shows nearby (data/concerts.json), once the Concerts tab has loaded it; a first open starts that load
+  if (state.concertsState === "idle") import("./concerts.js").then(m => m.loadConcerts()).catch(() => {});
+  const today = new Date(); const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const shows = (state.concerts?.events || []).filter(ev => ev.date >= todayKey && (ev.artists || [ev.artist]).some(a => sameName(a, name))).sort((a, b) => a.date.localeCompare(b.date));
+  /** @param {string} s */
+  const when = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString([], { month: "short", day: "numeric" }); };
   const kept = rated.filter(([, r]) => r.decision === "up").length, skipped = rated.length - kept;
   /** @param {FeedItem} i */
   const row = i => {
@@ -38,7 +44,7 @@ export function openArtist(name) {
     return `<div class="arow${state.playingId === i.id ? " current" : ""}" data-id="${esc(i.id)}">
       <button type="button" class="btn small aplay" ${yt.videoId ? "" : "disabled"} title="${yt.videoId ? "play" : "no YouTube match"}" aria-label="play ${esc(credit(i))}">▶&#xFE0E;</button>
       <span class="atitle"><b>${esc(i.display_title || i.title)}</b>${i.release && !sameName(i.release, i.title) ? ` <span class="muted">· ${esc(i.release)}</span>` : ""}${i.year ? ` <span class="muted">· ${esc(i.year)}</span>` : ""}</span>
-      <span class="aspec">${i.plays != null ? `${i.plays} plays` : (i.sources || []).map(s => s.split(":").slice(-1)[0]).slice(0, 3).join(", ")}</span>
+      <span class="aspec">${i.plays != null ? `${i.plays} plays` : (i.sources || []).map(sourceLabel).slice(0, 3).join(", ")}</span>
       <span class="ascore">${i.score ? scoreOf(i).toFixed(1) : ""}</span>
       <span class="astatus ${status.split(" ")[0]}">${status}</span>
     </div>`;
@@ -47,16 +53,18 @@ export function openArtist(name) {
   $("#artist-body").innerHTML = `
     <p class="muted">${match ? `<span class="match ${esc(first.match_kind || "")}">${esc(match)}</span> · ` : ""}${inFeed.length} in the feed${inCat.length ? ` · ${inCat.length} in the catalog` : ""}${isCurator() && rated.length ? ` · you kept ${kept} and skipped ${skipped} of theirs` : ""}</p>
     ${similar.size ? `<p class="muted">similar to ${[...similar].map(n => `<button type="button" class="linkish aopen" data-artist="${esc(n)}">${esc(n)}</button>`).join(", ")}</p>` : ""}
+    ${shows.length ? `<p class="muted ashows">upcoming near ${esc(state.concerts?.center?.name || "Detroit")}: ${shows.slice(0, 4).map(ev => `<b>${esc(when(ev.date))}</b> · ${esc(ev.venue)}, ${esc(ev.city)}${ev.tickets ? ` · <a href="${esc(ev.tickets)}" target="_blank" rel="noopener">tickets</a>` : ""}`).join(" · ")}${shows.length > 4 ? ` · ${shows.length - 4} more` : ""} · <button type="button" class="linkish" id="artist-shows">open in Concerts</button></p>` : ""}
     ${neighbours.size ? `<p class="muted">neighbours in the feed: ${[...neighbours.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `<button type="button" class="linkish aopen" data-artist="${esc(n)}">${esc(n)}</button>${c > 1 ? ` <span class="muted">×${c}</span>` : ""}`).join(", ")}</p>` : ""}
     <div class="alist">${mine.sort((a, b) => scoreOf(b) - scoreOf(a)).map(row).join("") || `<p class="muted">Nothing by them in the feed or the catalog right now.</p>`}</div>
     <div class="row">
       <button type="button" class="btn ghost small" id="artist-filter">only ${esc(name)} in the list</button>
       <a class="btn ghost small" href="https://www.last.fm/music/${encodeURIComponent(name)}" target="_blank" rel="noopener">last.fm</a>
-      <a class="btn ghost small" href="https://music.youtube.com/search?q=${encodeURIComponent(name)}" target="_blank" rel="noopener">YT Music</a>
+      <a class="btn ghost small" href="https://music.youtube.com/search?q=${encodeURIComponent(name)}" target="_blank" rel="noopener">YouTube Music</a>
       <a class="btn ghost small" href="https://musicbrainz.org/search?query=${encodeURIComponent(name)}&type=artist&method=indexed" target="_blank" rel="noopener">MusicBrainz</a>
     </div>`;
-  $("#artist-body").querySelectorAll(".aplay").forEach(b => b.addEventListener("click", () => { const id = /** @type {HTMLElement} */ (b.closest(".arow")).dataset.id; if (id) { play(id); $("#artist-body").querySelectorAll(".arow").forEach(r => r.classList.toggle("current", /** @type {HTMLElement} */ (r).dataset.id === id)); } }));
-  $("#artist-body").querySelectorAll(".aopen").forEach(b => b.addEventListener("click", () => openArtist(/** @type {HTMLElement} */ (b).dataset.artist || "")));
+  $("#artist-body").querySelectorAll(".aplay").forEach((/** @type {HTMLElement} */ b) => b.addEventListener("click", () => { const id = /** @type {HTMLElement} */ (b.closest(".arow")).dataset.id; if (id) { play(id); $("#artist-body").querySelectorAll(".arow").forEach((/** @type {HTMLElement} */ r) => r.classList.toggle("current", r.dataset.id === id)); } }));
+  $("#artist-body").querySelectorAll(".aopen").forEach((/** @type {HTMLElement} */ b) => b.addEventListener("click", () => openArtist(b.dataset.artist || "")));
   $("#artist-filter").addEventListener("click", () => { dlg.close(); searchFor(`artist:"${name}"`, { add: false }); });
+  const sb = $("#artist-shows"); if (sb) sb.addEventListener("click", () => { dlg.close(); import("./concerts.js").then(m => m.showConcertsFor(name)).catch(() => {}); });
   if (!dlg.open) dlg.showModal(); else openLayer(dlg.id, () => { if (dlg.open) dlg.close(); });
 }

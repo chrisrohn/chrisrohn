@@ -53,7 +53,10 @@ export function ratingsPayload() {
   // (discovery/unavailable.py) so the tab can swap it in, without a search's 100 units
   /** @type {Record<string, any>} */ const unplayable = {};
   for (const u of openAuditRows()) unplayable[`${u.playlistId}:${u.videoId}`] = { year: u.year, playlistId: u.playlistId, videoId: u.videoId, position: u.position, artist: u.artist, title: u.title, why: u.why, at: u.at };
-  return { version: 1, updatedAt: new Date().toISOString(), count: Object.keys(rated).length, rated, ...(Object.keys(unplayable).length ? { unplayable } : {}) };
+  // the Video tab's decisions (approved into the music-video playlist, or passed): the build leaves them out of the next list (discovery/videos.py)
+  /** @type {Record<string, any>} */ const videos = {};
+  for (const [v, m] of Object.entries(state.videoMarks)) if (m && !m.pending && (m.decision === "up" || m.decision === "down")) videos[v] = { decision: m.decision, at: m.at || 0, artist: m.artist || "", title: m.title || "", year: m.year ?? null, videoId: m.videoId || null };
+  return { version: 1, updatedAt: new Date().toISOString(), count: Object.keys(rated).length, rated, ...(Object.keys(unplayable).length ? { unplayable } : {}), ...(Object.keys(videos).length ? { videos } : {}) };
 }
 /** @param {string} text */
 function b64(text) {

@@ -29,8 +29,10 @@ SOURCE_MODULES = {
     "musicbrainz_artists": "musicbrainz_artists",
     "nts": "nts",
     "reddit": "reddit",
+    "difm": "difm",
+    "mixcloud": "mixcloud",
 }
-PER_FEED_HEALTH = {"rss", "youtube_channels", "radio", "nts", "reddit", "apple_music"}   # these report per feed / show / sub
+PER_FEED_HEALTH = {"rss", "youtube_channels", "radio", "nts", "reddit", "apple_music", "difm", "mixcloud"}   # these report per feed / show / sub
 
 
 def run_sources(cfg: dict, profile: dict, http, deadline: Deadline | None = None) -> list[Item]:

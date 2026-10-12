@@ -12,7 +12,7 @@ import { $, $$, toast } from "./dom.js";
 import { isSignedIn, isCurator, tokenValid, signIn, signOut } from "./auth.js";
 import { pullRatings } from "./sync.js";
 import { load, loadCatalog, fillSources, refreshFeed } from "./feed.js";
-import { render, deckOn, deckItem, deckYear } from "./render.js";
+import { render, renderIntro, deckOn, deckItem, deckYear, toggleLayout } from "./render.js";
 import { rate, replayQueued } from "./rating.js";
 import { play, toggle, nextTrack, prevTrack, holdAudition, stopPlayer, playerActive, toggleShuffle, reflectShuffle, autoplayOn, wireBackgroundPlay } from "./player.js";
 import { wireSettings } from "./settings.js";
@@ -21,6 +21,8 @@ import { wirePwa } from "./pwa.js";
 import { applyLaunchParams, wireLayers } from "./url.js";
 import { wireGhPush } from "./github.js";
 import { wireCleanup } from "./dupes.js";
+import { loadConcerts, wireConcerts } from "./concerts.js";
+import { loadVideos, wireVideos, refreshHeld } from "./videos.js";
 
 function wire() {
   const tabs = $$(".tab");
@@ -29,6 +31,8 @@ function wire() {
     const was = state.view; state.view = b.dataset.view || "feed"; tabs.forEach(x => x.classList.toggle("active", x === b));
     if ((was === "catalog") !== (state.view === "catalog")) fillSources();   // the chips are the feed's sources or the catalog's lists
     if (state.view === "catalog") loadCatalog().catch(() => {});
+    if (state.view === "concerts") loadConcerts().catch(() => {});
+    if (state.view === "videos") { loadVideos().catch(() => {}); if (isCurator() && tokenValid()) refreshHeld().catch(() => {}); }
     state.deckIndex = 0; render();
   };
   tabs.forEach(b => b.addEventListener("click", () => goTab(b)));
@@ -39,12 +43,11 @@ function wire() {
     if (to) { e.preventDefault(); to.focus(); goTab(to); }
   });
   const f = state.filters;
-  $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-playable").checked = f.onlyPlayable; $("#only-known").checked = f.onlyKnown; $("#only-recent").checked = f.onlyRecent; $("#shortlist").checked = f.shortlist;
+  $("#q").value = f.q; $("#sort").value = f.sort; $("#only-new").checked = f.onlyNew; $("#only-known").checked = f.onlyKnown; $("#only-recent").checked = f.onlyRecent; $("#shortlist").checked = f.shortlist;
   /** @type {any} */ let qTimer;
   $("#q").addEventListener("input", (/** @type {any} */ e) => { f.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(() => { persist(); render(); }, 120); });
   $("#sort").addEventListener("change", (/** @type {any} */ e) => { f.sort = e.target.value; persist(); render(); });
   $("#only-new").addEventListener("change", (/** @type {any} */ e) => { f.onlyNew = e.target.checked; persist(); render(); });
-  $("#only-playable").addEventListener("change", (/** @type {any} */ e) => { f.onlyPlayable = e.target.checked; persist(); render(); });
   $("#only-known").addEventListener("change", (/** @type {any} */ e) => { f.onlyKnown = e.target.checked; persist(); render(); });
   $("#only-recent").addEventListener("change", (/** @type {any} */ e) => { f.onlyRecent = e.target.checked; persist(); render(); });
   $("#shortlist").addEventListener("change", (/** @type {any} */ e) => { f.shortlist = e.target.checked; persist(); render(); });
@@ -63,7 +66,7 @@ function wire() {
   $("#deck-play").addEventListener("click", () => { const it = deckItem(); if (!it?.youtube?.videoId) return; if (state.playingId === it.id && state.playerReady) { holdAudition(); toggle(); } else play(it.id); });
   $("#deck-next").addEventListener("click", () => { state.deckIndex++; render(); const it = deckItem(); if (it?.youtube?.videoId && playerActive()) play(it.id); });
   $("#deck-prev").addEventListener("click", () => { state.deckIndex = Math.max(0, state.deckIndex - 1); render(); });
-  $("#layout-toggle").addEventListener("click", () => { state.settings.deck = !deckOn(); persist(); render(); });
+  $("#layout-toggle").addEventListener("click", toggleLayout);
   const toggleFilters = () => { const open = document.body.classList.toggle("filters-open"); $("#filters-more").textContent = open ? "hide filters ▴" : "filters ▾"; $("#filters-more").setAttribute("aria-expanded", String(open)); };
   $("#deck-filters").addEventListener("click", toggleFilters); $("#filters-more").addEventListener("click", toggleFilters);
   // keep the pinned deck buttons above the player bar whatever its height, and the deck card above the buttons
@@ -91,6 +94,8 @@ function wire() {
   wireLayers();
   wireSettings();
   wireCleanup();   // the Cleanup tab: its filters, the actions on every song and copy, the live scan and the audit
+  wireConcerts();  // the Concerts tab: when, how far, and in what order
+  wireVideos();    // the Video tab: the library's videos, played in place, approved into the music-video playlist or passed
   wireKeys();
   wirePwa();
   wireGhPush();   // the ratings file for the build: a last push when the tab goes away, and the retries after a dropped connection
@@ -113,7 +118,9 @@ function wireOffline() {
 
 function boot() {
   $("#meta").textContent = "loading feed…"; $("#feed-failed").hidden = true;
-  load().catch(e => { $("#meta").textContent = "The feed did not load. (" + e.message + ")"; $("#empty").hidden = false; $("#empty").textContent = state.online ? "No feed yet — run the Discover workflow once, or try again." : "Offline, and no feed cached yet."; $("#feed-failed").hidden = false; });
+  // a first visit reads the intro while the feed loads, laid out as the feed will be (the deck on a phone), so nothing moves when it lands
+  document.body.classList.toggle("deck-mode", deckOn()); renderIntro();
+  load().then(() => { if (state.view === "concerts") loadConcerts().catch(() => {}); }).catch(e => { $("#meta").textContent = "The feed did not load. (" + e.message + ")"; $("#empty").hidden = false; $("#empty").textContent = state.online ? "No feed yet — run the Discover workflow once, or try again." : "Offline, and no feed cached yet."; $("#feed-failed").hidden = false; });
 }
 wire();
 boot();

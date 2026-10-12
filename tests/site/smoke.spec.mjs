@@ -14,6 +14,14 @@ async function open(page, path = SITE_FILES) {
   return errors;
 }
 
+/** Wait for the history entry a sheet or dialog pushed to be gone again. Closing one by its own control (Esc, ✕,
+ * "not now") pops that entry with history.back(), a traversal the browser process commits on its own time; a reload
+ * or goto issued while it is still pending is cancelled with net::ERR_ABORTED, and a dialog opened meanwhile lands on
+ * the entry about to be popped and closes with it. Fast enough locally to never show; a CI runner is not. */
+async function layersSettled(page) {
+  await expect.poll(() => page.evaluate(() => !(history.state && history.state.layer)), { timeout: 10_000 }).toBeTruthy();
+}
+
 test("feed renders, filters work, controls unlock, no console errors", async ({ page }) => {
   const errors = await open(page);
   const feed = await page.evaluate(() => fetch("data/feed.json").then(r => r.json()));
@@ -72,6 +80,7 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   expect(await page.locator("#artist .arow").count()).toBeGreaterThan(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("#artist")).toBeHidden();
+  await layersSettled(page);
   // a first visit shows the intro card; ✕ dismisses it for good
   await expect(page.locator("#intro")).toBeVisible();
   await page.click("#intro-x");
@@ -99,6 +108,28 @@ test("feed renders, filters work, controls unlock, no console errors", async ({ 
   await page.keyboard.press("j");            // Esc kept the place: j moves on from the same card, not from the top
   await expect(page.locator(".card.current")).toHaveCount(1);
   expect(await page.locator(".card.current").getAttribute("data-id")).not.toBe(await page.locator("#list .card").first().getAttribute("data-id"));
+  expect(errors).toEqual([]);
+});
+
+test("a feed written before the audio rule: cards with no YouTube match never render, in the feed or the catalog", async ({ page }) => {
+  // a stale feed.json (or a cached one) can still carry matchless cards, which could neither play nor be filed nor skipped
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const base = feed.items.find(i => i.youtube && i.youtube.videoId);
+  const ghost = { ...base, id: "ghost-1", artist: "The Supermen Lovers", title: "Coco Bingo", display: "The Supermen Lovers - Coco Bingo", youtube: null, reasons: ["no YouTube match yet"], score: 9.9 };
+  const ghost2 = { ...base, id: "ghost-2", artist: "TEED", title: "Household Goods", display: "TEED - Household Goods", youtube: { videoId: null }, score: 9.8 };
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); j.items = [ghost, ghost2, ...j.items]; j.count += 2; await r.fulfill({ json: j }); });
+  await page.route("**/data/catalog.json", async r => { const j = await (await r.fetch()).json(); j.items = [{ ...ghost, id: "ghost-cat", plays: 40 }, ...(j.items || [])]; await r.fulfill({ json: j }); });
+  const errors = await open(page);
+  await expect(page.locator("#list .card").first()).toBeVisible();
+  await expect(page.locator('.card[data-id="ghost-1"]')).toHaveCount(0);
+  await expect(page.locator('.card[data-id="ghost-2"]')).toHaveCount(0);
+  expect(await page.locator(".art.unplayable").count()).toBe(0);
+  await page.fill("#q", "Coco Bingo");
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  await page.fill("#q", "");
+  await page.click(".tab[data-view=catalog]");
+  await expect(page.locator("#count-catalog")).not.toHaveText("…", { timeout: 15_000 });
+  await expect(page.locator('.card[data-id="ghost-cat"]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -153,6 +184,8 @@ test("a rated track feeds the personal ranking and the stats", async ({ page }) 
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
     localStorage.setItem("id:filters", JSON.stringify({ shortlist: false }));
   }, [rated, feed.google.curator_hashes[0]]);
+  // a remembered account with no live token: every tap starts a silent refresh, so Google's script is a stand-in here
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
   const errors = await open(page);
   await expect(page.locator("body")).toHaveClass(/curator/);
   // the Skipped tab lists the three local skips and the wrong-video flag (not the replaced one) and offers to restore them
@@ -210,6 +243,7 @@ test("the third verdict: ≠ wrong video hides a card without judging the song, 
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
     localStorage.setItem("id:filters", JSON.stringify({ shortlist: false, onlyRecent: false }));
   }, [rated, feed.google.curator_hashes[0]]);
+  await ctx.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));   // no live token: the silent refresh a tap starts must never reach a real popup
   const page = await ctx.newPage();
   const errors = await open(page);
   await expect(page.locator("body")).toHaveClass(/curator/);
@@ -234,8 +268,7 @@ test("the third verdict: ≠ wrong video hides a card without judging the song, 
   const before = Number(await page.locator("#count-feed").innerText());   // the pill counts the whole list; the page is paged
   await target.locator(".btn.wrong").click();
   await expect(target).toHaveCount(0);
-  await expect(page.locator(".toast")).toContainText(`≠ ${flagged.artist}`);
-  await expect(page.locator(".toast")).toContainText("wrong video");
+  await expect(page.locator(".toast")).toContainText(new RegExp(`≠ ${flagged.artist.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*wrong video`));
   await expect(page.locator("#count-feed")).toHaveText(String(before - 1));
   await page.locator("#meta").click();
   await page.keyboard.press("z");
@@ -381,6 +414,7 @@ test("theme toggle: header button, ⚙ select and the t key switch, persist and 
   await expect(html).not.toHaveAttribute("data-theme");
   await bg("rgb(231, 227, 218)");
   await page.keyboard.press("Escape");
+  await layersSettled(page);
   // the t key cycles too, with a toast
   await page.locator("#meta").click();
   await page.keyboard.press("t");
@@ -426,7 +460,10 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   // precache: the shell and the feed are in the build cache without a second visit
   await expect.poll(async () => page.evaluate(async () => {
     const keys = await caches.keys(); const c = await caches.open(keys.find(k => k.startsWith("newmusic-") && k !== "newmusic-art") || "");
-    const need = ["/", "/style.css", "/theme.js", "/data/feed.json", "/privacy.html", "/manifest.webmanifest"];
+    // the stylesheet and the theme script are content-hashed by build.mjs: the page says which names this build uses
+    const css = document.querySelector('link[rel="stylesheet"]')?.getAttribute("href") || "/style.css";
+    const theme = document.querySelector('script[src*="theme."]')?.getAttribute("src") || "/theme.js";
+    const need = ["/", css, theme, "/data/feed.json", "/privacy.html", "/manifest.webmanifest"];
     const hits = await Promise.all(need.map(p => c.match(location.origin + p)));
     return hits.filter(Boolean).length;
   }), { timeout: 15_000 }).toBe(6);
@@ -437,10 +474,12 @@ test("service worker installs, caches the shell and answers offline", async ({ b
   await page.click("#install-later");
   await page.keyboard.press("Escape");
   await expect(page.locator("#install-btn")).toBeHidden();   // "not now" sticks
+  await layersSettled(page);
   await page.click("#settings-btn");
   await expect(page.locator("#s-build")).toHaveText(/build [0-9a-f]{6,}/);
   await expect(page.locator("#s-update-btn")).toBeVisible();
   await page.keyboard.press("Escape");
+  await layersSettled(page);   // the reload below must not race the history.back() that Escape just queued
   // offline: the controlled page reloads from the cache with the feed intact. "ready" resolves while the worker is
   // still activating, and it claims this page (controller set) from inside its activate step; a navigation handed to
   // a worker that is still activating can be dropped on a slow runner (net::ERR_ABORTED on the reload), so wait
@@ -517,7 +556,7 @@ test("find year: an undated catalog card asks MusicBrainz and fills its year sel
   const item = { ...base, id: "cat-undated", artist: "Chromeo", title: "Night By Night", display_title: "Night By Night", display: "Chromeo - Night By Night", year: null, year_source: "unknown", year_confidence: "low", year_evidence: [], release_date: null, sources: ["lastfm:top tracks"], plays: 120, loved: false, score: 5, reasons: ["120 plays"] };
   const cat = { generated_at: feed.generated_at, candidates: 1, count: 1, undated: 1, pending: 3, sources: ["lastfm:top tracks"], years: { 2010: { playlist: 5, candidates: 0 } }, items: [item] };
   const ctx = await browser.newContext({ serviceWorkers: "block" });
-  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); localStorage.setItem("id:filters", JSON.stringify({ onlyPlayable: false })); }, [feed.google.curator_hashes[0]]);
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
   const page = await ctx.newPage();
   await page.route("**/data/catalog.json", r => r.fulfill({ json: cat }));
   await page.route("https://musicbrainz.org/ws/2/recording*", r => r.fulfill({ json: { recordings: [
@@ -550,7 +589,8 @@ test("the Cleanup tab: the duplicate report, filters, and the bulk button once a
   const errors = await open(page);
   const tab = page.locator(".tab[data-view=cleanup]");
   await expect(tab).toBeVisible();
-  await expect(page.locator("#count-cleanup")).toHaveText(String(feed.youtube.duplicates_count));
+  // the pill counts every open item: duplicated songs, rows that will not stream here, rows filed as the video
+  await expect(page.locator("#count-cleanup")).toHaveText(String(feed.youtube.duplicates_count + (feed.youtube.unavailable_count || 0) + (feed.youtube.video_count || 0)));
   await tab.click();
   await expect(page.locator("#cleanup")).toBeVisible();
   await expect(page.locator("#list .card")).toHaveCount(0);
@@ -648,7 +688,7 @@ test("Cleanup: a song's copies can be looked up, played in place, kept, removed 
   const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
   page.on("dialog", d => d.accept());
   await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
-  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 1, duplicates_kinds: report.kinds, unavailable_count: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 1, duplicates_kinds: report.kinds, unavailable_count: 0, video_count: 0 }); await r.fulfill({ json: j }); });
   await page.route("**/data/duplicates.json", r => r.fulfill({ json: report }));
   const calls = [];
   // the playlists as YouTube would answer for them: two items of audioA in y1, one in y0, one of videoB in y1 — kept in step with every add and delete
@@ -734,7 +774,7 @@ test("Cleanup: the playability audit finds deleted and blocked tracks, offers a 
   const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
   page.on("dialog", d => d.accept());
   await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
-  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 0, duplicates_kinds: {}, unavailable_count: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 0, duplicates_kinds: {}, unavailable_count: 0, video_count: 0 }); await r.fulfill({ json: j }); });
   const calls = [];
   const parse = t => { try { return JSON.parse(t || ""); } catch { return t; } };
   await page.route("https://www.googleapis.com/**", async route => {
@@ -814,7 +854,7 @@ test("Cleanup: tracks that will not stream here list their streamable counterpar
   const ctx = await browser.newContext({ serviceWorkers: "block" });
   await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
   const page = await ctx.newPage();
-  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 3, unavailable_with_alt: 1, unavailable_pending: 1 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 3, unavailable_with_alt: 1, unavailable_pending: 1, video_count: 0 }); await r.fulfill({ json: j }); });
   await page.route("**/data/unavailable.json", r => r.fulfill({ json: { count: 3, with_counterpart: 1, pending: 1, rows } }));
   const errors = await open(page);
   // the pills prove the feed (with its counts) and the catalog are both in before the tab is clicked: under
@@ -837,6 +877,48 @@ test("Cleanup: tracks that will not stream here list their streamable counterpar
   await expect(page.locator("#cl-dupe-bulk")).toBeHidden();
   await page.selectOption("#cl-dupe-yr", "2021");
   await expect(page.locator("#cl-dupe-bulk")).toHaveText("swap all 1 in 2021 for streamable uploads…");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("Cleanup: playlist rows filed as the video list their audio track and a swap", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const rows = [
+    { year: "2024", playlistId: "PL2024", videoId: "omv1", position: 0, artist: "Jungle", title: "Candle Flame", alt: { videoId: "atv1", title: "Candle Flame", album: "Volcano", videoType: "MUSIC_VIDEO_TYPE_ATV" }, pending: false, why: "video" },
+    { year: "2019", playlistId: "PL2019", videoId: "ugc1", position: 5, artist: "Someone", title: "Upload", alt: null, pending: false, why: "video" },
+    { year: "2016", playlistId: "PL2016", videoId: "dead2", position: 9, artist: "Roosevelt", title: "Lovers", alt: null, pending: false, why: "greyed" },
+  ];
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { unavailable_count: 1, unavailable_with_alt: 0, unavailable_pending: 0, video_count: 2, video_with_audio: 1, video_pending: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/unavailable.json", r => r.fulfill({ json: { count: 1, with_counterpart: 0, pending: 0, video: 2, video_with_audio: 1, video_pending: 0, rows } }));
+  const errors = await open(page);
+  await expect(page.locator("#count-cleanup")).toHaveText(String((feed.youtube.duplicates_count || 0) + 3));   // dead rows and video rows both count
+  await expect(page.locator("#count-catalog")).not.toHaveText("…", { timeout: 15_000 });
+  await page.click(".tab[data-view=cleanup]");
+  expect(errors).toEqual([]);
+  await expect(page.locator("#cl-summary")).toContainText("1 not streamable here");
+  await expect(page.locator("#cl-summary")).toContainText("2 filed as the video rather than the audio track (1 with the audio track found)");
+  await page.selectOption("#cl-dupe-kind", "unavailable");
+  await expect(page.locator("#cl-dupes .dupe.unav")).toHaveCount(1);                       // the video rows have their own list
+  await page.selectOption("#cl-dupe-kind", "video");
+  await expect(page.locator("#cl-dupes .dupe.unav.video")).toHaveCount(2);
+  const first = page.locator('#cl-dupes .dupe[data-key="unav:PL2024:omv1"]');
+  await expect(first.locator(".flag")).toHaveText("the video, not the audio track");
+  await expect(first.locator(".chip.wrong")).toContainText("▶︎ video");
+  await expect(first.locator(".chip.ok")).toContainText("Candle Flame · audio");
+  await expect(first.locator("button[data-swap]")).toHaveText("swap (100 units)");
+  const second = page.locator('#cl-dupes .dupe[data-key="unav:PL2019:ugc1"]');
+  await expect(second).toContainText("pairs no audio track with this video yet");
+  await expect(second.locator("button[data-drop]")).toHaveCount(0);                        // a playing video is never offered a bare removal
+  await page.selectOption("#cl-dupe-yr", "2024");
+  await expect(page.locator("#cl-dupe-bulk")).toHaveText("swap all 1 in 2024 for the audio track…");
+  // keeping the video costs nothing, drops the row from the list and the pill, and can be undone
+  await page.selectOption("#cl-dupe-yr", "");
+  await second.locator('button[data-act="keepvideo"]').click();
+  await expect(page.locator("#cl-dupes .dupe.unav.video")).toHaveCount(1);
+  await expect(page.locator("#count-cleanup")).toHaveText(String((feed.youtube.duplicates_count || 0) + 2));
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -878,7 +960,7 @@ test("a Keep verifies the playlist, adds the track, Undo removes it — and the 
   await ctx.addInitScript(([hash]) => {
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
     localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false, shortlistSize: 500 }));
-    localStorage.setItem("id:filters", JSON.stringify({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyPlayable: true, onlyKnown: false, onlyRecent: false, shortlist: false }));
+    localStorage.setItem("id:filters", JSON.stringify({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyKnown: false, onlyRecent: false, shortlist: false }));
     sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
   }, [feed.google.curator_hashes[0]]);
   const page = await ctx.newPage();
@@ -999,13 +1081,16 @@ test("a feed built on an earlier day says the morning build is late, and an all-
   const built = new Date(); built.setDate(built.getDate() - 1); built.setHours(6, 55, 0, 0);
   const feed = { ...live, generated_at: built.toISOString() };
   const ctx = await browser.newContext({ serviceWorkers: "block" });
-  const page = await ctx.newPage();
   const morning = new Date(); morning.setHours(8, 30, 0, 0);   // read over coffee, whatever hour CI happens to run at
-  await page.clock.setFixedTime(morning);
-  await page.route("**/data/feed.json", r => r.fulfill({ json: feed }));
+  await ctx.route("**/data/feed.json", r => r.fulfill({ json: feed }));
+  // each step gets a fresh page: a renderer worn down by the previous document (a whole feed rated, then re-listed)
+  // has crashed on a CI runner while navigating to the next one, taking the test with it
+  /** @type {import("@playwright/test").Page} */
+  let page;
+  const fresh = async () => { if (page) await page.close(); page = await ctx.newPage(); await page.clock.setFixedTime(morning); return page; };
 
   // 1. late, but nothing is wrong upstream: the quiet bar, not the "something failed" one
-  let errors = await open(page);
+  let errors = await open(await fresh());
   const bar = page.locator("#stale");
   await expect(bar).toBeVisible();
   await expect(bar).toHaveClass(/waiting/);
@@ -1020,7 +1105,7 @@ test("a feed built on an earlier day says the morning build is late, and an all-
     localStorage.setItem("id:rated", JSON.stringify(r));
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
   }, [rated, feed.google.curator_hashes[0]]);
-  errors = await open(page);
+  errors = await open(await fresh());
   const empty = page.locator("#empty");
   await expect(empty).toBeVisible();
   await expect(empty).toContainText(`You have rated all ${feed.items.length} cards`);
@@ -1032,10 +1117,11 @@ test("a feed built on an earlier day says the morning build is late, and an all-
 
   // 3. a full feed hidden behind the filters is a different sentence, and one button undoes it
   await ctx.addInitScript(() => localStorage.setItem("id:rated", "{}"));
-  errors = await open(page, "/?q=zzzz-nothing-has-this");
-  await expect(empty).toContainText(/unrated cards? (is|are) in this build/);
-  await expect(empty).toContainText("the search");
-  await empty.locator("button", { hasText: "clear the filters" }).click();
+  errors = await open(await fresh(), "/?q=zzzz-nothing-has-this");
+  const hidden = page.locator("#empty");
+  await expect(hidden).toContainText(/unrated cards? (is|are) in this build/);
+  await expect(hidden).toContainText("the search");
+  await hidden.locator("button", { hasText: "clear the filters" }).click();
   await expect(page.locator("#q")).toHaveValue("");
   await expect.poll(() => page.locator("#list .card").count()).toBeGreaterThan(50);
   expect(errors).toEqual([]);
@@ -1057,6 +1143,449 @@ test("a feed older than a day and a half is an alarm, not a late morning", async
   await expect(bar).not.toHaveClass(/waiting/);
   await expect(bar).toContainText("4 days old");
   await expect(bar).toContainText("Discover workflow");
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+/** A concert list the way discovery/concerts.py writes it, dated from today so the "this week" filter has something to keep. */
+function concertsFixture() {
+  const day = n => { const x = new Date(); x.setDate(x.getDate() + n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+  return {
+    generated_at: new Date().toISOString(), center: { name: "Detroit, MI", lat: 42.3314, lon: -83.0458 }, radius_miles: 150, months_ahead: 12,
+    artists_total: 1200, artists_checked: 900, artists_with_shows: 2, sources: ["bandsintown", "jambase", "ticketmaster"], health: { bandsintown: { ok: true }, ticketmaster: { ok: true }, jambase: { ok: true } }, count: 3,
+    events: [
+      { id: "bit:1", artist: "Cut Copy", artists: ["Cut Copy"], lineup: ["Cut Copy", "Opener"], date: day(3), time: "20:00", venue: "Saint Andrew's Hall", city: "Detroit", region: "MI", country: "United States", miles: 0.4,
+        tickets: "https://www.axs.com/events/1/cut-copy", ticketer: "AXS", url: "https://www.bandsintown.com/e/1", status: "available", sources: ["bandsintown"], links: { bandsintown: "https://www.bandsintown.com/e/1" }, festival: false },
+      { id: "tm:2", artist: "Jungle", artists: ["Jungle"], lineup: ["Jungle"], date: day(40), time: "19:30", venue: "Royal Oak Music Theatre", city: "Royal Oak", region: "MI", country: "United States", miles: 14.2,
+        tickets: "https://www.ticketmaster.com/event/2", ticketer: "Ticketmaster", url: "https://www.ticketmaster.com/event/2", status: "onsale", sources: ["ticketmaster"], price: { min: 35, max: 65, currency: "USD" }, links: { ticketmaster: "https://www.ticketmaster.com/event/2" }, festival: false },
+      { id: "bit:3", artist: "Cut Copy", artists: ["Cut Copy"], lineup: ["Cut Copy"], date: day(100), time: null, venue: "Agora", city: "Cleveland", region: "OH", country: "United States", miles: 90.5,
+        tickets: null, ticketer: null, url: "https://www.bandsintown.com/e/3", status: null, sources: ["bandsintown"], links: { bandsintown: "https://www.bandsintown.com/e/3" }, festival: false },
+    ],
+    artists: {
+      "Cut Copy": { plays: 143, filed: 4, via: ["lastfm:12month", "playlists"], image: null, top_track: { id: "concert-cutcopy-01", title: "Hearts on Fire", source: "lastfm", listeners: 1200000, youtube: { videoId: "dQw4w9WgXcQ", thumbnail: null } },
+        links: { "last.fm": "https://www.last.fm/music/Cut%20Copy", songkick: "https://www.songkick.com/search?query=Cut%20Copy&type=artists" } },
+      "Jungle": { plays: 80, filed: 0, via: ["lastfm:12month"], image: null, top_track: { id: "concert-jungle-01", title: "Back on 74", source: "deezer", youtube: null }, links: {} },
+    },
+  };
+}
+
+test("the Concerts tab: shows nearby, soonest first, with the ticket seller named and each act's most popular song in the queue", async ({ browser }) => {
+  const ctx = await browser.newContext({ serviceWorkers: "block" });   // page.route must see the fetch, not a worker
+  const page = await ctx.newPage();
+  await page.route("**/data/concerts.json", route => route.fulfill({ json: concertsFixture() }));
+  const errors = await open(page);
+  await expect(page.locator("#count-concerts")).toHaveText("…");   // not loaded until the tab opens
+  await page.click(".tab[data-view=concerts]");
+  await expect(page.locator("#concerts")).toBeVisible();
+  const rows = page.locator("#con-list .show");
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator("#count-concerts")).toHaveText("3");
+  await expect(page.locator("#con-summary")).toContainText("3 shows within 150 miles of Detroit, MI by 2 artists you played this year");
+  await expect(page.locator("#con-summary")).toContainText("900 of 1,200 played artists checked so far");
+  // the credits line names every listing the rows came from; JamBase's Developer tier requires its wording, linked
+  await expect(page.locator("#con-credits")).toHaveText("Listings: Bandsintown · Concert data provided by JamBase · Ticketmaster");
+  await expect(page.locator("#con-credits a", { hasText: "Concert data provided by JamBase" })).toHaveAttribute("href", "https://www.jambase.com");
+  expect(new URL(page.url()).searchParams.get("view")).toBe("concerts");
+  // the feed's controls step aside; the tab's own take their place
+  await expect(page.locator("#sort")).toBeHidden();
+  await expect(page.locator("#con-when")).toBeVisible();
+  // soonest first, under month headings; the ticket button names the seller; distance, bill and plays on the row
+  const first = rows.first();
+  await expect(first.locator(".artist")).toHaveText("Cut Copy");
+  await expect(first.locator(".show-side .tickets")).toHaveText("Tickets · AXS");
+  await expect(first.locator(".show-side .tickets")).toHaveAttribute("href", "https://www.axs.com/events/1/cut-copy");
+  await expect(first.locator(".show-venue")).toContainText("Saint Andrew's Hall · Detroit, MI · under a mile");
+  await expect(first.locator(".show-why")).toHaveText("you played them 143 times this year · 4 tracks filed this year · also on the bill: Opener");
+  await expect(first.locator(".show-track b")).toHaveText("Hearts on Fire");
+  await expect(first.locator(".show-track")).toContainText("1,200,000 listeners on Last.fm");
+  await expect(first.locator(".show-track a")).toHaveAttribute("href", "https://music.youtube.com/watch?v=dQw4w9WgXcQ");
+  await expect(first.locator(".links a").first()).toHaveText("tickets · AXS");
+  await expect(first.locator(".flag.soon")).toHaveText("this week");
+  expect(await page.locator("#con-list .con-month").count()).toBeGreaterThanOrEqual(2);
+  const second = rows.nth(1);
+  await expect(second.locator(".show-venue")).toContainText("Royal Oak Music Theatre · Royal Oak, MI · 14 mi");
+  await expect(second.locator(".show-side .price")).toHaveText("$35–$65");   // Ticketmaster's face value, under the button
+  await expect(first.locator(".show-side .price")).toHaveCount(0);            // Bandsintown lists no prices
+  await expect(second.locator(".show-side .tickets")).toHaveText("Tickets · Ticketmaster");
+  await expect(second.locator(".show-track .tplay")).toBeDisabled();           // no YouTube match for that song yet
+  await expect(second.locator(".show-track a")).toHaveAttribute("href", /music\.youtube\.com\/search\?q=Jungle/);
+  await expect(rows.nth(2).locator(".show-side a")).toHaveText("Details");   // no ticket link: the event page
+  // when, how far, in what order — and the address follows
+  await page.selectOption("#con-when", "7"); await expect(rows).toHaveCount(1);
+  expect(new URL(page.url()).searchParams.get("when")).toBe("7");
+  await page.selectOption("#con-when", ""); await expect(rows).toHaveCount(3);
+  await page.selectOption("#con-radius", "50"); await expect(rows).toHaveCount(2);
+  await page.selectOption("#con-radius", "");
+  await page.selectOption("#con-sort", "plays");
+  await expect(page.locator("#con-list .con-month")).toHaveCount(0);
+  await expect(rows.nth(2).locator(".artist")).toHaveText("Jungle");
+  await page.selectOption("#con-sort", "date");
+  // search matches venues, cities and the songs too
+  await page.fill("#q", "royal oak"); await expect(rows).toHaveCount(1); await expect(rows.first().locator(".artist")).toHaveText("Jungle");
+  await page.fill("#q", "hearts on fire"); await expect(rows).toHaveCount(2);
+  await page.fill("#q", ""); await expect(rows).toHaveCount(3);
+  // the rows' songs are the queue: space plays the first one, and its row lights up
+  await page.locator("#meta").click();
+  await page.keyboard.press(" ");
+  await expect(page.locator("#player")).toBeVisible();
+  await expect(page.locator("#now")).toContainText("Cut Copy");
+  await expect(page.locator("#now")).toContainText("Hearts on Fire");
+  await expect(page.locator("#np-eyebrow")).toContainText("No. 01 / 1");   // one song in the queue: both Cut Copy rows share it, Jungle's has no video yet
+  await expect(rows.first()).toHaveClass(/current/);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#player")).toBeHidden();
+  // the artist sheet lists their dates and hands over to the tab filtered to them
+  await rows.first().locator(".artist").click();
+  await expect(page.locator("#artist")).toBeVisible();
+  await expect(page.locator("#artist .ashows")).toContainText("Saint Andrew's Hall, Detroit");
+  await expect(page.locator("#artist .ashows")).toContainText("Agora, Cleveland");
+  await page.click("#artist-shows");
+  await expect(page.locator("#artist")).toBeHidden();
+  await expect(page.locator("#q")).toHaveValue('artist:"Cut Copy"');
+  await expect(rows).toHaveCount(2);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("no concert list yet: the Concerts tab says so instead of an empty sheet", async ({ browser }) => {
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  await page.route("**/data/concerts.json", route => route.fulfill({ status: 404, body: "" }));
+  const errors = await open(page, "/?view=concerts");
+  await expect(page.locator("#concerts")).toBeVisible();
+  await expect(page.locator("#con-empty")).toContainText("No concert list yet");
+  await expect(page.locator("#count-concerts")).toHaveText("…");
+  await expect(page.locator(".tab[data-view=concerts]")).toHaveClass(/active/);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("the Video tab: kept songs' videos and the library's, played in place, added to the music-video playlist or passed", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const playable = feed.items.filter(i => i.youtube && i.youtube.videoId).slice(0, 3);
+  const [kept, unkept, keptNoVideo] = playable;
+  // real-looking ids: the YouTube iframe API loads on a runner with network and throws "Invalid video id" on anything shorter than 11 characters
+  const report = { generated_at: new Date().toISOString(), checked_at: new Date().toISOString(), playlist_id: "PLVIDS", count: 3, pending: 4, no_video: 10, in_playlist: 2, decided: 1, rows: [
+    { video: "libv1000000", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "liba1000000", year: "2024", years: ["2024", "2019"], playlistId: "PL2024", position: 3, artist: "Jungle", title: "Candle Flame", album: "Volcano" },
+    { video: "libv2000000", kind: "MUSIC_VIDEO_TYPE_UGC", own: true, videoId: "libv2000000", year: "2019", years: ["2019"], playlistId: "PL2019", position: 8, artist: "Someone", title: "Upload", album: null },
+    { video: "heldv000000", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "helda000000", year: "2016", years: ["2016"], playlistId: "PL2016", position: 1, artist: "Roosevelt", title: "Lovers", album: "Roosevelt" },
+  ] };
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash, keptId, keptNoVideoId]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false }));
+    // two songs kept on this account: one whose card knows its video (it belongs on the tab), one without a video (it does not)
+    localStorage.setItem("id:rated", JSON.stringify({ [keptId]: { decision: "up", at: Date.now() - 60e3, year: 2026 }, [keptNoVideoId]: { decision: "up", at: Date.now() - 30e3, year: 2026 } }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0], kept.id, keptNoVideo.id]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => {
+    const j = await (await r.fetch()).json();
+    Object.assign(j.youtube, { videos_playlist_id: "PLVIDS", videos: { with_video: 2, no_video: 1, pending: 0 } });
+    // the kept song and an unkept one both know their video; only the kept one belongs on the tab. The kept song
+    // without one is made so here: the committed feed decides which cards come first, and the build may already
+    // have found that card's video (it did on 2026-09-21), which is the case the pill must not count.
+    for (const it of j.items) {
+      if (it.id === kept.id) Object.assign(it.youtube, { video: "keptv000000", videoKind: "MUSIC_VIDEO_TYPE_OMV" });
+      if (it.id === unkept.id) Object.assign(it.youtube, { video: "unkeptv0000", videoKind: "MUSIC_VIDEO_TYPE_OMV" });
+      if (it.id === keptNoVideo.id) { delete it.youtube.video; delete it.youtube.videoKind; }
+    }
+    await r.fulfill({ json: j });
+  });
+  await page.route("**/data/videos.json", r => r.fulfill({ json: report }));
+  // the fixture's videos do not exist on YouTube: with the player script loaded (a runner with network) the real player
+  // would answer "not found", and the site's "Can't embed this one" toast would replace the Undo toast the test clicks.
+  // What is under test is the site's own queue, cards and thumbs, so the player script stays out, as it does offline.
+  await page.route("https://www.youtube.com/**", r => r.abort());
+  const calls = [];
+  const parse = t => { try { return JSON.parse(t || ""); } catch { return t; } };
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); const params = Object.fromEntries(u.searchParams);
+    const body = parse(req.postData()); calls.push({ method: req.method(), path: u.pathname, params, body });
+    if (u.pathname.startsWith("/drive/") || u.pathname.startsWith("/upload/")) return route.fulfill({ json: { files: [], id: "drive-1" } });
+    // the music-video playlist holds one of the report's videos already; every other playlist read is empty
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: params.playlistId === "PLVIDS" && !params.videoId ? [{ id: "PLI-held", snippet: { resourceId: { videoId: "heldv000000" } } }] : [] } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "POST") return route.fulfill({ json: { id: "PLI-video-1" } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") return route.fulfill({ status: 204, body: "" });
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  const tab = page.locator(".tab[data-view=videos]");
+  await expect(tab).toBeVisible();
+  // the pill: the library's three rows plus the kept song's video (the unkept song's and the kept-without-video one never count)
+  await expect(page.locator("#count-videos")).toHaveText("4", { timeout: 15_000 });
+  await tab.click();
+  await expect(page.locator("#videos")).toBeVisible();
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  await expect(page.locator("#filters")).toBeHidden();
+  // opening the tab reads the music-video playlist (1 unit per 50): what it holds is hidden, the pill follows
+  await expect.poll(() => calls.filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "GET" && c.params.playlistId === "PLVIDS" && !c.params.videoId).length).toBe(1);
+  // the list is a ledger of cards like the feed's, one per video, under "video:" ids of their own
+  const rows = page.locator("#vid-list .card");
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator('#vid-list .card[data-id="video:heldv000000"]')).toHaveCount(0);
+  await expect(page.locator("#count-videos")).toHaveText("3");
+  await expect(page.locator("#vid-summary")).toContainText("3 videos to review");
+  await expect(page.locator("#vid-summary")).toContainText("4 rows still being asked");
+  await expect(page.locator("#vid-summary")).toContainText("1 from songs kept here");
+  await expect(page.locator("#vid-quota")).toContainText("approvals possible today");
+  // the kept song's video leads (kept most recently), then the library's, newest year first; each card says what it is and where from
+  await expect(rows.nth(0)).toHaveAttribute("data-id", "video:keptv000000");
+  await expect(rows.nth(0).locator(".release")).toHaveText(/^official video/);
+  await expect(rows.nth(0).locator(".reasons")).toHaveText(/^kept here \d+ min ago$/);
+  await expect(rows.nth(0).locator(".sources .src")).toHaveText("kept here");
+  await expect(rows.nth(0).locator(".artist")).toHaveText(kept.artist);
+  await expect(rows.nth(0).locator(".art img")).toHaveAttribute("src", "https://i.ytimg.com/vi/keptv000000/mqdefault.jpg");
+  await expect(rows.nth(1)).toHaveAttribute("data-id", "video:libv1000000");
+  await expect(rows.nth(1).locator(".release")).toHaveText("official video · Volcano");
+  await expect(rows.nth(1).locator(".yearbadge")).toHaveText("2024, 2019");
+  await expect(rows.nth(1).locator(".reasons")).toHaveText("in 2024 | Indie Discotheque, 2019 | Indie Discotheque · #4");
+  await expect(rows.nth(1).locator(".sources .src")).toHaveText("year playlists");
+  await expect(rows.nth(1).locator(".links a").nth(0)).toHaveAttribute("href", "https://music.youtube.com/watch?v=libv1000000");
+  await expect(rows.nth(1).locator(".links a").nth(1)).toHaveText("audio track");
+  await expect(rows.nth(1).locator(".links a").nth(1)).toHaveAttribute("href", "https://music.youtube.com/watch?v=liba1000000");
+  await expect(rows.nth(2).locator(".release")).toHaveText(/^upload/);
+  await expect(rows.nth(2).locator(".reasons")).toContainText("the playlist row itself is the video");
+  // a video's card has the two verdicts and no year select, no wrong-video flag, no score, no permalink
+  await expect(rows.nth(0).locator(".btn.up")).toHaveAttribute("title", "add this video to the music-video playlist (u)");
+  await expect(rows.nth(0).locator(".btn.down")).toHaveAttribute("title", /pass: not for the music-video playlist \(d/);
+  await expect(rows.nth(0).locator(".btn.wrong, .year, .share:has-text('link')")).toHaveCount(0);
+  await expect(page.locator('#vid-list .card[data-id="video:unkeptv0000"]')).toHaveCount(0);
+  // filters: where from, year, name
+  await page.selectOption("#vid-source", "library");
+  await expect(rows).toHaveCount(2);
+  await page.selectOption("#vid-year", "2019");
+  await expect(rows).toHaveCount(2);   // Candle Flame is filed in 2019 too
+  await page.selectOption("#vid-year", "2024");
+  await expect(rows).toHaveCount(1);
+  await page.selectOption("#vid-year", ""); await page.selectOption("#vid-source", "");
+  await page.fill("#vid-q", "zzzz-no-such-video");
+  await expect(page.locator("#vid-empty")).toContainText("Nothing matches");
+  await page.fill("#vid-q", "");
+  await expect(rows).toHaveCount(3);
+  // ▶ plays the video itself in the site's player, the cards are the queue: j moves on, the card lights up, Esc closes
+  await rows.nth(1).locator(".art").click();
+  await expect(page.locator("#player")).toBeVisible();
+  await expect(page.locator("#player")).toHaveClass(/video/);
+  await expect(page.locator("#p-wrong")).toBeHidden();   // a video has no wrong-video flag
+  await expect(page.locator("#now")).toContainText("Volcano");
+  await expect(page.locator("#np-spec")).toContainText("official video · in 2024 | Indie Discotheque");
+  await expect(page.locator("#np-eyebrow")).toContainText("No. 02 / 3");
+  await expect(page.locator("#np-next")).toContainText("Upload");   // up next: the card below
+  await expect(rows.nth(1)).toHaveClass(/current/);
+  await page.keyboard.press("j");
+  await expect(rows.nth(2)).toHaveClass(/current/);
+  await expect(rows.nth(1)).not.toHaveClass(/current/);
+  await expect(page.locator("#np-eyebrow")).toContainText("No. 03 / 3");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#player")).toBeHidden();
+  // ▲︎ add: the playlist was read a moment ago, so the add is the only request — into the music-video playlist, nowhere else
+  const before = calls.length;
+  await rows.nth(0).locator(".btn.up").click();
+  await expect(page.locator(".toast")).toContainText("→ the music-video playlist");
+  await expect(page.locator('#vid-list .card[data-id="video:keptv000000"]')).toHaveCount(0);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  const writes = calls.slice(before).filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "POST");
+  expect(writes).toHaveLength(1);
+  expect(writes[0].body.snippet.playlistId).toBe("PLVIDS"); expect(writes[0].body.snippet.resourceId.videoId).toBe("keptv000000");
+  expect(calls.slice(before).filter(c => c.method === "GET" && c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}").keptv000000?.playlistItemId)).toBe("PLI-video-1");
+  // the d key passes the card the keyboard is on (focus moved on to the next card when the first left): free, remembered, gone
+  await expect(rows.first()).toBeFocused();
+  const passes = calls.length;
+  await page.keyboard.press("d");
+  await expect(page.locator(".toast")).toContainText("passed");
+  await expect(page.locator('#vid-list .card[data-id="video:libv1000000"]')).toHaveCount(0);
+  expect(calls.slice(passes).filter(c => c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}").libv1000000?.decision)).toBe("down");
+  // z takes the last verdict back for free; the pill and the list follow
+  await page.keyboard.press("z");
+  await expect(page.locator('#vid-list .card[data-id="video:libv1000000"]')).toHaveCount(1);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  // the player's own thumbs judge what plays: ▼︎ on the bar passes the playing video, and autoplay moves on to the next
+  await page.locator('#vid-list .card[data-id="video:libv2000000"] .art').click();
+  await expect(page.locator("#now")).toContainText("Someone - Upload");
+  await page.click("#p-down");
+  await expect(page.locator(".toast")).toContainText("passed");
+  await expect(page.locator('#vid-list .card[data-id="video:libv2000000"]')).toHaveCount(0);
+  await expect(page.locator("#now")).toContainText("Candle Flame");   // libv1000000 sat before it: the only card left plays
+  await expect(page.locator("#count-videos")).toHaveText("1");
+  await page.locator(".toast button").click();   // Undo on the toast
+  await expect(page.locator('#vid-list .card[data-id="video:libv2000000"]')).toHaveCount(1);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#player")).toBeHidden();
+  // the decisions reach the build with the ratings file (`videos`), and a reload keeps them
+  await page.reload();
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("#count-videos")).toHaveText("2", { timeout: 15_000 });
+  const marks = await page.evaluate(() => JSON.parse(localStorage.getItem("id:videos") || "{}"));
+  expect(marks.keptv000000.decision).toBe("up"); expect(marks.libv1000000.decision).toBe("undone"); expect(marks.libv2000000.decision).toBe("undone");
+  // Settings points here too
+  await page.click("#settings-btn");
+  await expect(page.locator("#s-videos-summary")).toContainText("videos to review");
+  await page.click("#s-videos");
+  await expect(page.locator("#settings")).toBeHidden();
+  await expect(page.locator("#videos")).toBeVisible();
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("the Video tab on a phone is the Feed's deck: one video at a time, pass / play / add pinned at the foot, the player as the card's picture", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const report = { generated_at: new Date().toISOString(), checked_at: new Date().toISOString(), playlist_id: "PLVIDS", count: 3, pending: 0, no_video: 0, in_playlist: 0, decided: 0, rows: [
+    { video: "libv1000000", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "liba1000000", year: "2024", years: ["2024", "2019"], playlistId: "PL2024", position: 3, artist: "Jungle", title: "Candle Flame", album: "Volcano" },
+    { video: "libv2000000", kind: "MUSIC_VIDEO_TYPE_UGC", own: true, videoId: "libv2000000", year: "2019", years: ["2019"], playlistId: "PL2019", position: 8, artist: "Someone", title: "Upload", album: null },
+    { video: "libv3000000", kind: "MUSIC_VIDEO_TYPE_OMV", own: false, videoId: "liba3000000", year: "2016", years: ["2016"], playlistId: "PL2016", position: 1, artist: "Roosevelt", title: "Lovers", album: "Roosevelt" },
+  ] };
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await ctx.addInitScript(([hash]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now() }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { videos_playlist_id: "PLVIDS" }); await r.fulfill({ json: j }); });
+  await page.route("**/data/videos.json", r => r.fulfill({ json: report }));
+  await page.route("https://www.youtube.com/**", r => r.abort());
+  const calls = [];
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); calls.push({ method: req.method(), path: u.pathname, params: Object.fromEntries(u.searchParams) });
+    if (u.pathname.startsWith("/drive/") || u.pathname.startsWith("/upload/")) return route.fulfill({ json: { files: [], id: "drive-1" } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: [] } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "POST") return route.fulfill({ json: { id: "PLI-video-1" } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") return route.fulfill({ status: 204, body: "" });
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  // the Feed is a deck on a phone, with keep / skip / ≠ under it
+  await expect(page.locator("body")).toHaveClass(/deck-mode/);
+  await expect(page.locator("#deck-up")).toHaveText(/keep/);
+  await expect(page.locator("#count-videos")).toHaveText("3", { timeout: 15_000 });
+  await page.locator(".tab[data-view=videos]").click();
+  // …and so is the Video tab: the same deck, one video card at a time, the tab's own sheet folded away behind "filters"
+  await expect(page.locator("body")).toHaveClass(/deck-videos/);
+  await expect(page.locator("#videos")).toBeHidden();
+  await expect(page.locator("#vid-list .card")).toHaveCount(0);
+  await expect(page.locator("#list .card")).toHaveCount(0);
+  const card = page.locator("#deck-card .dcard");
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveAttribute("data-id", "video:libv1000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  await expect(card.locator(".dartist")).toHaveText("Jungle");
+  await expect(card.locator(".dtitle")).toHaveText("Candle Flame");
+  await expect(card.locator(".release")).toHaveText("official video · Volcano");
+  await expect(card.locator(".yearbadge")).toHaveText("2024, 2019");
+  await expect(card.locator(".dwhy")).toHaveText("in 2024 | Indie Discotheque, 2019 | Indie Discotheque · #4");
+  await expect(card.locator(".dsources .src")).toHaveText("year playlists");
+  await expect(card.locator(".dlinks a").nth(0)).toHaveText("video on YouTube Music");
+  await expect(card.locator(".dlinks a").nth(1)).toHaveText("audio track");
+  await expect(card.locator(".year, .share:has-text('link')")).toHaveCount(0);   // no year to choose, no permalink
+  // the vote buttons at the foot read as the tab's verdicts, ≠ has no meaning for a video, and every one is a full-size target inside the screen
+  await expect(page.locator("#deck-wrong")).toBeHidden();
+  await expect(page.locator("#deck-up")).toHaveText(/add/);
+  await expect(page.locator("#deck-down")).toHaveText(/pass/);
+  for (const sel of ["#deck-down", "#deck-play", "#deck-up"]) { const box = await page.locator(sel).boundingBox(); expect(box.height, sel).toBeGreaterThanOrEqual(40); expect(box.x + box.width, sel).toBeLessThanOrEqual(390); }
+  const actions = await page.locator("#deck-actions").boundingBox();
+  expect(actions.y + actions.height).toBeGreaterThan(800);   // pinned at the bottom of the screen
+  // "filters" opens the tab's own sheet — summary, quota and the where / year / order filters — over the deck; a filter turns the deck to its first card
+  await page.click("#deck-filters");
+  await expect(page.locator("#videos")).toBeVisible();
+  await expect(page.locator("#filters")).toBeHidden();   // the Feed's own strip stays folded: these are the tab's filters
+  await expect(page.locator("#vid-summary")).toContainText("3 videos to review");
+  const sheet = await page.locator("#videos").boundingBox(); const deckTop = await page.locator("#deck-top").boundingBox();
+  expect(sheet.y + sheet.height).toBeLessThanOrEqual(deckTop.y + 1);   // above the deck, clear of the pinned bar
+  await page.selectOption("#vid-year", "2019");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 2");
+  await page.selectOption("#vid-year", "");
+  await page.click("#deck-filters");
+  await expect(page.locator("#videos")).toBeHidden();
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  // ▶ plays the video in the player, drawn as the card's picture (in flow above the card, not a bar over the page)
+  await page.click("#deck-play");
+  await expect(page.locator("#player")).toBeVisible();
+  await expect(page.locator("#player")).toHaveClass(/video/);
+  await expect(page.locator("#now")).toContainText("Candle Flame");
+  expect(await page.locator("#player").evaluate(el => getComputedStyle(el).position)).toBe("static");
+  const frame = await page.locator("#player").boundingBox(); const body = await card.boundingBox();
+  expect(frame.y + frame.height).toBeLessThanOrEqual(body.y + 1);   // the player sits right above the card's text
+  await expect(card.locator(".dart")).toBeHidden();                  // no second picture under it
+  await expect(card).toHaveClass(/current/);
+  // later ›  walks on without a verdict and the player follows; ‹ back returns
+  await page.click("#deck-next");
+  await expect(page.locator("#deck-count")).toHaveText("2 / 3");
+  await expect(page.locator("#now")).toContainText("Someone - Upload");
+  await page.click("#deck-prev");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  // ▼︎ pass: free, remembered; the next card slides in and, with autoplay on, plays
+  const passes = calls.length;
+  await page.click("#deck-down");
+  await expect(page.locator(".toast")).toContainText("passed");
+  await expect(card).toHaveAttribute("data-id", "video:libv2000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 2");
+  await expect(page.locator("#now")).toContainText("Someone - Upload");
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  expect(calls.slice(passes).filter(c => c.path === "/youtube/v3/playlistItems")).toHaveLength(0);
+  // z takes it back and turns the deck to the card that came back
+  await page.keyboard.press("z");
+  await expect(card).toHaveAttribute("data-id", "video:libv1000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 3");
+  // ▲︎ add: one add into the music-video playlist, the card leaves the deck
+  const before = calls.length;
+  await page.click("#deck-up");
+  await expect(page.locator(".toast")).toContainText("→ the music-video playlist");
+  await expect(card).toHaveAttribute("data-id", "video:libv2000000");
+  const writes = calls.slice(before).filter(c => c.path === "/youtube/v3/playlistItems" && c.method === "POST");
+  expect(writes).toHaveLength(1);
+  await expect(page.locator("#count-videos")).toHaveText("2");
+  // a swipe left passes the card under the finger, as on the Feed
+  const box = await card.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6);
+  await card.dispatchEvent("pointerdown", { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: box.x + box.width * 0.7, clientY: box.y + box.height * 0.6, bubbles: true });
+  await card.dispatchEvent("pointermove", { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: box.x + box.width * 0.7 - 160, clientY: box.y + box.height * 0.6, bubbles: true });
+  await card.dispatchEvent("pointerup", { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: box.x + box.width * 0.7 - 160, clientY: box.y + box.height * 0.6, bubbles: true });
+  await expect(page.locator(".toast")).toContainText("Someone - Upload — passed");
+  await expect(card).toHaveAttribute("data-id", "video:libv3000000");
+  await expect(page.locator("#deck-count")).toHaveText("1 / 1");
+  // the last verdict empties the deck: the page says so where the Feed's deck would
+  await page.click("#deck-down");
+  await expect(page.locator("#deck-card .dcard")).toHaveCount(0);
+  await expect(page.locator("#empty")).toBeVisible();
+  await expect(page.locator("#empty")).toContainText("Nothing to review");
+  await expect(page.locator("#player")).toBeHidden();   // nothing left to play
+  // the list view is one tap away and shows the same tab as cards
+  await page.keyboard.press("z");
+  await expect(page.locator("#deck-card .dcard")).toHaveCount(1);
+  await page.click("#deck-filters");
+  await page.click("#vid-layout");
+  await expect(page.locator("body")).not.toHaveClass(/deck-mode/);
+  await expect(page.locator("#vid-layout")).toHaveText("card view");
+  await expect(page.locator("#vid-list .card")).toHaveCount(1);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("no video list yet, and a listener: the Video tab says so, and only a curator sees it", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const ctx = await browser.newContext({ serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  await page.route("**/data/videos.json", r => r.fulfill({ status: 404, body: "" }));
+  const errors = await open(page);
+  await expect(page.locator(".tab[data-view=videos]")).toBeHidden();            // curators only
+  await ctx.addInitScript(([hash]) => { localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash })); }, [feed.google.curator_hashes[0]]);
+  const curator = await ctx.newPage();
+  await curator.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { videos_playlist_id: "PLVIDS" }); await r.fulfill({ json: j }); });
+  await curator.route("**/data/videos.json", r => r.fulfill({ status: 404, body: "" }));
+  await open(curator, "/index.html?view=videos");
+  await expect(curator.locator("#videos")).toBeVisible();
+  await expect(curator.locator("#vid-summary")).toContainText("the library's own list appears after the first Videos workflow run");
+  await expect(curator.locator("#count-videos")).toHaveText("0");
   expect(errors).toEqual([]);
   await ctx.close();
 });

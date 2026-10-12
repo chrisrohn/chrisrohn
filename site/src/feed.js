@@ -7,6 +7,7 @@ import { pullRatings } from "./sync.js";
 import { refreshRecent } from "./youtube.js";
 import { render, deckOn, focusCard } from "./render.js";
 import { scoreOf, invalidateRank } from "./rank.js";
+import { loadVideos, reconcileVideos, videoItems } from "./videos.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -16,13 +17,17 @@ let loadedAt = 0;
 
 // same URL every time: GitHub Pages answers 304 from the ETag when nothing changed, and the service worker keeps one copy
 const fetchFeed = () => fetch("data/feed.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject(new Error("feed.json " + r.status)));
+/** Every card plays: the build only writes songs with their YouTube Music audio track, and a feed written before that
+ * rule (or a stale copy of one) still carries cards with no match, which could neither be played nor filed nor
+ * skipped. They are dropped on the way in, whatever file they came from. @param {FeedItem[] | undefined} list */
+const playable = list => (list || []).filter(i => i.youtube && i.youtube.videoId);
 /** @param {import("./types").Feed} feed */
 function absorb(feed) {
   // one card per id whatever the build wrote: a second item with the same id would share the first one's card element
-  const seen = new Set(); feed.items = (feed.items || []).filter(i => !seen.has(i.id) && seen.add(i.id));
+  const seen = new Set(); feed.items = playable(feed.items).filter(i => !seen.has(i.id) && seen.add(i.id));
   state.feed = feed; loadedAt = Date.now();
   hays.clear(); memo.clear(); invalidateRank(); reindex();
-  reconcileRated();
+  reconcileRated(); reconcileVideos();
   if (isOwner()) {
     for (const [y, pid] of Object.entries((feed.youtube && feed.youtube.playlists) || {})) state.playlists[y] = state.playlists[y] || pid;
     if (feed.youtube && feed.youtube.skipped_playlist_id) state.playlists.__skipped = state.playlists.__skipped || feed.youtube.skipped_playlist_id;
@@ -54,6 +59,7 @@ export async function load() {
   render();
   openPermalink();
   if (isCurator() || state.view === "catalog") loadCatalog().catch(() => {});
+  if (isCurator() || state.view === "videos") loadVideos().catch(() => {});   // the Video tab's pill counts from the start
   if (isCurator() && tokenValid()) pullRatings().then(() => refreshRecent()).catch(() => {});
   if (isSignedIn()) ensureTokenClient().catch(() => {});
   // after the tap or key has done its work, never on pointerdown: the silent refresh opens a Google popup, and a
@@ -73,6 +79,7 @@ export async function refreshFeed(force = false) {
   absorb(feed);
   render();
   if (state.catalogState === "ready") loadCatalog(true).catch(() => {});
+  if (state.videosState === "ready") loadVideos(true).catch(() => {});
   if (keep) { const i = state.order.indexOf(keep); if (i >= 0) { state.deckIndex = i; render(); } }
   toast(`Today's feed is in · ${feed.new_today} new`);
   return true;
@@ -87,7 +94,7 @@ export async function loadCatalog(force = false) {
     if (r.status === 404) { state.catalogState = "missing"; render(); return; }
     if (!r.ok) throw new Error("catalog.json " + r.status);
     const cat = await r.json();
-    if (cat.generated_at !== state.catalog?.generated_at) { state.catalog = cat; memo.clear(); reindex(); reconcileRated(); }
+    if (cat.generated_at !== state.catalog?.generated_at) { cat.items = playable(cat.items); state.catalog = cat; memo.clear(); reindex(); reconcileRated(); }
     state.catalogState = "ready";
   } catch (e) { state.catalogState = "failed"; toast("Could not load the catalog: " + /** @type {Error} */ (e).message, true); }
   fillSources(); fillCatalogYears(); render();
@@ -96,7 +103,9 @@ export async function loadCatalog(force = false) {
 export function fillCatalogYears() {
   const sel = $("#cat-year"); const cat = state.catalog; if (!sel || !cat) return;
   const years = Object.entries(cat.years || {}).sort((a, b) => Number(b[0]) - Number(a[0]));
-  sel.innerHTML = `<option value="">all years · ${cat.count} candidates${cat.pending ? ` · ${cat.pending} more being dated` : ""}</option>` + (cat.undated ? `<option value="?">year unknown · ${cat.undated}</option>` : "") +
+  const h = cat.history;
+  const hist = h ? ` · history: ${h.tracks} tracks${h.walked_back_to ? `, plays read back to ${h.complete ? "the start" : h.walked_back_to}` : ""}` : "";
+  sel.innerHTML = `<option value="">all years · ${cat.count} candidates${cat.playable && cat.playable > cat.count ? ` of ${cat.playable}` : ""}${cat.pending ? ` · ${cat.pending} more being dated` : ""}${hist}</option>` + (cat.undated ? `<option value="?">year unknown · ${cat.undated}</option>` : "") +
     years.map(([y, v]) => `<option value="${y}"${v.candidates ? "" : " disabled"}>${y} · ${v.playlist} in playlist · ${v.candidates} here</option>`).join("");
   sel.value = state.filters.catYear || "";
   if (sel.value !== (state.filters.catYear || "")) { state.filters.catYear = ""; sel.value = ""; }
@@ -124,9 +133,11 @@ function openPermalink() {
   if (state.view !== "feed") { state.view = "feed"; $$(".tab").forEach(x => x.classList.toggle("active", x.dataset.view === "feed")); render(); }
   if (!state.order.includes(id)) searchFor(`${it.artist} ${it.display_title || it.title}`, { add: false });   // the search index joins the fields with spaces
   if (!state.order.includes(id)) {
-    // a link means "show me this one": the toggles that hide it (new today, known artists, recent, playable) step aside
-    const f = state.filters; Object.assign(f, { onlyNew: false, onlyKnown: false, onlyRecent: false, onlyPlayable: false });
-    for (const [k, id2] of [["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"], ["onlyPlayable", "#only-playable"]]) { const cb = $(id2); if (cb) cb.checked = f[k]; }
+    // a link means "show me this one": the toggles that hide it (new today, known artists, recent) step aside
+    const f = state.filters; Object.assign(f, { onlyNew: false, onlyKnown: false, onlyRecent: false });
+    /** @type {Array<["onlyNew" | "onlyKnown" | "onlyRecent", string]>} */
+    const pairs = [["onlyNew", "#only-new"], ["onlyKnown", "#only-known"], ["onlyRecent", "#only-recent"]];
+    for (const [k, id2] of pairs) { const cb = $(id2); if (cb) cb.checked = f[k]; }
     persist(); render();
   }
   if (!state.order.includes(id)) { toast(`${credit(it)} is hidden by your filters`, true); return; }
@@ -181,8 +192,11 @@ function watchForToday() {
 }
 function fillYears() { const f = state.feed; state._years = (f?.years && f.years.length) ? f.years : range(new Date().getFullYear(), 1979); }
 /** @type {Record<string, string>} */
-const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "Artist watch", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify", reddit: "Reddit", apple: "Apple Music",
-  "lastfm:top tracks": "Most played", "lastfm:loved": "Loved", "lastfm:artist top": "Your artists' hits", "lastfm:similar top": "Similar artists' hits" };
+const SOURCE_LABELS = { listenbrainz: "ListenBrainz", musicbrainz: "MusicBrainz", bandcamp: "Bandcamp", deezer: "Deezer", "deezer-editorial": "Deezer editorial", "deezer-related": "Deezer related", ytmusic: "YouTube Music", youtube: "YouTube channels", radio: "Radio plays", rss: "Blogs", spotify: "Spotify", reddit: "Reddit", apple: "Apple Music",
+  "lastfm:history": "Play history", "lastfm:top tracks": "Most played", "lastfm:loved": "Loved", "lastfm:artist top": "Your artists' hits", "lastfm:similar top": "Similar artists' hits" };
+/** A source as the site names it: the family's full name ("ytmusic" → "YouTube Music", never an abbreviation of a
+ * trademark), a named feed by its own name ("rss:Gorilla vs. Bear" → "Gorilla vs. Bear"). @param {string} s */
+export function sourceLabel(s) { const [k, ...rest] = String(s).split(":"); return SOURCE_LABELS[s] || rest.join(":") || SOURCE_LABELS[k] || k; }
 /** The source chips: the feed's source families, or the catalog's Last.fm lists, whichever tab is open. */
 export function fillSources() {
   const box = $("#sources"); const catalog = state.view === "catalog";
@@ -190,7 +204,7 @@ export function fillSources() {
   const names = catalog ? (state.catalog?.sources || []) : (state.feed?.sources || []); const off = new Set(state.filters[key] || []);
   const blogs = catalog ? [] : (state.feed?.blogs || []); const boff = new Set(state.filters.blogsOff || []);
   const blogCount = blogs.filter(b => !boff.has(b)).length;
-  box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(SOURCE_LABELS[s] || s.split(":").slice(1).join(":") || s)}</label>` +
+  box.innerHTML = names.map(s => `<label class="${off.has(s) ? "" : "on"}"><input type="checkbox" value="${esc(s)}" ${off.has(s) ? "" : "checked"}> ${esc(sourceLabel(s))}</label>` +
       (s === "rss" && blogs.length ? `<button class="all pick" type="button" id="blogs-btn" title="choose which blogs, stations and channels">${blogCount}/${blogs.length} feeds ▾</button>` : "")).join("") +
     (names.length > 1 ? `<button class="all" type="button" data-all="1">all</button><button class="all" type="button" data-all="0">none</button>` : "");
   $$("input", box).forEach(cb => cb.addEventListener("change", () => { const set = new Set(state.filters[key] || []); cb.checked ? set.delete(cb.value) : set.add(cb.value); state.filters[key] = [...set]; cb.parentElement.classList.toggle("on", cb.checked); persist(); render(); }));
@@ -279,6 +293,8 @@ const memo = new Map();
 export function visibleItems(view = state.view) { return computeVisible(view).list; }
 /** @param {string} view */
 function computeVisible(view) {
+  // the Video tab's list lives in videos.js, keyed on its own filters and decisions (never memoised here): the deck's pages and the player's queue read it through this one door
+  if (view === "videos") return { list: videoItems(), hidden: 0 };
   const key = `${view}|${JSON.stringify(state.filters)}|${state.ratedVersion}|${state.feed?.generated_at || ""}|${state.catalog?.generated_at || ""}|${state.badVersion}|${Number(state.settings.shortlistSize) || 60}`;
   const hit = memo.get(key); if (hit) { if (view === "feed" || view === "catalog") state.shortlistHidden = hit.hidden; return hit; }
   const res = { list: listFor(view), hidden: 0 };
@@ -304,7 +320,7 @@ function listFor(view) {
     for (const it of [...mine, ...picks]) { const k = ((it.youtube && it.youtube.videoId) || it.id); if (seen.has(k)) continue; seen.add(k); all.push({ ...it, _pick: true, _year: it._year || (state.rated[it.id] && state.rated[it.id].year) }); }
     return all.filter(i => !terms.length || matches(i, terms));
   }
-  if (view === "cleanup") return [];   // the Cleanup tab is its own section, not a list of cards
+  if (view === "cleanup" || view === "concerts") return [];   // the Cleanup and Concerts tabs are sections of their own, not lists of cards
   if (view === "skipped") {
     // what this account thumbed down or flagged as the wrong video and is still in the feed or the catalog, newest
     // first; Undo brings any back (a flag whose video the build has since replaced is already back on its own)
@@ -317,7 +333,6 @@ function listFor(view) {
       if (hiddenBy(i)) return false;
       if (terms.length && !matches(i, terms)) return false;
       if (off.size && !(i.sources || []).some(s => !off.has(s))) return false;
-      if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
       if (y === "?" ? i.year != null : (y && String(i.year) !== y)) return false;
       return true;
     });
@@ -325,6 +340,9 @@ function listFor(view) {
     const ccmp = {
       score: (a, b) => scoreOf(b) - scoreOf(a) || b.score - a.score,
       plays: (a, b) => (b.plays || 0) - (a.plays || 0) || scoreOf(b) - scoreOf(a),
+      // a track the scrobble walk has not reached yet is older than any it has: it sorts last (first played: unknown last too)
+      last: (a, b) => String(b.last_played || "").localeCompare(String(a.last_played || "")) || (b.plays || 0) - (a.plays || 0),
+      first: (a, b) => String(b.first_played || "").localeCompare(String(a.first_played || "")) || (b.plays || 0) - (a.plays || 0),
       year: (a, b) => (b.year || 0) - (a.year || 0) || scoreOf(b) - scoreOf(a),
       artist: (a, b) => a.artist.localeCompare(b.artist),
     };
@@ -338,7 +356,6 @@ function listFor(view) {
     if (terms.length && !matches(i, terms)) return false;
     if (!(i.sources || []).some(sourceOn)) return false;
     if (f.onlyNew && i.first_seen !== today) return false;
-    if (f.onlyPlayable && !(i.youtube && i.youtube.videoId)) return false;
     if (f.onlyKnown && !i.match_kind) return false;
     if (f.onlyRecent && !i.backfill && Number.isFinite(i.year) && i.year_source !== "unknown" && /** @type {number} */ (i.year) < oldest) return false;
     return true;

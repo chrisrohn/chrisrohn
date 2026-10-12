@@ -13,6 +13,9 @@ asks the catalogues for the earliest date that recording (or its ISRC) was ever 
     5. iTunes Search API             – earliest release date of a matching song                   (free, ~20/min)
     6. the source's own release date (Bandcamp / ListenBrainz / KEXP album date) or the year the YouTube Music
        artist page states for the release, then the YouTube album year
+    7. still no date from any catalogue or store: the release date YouTube Music states for the upload itself
+       (ytmusicapi's song metadata, the date on the song page; no API quota), a weak hint, asked for only then
+       and only for a song with a YouTube match, a bounded batch a run (`resolve.max_ytmusic_date_lookups_per_run`)
 
 Every year found is kept as evidence; the earliest year from the most trusted tier wins. A blog-post or channel
 upload date is never a release date. When nothing anywhere says when a song came out, `year` stays None and the site
@@ -41,10 +44,12 @@ _ISRC_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}(\d{2})\d{5}$")
 
 # evidence tiers: 3 = recording-level catalogue fact, 2 = store/source date, 1 = weak hint
 TRUST = {"musicbrainz": 3, "musicbrainz-search": 3, "musicbrainz-isrc": 3, "discogs": 3,
-         "deezer": 2, "itunes": 2, "release-date": 2, "ytmusic-year": 2, "isrc": 1, "youtube": 1, "feed-date": 0}
+         "deezer": 2, "itunes": 2, "release-date": 2, "ytmusic-year": 2, "isrc": 1, "youtube": 1, "ytmusic-date": 1, "feed-date": 0}
 LABEL = {"musicbrainz": "MusicBrainz recording", "musicbrainz-search": "MusicBrainz search", "musicbrainz-isrc": "MusicBrainz via ISRC",
          "discogs": "Discogs master", "deezer": "Deezer", "itunes": "Apple Music", "release-date": "source release date",
-         "ytmusic-year": "YouTube Music release year", "isrc": "ISRC registration year", "youtube": "YouTube album", "feed-date": "blog post date"}
+         "ytmusic-year": "YouTube Music release year", "isrc": "ISRC registration year", "youtube": "YouTube album",
+         "ytmusic-date": "YouTube Music release date", "feed-date": "blog post date"}
+_UGC = "MUSIC_VIDEO_TYPE_UGC"   # a fan upload: its date says when it was uploaded, never when the song came out
 
 
 @dataclass
@@ -321,6 +326,40 @@ def lookup_track(http, artist: str, title: str, cfg: dict) -> dict:
     return entry
 
 
+# ---------------------------------------------------------------- 7. YouTube Music's own release date (fallback)
+def ytmusic_release_date(yt, video_id: str) -> str | None:
+    """The release date YouTube Music states for an upload (the song page's date: for the audio track the release
+    date of the record, for an official video its publish date), as YYYY-MM-DD, or None."""
+    try:
+        song = yt.get_song(video_id)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("ytmusic song %s failed: %s", video_id, exc)
+        return None
+    micro = ((song or {}).get("microformat") or {}).get("microformatDataRenderer") or {}
+    for key in ("publishDate", "uploadDate"):
+        d = str(micro.get(key) or "")[:10]
+        y = year_of(d)
+        if y and y > 1970:          # "1969-12-31" / "1970-01-01" is YouTube's "no date" (the Unix epoch), never a release
+            return d
+    return None
+
+
+def unsure(found: dict[str, int], it: Item) -> bool:
+    """No catalogue or store date (trust 2 or better) anywhere: the year, if any, rests on a weak hint."""
+    year, _source, _conf, ev = decide(found, it)
+    return year is None or not any(e.trust >= 2 for e in ev)
+
+
+def _ytdate_wanted(it: Item, entry: dict | None) -> bool:
+    """Ask YouTube Music for the upload's date: the item has a match that is not a fan upload, and the cache does not
+    already hold the answer for that very video (a re-resolved track gets its new upload's date)."""
+    yt = it.youtube or {}
+    if not yt.get("videoId") or yt.get("videoType") == _UGC:
+        return False
+    row = (entry or {}).get("ytdate") or {}
+    return row.get("video") != yt["videoId"]
+
+
 def decide(found: dict[str, int], it: Item) -> tuple[int | None, str, str, list[Evidence]]:
     """Pick the year: earliest year from the most trusted tier that has any evidence."""
     ev = [Evidence(y, s) for s, y in found.items() if y]
@@ -364,14 +403,29 @@ def _save_cache(cache: dict, cfg: dict) -> None:
     write_json(YEAR_CACHE, prune_cache(cache, date.today(), keep_days), compact=True)
 
 
-def verify_years(items: list[Item], cfg: dict, http, deadline: Deadline | None = None) -> None:
+def verify_years(items: list[Item], cfg: dict, http, deadline: Deadline | None = None, yt=None) -> None:
+    """Give every item its year (see the module docstring). `yt` is the YouTube Music client for the release-date
+    fallback; when None it is opened on first need (and skipped when ytmusicapi is not installed)."""
     rcfg = cfg.get("resolve") or {}
     budget = int(rcfg.get("max_year_lookups_per_run", 500))
+    yt_budget = int(rcfg.get("max_ytmusic_date_lookups_per_run", 200) or 0) if rcfg.get("youtube_music", True) else 0
     deadline = deadline or Deadline(None)
     cache = _load_cache()
     today_s = date.today().isoformat()
     looked = 0
     skipped_deadline = 0
+    yt_looked = yt_found = 0
+    yt_client = [yt]
+
+    def client():
+        if yt_client[0] is None:
+            from .resolve import ytmusic
+            try:
+                yt_client[0] = ytmusic(cfg)
+            except ImportError:
+                log.warning("ytmusicapi not installed; no YouTube Music release dates for the undated tracks")
+                yt_client[0] = False
+        return yt_client[0] or None
     # undated tracks first (they'd otherwise have nothing), then by score; the cache carries the rest to later runs
     order = sorted(items, key=lambda i: (0 if (i.release_date is None or i.date_kind != "release") else 1, -i.score))
     for it in order:
@@ -391,6 +445,19 @@ def verify_years(items: list[Item], cfg: dict, http, deadline: Deadline | None =
         found = (entry or {}).get("found") or {}
         if entry and entry.get("v") != CACHE_VERSION:   # legacy entry shape: {"mb":..,"dz":..,"it":..}
             found = {k: v for k, v in (("musicbrainz-search", entry.get("mb")), ("deezer", entry.get("dz")), ("itunes", entry.get("it"))) if v}
+        # still unsure after the catalogues (this run's lookup or the cached one): the date YouTube Music states for the
+        # upload is the last option, asked for once per video and kept with the entry
+        if (entry is not None and entry.get("v") == CACHE_VERSION and it.kind == "track" and unsure(found, it)
+                and _ytdate_wanted(it, entry) and yt_looked < yt_budget and not deadline.expired and client() is not None):
+            yt_looked += 1
+            d = ytmusic_release_date(client(), it.youtube["videoId"])
+            entry["ytdate"] = {"video": it.youtube["videoId"], "date": d}
+            if yt_looked % FLUSH_EVERY == 0:
+                _save_cache(cache, cfg)
+        ytdate = (entry or {}).get("ytdate") or {}
+        if ytdate.get("video") and ytdate.get("video") == (it.youtube or {}).get("videoId") and year_of(ytdate.get("date")):
+            found = {**found, "ytmusic-date": year_of(ytdate["date"])}
+            yt_found += 1
         year, source, conf, ev = decide(found, it)
         if entry is None and year is None and it.kind == "track":
             source = "pending"          # not looked up yet (budget or deadline): the site says so instead of "unknown"
@@ -405,7 +472,8 @@ def verify_years(items: list[Item], cfg: dict, http, deadline: Deadline | None =
     _save_cache(cache, cfg)
     if skipped_deadline:
         log.warning("years: time budget reached; %d recordings left for the next run", skipped_deadline)
-    log.info("years: %d recordings looked up this run (%d cached)", looked, len(cache))
+    log.info("years: %d recordings looked up this run (%d cached); %d asked YouTube Music for the upload's release date, %d dated by it",
+             looked, len(cache), yt_looked, yt_found)
 
 
 def decide_found(found: dict[str, int]) -> tuple[int | None, str | None]:
