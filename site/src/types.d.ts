@@ -48,6 +48,7 @@ export interface Feed {
   feed_health?: Record<string, { ok: boolean; entries: number; kept: number; error?: string | null }>;
   recent_since?: number;        // the earliest year "new releases only" still counts as recent (the backfill window)
   fresh_playable?: number; backfill?: number; backfill_candidates?: number;   // how much of the day came from the current timeframe, and what filled it
+  rotation?: { enabled: boolean; waiting: number; acts: number; cooling: number; over_quota: number; per_artist: number; cooldown_days: number };   // songs waiting so other acts get a turn
   lastfm_user?: string; repo?: string; profile?: { built_at?: string; counts?: Record<string, number> }; sources?: string[]; blogs?: string[]; items: FeedItem[];
 }
 export interface Rated {

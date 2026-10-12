@@ -403,6 +403,24 @@ ranking:
   # Hide anything already in your year playlists, saved or skipped from the site.
   hide_seen: true
 
+# ---------- Rotation: acts take turns (discovery/rotation.py) ----------
+# You rate nearly the whole day's list, so variety is decided by which songs make the day, not their order. The artist
+# watches bring an act's whole recent catalogue every run: on 2026-10-12 a third of the day's acts had three or more
+# songs in it, and 108 acts were in the list on three or more of the seven days before. Each act now takes turns.
+rotation:
+  enabled: true
+  per_artist: 2            # songs one act may put in a day (its best by score); the rest wait for its next turn
+  # Once you rate one of an act's songs (data/ratings.json), its other songs wait this many days, scaled by its keep
+  # rate against your overall one: an act you keep twice as often comes back in half the time, one you mostly skip
+  # waits longer — between min_scale and max_scale × cooldown_days. `prior` pseudo-ratings at your overall rate
+  # smooth an act's rate, so two skips are not a verdict.
+  cooldown_days: 5
+  min_scale: 0.5
+  max_scale: 3.0
+  prior: 4
+  new_release_days: 14     # a release dated this recently never waits: a favourite's new single is news today
+  min_cards: 150           # a day shorter than this takes the best waiting songs back early (one per act first)
+
 # ---------- Backfill: when the current timeframe runs thin, look further back ----------
 # The artist-watch sources (YouTube Music, Deezer, MusicBrainz) return releases back to `years` years ago for your
 # artists, their associates and the genre artists. The feed is built from the fresh window first; only when it holds

@@ -306,6 +306,15 @@ session that the playlist's owner approved in that browser.
   target says, so raising it costs nothing but keeps what a lower one threw away. `ranking.max_items` has to stay
   clear of `backfill.target`, or the final cut-by-score drops the fill it just made — a test in
   `tests/test_sources.py` holds that line.
+- **Acts take turns.** You rate nearly the whole day, so variety is decided by which songs make it: the artist
+  watches bring an act's whole recent catalogue every run, and before 2026-10-12 a third of a day's acts had three
+  or more songs in it and 108 acts were in the list on three or more days of a week. Now each act puts at most
+  `rotation.per_artist` songs in a day (its best), and once you have rated one of its songs (data/ratings.json) the
+  rest wait `rotation.cooldown_days`, scaled by the act's keep rate against yours — half as long for an act you keep
+  twice as often, up to `max_scale` times as long for one you mostly skip. The places go to the older releases of
+  acts that have not had a turn lately; a release dated within `new_release_days` never waits; a day still short of
+  `min_cards` takes the best waiting songs back early (*back early: a thin day*). Nothing waiting is lost: it joins
+  a later day. The feed's header line counts what waits, and `discovery/rotation.py` holds the rules.
 - **Every card plays.** A song becomes a card only once it has its YouTube Music audio track. One with no match, a
   video-only match or an upload whose kind is not known yet is left out of the day rather than shown as a card that
   cannot be played or filed, and is tried again on a later build: a miss is looked up again after
@@ -466,6 +475,10 @@ Everything lives in `discovery/config.yaml`:
   workflow, `feed_lookups_per_run` cards asked as the daily resolver runs, `recheck_days` before a song with no video
   is asked again, `time_budget_minutes` for the workflow, `in_daily` / `job_budget_minutes` for the rewrite at the end
   of the daily job; `youtube_music.videos_playlist_id` is the one playlist approved videos go to.
+- `rotation` — acts take turns: `per_artist` songs one act may put in a day, `cooldown_days` its other songs wait
+  after you rate one (× `min_scale`–`max_scale` by its keep rate against yours, smoothed by `prior`),
+  `new_release_days` for a release that never waits, `min_cards` below which waiting songs come back early;
+  `enabled: false` turns it off.
 - `ranking.max_items` — how many songs a day holds (500), cut by score after the backfill (keep it clear of
   `backfill.target` + `backfill.max`); `ranking.candidate_slack` — live slots beyond it carried into resolution (60),
   for what resolution then folds, drops or hides.
@@ -508,7 +521,7 @@ npm run lighthouse               # Lighthouse CI on dist/ (lighthouserc.json): p
 The site's JavaScript lives in `site/src/` as ES modules (`state`, `auth`, `sync`, `youtube`, `rating`, `feed`,
 `render`, `player`, `rank` (the personal ranking), `stats`, `dupes` (the Cleanup tab), `concerts` (the Concerts tab), `videos` (the Video tab), `buildstatus` (what the Discover workflow is doing while the day's feed is late), `editions` (which edition of a song a title is), `audit` (the playability audit), `settings`, `keys`, `theme`, `main`); the Python side is
 `discovery/build.py` (the feed), `discovery/catalog.py` (the earlier years), `discovery/concerts.py` (the concert list), `discovery/videos.py` (the Video tab's list), `discovery/learn.py` (what the playlists teach the
-ranking) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
+ranking), `discovery/rotation.py` (which acts get a turn today) and `discovery/headlines.py` (which blog posts are songs). `build.mjs` bundles them with esbuild into a content-hashed
 `app.<hash>.js` (minified, with a source map), minifies `style.css` and `theme.js` into hashed copies of their own, rewrites every page and `sw.js` to those names, writes `sitemap.xml`, and copies the rest of `site/` (`robots.txt`, `404.html`, the data) into `dist/`, which is what
 both workflows upload to GitHub Pages. Nothing generated is committed. The **CI** workflow runs every check on every
 pull request; **Publish site** runs the browser test again before anything reaches GitHub Pages. To bump a Python dependency edit `discovery/requirements.txt`, then regenerate the
