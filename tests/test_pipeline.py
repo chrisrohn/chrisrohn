@@ -37,6 +37,10 @@ def sandbox(tmp_path, monkeypatch):
     import discovery.years as years
     monkeypatch.setattr(years, "YEAR_CACHE", tmp_path / "data" / "cache" / "years.json")
     monkeypatch.setattr(deezer, "ID_CACHE", tmp_path / "data" / "cache" / "deezer_artists.json")
+    import discovery.learn as learn
+    monkeypatch.setattr(learn, "RATINGS_PATH", tmp_path / "data" / "ratings.json")   # never the curator's real ratings (and audit findings)
+    import discovery.videos as videos
+    monkeypatch.setattr(videos, "RATINGS_PATH", tmp_path / "data" / "ratings.json")
     util.ensure_dirs()
     yield tmp_path
 
