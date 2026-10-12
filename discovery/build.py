@@ -6,6 +6,11 @@ and undated releases from this year. The best older releases the artist-watch so
 current timeframe leaves fewer than `backfill.target` unrated cards — each marked as backfill and filed into its
 own year. Nothing that ranks below the score floor is ever used to fill.
 
+Acts take turns (rotation.py): each act puts at most `rotation.per_artist` songs in a day, and once you have rated
+one of its songs the rest wait a cooldown scaled by how often you keep that act — so the places go to acts that have
+not had a turn lately instead of the same names day after day. A new release never waits, and a day that runs short
+of `rotation.min_cards` takes the best waiting songs back early.
+
 Every card plays: a song is a card only once it has its YouTube Music audio track (`resolve.is_audio`). A song with
 no match, a video-only match, or an upload whose kind is not known yet is left out of the day and tried again on a
 later build (the resolver retries misses after `resolve.retry_misses_days`, re-asks video hits for their audio side
@@ -34,6 +39,7 @@ from .learn import learn_from_history, load_ratings, merge_ratings, public_summa
 from .models import Item
 from .profile import find_duplicates, load_profile
 from .resolve import AUDIO, LOOKUP, audio_summary, cached_states, collapse_shared_videos, drop_by_length, is_audio, resolve_all, video_summary
+from .rotation import Rotation
 from .score import dedupe, diversify, score_items
 from .sources import run_sources
 from .unavailable import build_report as unavailable_report
@@ -110,6 +116,10 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
         older = [i for i in older if not _known_saved(i, states, saved_videos)]
         if before - len(fresh) - len(older):
             log.info("hid %d items whose cached YouTube match is already in a playlist", before - len(fresh) - len(older))
+    # acts that had their turn lately go to the back of each half: the slots and the lookups go to songs that can
+    # join the day, and the waiting ones are resolved with what is left (so they are ready when their turn comes)
+    rot = Rotation.from_ratings(cfg, ratings)
+    fresh, older = rot.defer(fresh), rot.defer(older)
     # the slots count only what can become a card today (a cached audio hit, or a lookup still to make); what the
     # cache says is waiting on a heal or a retry rides along outside the count, so it costs the day nothing
     slack = int(rcfg.get("candidate_slack", 60) or 0)      # live slots beyond max_items, for what resolution then folds, drops or hides
@@ -136,7 +146,15 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
         if before - len(items):
             log.info("hid %d more items whose YouTube video is already in a playlist", before - len(items))
     items = score_items(items, profile, cfg)
+    # each act its turn: a cooling-down act's songs and anything past the day's quota per act wait, and the older
+    # releases of acts that have not had a turn lately fill the places they leave
+    items, held = rot.apply(items)
     items, filled = fill_from_backfill(items, cfg)
+    items, held = rot.top_up(items, held)
+    turns = rot.summary(held)
+    if held:
+        log.info("rotation: %d songs by %d acts wait their turn (%d cooling down, %d past the day's %d per act)", turns["waiting"], turns["acts"],
+                 turns["cooling"], turns["over_quota"], turns["per_artist"])
     items = diversify(items, cfg)
     # the second scoring pass can move an item below the floor (a merge changed its sources, a repeat penalty)
     items = [i for i in items if i.score >= floor][:max_items]
@@ -219,6 +237,8 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
         "fresh_playable": filled["fresh_playable"],
         "backfill": sum(1 for i in items if i.backfill),
         "backfill_candidates": filled["older"],
+        # songs held back so other acts get a turn: by acts you rated lately (cooling) or past the day's quota per act
+        "rotation": turns,
         "sources": sorted({s.split(":")[0] for i in items for s in i.sources}),
         # the named feeds the site can switch off one by one: blogs by name (as before), stations and channels by
         # their full source label

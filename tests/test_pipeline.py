@@ -256,6 +256,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
     assert payload["youtube"]["audio"] == {"audio": len(payload["items"]), "video": 0, "unknown": 0} and payload["youtube"]["video_count"] == 0
     assert payload["picks"][0]["artist"] == "Jungle"
+    assert payload["rotation"]["enabled"] is True and payload["rotation"]["waiting"] == 0   # nobody rated lately: every act is due
     assert (sandbox / "site" / "feed.xml").read_text().count("<item>") == len(payload["items"])
 
 
@@ -2080,3 +2081,59 @@ def test_backfill_min_makes_the_last_years_a_daily_fixture():
     assert fill_from_backfill(fresh + older, cfg)[1]["used"] == 0
     cfg["backfill"]["target"] = 10                                                      # a thin day: the gap, up to max
     assert fill_from_backfill(fresh + older, cfg)[1]["used"] == 3
+
+
+def test_rotation_gives_each_act_its_turn():
+    """Acts take turns: at most `per_artist` songs a day (the best), a cooldown after a rating scaled by the act's keep
+    rate (a keeper is back sooner, a skipped act later), new releases never wait, collaborations count for each act,
+    and a thin day takes the best waiting songs back early."""
+    from datetime import UTC, datetime
+
+    from discovery.rotation import Rotation, acts
+
+    now = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)
+    day = 86_400_000
+    at = int(now.timestamp() * 1000)
+
+    def rated(artist, decision, days_ago, n=1):
+        return {f"{artist}{decision}{days_ago}{i}": {"artist": artist, "decision": decision, "at": at - int(days_ago * day)} for i in range(n)}
+
+    ratings = {**rated("Keeper", "up", 3, 6),                   # kept every time, rated 3 days ago: half the cooldown has passed
+               **rated("Skipped", "down", 9, 6),                # skipped every time, 9 days ago: still waiting (up to 3 × 5 days)
+               **rated("Average", "up", 2), **rated("Average", "down", 2, 2),
+               **rated("Filler", "up", 1, 3), **rated("Filler", "down", 1, 7)}   # sets the overall keep rate near a third
+    cfg = {"rotation": {"per_artist": 2, "cooldown_days": 5, "min_scale": 0.5, "max_scale": 3.0, "prior": 4, "new_release_days": 14, "min_cards": 0}}
+    rot = Rotation.from_ratings(cfg, ratings, now=now)
+
+    def card(artist, title, score, **kw):
+        it = Item(artist=artist, title=title, kind="track", sources=["ytmusic"], **kw)
+        it.score = score
+        return it
+
+    assert acts("Keeper & Other Act") == {"keeper and other act", "keeper", "other act"} and acts("Belle and Sebastian") == {"belle and sebastian"}
+    assert rot.wait_days(card("Keeper", "x", 1)) == 0                       # 5 × ~0.5 = 2.5 days < 3 since the rating
+    assert rot.wait_days(card("Skipped", "x", 1)) > 0                       # 5 × 3 = 15 days > 9
+    assert 0 < rot.wait_days(card("Average", "x", 1)) <= 5                  # an average act waits about the base cooldown
+    assert rot.wait_days(card("Never Rated", "x", 1)) == 0
+    assert rot.wait_days(card("Skipped", "New Single", 1, release_date=now.date())) == 0               # a new release never waits
+    assert rot.wait_days(card("Skipped", "Heard On Air", 1, release_date=now.date(), date_kind="sighting")) > 0   # a sighting is not a release
+    assert rot.wait_days(card("Average & Friend", "x", 1)) > 0              # a collaboration waits when one of its acts does
+
+    items = [card("Prolific", f"Song {n}", 10 - n) for n in range(5)] + [card("Average", "Again", 9), card("Fresh Face", "Hello", 1)]
+    keep, held = rot.apply(items)
+    assert [i.title for i in keep] == ["Song 0", "Song 1", "Hello"]          # the act's best two, then the newcomer
+    assert {i.title for i in held} == {"Song 2", "Song 3", "Song 4", "Again"}
+    turns = rot.summary(held)
+    assert turns["waiting"] == 4 and turns["acts"] == 2 and turns["cooling"] == 1 and turns["over_quota"] == 3
+
+    rot.cfg["min_cards"] = 5                                                # a thin day: one per act first, best first
+    day_items, still = rot.top_up(keep, held)
+    back = day_items[len(keep):]
+    assert [i.title for i in back] == ["Again", "Song 2"] and all("back early: a thin day" in i.reasons for i in back)
+    assert {i.title for i in still} == {"Song 3", "Song 4"}
+
+    rot.cfg["enabled"] = False
+    assert rot.apply(items) == (items, []) and rot.defer(items) == items
+    rot.cfg["enabled"] = True
+    deferred = rot.defer([card("Average", "Waits", 9), card("Fresh Face", "Due", 1)])
+    assert [i.title for i in deferred] == ["Due", "Waits"]                  # before resolution the due songs go first
