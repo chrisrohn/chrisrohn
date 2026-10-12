@@ -124,4 +124,39 @@ test.describe("ride mode", () => {
     await expect(page.locator("#settings")).not.toBeVisible();
     await expect(page.locator("#step-target")).toContainText("138–151");
   });
+
+  test("finds a Garmin HRM-Pro+ by name, says what to try when it isn't listed, and offers every nearby device", async ({ page }) => {
+    // a stand-in Web Bluetooth: the picker answers from a script, the strap streams 142 bpm once subscribed
+    await page.addInitScript(() => {
+      const w = /** @type {any} */ (window);
+      w.__asks = []; w.__pick = "cancel";
+      const strap = {
+        id: "hrm-823265", name: "HRM-Pro+:823265", addEventListener() {},
+        gatt: { connected: false, async connect() { this.connected = true; return this; }, disconnect() { this.connected = false; },
+          async getPrimaryService() { return { async getCharacteristic() { const c = { fn: null, addEventListener(_, f) { c.fn = f; },
+            async startNotifications() { setTimeout(() => c.fn({ target: { value: new DataView(new Uint8Array([0, 142]).buffer) } }), 50); } }; return c; } }; } },
+      };
+      Object.defineProperty(navigator, "bluetooth", { configurable: true, value: {
+        async requestDevice(opts) {
+          w.__asks.push(opts);
+          if (w.__pick === "cancel") throw new DOMException("User cancelled the requestDevice() chooser.", "NotFoundError");
+          return strap;
+        },
+      } });
+    });
+    await page.goto(link(PLAN));
+    await page.click("#btn-hr");
+    await expect(page.locator("#note")).toContainText("Forget");                         // the phone's own pairing hides it
+    const first = await page.evaluate(() => /** @type {any} */ (window).__asks[0]);
+    expect(first.filters).toContainEqual({ namePrefix: "HRM" });
+    expect(first.filters).toContainEqual({ services: ["heart_rate"] });
+    await page.evaluate(() => { /** @type {any} */ (window).__pick = "strap"; });
+    await page.getByRole("button", { name: "Show all nearby devices" }).click();
+    const all = await page.evaluate(() => /** @type {any} */ (window).__asks[1]);
+    expect(all).toEqual({ acceptAllDevices: true, optionalServices: ["heart_rate"] });
+    await expect(page.locator("#btn-hr")).toHaveClass(/\bon\b/);
+    await expect(page.locator("#hr")).toHaveText("142");
+    await expect(page.locator("#note")).toHaveText("Connected: HRM-Pro+:823265.");
+    expect(await page.evaluate(() => localStorage.getItem("fitness-ride-hr"))).toBe("hrm-823265");
+  });
 });

@@ -130,6 +130,24 @@
   };
   const onPower = dv => { live.power = dv.getInt16(2, true); live.powerAt = Date.now(); };
 
+  // Garmin's straps (HRM-Pro, HRM-Pro Plus, HRM-Dual, HRM-Fit, HRM 600) are matched by name as well as by service,
+  // so one that only names itself in its advertisement still shows; "Show all nearby devices" is the last resort.
+  const SENSORS = {
+    hr: { id: "btn-hr", label: "heart-rate strap", services: ["heart_rate"], prefixes: ["HRM", "Polar", "TICKR", "Wahoo", "COOSPO", "Garmin"] },
+    csc: { id: "btn-csc", label: "cadence, speed or power sensor", services: ["cycling_speed_and_cadence", "cycling_power"], prefixes: ["CAD", "SPD", "Garmin", "Wahoo", "RPM"] },
+  };
+  const hooked = new WeakSet();
+  const helpHtml = kind => kind === "hr"
+    ? "<b>Strap not in the list?</b> Wear it with the pads wet: it sleeps until it feels a heartbeat. If it shows in your phone's own Bluetooth settings, tap it there and choose <b>Forget</b> (or Unpair): a strap held by the phone stops advertising, so the browser never sees it. It takes only a couple of Bluetooth links at once, so close Garmin Connect, Zwift or any other app using it (the watch can stay on it over ANT+). Android: give Chrome <b>Nearby devices</b> permission and keep Location on."
+    : "<b>Sensor not in the list?</b> Spin the crank or wheel to wake it. If it shows in your phone's own Bluetooth settings, choose <b>Forget</b> there, and close Garmin Connect, Zwift or any other app holding it. Android: give Chrome <b>Nearby devices</b> permission and keep Location on.";
+  const help = (kind, lead = "") => {
+    note.innerHTML = `${lead ? `${esc(lead)} ` : ""}${helpHtml(kind)} `;
+    const all = document.createElement("button");
+    all.type = "button"; all.className = "chip"; all.textContent = "Show all nearby devices";
+    all.addEventListener("click", () => connect(kind, true));
+    note.append(all);
+  };
+
   async function subscribe(device, kind) {
     const server = await device.gatt.connect();
     const hook = async (svc, char, fn) => {
@@ -146,28 +164,78 @@
     if (b) $("t-cad-k").textContent = "Power";
     return a || b;
   }
-  async function connect(kind) {
-    if (!navigator.bluetooth) { noBluetooth(); return; }
-    const id = kind === "hr" ? "btn-hr" : "btn-csc";
-    const services = kind === "hr" ? ["heart_rate"] : ["cycling_speed_and_cadence", "cycling_power"];
+  // one live sensor per kind; a connection that fails says why (and what to try) instead of just turning red
+  const conn = { hr: null, csc: null };
+  async function attach(device, kind, quiet = false) {
+    const s = SENSORS[kind], name = device.name || `the ${s.label}`;
+    if (conn[kind] === device && device.gatt.connected) { chip(s.id, "on"); return true; }   // already streaming: don't hook it twice
+    chip(s.id, "wait");
     try {
-      chip(id, "wait");
-      const device = await navigator.bluetooth.requestDevice({ filters: services.map(s => ({ services: [s] })), optionalServices: services });
-      device.addEventListener("gattserverdisconnected", () => retry(device, kind, id, 0));
-      chip(id, (await subscribe(device, kind)) ? "on" : "off");
+      if (await subscribe(device, kind)) {
+        const old = conn[kind];
+        conn[kind] = device;
+        if (old && old !== device && old.gatt.connected) old.gatt.disconnect();
+        if (!hooked.has(device)) { hooked.add(device); device.addEventListener("gattserverdisconnected", () => retry(device, kind, 0)); }
+        ls.set(`fitness-ride-${kind}`, device.id);
+        $(s.id).title = name;
+        chip(s.id, "on");
+        if (!quiet) note.textContent = `Connected: ${name}.`;
+        return true;
+      }
+      chip(s.id, conn[kind] && conn[kind].gatt.connected ? "on" : "off");
+      if (!quiet) help(kind, `${name} connected but sends no ${kind === "hr" ? "heart rate" : "cadence, speed or power"}.`);
     } catch (e) {
-      chip(id, "off");
-      if (e && e.name !== "NotFoundError") note.textContent = `Bluetooth: ${e.message || e}`;
+      chip(s.id, conn[kind] && conn[kind] !== device && conn[kind].gatt.connected ? "on" : "off");
+      if (!quiet) help(kind, `Couldn't connect to ${name}${e && e.message ? ` (${e.message})` : ""}.`);
     }
+    return false;
   }
-  function retry(device, kind, id, n) {
-    chip(id, "wait");
-    if (n > 6) { chip(id, "off"); return; }
-    setTimeout(async () => { try { chip(id, (await subscribe(device, kind)) ? "on" : "off"); } catch { retry(device, kind, id, n + 1); } }, Math.min(16000, 1000 * 2 ** n));
+  async function connect(kind, all = false) {
+    if (!navigator.bluetooth) { noBluetooth(); return; }
+    const s = SENSORS[kind];
+    chip(s.id, "wait");
+    let device;
+    try {
+      device = await navigator.bluetooth.requestDevice(all
+        ? { acceptAllDevices: true, optionalServices: s.services }
+        : { filters: [...s.services.map(x => ({ services: [x] })), ...s.prefixes.map(p => ({ namePrefix: p }))], optionalServices: s.services });
+    } catch (e) {
+      chip(s.id, conn[kind] && conn[kind].gatt.connected ? "on" : "off");
+      const msg = (e && e.message) || String(e);
+      help(kind, e && e.name === "NotFoundError" && /cancel/i.test(msg) ? "" : `Bluetooth: ${msg}.`);
+      return;
+    }
+    attach(device, kind);
+  }
+  function retry(device, kind, n) {
+    const s = SENSORS[kind];
+    if (conn[kind] !== device) return;   // swapped for another sensor
+    chip(s.id, "wait");
+    if (n > 6) { chip(s.id, "off"); rejoin(device, kind); return; }
+    setTimeout(async () => { if (!(await attach(device, kind, true))) retry(device, kind, n + 1); }, Math.min(16000, 1000 * 2 ** n));
+  }
+  // a sensor used here before comes back without the picker, as soon as it's heard (Chrome's getDevices and
+  // watchAdvertisements; elsewhere a direct reconnect is tried once)
+  function rejoin(device, kind) {
+    if (typeof device.watchAdvertisements !== "function") { attach(device, kind, true); return; }
+    const ctl = new AbortController();
+    device.addEventListener("advertisementreceived", async () => {
+      ctl.abort();
+      if (!(await attach(device, kind, true))) setTimeout(() => rejoin(device, kind), 10000);
+    }, { once: true });
+    device.watchAdvertisements({ signal: ctl.signal }).catch(() => {});
   }
   $("btn-hr").addEventListener("click", () => connect("hr"));
   $("btn-csc").addEventListener("click", () => connect("csc"));
   if (!navigator.bluetooth) noBluetooth();
+  else if (typeof navigator.bluetooth.getDevices === "function") {
+    navigator.bluetooth.getDevices().then(list => {
+      for (const kind of ["hr", "csc"]) {
+        const d = list.find(x => x.id === ls.get(`fitness-ride-${kind}`));
+        if (d) { conn[kind] = d; rejoin(d, kind); }
+      }
+    }).catch(() => {});
+  }
 
   // ── GPS ─────────────────────────────────────────────────────────────────────────────────────────────────
   const R = 6371e3, rad = x => x * Math.PI / 180;
