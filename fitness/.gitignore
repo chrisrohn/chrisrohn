@@ -1,0 +1,3 @@
+# personal health data and the pages built from it never leave this machine
+data/
+dist/

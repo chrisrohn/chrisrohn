@@ -1045,6 +1045,31 @@ def test_catalog_reviews_the_whole_play_history(monkeypatch, sandbox):
     assert payload["history"]["waiting"] == 3 and payload["count"] == 1
 
 
+def test_scrobble_walk_fills_a_queued_gap_and_counts_only_the_whole_log():
+    """A span queued as a gap is read top down before the plays since the last run; a page bounded by `to` counts the
+    plays below that time, not the log, so the total stays unknown rather than wrong."""
+    from discovery import catalog
+
+    calls = []
+
+    class FakeLastFm:
+        enabled = True
+
+        def recent_tracks(self, user, *, from_uts=None, to_uts=None):
+            calls.append((from_uts, to_uts))
+            if (from_uts, to_uts) == (1_500_000_000, 1_690_000_000):
+                return [{"artist": {"#text": "Jungle"}, "name": "Fire", "date": {"uts": "1600000000"}}], {"total": "1"}
+            return [], {"total": "0"}
+
+    state = {"scrobbles": {"newest": 1_699_000_000, "oldest": 1_400_000_000, "complete": False, "gap": {"lo": 1_499_999_999, "hi": 1_690_000_000}, "total": None, "tracks": {}}}
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(catalog.time, "time", lambda: 1_700_000_000)
+        sc = catalog.walk_scrobbles(FakeLastFm(), "u", state, 10)
+    assert calls == [(1_500_000_000, 1_690_000_000), (1_500_000_000, 1_599_999_999), (1_699_000_001, 1_700_000_000), (None, 1_399_999_999)]
+    assert sc["tracks"] == {catalog.history_key("Jungle", "Fire"): [1_600_000_000, 1_600_000_000]}
+    assert sc["complete"] and sc["gap"] is None and sc["total"] is None and sc["newest"] == 1_700_000_000
+
+
 def test_resolver_prefers_the_audio_track_and_the_original_issue():
     from discovery.resolve import ATV, _pick, album_year, audio_counterpart, prefer_audio
 
@@ -1325,6 +1350,22 @@ def test_resolve_all_redoes_a_flagged_video_and_remembers_the_refusal(monkeypatc
     resolve.resolve_all([again := Item(artist="Jungle", title="Keep Moving", kind="track")], _cfg(), avoid={again.key: {"vgood"}})
     assert again.youtube is None and FakeYT.calls == 4   # songs, then videos (the track search's second try)
     assert util.read_json(resolve.YT_CACHE, {})[again.key]["not"] == ["vbad", "vgood"]
+
+
+def test_thin_evidence_only_nudges():
+    """Four keeps from one blog, when the curator keeps a fifth of everything, are a hint: the bound on a feature's
+    adjustment grows with its sightings and reaches max_adjust at 2 × prior."""
+    from discovery import learn
+
+    shown = "2026-09-08"
+    outs = [{"id": f"k{i}", "a": f"Act {i}", "s": ["rss:A"], "t": [], "shown": shown, "verdict": "kept"} for i in range(4)]
+    outs += [{"id": f"p{i}", "a": f"Other {i}", "s": ["rss:B"], "t": [], "shown": shown, "verdict": "pass"} for i in range(40)]
+    outs += [{"id": f"s{i}", "a": f"Skip {i}", "s": ["rss:C"], "t": [], "shown": shown, "verdict": "skipped"} for i in range(3)]
+    learned = learn.learn(outs, {"learn": {"half_life_days": 0}}, today=date(2026, 9, 10))
+    assert 0 < learned["sources"]["rss:A"]["adj"] <= 1.5 * 4 / 16 + 1e-9                     # a nudge, not yet a reason line
+    assert learn.adjustment(learned, ["rss:A"], [], "New Act")[1] == []
+    many = learn.learn(outs * 4, {"learn": {"half_life_days": 0}}, today=date(2026, 9, 10))   # sixteen keeps: the full say
+    assert many["sources"]["rss:A"]["adj"] > 0.5 and learn.adjustment(many, ["rss:A"], [], "New Act")[1]
 
 
 def test_learning_decays_and_explores():

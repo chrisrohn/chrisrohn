@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="__CSP__">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <title>Training &amp; Recovery</title>
+  <meta name="theme-color" content="#111111">
+  <meta name="application-name" content="Training">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Training">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <script>try { const t = localStorage.getItem("fitness-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <style>/*__STYLE__*/</style>
+</head>
+<body>
+  <header class="top">
+    <div class="bar">
+      <h1>Training &amp; Recovery</h1>
+      <div class="tools">
+        <button type="button" class="chip" id="install" hidden>Install</button>
+        <a class="chip" id="ride-link" href="ride.html">Ride mode</a>
+        <div class="seg" role="group" aria-label="Units" id="units-seg">
+          <button type="button" class="chip" data-units="mi" aria-pressed="true"><span class="long">Imperial</span><span class="short">mi</span></button><button type="button" class="chip" data-units="km" aria-pressed="false"><span class="long">Metric</span><span class="short">km</span></button>
+        </div>
+        <div class="seg" role="group" aria-label="Theme">
+          <button type="button" class="chip" data-theme-pick="light" aria-pressed="false"><span class="long">Light</span><span class="short" aria-hidden="true">☀</span><span class="sr">Light</span></button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false"><span class="long">Dark</span><span class="short" aria-hidden="true">☾</span><span class="sr">Dark</span></button>
+        </div>
+      </div>
+      <nav id="tabs" class="tabs" aria-label="Sections" hidden></nav>
+    </div>
+  </header>
+  <section id="databar" class="databar" aria-label="Data on this device" hidden></section>
+  <main id="app"></main>
+  <dialog id="import" aria-labelledby="import-title">
+    <form method="dialog" class="sheet">
+      <h2 id="import-title">Your data</h2>
+      <h3>Sync from GitHub</h3>
+      <p class="sub">Your private repository syncs Garmin and Strava on a schedule. This phone reads it with a token that can only see that repository.</p>
+      <label for="cloud-repo" class="label">Repository</label>
+      <input id="cloud-repo" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="you/training-data">
+      <label for="cloud-token" class="label">Token</label>
+      <input id="cloud-token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+      <p class="sub"><a id="cloud-new-token" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a token</a>: repository access <b>only that repository</b>; permissions <b>Actions: Read and write</b> and <b>Contents: Read-only</b>.</p>
+      <div class="actions"><button type="button" class="chip" id="cloud-forget" hidden>Disconnect</button><button type="button" class="chip primary" id="cloud-save">Save and sync</button></div>
+      <p id="cloud-error" class="error" role="alert"></p>
+      <section id="notify" hidden aria-labelledby="notify-title">
+        <h3 class="mt-3" id="notify-title">Morning notification</h3>
+        <p class="sub" id="notify-state">The day's call on your phone each morning, once last night's sleep is in: what to ride, readiness and the weather. Encrypted from the sync to this browser.</p>
+        <div class="actions"><button type="button" class="chip" id="notify-test" hidden>Send a test</button><button type="button" class="chip primary" id="notify-on">Turn on</button></div>
+        <p id="notify-error" class="error" role="alert"></p>
+      </section>
+      <h3 class="mt-3">Or import by hand</h3>
+      <label for="import-text" class="label">Phone link</label>
+      <textarea id="import-text" rows="3" spellcheck="false" autocomplete="off" placeholder="https://chrisrohn.com/fitness/#d=…"></textarea>
+      <div class="actions"><button type="button" class="chip" id="import-paste">Paste</button><button type="submit" class="chip primary" id="import-go">Import</button></div>
+      <label for="import-file" class="label mt-3">Or a data file</label>
+      <input id="import-file" type="file" accept=".json,application/json,text/plain">
+      <p id="import-error" class="error" role="alert"></p>
+      <div class="actions"><button type="button" class="chip" data-action="forget">Remove from this device</button><button type="submit" class="chip" value="cancel">Close</button></div>
+    </form>
+  </dialog>
+  <footer id="foot"></footer>
+  <script type="application/json" id="data">__DATA__</script>
+  <script>/*__SHELL__*/</script>
+  <script>/*__APP__*/</script>
+</body>
+</html>

@@ -25,7 +25,8 @@ function browserPath() {
 const executablePath = browserPath();
 
 export default defineConfig({
-  testDir: "tests/site",
+  testDir: ".",
+  testMatch: ["tests/site/**/*.spec.mjs", "fitness/tests/**/*.spec.mjs"],   // the site, plus fitness's ride page
   timeout: 30_000,
   // one retry on CI, for the runner rather than the app: a renderer that dies mid-navigation on a loaded GitHub
   // runner ("Page crashed") is not a site bug, and must not block a deploy. The list reporter still marks the test
