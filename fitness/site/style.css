@@ -301,6 +301,10 @@ form.pressure button { min-height: 40px; }
 .feel { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: var(--sp-1); }
 .feel legend { padding: 0; margin-bottom: var(--sp-1); font-weight: 700; }
 .feel .seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.rate { border-top: var(--rule-hair) solid var(--hair); padding-top: var(--sp-3); max-width: 60ch; display: grid; gap: var(--sp-2); }
+.rate .label { margin-right: var(--sp-2); }
+.seg.rpe { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); }
+.seg.rpe .chip { padding: 0; min-width: 0; font-variant-numeric: tabular-nums; }
 .feel .chip { white-space: normal; text-align: center; line-height: 1.15; padding: var(--sp-1); font-size: var(--fs-small); min-width: 0; }
 /* Today's last lines: tomorrow, and the day's eating, each a tap from its tab */
 .tomorrow, .fuel-line { margin: var(--sp-4) 0 0; padding-top: var(--sp-3); border-top: var(--rule-hair) solid var(--hair); max-width: 60ch; text-wrap: pretty; }

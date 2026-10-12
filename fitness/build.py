@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fitness import bike, fuel, raceday, streams
+from fitness import bike, feel, fuel, power, raceday, streams
 from fitness import metrics as m
 from fitness import weather as wxm
 from fitness.activities import merge
@@ -29,7 +29,7 @@ def _iso(d: date) -> str:
 
 def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date, profile: dict | None = None,
              now: datetime | None = None, weather: dict | None = None, bike_state: dict | None = None,
-             traces: dict[str, str] | None = None) -> dict:
+             traces: dict[str, str] | None = None, felt: dict | None = None) -> dict:
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
@@ -112,6 +112,9 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         else:
             level = {"skip": "rest", "easy": "easy", "optional": "easy"}.get(commute_today["verdict"], plan_today["level"])
             rec = {"level": level, "title": commute_today["title"], "detail": commute_today["detail"]}
+    felt = felt or {"checkins": {}, "rpe": {}}
+    feel_now = feel.blended(ready_today, felt["checkins"].get(t))      # this morning's check-in, from the app
+    rec = feel.ease(rec, feel_now, plan_today)
     today_wx = _today_wx(wx, plan_today, cfg, today, now or datetime.now(), commute_today) if wx else None
     if plan:
         for d in plan["days"][:16]:
@@ -189,7 +192,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "now": {"readiness": ready_today, "recommendation": rec, "base_call": m.recommend(ready_today, None), "sleep": sleep.get(t), "form": form_now,
                 "sleep_debt": round(debt, 1) if debt is not None else None, "regularity_min": round(regularity) if regularity is not None else None,
                 "last_night": (days.get(t) or {}).get("sleep"), "weather": today_wx,
-                "bedtime": _bedtime(days, need, debt, plan, today, cfg, route), "personal": personal},
+                "bedtime": _bedtime(days, need, debt, plan, today, cfg, route), "personal": personal, "feel": feel_now},
         "pmc": [r for r in rows if r["date"] >= chart_from],
         "plan": plan,
         "variants": variants,
@@ -202,7 +205,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "zones": {"seconds": zones, "days": 28} if any(zones) else None,
         "insights": m.insights(pairs),
         "editions": editions,
-        "recent": [{k: a.get(k) for k in ("start", "name", "kind", "group", "offroad", "indoor", "commute", "leg", "moving_s", "distance_m", "elev_m", "avg_hr", "np", "load", "load_src")}
+        "recent": [{k: a.get(k) for k in ("id", "start", "name", "kind", "group", "offroad", "indoor", "commute", "leg", "moving_s", "distance_m", "elev_m", "avg_hr", "np", "load", "load_src")}
                    for a in reversed(acts[-25:])],
         "ytd": {"rides": len(ytd), "hours": round(sum(a["moving_s"] for a in ytd) / 3600, 1), "km": round(sum(a["distance_m"] for a in ytd) / 1000),
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
@@ -215,6 +218,8 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "rides": _inside_rides(acts, traces, th, adjust, today),
         "recap": _recap(acts, by_day, adjust, plan, today),
         "strength": _strength_log(acts, plan, lifted, today),
+        "power": power.profile(acts, {k: json.loads(v) for k, v in (traces or {}).items()}, today, weight, th.get("ftp")),
+        "checkins": felt["checkins"], "rpe": {a["id"]: felt["rpe"][a["id"]] for a in acts[-60:] if a["id"] in felt["rpe"]},
         "race_day": races_soon,
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }

@@ -10,7 +10,7 @@ import webbrowser
 from datetime import date, datetime
 from pathlib import Path
 
-from fitness import bike, build, config
+from fitness import bike, build, config, feel
 from fitness.store import Store
 
 
@@ -18,7 +18,7 @@ def _build(cfg: dict, db: Path, out: Path | None = None, today: date | None = No
     with Store(db) as store:
         forecast = build.forecast_for(store, cfg, today or date.today(), datetime.now()) if cfg.get("weather", {}).get("enabled", True) else None
         data = build.assemble(cfg, store.days(), store.activities(), today or date.today(), {**(json.loads(store.get("profile") or "null") or {}), "weigh_ins": json.loads(store.get("weigh_ins") or "[]")}, weather=forecast,
-                              bike_state=bike.state(store, today or date.today()), traces=store.prefixed("stream:"))
+                              bike_state=bike.state(store, today or date.today()), traces=store.prefixed("stream:"), felt=feel.load(store, today or date.today()))
     return build.render(data, out, cfg), data
 
 

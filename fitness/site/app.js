@@ -257,15 +257,64 @@ window.startDashboard = D => {
     ["mood", "Mood", ["Low", "Flat", "Normal", "Good", "Great"]],
   ];
   const SICK = [["none", "No"], ["above", "Head cold"], ["below", "Chest, fever, aches"]];
-  const checkins = () => { try { const c = JSON.parse(ls.get(CHECK_KEY) || "{}"); return c && typeof c === "object" ? c : {}; } catch { return {}; } };
+  const stored = key => { try { const c = JSON.parse(ls.get(key) || "{}"); return c && typeof c === "object" ? c : {}; } catch { return {}; } };
+  // this phone's answers over what the sync already holds (another device's, or this one's from before a reinstall)
+  const checkins = () => { const mine = stored(CHECK_KEY), all = { ...(D.checkins || {}) }; for (const [d, c] of Object.entries(mine)) all[d] = { ...(all[d] || {}), ...c }; return all; };
   const live = () => D.today === isoToday();                         // a check-in belongs to the morning it was made on
   const checkin = () => live() ? checkins()[D.today] || null : null;
   const saveCheckin = (k, v) => {
-    const all = checkins(), day = { ...(all[D.today] || {}), [k]: v };
+    const all = stored(CHECK_KEY), day = { ...(all[D.today] || {}), [k]: v };
     all[D.today] = day;
     const keep = Object.keys(all).sort().slice(-90);                  // three months is plenty for the chart
     ls.set(CHECK_KEY, JSON.stringify(Object.fromEntries(keep.map(d => [d, all[d]]))));
+    syncFeel();
   };
+
+  // ── how hard each ride felt: Foster's session RPE, on the CR-10 scale ──────────────────────────────────────
+  // Rated rides sit beside their heart-rate load (TSS). Rides that keep feeling harder than their load says are an
+  // early sign of fatigue, before it shows overnight (Foster et al. 2001; Saw et al. 2016).
+  const RPE_KEY = "fitness-rpe";
+  const RPE_WORDS = { 1: "very easy", 2: "easy", 3: "moderate", 4: "somewhat hard", 5: "hard", 6: "hard", 7: "very hard", 8: "very hard", 9: "near max", 10: "maximal" };
+  const ratings = () => ({ ...(D.rpe || {}), ...stored(RPE_KEY) });
+  const rateRide = (id, n) => {
+    const all = { ...stored(RPE_KEY), [id]: n };
+    ls.set(RPE_KEY, JSON.stringify(Object.fromEntries(Object.entries(all).slice(-60))));
+    syncFeel();
+  };
+  // each rated ride: session RPE (RPE × minutes) per TSS, against your own usual ratio
+  const felt = () => {
+    const R = ratings();
+    const rows = (D.recent || []).filter(a => a.group === "ride" && R[a.id] && a.load > 0).map(a => ({ ...a, rpe: R[a.id], srpe: R[a.id] * a.moving_s / 60, ratio: R[a.id] * a.moving_s / 60 / a.load })).reverse();
+    const sorted = rows.map(r => r.ratio).sort((a, b) => a - b), med = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+    for (const r of rows) r.vs = med ? r.ratio / med : null;
+    const last3 = rows.slice(-3), drift = rows.length >= 8 && last3.length === 3 ? mean(last3.map(r => r.vs)) : null;
+    return { rows, drift };
+  };
+  const toRate = () => {
+    if (!live()) return null;
+    const R = ratings(), since = new Date(asDate(D.today).getTime() - 3 * 864e5).toISOString().slice(0, 10);
+    return (D.recent || []).find(a => a.id && a.group === "ride" && !a.commute && a.start.slice(0, 10) >= since && !R[a.id]) || null;
+  };
+  function rpeBlock() {
+    const a = toRate();
+    if (!a) return "";
+    return `<div class="rate"><span class="label">How hard was it?</span> <span>${esc(a.start.slice(0, 10) === D.today ? "Today's" : `${DOW[asDate(a.start).getDay()]}'s`)} ${esc(a.name)} · ${dur(a.moving_s)}</span>
+      <div class="seg rpe" role="group" aria-label="Effort, 1 very easy to 10 maximal">${Array.from({ length: 10 }, (_, i) => `<button type="button" class="chip" data-rpe="${esc(a.id)}" data-v="${i + 1}" aria-label="${i + 1}, ${RPE_WORDS[i + 1]}">${i + 1}</button>`).join("")}</div>
+      <p class="sub">1 very easy · 3 moderate · 5 hard · 7 very hard · 10 maximal. The whole ride, 30 minutes after.</p></div>`;
+  }
+
+  // check-ins and ratings go to the sync too (a quiet "service" run), so the morning call and every device see them
+  let feelTimer = 0;
+  function syncFeel() {
+    clearTimeout(feelTimer);
+    feelTimer = window.setTimeout(() => {
+      const mine = stored(CHECK_KEY), since = new Date(asDate(D.today).getTime() - 3 * 864e5).toISOString().slice(0, 10);
+      const body = { checkins: Object.fromEntries(Object.entries(mine).filter(([d]) => d >= since)), rpe: stored(RPE_KEY) };
+      const json = JSON.stringify(body);
+      if (json === ls.get("fitness-feel-sent")) return;
+      document.dispatchEvent(new CustomEvent("fitness-feel", { detail: { code: "feel:" + btoa(json).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""), sent: json } }));
+    }, 4000);
+  }
   // 3 is your normal = 75, like the watch's markers; each step either way is 15 points
   const feelScore = c => { const v = c && FEEL.map(([k]) => c[k]).filter(x => x >= 1 && x <= 5); return v && v.length ? Math.max(0, Math.min(100, Math.round(75 + 15 * (mean(v) - 3)))) : null; };
   const levelOf = s => s >= 75 ? "hard" : s >= 60 ? "moderate" : s >= 45 ? "easy" : "rest";
@@ -306,6 +355,14 @@ window.startDashboard = D => {
       <p class="sub">Kept on this phone. It eases the call when your body says so, never makes it harder.</p></details>`;
   }
   app.addEventListener("click", e => {
+    const r = e.target instanceof Element ? e.target.closest("[data-rpe]") : null;
+    if (!r) return;
+    rateRide(/** @type {HTMLElement} */ (r).dataset.rpe, Number(/** @type {HTMLElement} */ (r).dataset.v));
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  });
+  app.addEventListener("click", e => {
     const t = e.target instanceof Element ? e.target : null;
     const sum = t && t.closest(".checkin > summary");
     if (sum) { feelOpen = !(/** @type {HTMLDetailsElement} */ (sum.parentElement).open); return; }
@@ -320,6 +377,31 @@ window.startDashboard = D => {
     const again = document.querySelector(`[data-feel="${k}"][data-v="${raw}"]`);
     if (again instanceof HTMLElement && again.closest("details[open]")) again.focus();
   });
+
+  // the power-duration curve (fitness/power.py): the last 6 weeks against the year's best, and critical power
+  const durLabel = m => m >= 60 ? `${m / 60} h` : `${m} min`;
+  function powerHTML() {
+    const P = D.power;
+    if (!P) return "";
+    const cp = P.cp;
+    return `<h3 class="mt-6" id="power">Power-duration curve</h3>
+      <div class="kpis">${cp ? `<span>Critical power <b>${cp.cp} W</b>${P.wkg_cp ? ` · ${P.wkg_cp} W/kg` : ""}</span><span>W′ <b>${cp.w_prime_kj} kJ</b></span>` : ""}
+        ${P.eftp ? `<span>eFTP <b>${P.eftp} W</b>${P.wkg_20 ? ` · 20 min ${P.wkg_20} W/kg` : ""}</span>` : ""}${P.ftp ? `<span>FTP in use <b>${P.ftp} W</b></span>` : ""}</div>
+      <div id="c-power"></div>
+      ${P.notes.map(n => `<p class="advice">${esc(n)}</p>`).join("")}
+      <p class="sub">Best average power for each duration. Critical power is fitted to the best 3–20 minute efforts of the last 90 days${cp ? "" : " once there are enough of them"}.</p>`;
+  }
+  // rides you rated, against their heart-rate load
+  function ratedHTML() {
+    const { rows, drift } = felt();
+    if (!rows.length) return "";
+    const word = v => v == null ? "—" : v >= 1.2 ? "harder than usual" : v <= 0.83 ? "easier than usual" : "as usual";
+    return `<h3 class="mt-6" id="rated">How rides felt</h3>
+      <div class="scrollx" tabindex="0" role="region" aria-label="Rated rides"><table class="tbl"><thead><tr><th>When</th><th>Ride</th><th class="r">RPE</th><th class="r hide-sm">Session RPE</th><th class="r">TSS</th><th>Felt</th></tr></thead><tbody>
+      ${rows.slice().reverse().map(r => `<tr><td class="num">${fmtD(r.start)}</td><td>${esc(r.name)}</td><td class="r">${r.rpe}</td><td class="r hide-sm">${r0(r.srpe)}</td><td class="r">${r0(r.load)}</td><td>${rows.length >= 5 ? word(r.vs) : "—"}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="sub">${rows.length < 8 ? `${rows.length} rated so far: after 8, the app says when rides start feeling harder than their load (fatigue) or easier (fitness).` : drift >= 1.2 ? "The last three rides felt harder than their load: ease off before the overnight numbers say so." : drift <= 0.83 ? "The last three rides felt easier than their load: the fitness is landing." : "Effort and load agree: the training is landing as planned."}</p>`;
+  }
 
   // strength after the ride (plan.py STRENGTH): what, and whether today's call still has room for it
   function strengthLine(day, rec) {
@@ -716,7 +798,9 @@ window.startDashboard = D => {
     const rAvg = mean(last7);
     const B = blended(), score = B && B.score != null ? B.score : rd ? rd.score : null;   // with this morning's check-in in it
     const readinessTile = tile("Readiness", score ?? "—", "/100", B && B.feel != null ? `watch ${rd ? rd.score : "—"} · feel ${B.feel}` : rAvg != null && rd ? `${signed(rd.score - rAvg)} vs 7-day avg` : "needs 14 nights", score != null ? (score >= 60 ? "good" : "bad") : "", score != null && rAvg != null ? (score - rAvg >= 0.5 ? "up" : score - rAvg <= -0.5 ? "down" : "") : "");
-    const feelReason = B && B.why ? [{ tone: rec.eased ? "bad" : "good", text: `Check-in: ${B.why}` }] : [];
+    const F = felt();
+    const feelReason = [...(B && B.why ? [{ tone: rec.eased ? "bad" : "good", text: `Check-in: ${B.why}` }] : []),
+      ...(F.drift && F.drift >= 1.2 ? [{ tone: "bad", dir: "up", text: `Your last 3 rides felt ${Math.round((F.drift - 1) * 100)}% harder than their heart-rate load usually does: fatigue building before it shows overnight` }] : [])];
     const sleepTile = tile("Sleep score", sl ? sl.score : "—", "", sl ? `${esc(sl.label)} · ${hrs(sl.hours)}` : "no sleep logged", sl ? (sl.score >= 80 ? "good" : sl.score < 60 ? "bad" : "") : "");
 
     // today: the call and everything that bears on it, on one screen
@@ -730,6 +814,7 @@ window.startDashboard = D => {
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
         ${rd || feelReason.length ? `<ul class="reasons">${[...feelReason, ...(rd ? rd.reasons : [])].map(r => `<li class="${r.tone === "bad" ? "bad" : ""} ${r.dir || ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
         ${checkinBlock()}
+        ${rpeBlock()}
         ${strengthLine(pToday, rec)}
         ${planB(pToday, rec, rd)}
         ${overnightBlock()}
@@ -807,10 +892,12 @@ window.startDashboard = D => {
       <div><h3>Heart-rate zones, last ${z ? z.days : 28} days</h3>${z ? `<div class="zones" role="img" aria-label="Time in zones">${zp.map((p, i) => `<div style="flex:${p};background:var(--z${i + 1})" title="Zone ${i + 1}: ${p.toFixed(0)}%"></div>`).join("")}</div>
         <div class="zones-key">${zp.map((p, i) => `<span><b><i class="sw" style="background:var(--z${i + 1})"></i>Z${i + 1}</b>${p.toFixed(0)}%<br>${dur(z.seconds[i])}</span>`).join("")}</div>
         <p class="sub mt-3">${zp[0] + zp[1] >= 75 ? "Mostly easy, with the hard work concentrated: a polarized/pyramidal mix that suits a 2-hour race." : zp[2] > 25 ? "A lot of Zone 3: the 'grey zone' tires you without the stimulus of real intervals. Make easy days easier." : "A balanced mix."}</p>` : `<p class="empty">Time in zones comes from Garmin-recorded activities.</p>`}</div></div>
+      ${powerHTML()}
+      ${ratedHTML()}
       ${commuteHTML()}
       ${insideHTML()}
       <h3 class="mt-6">Recent activities</h3><div class="scrollx" tabindex="0" role="region" aria-label="Recent activities"><table class="tbl"><thead><tr><th>When</th><th>Activity</th><th class="r">Time</th><th class="r">Distance</th><th class="r hide-sm">Climb</th><th class="r hide-sm">Avg HR</th><th class="r">TSS</th></tr></thead><tbody>
-      ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}${a.indoor ? " · trainer" : ""}${a.commute ? ` · commute ${a.leg === "home" ? "home" : "in"}` : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r hide-sm">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r hide-sm">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
+      ${D.recent.map(a => `<tr><td class="num">${fmtD(a.start)}</td><td>${esc(a.name)}<br><span class="sub">${esc(a.kind.replace(/_/g, " "))}${a.offroad ? " · off-road" : ""}${a.indoor ? " · trainer" : ""}${a.commute ? ` · commute ${a.leg === "home" ? "home" : "in"}` : ""}${ratings()[a.id] ? ` · RPE ${ratings()[a.id]}` : ""}</span></td><td class="r">${dur(a.moving_s)}</td><td class="r">${a.distance_m ? dist(a.distance_m) : "—"}</td><td class="r hide-sm">${a.elev_m ? elev(a.elev_m) : "—"}</td><td class="r hide-sm">${r0(a.avg_hr)}</td><td class="r" title="from ${esc(a.load_src)}">${r0(a.load)}${a.load_src === "duration" ? "*" : ""}</td></tr>`).join("")}
       </tbody></table></div>${D.recent.some(a => a.load_src === "duration") ? `<p class="sub mt-3">* No heart rate: load estimated from duration.</p>` : ""}</section>`);
 
     // insights
@@ -922,13 +1009,26 @@ window.startDashboard = D => {
         yFmt: v => (k === "resp" ? v.toFixed(1) : String(Math.round(v))),
       });
     }
-    const mine = checkins(), felt = D.readiness.map(r => feelScore(mine[r.date]));   // this phone's check-ins, on the same scale
+    const mine = checkins(), feltLine = D.readiness.map(r => feelScore(mine[r.date]));   // this phone's check-ins, on the same scale
     chart(document.getElementById("c-ready"), {
       label: "Readiness score", x: D.readiness.map(r => r.date), height: 170, yMin: 0, yMax: 100,
       ref: { lo: 75, hi: 100, label: "key-session zone", color: "var(--s3)" },
       series: [{ name: "Readiness", type: "line", color: "var(--s1)", values: D.readiness.map(r => r.score), endDot: true },
-        ...(felt.some(v => v != null) ? [{ name: "How you felt", type: "line", color: "var(--s2)", values: felt, endDot: true }] : [])],
+        ...(feltLine.some(v => v != null) ? [{ name: "How you felt", type: "line", color: "var(--s2)", values: feltLine, endDot: true }] : [])],
     });
+
+    if (D.power && document.getElementById("c-power")) {
+      const P = D.power;
+      chart(document.getElementById("c-power"), {
+        label: "Power-duration curve: best average power for each duration", x: P.durations, height: 200, xName: "Duration",
+        xFmt: durLabel, tipFmt: durLabel, yFmt: v => `${v}`,
+        extra: i => P.year_when[i] ? [["Year's best on", fmtD(P.year_when[i])]] : [],
+        series: [
+          { name: "Last 6 weeks (W)", type: "line", color: "var(--s1)", values: P.recent, endDot: true },
+          { name: "Best of the year", type: "line", color: "var(--s3)", values: P.year },
+        ],
+      });
+    }
 
     // weekly hours
     const W = D.weeks;

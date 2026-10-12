@@ -125,13 +125,31 @@ read there is: subjective wellness tracks training load, fatigue and coming illn
 rate measures do (Saw, Main & Gastin 2016, a systematic review of 56 studies).
 
 - **Readiness** becomes 70% the watch, 30% you (3 is your normal = 75, each step 15 points); the tile shows both.
-- **The call** can only get easier: the blended score's band (the same 75 / 60 / 45 as readiness), legs very sore
-  or energy drained cap the day at easy, and the **neck check** decides sickness: a head cold rides easy at most,
-  anything below the neck (chest, fever, aches) rests.
+- **The call** can only get easier: the blended score's band (the same 75 / 60 / 45 as readiness), any answer at
+  its worst (legs very sore, energy drained, life stress very high, mood low) caps the day at easy, and the **neck
+  check** decides sickness: a head cold rides easy at most, anything below the neck (chest, fever, aches) rests.
 - **Strength** is skipped on a day the call came down from the plan: heavy sets want fresh legs.
 - **Body → Recovery markers** draws *How you felt* over the readiness chart, so you can see the two agree or not.
-- **Private:** it stays on the phone (`fitness-checkin`, the last 90 mornings) and *Remove from this device*
-  clears it with the rest.
+- **Synced:** with GitHub sync set up, a few seconds after your last tap the app starts a quiet `service` run with
+  the check-in (and any ride ratings) as its code, so no change to your private repository's workflow is needed.
+  The sync keeps them in its encrypted store (`feel.py`), blends them into the morning call the same way, and the
+  notification's afternoon-update rule sends the eased call if it changed. Every device sees them; this phone's own
+  answers win. A save that can't go (offline) goes the next time the app opens.
+- **Without the sync** it stays on the phone (`fitness-checkin`, the last 90 mornings). *Remove from this device*
+  clears it, and the ride ratings, with the rest.
+
+### Ride ratings
+
+Under the check-in, the app asks how hard your latest ride was (from the last three days, not commutes), on the
+CR-10 scale: 1 very easy, 3 moderate, 5 hard, 7 very hard, 10 maximal, for the whole ride, about 30 minutes after.
+That's Foster's **session RPE** (Foster et al. 2001), and it's what heart rate can't say: how the ride *felt*.
+
+- **Ride → Training → How rides felt** lists the rated rides: RPE, session RPE (RPE × minutes) and the heart-rate
+  load (TSS). Each ride's session RPE per TSS is set against your own usual ratio: *harder than usual*, *as usual*
+  or *easier than usual*.
+- **After 8 ratings**, when your last three rides felt 20% or more harder than their load usually does, the Today card
+  says so: fatigue that shows up in how rides feel before it shows overnight (Saw et al. 2016). It's a reason
+  beside the call, not a change to it. Recent activities show each ride's RPE.
 
 ### The week so far
 
@@ -382,6 +400,22 @@ most 30 rides per sync to stay under Garmin's limits.
   actually spent there. A rep under 4 minutes is expected to show half its length, because heart rate lags. If two
   sessions in a week fall well short, the page suggests your threshold heart rate is set too high, and how to retest
   it.
+
+### The power-duration curve
+
+From the same traces (and the average power of trainer rides from Strava that have no trace), **Ride → Training →
+Power-duration curve** draws your best average power for 1 minute to 2 hours: the last 6 weeks against the year's
+best, with the day each best was set (`power.py`).
+
+- **Critical power and W′** (Monod & Scherrer 1965; Jones et al. 2010), fitted to the best 3–20 minute efforts of the
+  last 90 days: CP is the most you can hold on your aerobic engine (close to, a little above, FTP); W′ is the fixed
+  reserve above it that every surge and wave start spends. The page says how long an effort at 120% of CP empties it.
+- **eFTP**, 95% of the best 20 minutes, beside the FTP the load math uses, with W/kg from your weight. When they're
+  more than 5% apart the page says which way to move `athlete.ftp`, and with no FTP set it gives the number to use.
+- **The last 6 weeks more than 8% under the year** at 5 or 20 minutes: the page says so, and that a rested hard
+  session at that duration will tell fitness from simply no recent all-out effort.
+- Minute resolution makes the 1–2 minute bests a little conservative; from 3 minutes on they're exact enough.
+  Outdoors that needs a power meter; the trainer season fills the curve on its own.
 
 ## When the plan doesn't happen
 
@@ -685,6 +719,8 @@ legs actually felt on the bike.
 | `garmin.py`, `strava.py` | sync, sign-in and parsers (raw responses are kept in SQLite, so fixing a parser never needs a re-download) |
 | `activities.py` | sport mapping and the Garmin↔Strava duplicate merge |
 | `metrics.py` | load, PMC, sleep score, readiness, recommendation, insights (pure functions) |
+| `feel.py` | the app's morning check-in and ride ratings: parsing what the phone sends, storing it, blending it into the call |
+| `power.py` | the power-duration curve, critical power and eFTP |
 | `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` and `dist/ride.html` |
 | `build-app.mjs` | writes the public, data-free app to `chrisrohn.com/fitness/` during the site build: the dashboard shell, ride mode, manifest, icons and the offline service worker |
