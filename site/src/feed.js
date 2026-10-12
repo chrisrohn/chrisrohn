@@ -8,6 +8,7 @@ import { refreshRecent } from "./youtube.js";
 import { render, deckOn, focusCard } from "./render.js";
 import { scoreOf, invalidateRank } from "./rank.js";
 import { loadVideos, reconcileVideos, videoItems } from "./videos.js";
+import { showBuildStatus } from "./buildstatus.js";
 
 /** @typedef {import("./types").FeedItem} FeedItem */
 
@@ -173,6 +174,7 @@ export function renderMeta() {
       ? `This feed is ${Math.round(age / 86400e3)} days old — the daily build has not run since ${when.toLocaleDateString()}. Check the Discover workflow on GitHub.`
       : `Today's build has not landed yet — this is ${when.toLocaleDateString()}'s feed, built ${relTime(when)}. The morning job retries until it lands, and this page picks it up on its own.`;
   }
+  showBuildStatus(stale);   // …and what the workflow is doing about it right now: building, queued, failed, or not started
   $("#lfm").href = "https://www.last.fm/user/" + (f.lastfm_user || "tt_discotheque");
   const rev = $("#tb-rev"); if (rev && when) rev.textContent = when.toISOString().slice(0, 10);   // title block: revision = build date
   document.title = `${f.site_name || "Chris Rohn's New Music"} · ${f.new_today} new`;

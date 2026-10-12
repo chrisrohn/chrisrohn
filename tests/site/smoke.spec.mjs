@@ -1083,6 +1083,8 @@ test("a feed built on an earlier day says the morning build is late, and an all-
   const ctx = await browser.newContext({ serviceWorkers: "block" });
   const morning = new Date(); morning.setHours(8, 30, 0, 0);   // read over coffee, whatever hour CI happens to run at
   await ctx.route("**/data/feed.json", r => r.fulfill({ json: feed }));
+  /** @type {any[]} */ let runs = [];   // the Actions API the late bar reads (1b fills it in)
+  await ctx.route("https://api.github.com/repos/**/actions/workflows/discover.yml/runs*", r => r.fulfill({ json: { total_count: runs.length, workflow_runs: runs } }));
   // each step gets a fresh page: a renderer worn down by the previous document (a whole feed rated, then re-listed)
   // has crashed on a CI runner while navigating to the next one, taking the test with it
   /** @type {import("@playwright/test").Page} */
@@ -1097,6 +1099,29 @@ test("a feed built on an earlier day says the morning build is late, and an all-
   await expect(bar).toContainText("Today's build has not landed yet");
   await expect(bar).not.toContainText("days old");
   expect(errors).toEqual([]);
+
+  // 1b. …and what the Discover workflow is doing about it, from the Actions API: a run under way names its step and
+  // what is left (timed from the recent builds), and links to itself; a failed one says so and points at the next try
+  const iso = (/** @type {number} */ min) => new Date(morning.getTime() + min * 60e3).toISOString();
+  const done = (id, start, took, conclusion = "success") => ({ id, status: "completed", conclusion, event: "schedule", html_url: `https://github.com/x/runs/${id}`, created_at: iso(start), run_started_at: iso(start), updated_at: iso(start + took) });
+  runs = [{ id: 9, status: "in_progress", conclusion: null, event: "schedule", html_url: "https://github.com/x/runs/9", created_at: iso(-10), run_started_at: iso(-10), updated_at: iso(-1) }, done(8, -1500, 30), done(7, -1520, 0.2), done(6, -2900, 30)];
+  await ctx.route("https://api.github.com/repos/**/actions/runs/9/jobs*", r => r.fulfill({ json: { jobs: [{ name: "build", status: "in_progress", steps: [{ name: "Set up job", status: "completed" }, { name: "Build the feed", status: "in_progress" }] }] } }));
+  errors = await open(await fresh());
+  const run = page.locator("#stale .run");
+  await expect(run).toContainText("Building now");
+  await expect(run).toContainText("“Build the feed”");
+  await expect(run).toContainText("about 20 min to go");   // the 30-minute builds, not the slot that stopped in seconds
+  await expect(run.locator("a")).toHaveAttribute("href", "https://github.com/x/runs/9");
+  expect(errors).toEqual([]);
+  runs = [done(10, -40, 12, "failure"), done(8, -1500, 30)];
+  errors = await open(await fresh());
+  const failed = page.locator("#stale .run");
+  await expect(failed).toContainText("The last attempt (scheduled run");
+  await expect(failed).toContainText("failed");
+  await expect(failed.locator("a").first()).toHaveAttribute("href", "https://github.com/x/runs/10");
+  expect(errors).toEqual([]);
+  runs = [];
+  await ctx.unroute("https://api.github.com/repos/**/actions/runs/9/jobs*");
 
   // 2. …and every card of it rated: the reason, the counts, and the two tabs that still have something in them
   const rated = {};
