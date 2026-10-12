@@ -62,7 +62,7 @@ test.describe("installable app", () => {
     await page.reload();                                                         // kept on this device
     await expect(page.locator("#tab-today")).toBeVisible();
     await page.goto("/fitness/ride.html");                                       // ride mode reads the same copy
-    await expect(page.locator("#day option").first()).toContainText(DATA.ride.days[0].title);
+    await expect(page.locator("#day option").first()).toContainText(DATA.ride.days.find(d => d.steps && d.steps.length).title);   // rest days have no steps to ride
     await page.goto("/fitness/");
     await page.locator("#databar [data-action=settings]").click();
     page.once("dialog", d => d.accept());
