@@ -351,6 +351,10 @@ what changed under **Plan adjusted**:
 - **Today, as it happens.** If no ride in is logged by 10:00 on a commute day, today stops being a commute. The
   session it replaced comes back for the evening, on the trainer or outside, and the food plan follows. If nothing is
   logged by 19:00 on a long-ride day, the long ride moves to tomorrow when tomorrow is free.
+- **Rest is earned.** A planned rest day after three days with next to nothing ridden (under 30 TSS, form above −15)
+  has nothing to recover from. On a day off work (a weekend or a federal holiday), it becomes the long ride those days
+  owed, even if that was last Saturday's. On a workday, it becomes steady endurance. Readiness still eases it if the
+  morning says so. The holiday Monday after a weekend off the bike is the case it was built for.
 - **Fitness lost to a missed day** isn't made up in one go. The coming weeks' load targets are recomputed from the
   fitness you actually have, still capped at `max_ramp`, so the race-day target stays honest without a cram week.
 
