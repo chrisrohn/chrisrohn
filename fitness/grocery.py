@@ -109,6 +109,8 @@ def week(fuel_days: list[dict], cfg: dict, start: date) -> dict | None:
         prep.append("Lunches: cook the frozen broccoli, cauliflower and shiitake for up to four days at a time (cooked, they keep 3–4 days "
                     "in the fridge) with the lentils rinsed in" + (", or 100 g shredded chicken instead" if chicken else "")
                     + "; dress each bowl when you eat it.")
+    buy += _extras(fuel_days, imperial)
+    check += _supplements(fuel_days)
     end = date.fromisoformat(fuel_days[-1]["date"])
     return {"from": start.isoformat(), "to": end.isoformat(), "pudding": np, "veggie": nv, "pudding_days": pud_days, "veggie_days": veg_days,
             "chicken": chicken, "buy": buy, "check": check, "prep": prep}
@@ -116,3 +118,33 @@ def week(fuel_days: list[dict], cfg: dict, start: date) -> dict | None:
 
 def days_from(start: date, n: int = 7) -> list[date]:
     return [start + timedelta(days=i) for i in range(n)]
+
+
+# what the gap fillers, the beet shots and the bedtime protein add up to over the week (fuel.py meals' "buy")
+EXTRAS = {
+    "yogurt": ("Plain Greek yogurt", lambda n, imp: f"{n} cup{'s' if n != 1 else ''} (≈ {math.ceil(n / 3.7)} × 32 oz tub{'s' if math.ceil(n / 3.7) != 1 else ''})"),
+    "cottage": ("Cottage cheese, for before bed", lambda n, imp: f"{n} cup{'s' if n != 1 else ''} (≈ {math.ceil(n / 2)} × 16 oz tub{'s' if math.ceil(n / 2) != 1 else ''})"),
+    "eggs": ("Eggs", lambda n, imp: f"{n} (≈ {math.ceil(n / 12)} dozen)"),
+    "pumpkin": ("Pumpkin seeds (pepitas)", lambda n, imp: f"{n / 4:g} cup{'s' if n / 4 > 1 else ''} ({_weight(32 * n, imp)})"),
+    "beet": ("Beet-It Sport shots (70 ml), for the key sessions", lambda n, imp: f"{n}"),
+}
+
+
+def _extras(fuel_days: list[dict], imperial: bool) -> list[dict]:
+    counts: dict[str, int] = {}
+    for d in fuel_days:
+        for m in d["meals"]:
+            for k, v in (m.get("buy") or {}).items():
+                counts[k] = counts.get(k, 0) + v
+    return [{"item": EXTRAS[k][0], "amount": EXTRAS[k][1](counts[k], imperial)} for k in EXTRAS if counts.get(k)]
+
+
+def _supplements(fuel_days: list[dict]) -> list[dict]:
+    """What food can't carry (nutrients.py), to check you have: iodized salt always, D3 and algae oil unless you take them."""
+    out = [{"item": "Iodized salt (sea and pink salt aren't)", "amount": "¼ tsp a day", "aisle": "pantry"}]
+    advice = ((fuel_days[0].get("nutrients") or {}).get("advice") or []) if fuel_days else []
+    for a in advice:
+        if not a["name"].endswith("(optional)"):
+            out.append({"item": a["name"], "amount": a["dose"], "aisle": "supplements"})
+    return out
+

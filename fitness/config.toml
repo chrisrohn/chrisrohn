@@ -18,6 +18,14 @@ lunch = "veggie"          # "veggie" (black lentils) or "veggie_chicken" (100 g 
 weekday_ride = "evening"  # when a non-commute weekday ride happens: "evening" or "morning"
 bottle_cages = 2
 bladder_l = 2             # a back bladder (water only), for long rides with nowhere to refill; 0 = none
+diet = "vegetarian"       # raises the iron (× 1.8) and zinc (× 1.5) targets, as the DRIs do; "omnivore" to drop that
+creatine = false          # true once you take it, so it stops being suggested
+
+# What you already take, so the Nutrients panel counts it instead of suggesting it. Any of: vitamin_d_iu, epa_dha_mg,
+# b12_ug, iodine_ug, calcium_mg, zinc_mg, iron_mg, magnesium_mg (amounts a day).
+[nutrition.supplements]
+# vitamin_d_iu = 1000
+# epa_dha_mg = 300
 
 # The on-bike drink mix, per serving (one packet / one bottle): Infinit Go Far by default. Change any of it here.
 [nutrition.ride_fuel]

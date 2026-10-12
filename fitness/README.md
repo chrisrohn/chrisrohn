@@ -453,6 +453,50 @@ The **Fuel** panel under today's call plans the day's eating, with tomorrow's in
 `[nutrition.ride_fuel]` holds the drink mix's label numbers (change them for another product); `bottle_cages` and
 `bladder_l` describe what the bike and you can carry.
 
+### Beyond carbs and protein: the nutrients
+
+The **Fuel** tab's *Nutrients* table checks the day against the Dietary Reference Intakes for your age and sex
+([`nutrients.py`](nutrients.py)). Iron (× 1.8) and zinc (× 1.5) are raised for a vegetarian diet, as the DRIs do,
+because plant iron and zinc absorb less. The Pudding and the Super Veggie are worked out ingredient by ingredient
+(USDA FoodData Central; the whey and the lentils from their labels).
+
+| What the two Blueprint meals bring | |
+|---|---|
+| Plenty | Fiber (~47 g), folate, vitamins C and K, magnesium, iron (~17 mg, mostly plant iron), plant omega-3 (ALA, ~7 g) |
+| Part | Calcium ~60%, zinc and potassium ~65%, choline ~50%, selenium ~70% |
+| None | Vitamin B12, vitamin D, iodine, EPA and DHA |
+
+The plan closes the gaps every day:
+- **A cup of plain Greek yogurt with the Super Veggie** (as a lime-cumin dressing or on the side). It adds B12,
+  calcium and iodine. It also takes lunch past the ~2.5 g of leucine a meal needs to switch muscle repair fully on
+  (the bowl alone has ~1.8 g, from plant protein).
+- **Gap fillers**: 2 eggs (choline, B12, iodine, selenium), ¼ cup pumpkin seeds (zinc), and iodized salt in the
+  cooking (sea and pink salt aren't iodized).
+- **Iron**: the Super Veggie's lime and broccoli supply the vitamin C that helps its iron absorb. Keep coffee or tea
+  an hour away from it.
+
+What food can't cover is listed with a dose and the reason:
+- **Vitamin D3**: 600–1,000 IU. At 42° N the skin makes next to none from November to February, and these foods
+  have almost none.
+- **Algae oil**: 250–500 mg EPA + DHA. The body turns only a few percent of ALA into EPA, and under 1% into DHA.
+- **Creatine** (optional): 3–5 g. It helps the hard surges of a mass start or a punchy climb, and vegetarians
+  respond more. It costs about 1 kg of water weight.
+
+List what you already take under `[nutrition.supplements]` (`vitamin_d_iu`, `epa_dha_mg`, `b12_ug`…) and the table
+counts it instead of suggesting it. Set `creatine = true` once you take it.
+
+Training days add three things:
+- **A beet-juice shot** (≈ 400 mg nitrate) 2–3 hours before key sessions and races, and daily for the 3–5 days
+  before a race. Nitrate is one of the few supplements the IOC consensus rates as well supported (Maughan et al.
+  2018). Skip antibacterial mouthwash on those days: mouth bacteria do the conversion.
+- **25–30 g of slow protein before bed** after hard, long and race days: cottage cheese or Greek yogurt (Snijders
+  et al. 2015).
+- **Caffeine on race morning**, if you use it: 3 mg per kg, 60 minutes before the start (ISSN, Guest et al. 2021).
+
+The weekly shopping list includes all of it: yogurt, eggs, pumpkin seeds, cottage cheese, beet shots, and a check
+for the iodized salt and the supplements. These are planning numbers, not a food log. Dinner (beans, tofu,
+potatoes) adds zinc, potassium, magnesium and iron on top.
+
 ### Shopping and prep
 
 Under the fuel plan, *Shopping & prep* covers the next seven days:

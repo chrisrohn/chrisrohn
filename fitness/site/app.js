@@ -456,7 +456,22 @@ window.startDashboard = D => {
       <p class="sub">${targets}</p>${weight}
       ${mealsHTML(T)}
       ${N ? `<details class="fuel-next"><summary>Tomorrow · ${esc(N.label)}</summary>${mealsHTML(N)}</details>` : ""}
+      ${full ? nutrientsHTML(T.nutrients) : ""}
       ${kitchenHTML(F.kitchen, full)}</div>`;
+  }
+
+  // beyond carbs and protein: what today's meals bring against the day's needs, and what food can't (fitness/nutrients.py)
+  function nutrientsHTML(Nu) {
+    if (!Nu) return "";
+    const tag = { ok: "good", near: "", low: "bad" }, word = { ok: "covered", near: "close: dinner adds more", low: "short" };
+    const num = (v, u) => `${v.toLocaleString()} ${u}`;
+    return `<h3 class="mt-6">Nutrients · today</h3>
+      <p class="sub">The Nutty Pudding and Super Veggie worked out ingredient by ingredient, plus the yogurt and gap fillers, against the Dietary Reference Intakes for your age${Nu.vegetarian ? " (iron and zinc raised for a vegetarian diet, which absorbs less of both)" : ""}. Dinner comes on top: beans, tofu and potatoes add zinc, potassium, magnesium and iron.</p>
+      <div class="scrollx" tabindex="0" role="region" aria-label="Nutrients today"><table class="tbl nutrients"><thead><tr><th>Nutrient</th><th class="r">Need</th><th class="r hide-sm">Pudding + Veggie</th><th class="r hide-sm">+ fillers</th><th class="r">Today</th></tr></thead><tbody>
+      ${Nu.rows.map(r => `<tr><td>${esc(r.label)}</td><td class="r num">${num(r.need, r.unit)}</td><td class="r num hide-sm">${num(r.core, r.unit)}</td><td class="r num hide-sm">${r.fillers ? `+${num(r.fillers, r.unit)}` : "—"}${r.supplement ? ` +${num(r.supplement, r.unit)} supp.` : ""}</td><td class="r"><span class="tag ${tag[r.status]}" title="${esc(word[r.status])}">${r.pct}%</span></td></tr>`).join("")}
+      </tbody></table></div>
+      ${Nu.advice.length ? `<h4 class="mt-3">What food can't cover</h4><ul class="plain advice-list">${Nu.advice.map(a => `<li><b>${esc(a.name)}</b> · ${esc(a.dose)}<span class="sub">${esc(a.why)}</span></li>`).join("")}</ul>
+      <p class="sub">Already taking something? List it under <code>[nutrition.supplements]</code> in the config (<code>vitamin_d_iu</code>, <code>epa_dha_mg</code>, <code>b12_ug</code>…) and it counts here instead.</p>` : ""}`;
   }
   const pToday0 = () => plan && plan.days[0];
 

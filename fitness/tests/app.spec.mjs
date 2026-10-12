@@ -231,6 +231,21 @@ test.describe("installable app", () => {
     expect(bar && bar.y).toBeLessThan(200);                                       // a wide screen: the band's second tier
   });
 
+  test("the Fuel tab: today's nutrients against the day's needs, and what food can't cover", async ({ page }) => {
+    const problems = watch(page);
+    expect(DATA.fuel.today.nutrients.rows.length).toBeGreaterThan(10);
+    await page.goto(phoneLink(DATA));
+    await page.locator("#tab-fuel").click();
+    const table = page.locator("#panel-fuel table.nutrients");
+    await expect(table).toBeVisible();
+    await expect(table.locator("tr").filter({ hasText: "Vitamin B12" })).toBeVisible();
+    await expect(page.locator("#panel-fuel .advice-list")).toContainText("Algae oil (EPA + DHA)");
+    await expect(page.locator("#panel-fuel .meals").first()).toContainText("Gap fillers");
+    await expect(page.locator("#panel-today table.nutrients")).toHaveCount(0);          // the full panel lives on Fuel only
+    expect(await axe(page)).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
   test("opens offline once the service worker has it", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

@@ -54,8 +54,13 @@ def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: 
             (gun - timedelta(hours=3, minutes=30), "Up. A big glass of water."),
             (gun - timedelta(hours=3), f"Breakfast: {f'about {carbs_g} g of carbs' if carbs_g else '2–3 g of carbs per kg'}, low in fat and fiber: "
                                        "oatmeal or white rice with banana and honey, or bagels with jam. Not the Nutty Pudding today: its fat and fiber sit heavy."),
+            (gun - timedelta(hours=2, minutes=30), "A beet-juice shot (Beet-It Sport, 70 ml ≈ 400 mg nitrate), the last of the "
+                                                    "week's: one a day for the 3–5 days before primes it (IOC consensus, Maughan et al. 2018). No mouthwash."),
             (gun - timedelta(hours=1, minutes=30), f"Mix the bottles: {b['setup']}. Gels in the pocket."),
             (gun - timedelta(hours=1), "Kit on, number on, tire pressure set with a gauge, a last bathroom stop."),
+            (gun - timedelta(minutes=60), f"If you use caffeine: {f'about {round(3 * weight_kg / 10) * 10} mg' if weight_kg else '3 mg per kg'} "
+                                          "(a strong coffee, or caffeinated gels), the dose with the best evidence (ISSN position stand, Guest et al. 2021). "
+                                          "Only what you've tried in training."),
             (gun - timedelta(minutes=45), "Warm up 15–20 min: easy spinning with 2 × 30 s at race effort, then 5 min easy."),
             (gun - timedelta(minutes=20), "Into the start area. A gel 10 minutes before the gun, with water."),
             (gun, f"Go. Then settle at {settle} and start eating at 20 minutes: {b['sips']}"
