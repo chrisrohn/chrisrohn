@@ -749,6 +749,27 @@ def test_missed_key_session_with_no_room_is_dropped_not_crammed(cfg):
     assert not a["roles"] and any("Thursday's key session didn't happen. No free day" in n for n in a["notes"])
 
 
+def test_rest_is_earned_a_missed_weekend_rides_on_a_holiday_monday(cfg):
+    """Columbus Day after a weekend off the bike: Monday's rest has nothing to recover from, so Saturday's long ride is
+    on today; a workday gets steady endurance; a rest day after real riding stays a rest day."""
+    from fitness.plan import adapt
+    state = {(date(2026, 10, 11) - timedelta(days=i)).isoformat(): {"ctl": 30.0, "atl": 33.0} for i in range(10)}
+    loads = {"2026-10-06": 90, "2026-10-08": 105}                                   # nothing Friday to Sunday
+    a = adapt(date(2026, 10, 12), 8, cfg, loads, set(), state)
+    assert a["roles"] == {date(2026, 10, 12): "long"}
+    assert a["notes"][-1].startswith("Nothing ridden in 3 days") and "Saturday's long ride didn't happen and today is a holiday" in a["notes"][-1]
+    monday = season(date(2026, 10, 12), 30, 33, cfg, adapt=a)["days"][0]
+    assert monday["role"] == "long" and monday["minutes"] >= 90
+    workday = adapt(date(2026, 10, 19), 8, cfg, {}, set(), {**state, **{f"2026-10-{d}": {"ctl": 30.0, "atl": 33.0} for d in range(12, 19)}})
+    if (workday["planned"].get(date(2026, 10, 19)) or {}).get("role") == "rest":
+        assert workday["roles"][date(2026, 10, 19)] == "endurance" and "Today is a workday" in workday["notes"][-1]
+    rode = adapt(date(2026, 10, 12), 8, cfg, {**loads, "2026-10-10": 150, "2026-10-11": 60}, set(), state)
+    assert date(2026, 10, 12) not in rode["roles"]                                   # a real weekend: rest stays rest
+    tired = {**state, "2026-10-11": {"ctl": 30.0, "atl": 50.0}}
+    assert date(2026, 10, 12) not in adapt(date(2026, 10, 12), 8, cfg, loads, set(), tired)["roles"]   # still carrying fatigue
+    assert date(2026, 10, 12) not in adapt(date(2026, 10, 12), 20, cfg, loads, set(), state)["roles"]  # too late in the day
+
+
 # ── fitted to how you ride ────────────────────────────────────────────────────────────────────────────────
 
 def _habit_acts(today=date(2026, 10, 8)):

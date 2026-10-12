@@ -579,6 +579,7 @@ def _weeks(days: list[dict]) -> list[dict]:
 
 DAY = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 COMMUTE_BY, LONG_BY = 10, 19          # local hour by which a commute day's ride in, or a long ride, should be on the watch
+IDLE_DAYS, IDLE_TSS, IDLE_TSB = 3, 30, -15   # three days with under 30 TSS ridden and form above −15: nothing to rest from
 
 
 def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], commute_days: set[date], state: dict[str, dict]) -> dict:
@@ -591,6 +592,10 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
     - A missed commute is rebooked: commutes already ridden count toward the week's per_week, the rest are re-picked.
     - Today: no ride in by 10:00 on a commute day means no commute (the session it replaced is back, for the evening);
       nothing logged by 19:00 on a long-ride day means it moves to tomorrow if tomorrow is free.
+    - Rest is earned: a planned rest day after three days with next to nothing ridden (a missed weekend, a busy
+      stretch) has nothing to recover from. It becomes the long ride those days owed, last week's included, on a day
+      off work (a weekend or a holiday), or steady endurance on a workday. Readiness still eases it when the morning
+      says so.
     Recovery weeks, tapers and race weeks aren't rearranged. Fitness lost to a missed day is made up the slow way: the
     next weeks' ramp toward the race target recomputes from the fitness you actually have.
     """
@@ -655,7 +660,37 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
         else:
             out["notes"].append(f"{when.capitalize()} {what} didn't happen. No free day is left this week for it, so the plan carries on "
                                 "rather than cramming it in; the coming weeks' targets already account for it.")
+    _earned_rest(today, now_hour, cfg, load_by_day, state, planned, out)
     return out
+
+
+def _earned_rest(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], state: dict[str, dict], planned: dict, out: dict) -> None:
+    """A rest day with nothing to rest from becomes the session the idle days owed (see adapt)."""
+    p = planned.get(today)
+    if not p or p["role"] != "rest" or today in out["roles"] or p.get("recovery_week") or now_hour >= LONG_BY \
+            or p["phase"] not in ("base", "build", "transition"):
+        return
+    idle = [today - timedelta(days=i) for i in range(IDLE_DAYS, 0, -1)]
+    y = state.get((today - timedelta(days=1)).isoformat())
+    if sum(load_by_day.get(d.isoformat(), 0.0) for d in idle) >= IDLE_TSS or (y and y["ctl"] - y["atl"] < IDLE_TSB):
+        return
+    before = dict(planned)                         # the idle days may reach back into last week's plan
+    monday = today - timedelta(days=today.weekday())
+    if idle[0] < monday:
+        prev = monday - timedelta(days=7)
+        prior = state.get((prev - timedelta(days=1)).isoformat())
+        last = season(prev, prior["ctl"], prior["atl"], cfg) if prior else None
+        before.update({date.fromisoformat(d["date"]): d for d in (last or {}).get("days", []) if prev <= date.fromisoformat(d["date"]) < monday})
+    owed = [d for d in idle if (before.get(d) or {}).get("role") == "long" and load_by_day.get(d.isoformat(), 0.0) < 0.5 * before[d]["load"]]
+    off = not workday(today, cfg)
+    role = "long" if off and owed else "endurance"
+    out["roles"][today] = role
+    ridden = sum(load_by_day.get(d.isoformat(), 0.0) for d in idle)
+    day = ("a holiday" if today.weekday() < 5 else "a weekend day") if off else "a workday"
+    then = (f"{DAY[owed[-1].weekday()]}'s long ride didn't happen and today is {day}: it's on today instead." if role == "long" else
+            f"Today is {day}: steady endurance instead.")
+    out["notes"].append(f"{'Next to nothing' if ridden else 'Nothing'} ridden in {IDLE_DAYS} days, so today's rest has nothing to recover from. "
+                        f"{then} Readiness still eases it if the morning says so.")
 
 
 def _rain_swap(week: list[date], today: date, now_hour: int, planned: dict, out: dict, cfg: dict, free) -> None:
