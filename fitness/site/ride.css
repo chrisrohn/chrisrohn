@@ -86,6 +86,7 @@ button.rtile { font: inherit; color: inherit; text-align: left; background: tran
 .fuel span { flex: 1 1 auto; font-size: var(--fs-small); opacity: .85; }
 .fuel .chip { color: var(--page); border-color: var(--page); }
 .note { font-size: var(--fs-small); color: var(--ink-2); text-wrap: pretty; }
+.note .chip { margin-top: var(--sp-2); min-height: var(--tap); padding: 0 var(--sp-3); }
 
 /* the controls: full-bleed, thumb-sized */
 .rfoot { max-width: none; margin: 0; display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 0; padding: 0; border-top: var(--rule-major) solid var(--ink); background: var(--page); color: var(--ink); font-size: inherit; }
