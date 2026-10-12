@@ -96,7 +96,7 @@
     return valid(d) ? adopt(d) : null;
   }
   const timeout = (p, ms) => Promise.race([p, sleep(ms).then(() => { throw new Error("GitHub is slow to answer: showing this device's copy"); })]);
-  const problems = st => !st ? [] : [st.garmin && st.garmin.error && `Garmin: ${st.garmin.error}`, st.strava && st.strava.error && `Strava: ${st.strava.error}`, st.error && `Build: ${st.error}`].filter(Boolean);
+  const problems = st => !st ? [] : [st.garmin && st.garmin.error && `Garmin: ${st.garmin.error}`, st.strava && st.strava.error && `Strava: ${st.strava.error}`, st.feel && st.feel.error && `Check-in: ${st.feel.error}`, st.error && `Build: ${st.error}`].filter(Boolean);
 
   async function load() {
     const raw = ($("data") || { textContent: "" }).textContent.trim();
@@ -284,9 +284,24 @@
     if (act === "reload") location.reload();
     if (act === "forget") {
       e.preventDefault();
-      if (confirm("Remove the dashboard data from this device?")) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin"]) ls.set(k, null); location.reload(); }
+      if (confirm("Remove the dashboard data from this device?")) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin", "fitness-rpe", "fitness-feel-sent", "fitness-feel-pending"]) ls.set(k, null); location.reload(); }
     }
   });
+  // the morning check-in and ride ratings (app.js): a quiet "service" run takes them to the sync, so the next build's
+  // call (and the morning notification's update) carries them. Nothing to watch; one that can't go now goes next open.
+  async function sendFeel(code, sent) {
+    const c = cloud();
+    if (!c) return;
+    try {
+      await gh(c, `/actions/workflows/${WORKFLOW}/dispatches`, { method: "POST", body: { ref: c.branch || "main", inputs: { action: "service", code } }, what: "save your check-in" });
+      ls.set("fitness-feel-sent", sent);
+      ls.set("fitness-feel-pending", null);
+      if (!busy) { barHTML(`<span role="status">Saved to your sync: the next build's call includes it.</span>`); setTimeout(() => { if (!busy && barArgs) databar(...barArgs); }, 4000); }
+    } catch {
+      ls.set("fitness-feel-pending", JSON.stringify({ code, sent }));
+    }
+  }
+  document.addEventListener("fitness-feel", e => { const d = /** @type {CustomEvent} */ (e).detail || {}; if (d.code) sendFeel(d.code, d.sent); });
   // Silca's numbers for a surface: a "service" run stores them with today's weight, so the app knows when to recalculate
   document.addEventListener("submit", e => {
     const f = e.target instanceof HTMLFormElement && e.target.dataset.form === "pressure" ? e.target : null;
@@ -299,6 +314,8 @@
   });
   document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target instanceof HTMLElement && e.target.id === "garmin-code") { e.preventDefault(); sendCode(); } });
 
+  /** @type {[any, string] | null} */
+  let barArgs = null;
   // the line under the masthead: how fresh this device's copy is, what needs doing, and the buttons that do it
   function connectButtons() {
     if (!status) return "";
@@ -394,11 +411,13 @@
     if (!got) welcome();
     else {
       shown = got.D.generated;
+      barArgs = [got.D, got.source];
       databar(got.D, got.source);
       /** @type {any} */ (window).startDashboard(got.D, got.source);
     }
     if (typeof strava === "string") barHTML(`<span class="bad" role="alert">${esc(strava)}</span>`);
     else if (strava) job("connect-strava", "Connecting Strava", { code: strava.code });
     else if (got && got.source === "cloud" && !cloudProblem) autoSync(status);
+    try { const p = JSON.parse(ls.get("fitness-feel-pending") || "null"); if (p && p.code && navigator.onLine) sendFeel(p.code, p.sent); } catch { /* none */ }
   });
 })();

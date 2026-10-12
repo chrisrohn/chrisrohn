@@ -3,12 +3,34 @@ winters (Strava-only virtual rides with power), two past Icemen and Barry-Roubai
 Garmin rides so the merge is exercised. Seeded, so the demo page is the same every run."""
 from __future__ import annotations
 
+import json
 import math
 import random
 from datetime import date, datetime, timedelta
 
 from fitness.activities import activity
 from fitness.store import Store
+
+
+def _trace(rnd: random.Random, minutes: int, dow: int, hr: float, speed: float, ftp: float) -> dict:
+    """A ride's minute values (streams.compact's shape): Z2 with Tuesday VO2 intervals, Thursday threshold and a
+    weekend climb or two, so the power curve has real efforts from 1 to 20 minutes in it."""
+    target = [0.65] * minutes
+    if dow == 1 and minutes >= 60:
+        for k in range(5):
+            for m in range(15 + k * 8, 19 + k * 8):
+                target[m] = 1.15 + rnd.uniform(-0.03, 0.03)
+    elif dow == 3 and minutes >= 60:
+        for m in [*range(15, 35), *range(40, 52)]:
+            target[m] = 0.95 + rnd.uniform(-0.02, 0.02)
+    elif minutes >= 30:
+        for m in range(rnd.randint(10, minutes - 12), minutes)[:8]:
+            target[m] = 1.02
+        target[rnd.randint(5, minutes - 3)] = 1.45
+    p = [round(ftp * t * rnd.uniform(0.95, 1.05), 1) if rnd.random() > 0.04 else None for t in target]
+    h = [round(hr * (0.85 + 0.2 * t) + rnd.gauss(0, 2), 1) for t in target]
+    v = [round(speed / 3.6 * (0.85 + 0.25 * t), 1) for t in target]
+    return {"hr": h, "v": v, "p": p}
 
 
 def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
@@ -64,6 +86,8 @@ def populate(store: Store, today: date, days: int = 760, seed: int = 7) -> None:
                            duration_s=dur * 1.05, moving_s=dur, distance_m=speed * hours * 1000, elev_m=hours * rnd.uniform(180, 420),
                            avg_hr=round(hr), max_hr=round(hr + rnd.uniform(18, 32)), hr_zones=zones)
             store.put_activity(act)
+            if i <= 120:   # the recent rides carry minute-by-minute traces, with power, as a power meter would record
+                store.set(f"stream:{act['id']}", json.dumps(_trace(random.Random(seed * 100003 + i), round(dur / 60), dow, hr, speed, 245 + 10 * math.sin(i / 40))))
             if rnd.random() > 0.2:
                 twin = dict(act, id=f"strava:{d.toordinal()}", source="strava", start=(start + timedelta(seconds=40)).isoformat(),
                             name=rnd.choice(["Sandy two-track grind", "Vasa loop", "Lunch ride", "Evening spin"]))

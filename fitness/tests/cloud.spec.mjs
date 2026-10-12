@@ -70,6 +70,31 @@ test.describe("GitHub sync", () => {
     expect(await page.evaluate(() => localStorage.getItem("fitness-cloud"))).toBeNull();
   });
 
+  test("a finished check-in and a ride rating go to the sync as one quiet service run; the sync's copy comes back", async ({ page }) => {
+    const problems = watch(page);
+    const ride = DATA.recent.find(a => a.group === "ride" && !a.commute);
+    const recent = DATA.recent.map(a => a.id === ride.id ? { ...a, start: `${DATA.today}T07:00:00` } : a);
+    const elsewhere = { [DATA.today]: { legs: 4, energy: 4, stress: 3, mood: 4, sick: "none" } };   // made on another device
+    const gh = await github(page, { data: { ...DATA, recent, checkins: elsewhere, rpe: {} } });
+    await page.goto("/fitness/");
+    await signIn(page);
+    await page.reload();
+    await expect(page.locator(".checkin summary")).toContainText("Legs good");                    // the sync's check-in shows here
+    await page.locator(".checkin summary").click();
+    await page.locator('[data-feel=legs][data-v="2"]').click();
+    await page.locator(`[data-rpe="${ride.id}"][data-v="7"]`).click();
+    await expect(page.locator(`[data-rpe="${ride.id}"]`)).toHaveCount(0);                      // rated: the question goes
+    await expect.poll(() => gh.dispatches.filter(d => d.inputs.action === "service").length, { timeout: 10_000 }).toBe(1);
+    const sent = gh.dispatches.find(d => d.inputs.action === "service").inputs.code;
+    expect(sent.startsWith("feel:")).toBe(true);
+    const body = JSON.parse(Buffer.from(sent.slice(5), "base64url").toString());
+    expect(body.checkins[DATA.today]).toEqual({ legs: 2 });                                      // only this phone's answers
+    expect(body.rpe).toEqual({ [ride.id]: 7 });
+    await expect(page.locator("#databar")).toContainText("Saved to your sync");
+    expect(await page.evaluate(() => localStorage.getItem("fitness-feel-pending"))).toBeNull();
+    expect(problems).toEqual([]);
+  });
+
   test("opening the app after a while syncs on its own, and only once", async ({ page }) => {
     const hoursAgo = { ...SYNCED, synced: new Date(Date.now() - 3 * 36e5).toISOString() };
     const gh = await github(page, { status: hoursAgo });   // the run "lands" without news: the reload mustn't start another

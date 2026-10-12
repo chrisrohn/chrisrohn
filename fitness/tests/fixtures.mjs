@@ -12,7 +12,7 @@ from fitness.store import Store
 cfg = config.load()
 with tempfile.TemporaryDirectory() as tmp, Store(Path(tmp) / "d.db") as store:
     demo.populate(store, date.today(), days=200)
-    data = build.assemble(cfg, store.days(), store.activities(), date.today())
+    data = build.assemble(cfg, store.days(), store.activities(), date.today(), traces=store.prefixed("stream:"))
 sys.stdout.write(json.dumps(build.phone_data(data)))
 `], { cwd: new URL("../..", import.meta.url), maxBuffer: 64 << 20 }).toString());
 

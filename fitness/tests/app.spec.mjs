@@ -221,6 +221,24 @@ test.describe("installable app", () => {
     expect(problems).toEqual([]);
   });
 
+  test("rides you rate sit beside their load, and three that felt hard say so on Today; the power curve and CP on Ride", async ({ page }) => {
+    const problems = watch(page);
+    const rides = Array.from({ length: 10 }, (_, i) => ({ id: `garmin:r${i}`, start: `${DATA.today}T0${i}:00:00`, name: `Ride ${i}`, kind: "road_biking",
+      group: "ride", offroad: false, indoor: false, commute: false, leg: null, moving_s: 3600, distance_m: 30000, elev_m: 200, avg_hr: 140, np: null, load: 60, load_src: "hr" }));
+    const rpe = Object.fromEntries(rides.map((r, i) => [r.id, i < 3 ? 8 : 4]));                // newest first: the last three felt hard
+    await page.goto(phoneLink({ ...DATA, recent: rides, rpe, checkins: {} }));
+    await expect(page.locator("#today .reasons li").first()).toContainText("Your last 3 rides felt 100% harder");
+    await page.locator("#tab-ride").click();
+    await expect(page.locator("#training")).toContainText("How rides felt");
+    await expect(page.locator("[aria-label=\"Rated rides\"] tbody tr").first()).toContainText("harder than usual");
+    await expect(page.locator("#training")).toContainText("Power-duration curve");
+    expect(DATA.power && DATA.power.cp).toBeTruthy();                                         // the demo rides carry power
+    await expect(page.locator("#training")).toContainText(`Critical power ${DATA.power.cp.cp} W`);
+    await expect(page.locator("#c-power svg")).toBeVisible();
+    expect(await axe(page)).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
   test("five tabs: Today first, a bar under the thumb on a phone, every old section link lands on its tab", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();

@@ -25,7 +25,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from fitness import bike, build, config
+from fitness import bike, build, config, feel
 from fitness.store import Store
 
 CODE_WAIT_S = 600          # how long a sign-in waits for the code Garmin emailed
@@ -231,11 +231,17 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
                 errors["strava"] = _why(e)
         days, acts = store.days(), store.activities()
         profile = {**(json.loads(store.get("profile") or "null") or {}), "weigh_ins": json.loads(store.get("weigh_ins") or "[]")}
-        if action == "service" and code:
+        if action == "service" and code.startswith("feel:"):   # the app's check-in and ride ratings ride a service run
+            try:
+                print(f"Feel: {feel.save(store, code, today or date.today())} saved")
+            except Exception as e:
+                errors["feel"] = f"your check-in wasn't saved: {_why(e)}"
+        elif action == "service" and code:
             try:
                 print(f"Bike: {bike.log(store, code, datetime.now(), (profile or {}).get('weight_kg'))} logged")
             except Exception as e:
                 errors["bike"] = f"that bike job wasn't logged: {_why(e)}"
+        felt = feel.load(store, today or date.today())
         bike_state = bike.state(store, today or date.today())
         traces = store.prefixed("stream:")
         try:
@@ -247,7 +253,7 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
     data = None
     if days or acts:
         try:
-            data = build.assemble(cfg, days, acts, today or date.today(), profile, weather=forecast, bike_state=bike_state, traces=traces)
+            data = build.assemble(cfg, days, acts, today or date.today(), profile, weather=forecast, bike_state=bike_state, traces=traces, felt=felt)
             (out / DATA_FILE).write_text(json.dumps(build.phone_data(data), separators=(",", ":")))
         except Exception as e:
             errors["build"] = _why(e)
@@ -269,6 +275,7 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
                    "export": {k: export[k] for k in ("file", "rows", "at")} if export else None, "error": errors.get("strava")},
         "push": {**(push or {}), "error": errors.get("push")},
         "bike": {"error": errors.get("bike")},
+        "feel": {"error": errors.get("feel")},
         "error": errors.get("build"),
     }
     (out / STATUS_FILE).write_text(json.dumps(status, indent=2))
