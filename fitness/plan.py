@@ -89,6 +89,30 @@ SKILLS = {
     ],
 }
 
+# Strength all season, not just the off-season. Heavy, low-rep leg work improves cycling economy, power and late-race
+# durability without adding bulk (Rønnestad & Mujika 2014 review; Vikmoen et al. 2016), and one session a week keeps
+# the gains through a race season (Rønnestad et al. 2010). Cycling doesn't load bone, so a few jumps come along: bone
+# answers to impact, and masters riders lose it (Nichols & Rauh 2011). It goes on the hard days, after the ride, so
+# easy days stay easy; never the day before a long ride, key session or race, never two days running, and never in
+# a taper: the last heavy session is STRENGTH_CUTOFF days out, so the legs arrive fresh.
+STRENGTH_PER_WEEK = {"base": 2, "build": 1}
+STRENGTH_CUTOFF = 10
+STRENGTH = {
+    "heavy": [   # the trainer base: two a week, heavy (the transition's lighter weeks taught the lifts)
+        ("Strength A · heavy", 35, "After the ride: back squat or leg press 4 × 4–6 heavy (2 reps in reserve), single-leg Romanian deadlift 3 × 6 a side, "
+                                   "Bulgarian split squat 3 × 6 a side, 3 × 8 box jumps, plank 3 × 45 s"),
+        ("Strength B · heavy", 35, "After the ride: trap-bar deadlift 4 × 4–6 heavy, step-ups 3 × 8 a side, single-leg calf raise 3 × 10, "
+                                   "rows or pull-ups 3 × 8 (the arms that hold the bars on two-track), side plank 3 × 30 s a side"),
+    ],
+    "keep": [   # the race season: one short session holds what the winter built
+        ("Strength · keep it", 25, "After the ride: squat or leg press 3 × 4 at your winter weight, step-ups 2 × 6 a side, 2 × 8 box jumps, "
+                                   "10 min of core — keep the weight, drop the volume"),
+    ],
+    "light": [   # a recovery week: move, don't load
+        ("Strength · light", 20, "Bodyweight split squats 2 × 10 a side, glute bridges 2 × 12, bird-dogs, dead bugs and hip mobility — nothing heavy"),
+    ],
+}
+
 
 def roles(pattern: list[float]) -> list[str]:
     """Each weekday's job: the biggest day is the long ride; the two next-biggest riding days carry the week's
@@ -414,6 +438,7 @@ def season(today: date, ctl0: float, atl0: float, cfg: dict, done_today: float =
         summaries.append(summary)
         ctl, atl, start, prev = seg[-1]["ctl"], seg[-1]["atl"], race["date"] + timedelta(days=1), race["date"]
     days = _dress(rows, races, cfg, done_today)
+    _strength(days, [r["left"] for r in rows], (adapt or {}).get("strength_done", 0))
     weeks = _weeks(days)
     for s in summaries:
         mine = [d for d in days if d["race"] == s["name"]]
@@ -450,6 +475,45 @@ def _dress(rows: list[dict], races: list[dict], cfg: dict, done_today: float) ->
                     "ctl": round(r["ctl"], 1), "atl": round(r["atl"], 1), "tsb": round(r["tsb"], 1),
                     "done": round(done_today) if i == 0 and done_today else None})
     return out
+
+
+def _strength(days: list[dict], lefts: list[int], done: int = 0) -> None:
+    """Book the season's strength sessions onto the dressed days (see STRENGTH): each base week two, each build week
+    one, a recovery week one light one. Hard days first, then endurance, easy and commute days; this week's quota
+    counts the sessions already logged since Monday."""
+    weeks: dict[str, list[int]] = {}
+    for i, d in enumerate(days):
+        day = date.fromisoformat(d["date"])
+        weeks.setdefault((day - timedelta(days=day.weekday())).isoformat(), []).append(i)
+    turn = Counter()
+    picked: set[int] = set()
+    rank = {"key": 0, "endurance": 1, "easy": 2, "commute": 3}
+    for n, idx in enumerate(weeks.values()):
+        live = [i for i in idx if days[i]["phase"] in STRENGTH_PER_WEEK and lefts[i] >= STRENGTH_CUTOFF and days[i]["role"] in rank]
+        if not live:
+            continue
+        light = any(days[i]["recovery_week"] for i in live)
+        quota = 1 if light else max(STRENGTH_PER_WEEK[days[i]["phase"]] for i in live)
+        quota -= done if n == 0 else 0
+
+        def ok(i: int) -> bool:
+            nxt = days[i + 1] if i + 1 < len(days) else None
+            if i - 1 in picked or i + 1 in picked:
+                return False
+            return not nxt or (nxt["role"] not in ("long", "key", "race", "openers") and nxt.get("commute") != "workout")
+
+        def order(i: int) -> tuple:   # a ride home with a workout is a hard day too, but after 2 h on the bike it waits its turn
+            return (rank[days[i]["role"]], days[i].get("commute") != "workout", i)
+        for i in sorted(live, key=order):
+            if quota <= 0:
+                break
+            if ok(i):
+                kind = "light" if light else "heavy" if days[i]["phase"] == "base" else "keep"
+                title, minutes, detail = STRENGTH[kind][turn[kind] % len(STRENGTH[kind])]
+                turn[kind] += 1
+                days[i]["strength"] = {"title": title, "minutes": minutes, "detail": detail}
+                picked.add(i)
+                quota -= 1
 
 
 def _plan_b(r: dict, title: str, minutes: int, cfg: dict) -> str | None:
@@ -510,8 +574,9 @@ def _session(r: dict, race: dict, cfg: dict, counters: Counter, ftp_tests: set[s
         return "Openers", f"40 min easy with 3 × 1 min at race pace and 3 × 10 s sprints; last bike check, {tires}"
     if role == "rest":
         return "Rest", "Off the bike. Walk, mobility, sleep" + (" — travel and packet pickup" if r["left"] == 2 else "")
-    if role == "strength":
-        return "Strength", "45–60 min: squats or leg press, Romanian deadlifts, step-ups, core — heavy, low reps (it carries over to on-bike power)"
+    if role == "strength":   # the transition teaches the lifts; the heavy sets start with the trainer base (STRENGTH)
+        return "Strength", ("45 min: goblet or back squat, Romanian deadlift, step-ups and single-leg calf raises, 3 × 8–10 at a weight that leaves "
+                            "2 reps in reserve, a little heavier each week; 3 × 8 box jumps; core. Heavy sets start with the trainer season")
     if role == "fun":
         return "Ride for fun", "Unstructured: outdoor ride, hike, run or ski while you still can — no numbers"
     if role == "easy":

@@ -242,6 +242,95 @@ window.startDashboard = D => {
     const m = day.minutes || 0;
     return { level: day.level, title: day.title, detail: day.session + (m >= 60 ? ` — about ${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : m ? ` — about ${m} min` : "") };
   };
+
+  // ── the morning check-in ────────────────────────────────────────────────────────────────────────────────
+  // How you feel is the earliest read on how the training is landing: subjective wellness tracks load, fatigue and
+  // illness more sensitively than resting HR or heart-rate measures do (Saw, Main & Gastin 2016, a systematic review
+  // of 56 studies). Four taps, kept on this device only, blended into readiness (70% the watch, 30% you) and able to
+  // ease the call, never to make it harder. Sickness follows the "neck check": a head cold may ride easy, anything
+  // below the neck (chest, fever, aches) rests.
+  const CHECK_KEY = "fitness-checkin";
+  const FEEL = [
+    ["legs", "Legs", ["Very sore", "Sore", "Normal", "Good", "Fresh"]],
+    ["energy", "Energy", ["Drained", "Tired", "Normal", "Good", "Great"]],
+    ["stress", "Life stress", ["Very high", "High", "Normal", "Low", "Very low"]],
+    ["mood", "Mood", ["Low", "Flat", "Normal", "Good", "Great"]],
+  ];
+  const SICK = [["none", "No"], ["above", "Head cold"], ["below", "Chest, fever, aches"]];
+  const checkins = () => { try { const c = JSON.parse(ls.get(CHECK_KEY) || "{}"); return c && typeof c === "object" ? c : {}; } catch { return {}; } };
+  const live = () => D.today === isoToday();                         // a check-in belongs to the morning it was made on
+  const checkin = () => live() ? checkins()[D.today] || null : null;
+  const saveCheckin = (k, v) => {
+    const all = checkins(), day = { ...(all[D.today] || {}), [k]: v };
+    all[D.today] = day;
+    const keep = Object.keys(all).sort().slice(-90);                  // three months is plenty for the chart
+    ls.set(CHECK_KEY, JSON.stringify(Object.fromEntries(keep.map(d => [d, all[d]]))));
+  };
+  // 3 is your normal = 75, like the watch's markers; each step either way is 15 points
+  const feelScore = c => { const v = c && FEEL.map(([k]) => c[k]).filter(x => x >= 1 && x <= 5); return v && v.length ? Math.max(0, Math.min(100, Math.round(75 + 15 * (mean(v) - 3)))) : null; };
+  const levelOf = s => s >= 75 ? "hard" : s >= 60 ? "moderate" : s >= 45 ? "easy" : "rest";
+  // readiness with the check-in in it, and what it says
+  const blended = () => {
+    const rd = now.readiness, c = checkin(), f = feelScore(c);
+    if (!c) return null;
+    const score = f == null ? (rd ? rd.score : null) : rd ? Math.round(0.7 * rd.score + 0.3 * f) : f;
+    const low = FEEL.filter(([k]) => c[k] === 1).map(([, name, words]) => `${name.toLowerCase()} ${words[0].toLowerCase()}`);
+    let cap = score == null ? null : levelOf(score), why = f != null && rd && levelOf(score) !== levelOf(rd.score) ? `how you feel (${f}) moves readiness to ${score}` : "";
+    if (low.length) { cap = cap === "rest" ? "rest" : "easy"; why = low.join(", "); }
+    if (c.sick === "above") { cap = cap === "rest" ? "rest" : "easy"; why = "a head cold: easy only, and stop if it gets worse"; }
+    if (c.sick === "below") { cap = "rest"; why = "symptoms below the neck: rest until they're gone"; }
+    return { score, feel: f, cap, why, c };
+  };
+  // the call, eased by the check-in when it says so (the same rule as readiness: easier, never harder)
+  const feelCall = (rec, day) => {
+    const B = blended();
+    if (!B || !B.cap || !ORDER.includes(rec.level) || ORDER.indexOf(B.cap) >= ORDER.indexOf(rec.level)) return rec;
+    const planned = day ? `Planned: ${day.session}. ` : "";
+    const commute = day && day.commute ? " On the bike to work: Z1 both ways, or leave it." : "";
+    return B.cap === "rest"
+      ? { level: "rest", title: "Rest today", detail: `${planned}Your check-in says rest — ${B.why}. Off the bike, or 20–30 min truly easy if you're well.`, eased: true }
+      : { level: "easy", title: "Keep it easy", detail: `${planned}Your check-in says ease off — ${B.why}. Z1–Z2 only, 45–75 min, no intervals.${commute}`, eased: true };
+  };
+  const answered = c => !!c && FEEL.every(([k]) => c[k]) && !!c.sick;
+  let feelOpen = false;   // a finished check-in reopened to change an answer stays open while you do
+  function checkinBlock() {
+    if (!live()) return "";
+    const c = checkin() || {};
+    const done = answered(c);
+    const group = (k, name, opts) => `<fieldset class="feel"><legend>${esc(name)}</legend><div class="seg">${opts.map(([v, label]) =>
+      `<button type="button" class="chip" data-feel="${k}" data-v="${v}" aria-pressed="${String(c[k] === v)}">${esc(label)}</button>`).join("")}</div></fieldset>`;
+    const B = blended();
+    const said = done ? FEEL.map(([k, name, words]) => `${name.toLowerCase()} ${words[c[k] - 1].toLowerCase()}`).concat(c.sick !== "none" ? [SICK.find(s => s[0] === c.sick)[1].toLowerCase()] : []) : [];
+    return `<details class="checkin"${done && !feelOpen ? "" : " open"}><summary><span class="label">How do you feel?</span>${done ? ` <span class="said">${esc(listOf(said))}${B && B.feel != null ? ` · feel ${B.feel}` : ""}</span>` : ""}</summary>
+      <div class="feel-in">${FEEL.map(([k, name, words]) => group(k, name, words.map((w, i) => [i + 1, w]))).join("")}${group("sick", "Feeling sick?", SICK)}</div>
+      <p class="sub">Kept on this phone. It eases the call when your body says so, never makes it harder.</p></details>`;
+  }
+  app.addEventListener("click", e => {
+    const t = e.target instanceof Element ? e.target : null;
+    const sum = t && t.closest(".checkin > summary");
+    if (sum) { feelOpen = !(/** @type {HTMLDetailsElement} */ (sum.parentElement).open); return; }
+    const b = t && t.closest("[data-feel]");
+    if (!b) return;
+    const k = /** @type {HTMLElement} */ (b).dataset.feel, raw = /** @type {HTMLElement} */ (b).dataset.v;
+    feelOpen = answered(checkin());                                   // the answer that finishes it folds it away
+    saveCheckin(k, k === "sick" ? raw : Number(raw));
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+    const again = document.querySelector(`[data-feel="${k}"][data-v="${raw}"]`);
+    if (again instanceof HTMLElement && again.closest("details[open]")) again.focus();
+  });
+
+  // strength after the ride (plan.py STRENGTH): what, and whether today's call still has room for it
+  function strengthLine(day, rec) {
+    const S = day && day.strength;
+    if (!S) return "";
+    const off = ORDER.indexOf(rec.level) < ORDER.indexOf(day.level);
+    const wk = D.strength;
+    const tally = wk ? ` <span class="sub">Strength this week: ${wk.done.length} of ${wk.done.length + wk.ahead.length}.</span>` : "";
+    return `<p class="lift${off ? " off" : ""}"><span class="label">Plus · ${esc(S.title)} · ${S.minutes} min</span> ${off ? "Skip the lifting today: the call is easier than the plan, and heavy sets want fresh legs." : esc(S.detail)}${off ? "" : tally}</p>`;
+  }
+
   const shortName = name => name.replace(/^Bell's /, "").replace(/ Cometh Challenge$/, "");
   const LEVEL = { hard: "Go hard", moderate: "Train", easy: "Easy", rest: "Rest", unknown: "Waiting for data" };
   const formWord = t => t == null ? "" : t > 15 ? "very fresh" : t > 5 ? "fresh" : t > -10 ? "neutral" : t > -30 ? "productive fatigue" : "overreaching";
@@ -422,11 +511,11 @@ window.startDashboard = D => {
   function weekBlock() {
     if (!plan) return "";
     const week = plan.days.slice(0, 7);
-    const hours = week.reduce((a, d) => a + (d.minutes || 0), 0) / 60, commutes = week.filter(d => d.commute).length;
-    return `<div class="week-ahead"><span class="label">The next 7 days · ${hours.toFixed(1)} h${commutes ? ` · ${commutes} commute${commutes === 1 ? "" : "s"}` : ""}</span>
+    const hours = week.reduce((a, d) => a + (d.minutes || 0), 0) / 60, commutes = week.filter(d => d.commute).length, lifts = week.filter(d => d.strength).length;
+    return `<div class="week-ahead"><span class="label">The next 7 days · ${hours.toFixed(1)} h${commutes ? ` · ${commutes} commute${commutes === 1 ? "" : "s"}` : ""}${lifts ? ` · ${lifts} strength` : ""}</span>
       <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i>
-        <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}</span>${wxChip(d.wx)}</summary>
-        <p class="sub">${esc(d.session)}</p>${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}${d.indoor && d.steps && d.steps.length ? `<p><button type="button" class="chip" data-zwo="${esc(d.date)}">Zwift / MyWoosh file (.zwo)</button></p>` : ""}</details></li>`).join("")}</ol>
+        <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}${d.strength ? " · + strength" : ""}</span>${wxChip(d.wx)}</summary>
+        <p class="sub">${esc(d.session)}</p>${d.strength ? `<p class="sub"><b>+ ${esc(d.strength.title)} · ${d.strength.minutes} min:</b> ${esc(d.strength.detail)}</p>` : ""}${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}${d.indoor && d.steps && d.steps.length ? `<p><button type="button" class="chip" data-zwo="${esc(d.date)}">Zwift / MyWoosh file (.zwo)</button></p>` : ""}</details></li>`).join("")}</ol>
       <p class="sub">Rebuilt at every sync from what you actually rode, slept and recovered: a missed day moves, a good week grows.</p></div>`;
   }
 
@@ -622,10 +711,12 @@ window.startDashboard = D => {
   }
 
   function render() {
-    const rd = now.readiness, sl = now.sleep, pToday = plan && plan.days[0], rec = todayCall(pToday), next = plan && plan.races[0];
+    const rd = now.readiness, sl = now.sleep, pToday = plan && plan.days[0], rec = feelCall(todayCall(pToday), pToday), next = plan && plan.races[0];
     const last7 = D.readiness.slice(-8, -1).map(r => r.score);
     const rAvg = mean(last7);
-    const readinessTile = tile("Readiness", rd ? rd.score : "—", "/100", rAvg != null && rd ? `${signed(rd.score - rAvg)} vs 7-day avg` : "needs 14 nights", rd ? (rd.score >= 60 ? "good" : "bad") : "", rd && rAvg != null ? (rd.score - rAvg >= 0.5 ? "up" : rd.score - rAvg <= -0.5 ? "down" : "") : "");
+    const B = blended(), score = B && B.score != null ? B.score : rd ? rd.score : null;   // with this morning's check-in in it
+    const readinessTile = tile("Readiness", score ?? "—", "/100", B && B.feel != null ? `watch ${rd ? rd.score : "—"} · feel ${B.feel}` : rAvg != null && rd ? `${signed(rd.score - rAvg)} vs 7-day avg` : "needs 14 nights", score != null ? (score >= 60 ? "good" : "bad") : "", score != null && rAvg != null ? (score - rAvg >= 0.5 ? "up" : score - rAvg <= -0.5 ? "down" : "") : "");
+    const feelReason = B && B.why ? [{ tone: rec.eased ? "bad" : "good", text: `Check-in: ${B.why}` }] : [];
     const sleepTile = tile("Sleep score", sl ? sl.score : "—", "", sl ? `${esc(sl.label)} · ${hrs(sl.hours)}` : "no sleep logged", sl ? (sl.score >= 80 ? "good" : sl.score < 60 ? "bad" : "") : "");
 
     // today: the call and everything that bears on it, on one screen
@@ -637,7 +728,9 @@ window.startDashboard = D => {
         <p class="detail">${esc(rec.detail)}</p>
         ${adjustedBlock()}
         ${pToday && pToday.done ? `<p class="sub">Already logged today: ${pToday.done} TSS of ${pToday.load} planned.</p>` : ""}
-        ${rd ? `<ul class="reasons">${rd.reasons.map(r => `<li class="${r.tone === "bad" ? "bad" : ""} ${r.dir || ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
+        ${rd || feelReason.length ? `<ul class="reasons">${[...feelReason, ...(rd ? rd.reasons : [])].map(r => `<li class="${r.tone === "bad" ? "bad" : ""} ${r.dir || ""}">${esc(r.text)}</li>`).join("")}</ul>` : ""}
+        ${checkinBlock()}
+        ${strengthLine(pToday, rec)}
         ${planB(pToday, rec, rd)}
         ${overnightBlock()}
         ${weatherBlock()}
@@ -709,6 +802,7 @@ window.startDashboard = D => {
     const zp = z ? z.seconds.map(s => s / zt * 100) : [];
     const training = (`<section id="training" class="card"><div class="head"><h2>Training</h2><span class="sub">${D.ytd.rides} rides this year · ${D.ytd.hours} h · ${dist(D.ytd.km * 1000)} · ${elev(D.ytd.elev_m)}</span></div>
       ${D.indoor ? `<div class="kpis"><span>Trainer season ${fmtD(D.indoor.start)} – ${fmtD(D.indoor.end)}${D.indoor.current ? " (on now)" : ""}: <b>${D.indoor.rides}</b> rides · <b>${D.indoor.hours} h</b>${D.indoor.avg_np ? ` · avg NP <b>${D.indoor.avg_np} W</b>` : ""}${D.indoor.ftp_start && D.indoor.ftp_end ? ` · best-effort FTP <b>${D.indoor.ftp_start} → ${D.indoor.ftp_end} W</b>` : ""}${D.indoor.outdoor_rides ? ` · ${D.indoor.outdoor_rides} outdoor` : ""}</span></div>` : ""}
+      ${D.strength ? `<div class="kpis"><span>Strength: <b>${D.strength.per_week_8}</b> a week over the last 8 weeks · <b>${D.strength.done.length}</b> this week${D.strength.ahead.length ? `, ${D.strength.ahead.length} still planned` : ""}</span><span class="muted">The plan asks for 2 a week in the trainer base and 1 in the build; log them on the watch as Strength.</span></div>` : ""}
       <div class="grid"><div><h3>Weekly hours</h3><div id="c-weeks"></div></div>
       <div><h3>Heart-rate zones, last ${z ? z.days : 28} days</h3>${z ? `<div class="zones" role="img" aria-label="Time in zones">${zp.map((p, i) => `<div style="flex:${p};background:var(--z${i + 1})" title="Zone ${i + 1}: ${p.toFixed(0)}%"></div>`).join("")}</div>
         <div class="zones-key">${zp.map((p, i) => `<span><b><i class="sw" style="background:var(--z${i + 1})"></i>Z${i + 1}</b>${p.toFixed(0)}%<br>${dur(z.seconds[i])}</span>`).join("")}</div>
@@ -828,10 +922,12 @@ window.startDashboard = D => {
         yFmt: v => (k === "resp" ? v.toFixed(1) : String(Math.round(v))),
       });
     }
+    const mine = checkins(), felt = D.readiness.map(r => feelScore(mine[r.date]));   // this phone's check-ins, on the same scale
     chart(document.getElementById("c-ready"), {
       label: "Readiness score", x: D.readiness.map(r => r.date), height: 170, yMin: 0, yMax: 100,
       ref: { lo: 75, hi: 100, label: "key-session zone", color: "var(--s3)" },
-      series: [{ name: "Readiness", type: "line", color: "var(--s1)", values: D.readiness.map(r => r.score), endDot: true }],
+      series: [{ name: "Readiness", type: "line", color: "var(--s1)", values: D.readiness.map(r => r.score), endDot: true },
+        ...(felt.some(v => v != null) ? [{ name: "How you felt", type: "line", color: "var(--s2)", values: felt, endDot: true }] : [])],
     });
 
     // weekly hours
