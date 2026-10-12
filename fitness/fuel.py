@@ -12,10 +12,15 @@ everything else, sized to the day's training.
   what that is in rice, tortillas, potatoes or pasta and in tofu, tempeh, eggs, Greek yogurt or beans. Dinner is
   sized to what the day still owes, so taco or pizza night can be planned to hit it.
 - Body weight comes from Garmin's profile (or [athlete] weight_kg); without one, targets are given per kg.
+- **Beyond carbs and protein** (nutrients.py): Greek yogurt with the Super Veggie and the day's gap fillers (eggs,
+  pumpkin seeds, iodized salt) bring the B12, iodine, choline, calcium and zinc the Blueprint meals can't; a beet
+  shot before key sessions and races; slow protein before bed after hard days.
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
+
+from fitness import nutrients
 
 CARBS_PER_KG = {"rest": 3.0, "easy": 3.5, "moderate": 5.0, "hard": 6.0, "long": 7.0, "race": 8.0, "load": 8.0}
 FAT_PER_KG = 0.9                                    # what the Pudding, the Super Veggie and dinner add up to, roughly
@@ -239,9 +244,12 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
     carbs = protein = 0.0
     pudding_later = False
 
-    def add(slot: str, what: str, why: str, c: float = 0, p: float = 0, base_line: str = "", recipe: str = "") -> None:
+    fillers: list[str] = []
+
+    def add(slot: str, what: str, why: str, c: float = 0, p: float = 0, base_line: str = "", recipe: str = "", buy: dict | None = None) -> None:
         nonlocal carbs, protein
-        meals.append({"slot": slot, "what": what, "why": why, **({"base": base_line} if base_line else {}), **({"recipe": recipe} if recipe else {})})
+        meals.append({"slot": slot, "what": what, "why": why, **({"base": base_line} if base_line else {}), **({"recipe": recipe} if recipe else {}),
+                      **({"buy": buy} if buy else {})})
         carbs, protein = carbs + c, protein + p
 
     # ── breakfast ──
@@ -288,9 +296,25 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
         why = (f"{veggie['carbs'] + (CARB_SIDE if side else 0)} g carbs to refill what the ride used." if side and pudding_later and not weekday
                else f"{veggie['carbs'] + (CARB_SIDE if side else 0)} g carbs for the riding still to come." if side
                else f"{veggie['protein']} g protein, {veggie['carbs']} g carbs, {veggie['fiber']} g fiber: as it is, it fits the day.")
-        add("Lunch", what, why, veggie["carbs"] + (CARB_SIDE if side else 0), veggie["protein"], recipe=n.get("lunch", "veggie"))
+        key = n.get("lunch", "veggie")
+        yog = ", with a cup of plain Greek yogurt (stirred into the lime-cumin dressing, or on the side)"
+        what = what.replace(", after the ride", yog + ", after the ride") if what.endswith(", after the ride") else what + yog
+        leu, alone = nutrients.lunch_leucine(key, True), nutrients.lunch_leucine(key, False)
+        why += (f" The yogurt takes lunch to ~{veggie['protein'] + 25} g protein and {leu:g} g leucine (the bowl alone: {alone:g} g"
+                + (", plant protein" if key == "veggie" else "") + "), past the ~2.5 g that switches muscle repair fully on, "
+                "and brings the B12, calcium and iodine the bowl doesn't have.")
+        if key == "veggie":
+            why += " Its ~12 mg of iron is plant iron: the lime and broccoli's vitamin C help it absorb; keep coffee or tea an hour away."
+        add("Lunch", what, why, veggie["carbs"] + (CARB_SIDE if side else 0) + 9, veggie["protein"] + 25, recipe=key, buy={"yogurt": 1})
+        fillers.append("yogurt")
 
     # ── before, during and after the ride ──
+    if rides and t != "load" and ((day or {}).get("role") in ("key", "race") or commute == "workout"):
+        when = "with breakfast" if ride_when == "morning" or t == "race" else "2–3 h before the ride home" if commute else "2–3 h before the ride"
+        add("Nitrate", f"A beet-juice shot {when} (Beet-It Sport, 70 ml ≈ 400 mg nitrate; or 500 ml of beet juice)",
+            "Nitrate lowers the oxygen cost of hard efforts; it's one of the few supplements the IOC rates as well supported for "
+            "performance (Maughan et al. 2018), and the effect is largest below elite level. Skip antibacterial mouthwash today: "
+            "mouth bacteria do the conversion. Pink pee afterwards is harmless.", 15, 1, buy={"beet": 1})
     if rides and t != "race" and mins >= 45 and t in ("moderate", "hard", "long") and ride_when in ("evening", "commute"):
         workout_home = commute == "workout"
         c = 40 if workout_home else 35
@@ -321,6 +345,13 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
                 "Protein and carbs early start the repair and refill the glycogen tomorrow's riding needs.",
                 40, SHAKE, base(40, SHAKE, kind="snack"))
 
+    # ── what the Blueprint meals can't carry: eggs, a Brazil nut, pumpkin seeds, iodized salt (nutrients.py) ──
+    fillers += ["eggs", "pumpkin", "salt"]
+    add("Gap fillers", "2 eggs (at dinner, or a snack), ¼ cup pumpkin seeds (a snack, or on the Super Veggie), and iodized salt when you cook",
+        "What the Pudding and the Super Veggie can't bring: the eggs carry choline (a day's worth with the bowl), B12, iodine and "
+        "selenium; the seeds carry zinc, which plant meals absorb less of; iodized salt is the iodine (sea and pink salt aren't "
+        "iodized). The Nutrients panel shows the day's sums.", 5, 21.1, buy={"eggs": 2, "pumpkin": 1})
+
     # ── dinner (and an evening snack when the day still owes a lot) ──
     left_c = (carb_target - carbs) if carb_target else None
     left_p = (protein_target - protein) if protein_target else None
@@ -333,6 +364,9 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
             snack_p = left_p - 50
     elif left_c is not None and (left_c > 200 or left_p > 60):
         snack_c, snack_p = max(0.0, left_c * 0.3), max(0.0, left_p * 0.35)
+    presleep = t in ("hard", "long", "race")     # slow protein before bed after a hard day, even past the day's 1.8 g/kg
+    if presleep:
+        snack_p = max(snack_p, 25.0)
     low_fiber = t == "load" or t_next == "race"
     if low_fiber:
         idea = "The carb night: pasta with marinara and parmesan, or a cheese pizza, with eggs, tofu or Greek yogurt for protein. Skip the beans tonight (fiber), keep fat moderate, eat by 7."
@@ -353,20 +387,28 @@ def day_plan(day: dict | None, tomorrow: dict | None, on: date, cfg: dict, weigh
             dinner_c, dinner_p, line)
     else:
         add("Dinner", idea, f"Aim for about {CARBS_PER_KG[t]:g} g carbs and {PROTEIN_PER_KG:g} g protein per kg over the whole day.")
-    if snack_c >= 15 or snack_p >= 10:
+    if presleep and snack_c < 15:
+        add("Before bed", "1 cup cottage cheese or plain Greek yogurt, 30–60 min before lights out",
+            "About 25–30 g of slow casein protein keeps muscle repair going overnight after a hard day (Snijders et al. 2015; "
+            "Trommelen et al. 2023), and it doesn't cost sleep.", 8, snack_p, buy={"cottage": 1})
+    elif snack_c >= 15 or snack_p >= 10:
         if snack_c < 15:
             add("Evening snack", "Greek yogurt or cottage cheese, plain or with a few berries",
                 "Protein the light dinner didn't carry; it also helps overnight repair.", 0, snack_p,
                 f"Vegetarian base: ~{_r10(snack_p)} g protein (1 cup Greek yogurt ≈ 23 g, 1 cup cottage cheese ≈ 25 g).")
         else:
-            add("Evening snack", "Greek yogurt with fruit and granola, or cottage cheese with berries and honey",
-                "The day still owes more than one dinner can carry comfortably.", snack_c, snack_p, base(snack_c, snack_p, kind="snack"))
+            add("Evening snack", "Greek yogurt with fruit and granola, or cottage cheese with berries and honey" + (", before bed" if presleep else ""),
+                "The day still owes more than one dinner can carry comfortably" + ("; the dairy's slow casein keeps muscle repair going "
+                "overnight after a hard day (Snijders et al. 2015)." if presleep else "."), snack_c, snack_p, base(snack_c, snack_p, kind="snack"),
+                buy={"cottage": 1} if presleep else None)
 
+    eaten = [m["recipe"] for m in meals if m.get("recipe")]
+    nut = nutrients.day(eaten, fillers, on, cfg, (body or {}).get("age"))
     kcal = carb_target * 4 + protein_target * 4 + FAT_PER_KG * kg * 9 if kg else None
     return {"date": on.isoformat(), "tier": t, "label": LABEL[t], "weekday": weekday,
             "carbs_g": _r10(carb_target) if carb_target else None, "protein_g": _r10(protein_target) if protein_target else None,
             "kcal": int(round(kcal / 50) * 50) if kcal else None, "burn": {k: int(round(v / 50) * 50) for k, v in energy.items()} if energy else None,
-            "carbs_per_kg": CARBS_PER_KG[t], "protein_per_kg": PROTEIN_PER_KG, "meals": meals}
+            "carbs_per_kg": CARBS_PER_KG[t], "protein_per_kg": PROTEIN_PER_KG, "meals": meals, "nutrients": nut}
 
 
 def plan(days: list[dict], today: date, cfg: dict, weight_kg: float | None, profile: dict | None = None) -> dict | None:

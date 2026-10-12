@@ -209,3 +209,46 @@ def test_readiness_learns_which_markers_predict_your_good_days():
     assert p["best"] == "rhr" and p["rho"]["rhr"] > 0.9 and p["weights"]["rhr"] > m.BASE_WEIGHTS["rhr"]
     assert abs(sum(p["weights"].values()) - sum(m.BASE_WEIGHTS.values())) < 0.01
     assert m.personal_weights(dict(list(ready.items())[:10]), acts) is None        # 10 mornings: too few to learn from
+
+
+def test_nutrients_the_blueprint_meals_worked_out_and_what_they_cant_carry():
+    """The Pudding and Super Veggie from their ingredients: rich in fiber, folate, C, K and ALA, with no B12, D,
+    iodine or EPA/DHA; the yogurt and gap fillers close B12, iodine and choline; D and EPA/DHA go to the advice."""
+    from fitness import nutrients
+    pud, veg = nutrients.recipe("pudding"), nutrients.recipe("veggie")
+    assert 40 <= pud["protein"] <= 48 and 25 <= veg["protein"] <= 31        # matches fuel.RECIPES
+    assert pud["b12"] == veg["b12"] == 0 and pud["epa_dha"] == veg["epa_dha"] == 0 and pud["vitamin_d"] == 0
+    assert veg["vitamin_c"] > 90 and pud["ala"] + veg["ala"] > 5 and veg["leucine"] < nutrients.LEUCINE_MEAL
+    assert nutrients.lunch_leucine("veggie", True) >= nutrients.LEUCINE_MEAL
+    need = nutrients.needs(46)
+    assert need["iron"] == 8 * 1.8 and need["zinc"] == 11 * 1.5 and nutrients.needs(46, vegetarian=False)["iron"] == 8
+    cfg = config.load()
+    bare = {r["key"]: r for r in nutrients.day(["pudding", "veggie"], [], date(2026, 12, 1), cfg, 46)["rows"]}
+    assert bare["b12"]["status"] == "low" and bare["iodine"]["pct"] == 0 and bare["folate"]["status"] == "ok"
+    day = nutrients.day(["pudding", "veggie"], ["yogurt", "eggs", "pumpkin", "salt"], date(2026, 12, 1), cfg, 46)
+    rows = {r["key"]: r for r in day["rows"]}
+    assert all(rows[k]["status"] == "ok" for k in ("b12", "iodine", "choline", "selenium", "calcium", "iron"))
+    assert rows["vitamin_d"]["status"] == "low" and rows["epa_dha"]["pct"] == 0
+    names = [a["name"] for a in day["advice"]]
+    assert names[:2] == ["Vitamin D3", "Algae oil (EPA + DHA)"] and "November" in day["advice"][0]["why"]
+    taking = {**cfg, "nutrition": {**cfg["nutrition"], "supplements": {"vitamin_d_iu": 1000, "epa_dha_mg": 300}, "creatine": True}}
+    took = nutrients.day(["pudding", "veggie"], ["yogurt", "eggs"], date(2026, 12, 1), taking, 46)
+    assert took["advice"] == [] and {r["key"]: r for r in took["rows"]}["vitamin_d"]["status"] == "ok"
+    assert nutrients.low_sun(date(2026, 1, 10), 42.3) and not nutrients.low_sun(date(2026, 6, 10), 42.3) and nutrients.low_sun(date(2026, 1, 10), 0)
+
+
+def test_fuel_days_carry_the_gap_fillers_nitrate_and_bedtime_protein():
+    cfg = config.load()
+    body = {"kg": 84, "height_cm": 180, "age": 46, "sex": "male"}
+    rest = fuel.day_plan({"role": "rest", "minutes": 0, "level": "rest"}, None, date(2026, 10, 14), cfg, 84, body)
+    slots = {m["slot"]: m for m in rest["meals"]}
+    assert "Greek yogurt" in slots["Lunch"]["what"] and "leucine" in slots["Lunch"]["why"] and "Gap fillers" in slots
+    assert "Nitrate" not in slots and "Before bed" not in slots and rest["nutrients"]["rows"]
+    key = fuel.day_plan({"role": "key", "minutes": 60, "load": 85, "level": "hard"}, None, date(2026, 10, 14), cfg, 84, body)
+    order = [m["slot"] for m in key["meals"]]
+    assert order.index("Nitrate") < order.index("Snack") and "Before bed" in order
+    assert {m["slot"]: m for m in key["meals"]}["Before bed"]["buy"] == {"cottage": 1}
+    k = grocery.week([key, rest], cfg, date(2026, 10, 14))
+    buy = {r["item"]: r["amount"] for r in k["buy"]}
+    assert buy["Eggs"].startswith("4") and buy["Plain Greek yogurt"].startswith("2 cups") and buy["Beet-It Sport shots (70 ml), for the key sessions"] == "1"
+    assert any(r["item"].startswith("Iodized salt") for r in k["check"]) and any(r["item"] == "Vitamin D3" for r in k["check"])
