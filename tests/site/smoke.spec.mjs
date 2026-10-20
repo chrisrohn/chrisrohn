@@ -1319,7 +1319,22 @@ test("the Video tab: kept songs' videos and the library's, played in place, adde
     }
     await r.fulfill({ json: j });
   });
+  // a curator's catalog loads in the background and can hold the same songs under the same ids (the committed one
+  // did on 2026-10-12, with the kept-without-video song's video in it): it gets the feed's treatment, so the tab
+  // counts the fixture's videos whatever the data commits bring
+  await page.route("**/data/catalog.json", async r => {
+    const j = await (await r.fetch()).json();
+    for (const it of j.items || []) {
+      if (!it.youtube) continue;
+      if (it.id === kept.id) Object.assign(it.youtube, { video: "keptv000000", videoKind: "MUSIC_VIDEO_TYPE_OMV" });
+      if (it.id === unkept.id) Object.assign(it.youtube, { video: "unkeptv0000", videoKind: "MUSIC_VIDEO_TYPE_OMV" });
+      if (it.id === keptNoVideo.id) { delete it.youtube.video; delete it.youtube.videoKind; }
+    }
+    await r.fulfill({ json: j });
+  });
   await page.route("**/data/videos.json", r => r.fulfill({ json: report }));
+  // the fixture's thumbnails don't exist either, and offline they fail: the card drops a dead image (dropIfDead)
+  await page.route("https://i.ytimg.com/**", r => r.fulfill({ contentType: "image/gif", body: Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64") }));
   // the fixture's videos do not exist on YouTube: with the player script loaded (a runner with network) the real player
   // would answer "not found", and the site's "Can't embed this one" toast would replace the Undo toast the test clicks.
   // What is under test is the site's own queue, cards and thumbs, so the player script stays out, as it does offline.
