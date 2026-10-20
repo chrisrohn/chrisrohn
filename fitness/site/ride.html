@@ -21,80 +21,260 @@
   <style>/*__RIDE_STYLE__*/</style>
 </head>
 <body class="ride">
-  <header class="rbar">
+  <header class="rtop">
+  <div class="rbar">
     <label class="day"><span class="sr">Session</span><select id="day"></select></label>
     <button type="button" class="chip sensor" id="btn-hr" aria-label="Connect heart-rate sensor"><i></i>HR</button>
     <button type="button" class="chip sensor" id="btn-csc" aria-label="Connect cadence, speed or power sensor"><i></i>Cad</button>
     <span class="chip sensor" id="gps-chip"><i></i>GPS</span>
     <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙</button>
+  </div>
+
+  <div class="rtabs" role="tablist" aria-label="Ride screens">
+    <button type="button" role="tab" id="tab-workout" aria-controls="pg-workout" aria-selected="true">Workout</button>
+    <button type="button" role="tab" id="tab-map" aria-controls="pg-map" aria-selected="false" tabindex="-1">Map</button>
+    <button type="button" role="tab" id="tab-ahead" aria-controls="pg-ahead" aria-selected="false" tabindex="-1">Ahead</button>
+    <button type="button" role="tab" id="tab-data" aria-controls="pg-data" aria-selected="false" tabindex="-1">Data</button>
+    <button type="button" role="tab" id="tab-laps" aria-controls="pg-laps" aria-selected="false" tabindex="-1">Laps</button>
+  </div>
+
+  <div class="navbanner" id="navbanner" hidden aria-live="assertive">
+    <span class="arrow" id="nb-arrow" aria-hidden="true">↑</span>
+    <span class="nbtext"><b id="nb-dist" class="num"></b><span id="nb-what"></span></span>
+    <button type="button" class="chip" id="nb-action" hidden>Reroute</button>
+  </div>
   </header>
 
-  <main class="rmain">
+  <main class="pages" id="pages" tabindex="0">
     <h1 class="sr">Ride mode</h1>
-    <section class="stepcard" id="stepcard" aria-live="polite">
-      <div class="stepname" id="step-name">Free ride</div>
-      <div class="steptime num" id="step-time">—</div>
-      <div class="target" id="step-target"></div>
-      <div class="progress" aria-hidden="true"><span id="step-bar"></span></div>
-      <div class="cue" id="step-cue"></div>
-      <div class="next" id="step-next"></div>
+
+    <section class="page rmain" id="pg-workout" role="tabpanel" aria-labelledby="tab-workout">
+      <section class="stepcard" id="stepcard" aria-live="polite">
+        <div class="stepname" id="step-name">Free ride</div>
+        <div class="steptime num" id="step-time">—</div>
+        <div class="target" id="step-target"></div>
+        <div class="progress" aria-hidden="true"><span id="step-bar"></span></div>
+        <div class="cue" id="step-cue"></div>
+        <div class="next" id="step-next"></div>
+      </section>
+
+      <div class="suggest" id="suggest" hidden role="status"><span id="suggest-text"></span><span class="sbtns"><button type="button" class="chip primary" id="suggest-yes">Yes</button><button type="button" class="chip" id="suggest-no">No</button></span></div>
+
+      <section class="hrcard" id="hrcard">
+        <div class="hrval num" id="hr">—</div>
+        <div class="hrmeta"><span class="zone" id="hr-zone">bpm</span><span class="status" id="hr-status"></span></div>
+        <div class="zbar" id="zbar" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><b id="zmark"></b></div>
+      </section>
+
+      <section class="rtiles">
+        <div class="rtile"><span class="k">Time</span><span class="v num" id="t-time">0:00</span></div>
+        <button type="button" class="rtile unit-flip" aria-label="Distance; tap to switch imperial / metric"><span class="k">Distance</span><span class="v num" id="t-dist">0.0</span></button>
+        <button type="button" class="rtile unit-flip" aria-label="Speed; tap to switch imperial / metric"><span class="k">Speed</span><span class="v num" id="t-speed">—</span></button>
+        <div class="rtile"><span class="k" id="t-cad-k">Cadence</span><span class="v num" id="t-cad">—</span></div>
+        <div class="rtile"><span class="k">Avg HR</span><span class="v num" id="t-avg">—</span></div>
+        <div class="rtile"><span class="k">Load</span><span class="v num" id="t-load">0</span></div>
+      </section>
+
+      <div class="tailor" role="group" aria-label="Tailor the workout">
+        <button type="button" class="chip" id="w-easier" aria-label="Easier: targets down 5%">Easier</button>
+        <span class="chip ghost num" id="w-int" aria-live="polite">100%</span>
+        <button type="button" class="chip" id="w-harder" aria-label="Harder: targets up 5%">Harder</button>
+        <button type="button" class="chip" id="w-more" aria-label="One more minute on this step">+1 min</button>
+        <button type="button" class="chip primary" id="w-tailor">Tailor</button>
+      </div>
+
+      <section class="rtiles wxbar" id="wxbar" hidden aria-label="Weather">
+        <div class="rtile"><span class="k">Temp</span><span class="v num" id="wx-temp">—</span><span class="s" id="wx-feels"></span></div>
+        <div class="rtile"><span class="k">Wind</span><span class="v num"><i class="arrow" id="wx-arrow" aria-hidden="true">↑</i><span id="wx-wind">—</span></span><span class="s" id="wx-dir"></span></div>
+        <div class="rtile"><span class="k">On your line</span><span class="v" id="wx-rel">—</span><span class="s" id="wx-src"></span></div>
+      </section>
+
+      <div class="fuel" id="fuel" hidden role="alert"><b>Eat &amp; drink</b><span id="fuel-text"></span><button type="button" class="chip" id="fuel-ok">Done</button></div>
+      <p class="note" id="note"></p>
     </section>
 
-    <section class="hrcard" id="hrcard">
-      <div class="hrval num" id="hr">—</div>
-      <div class="hrmeta"><span class="zone" id="hr-zone">bpm</span><span class="status" id="hr-status"></span></div>
-      <div class="zbar" id="zbar" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><b id="zmark"></b></div>
+    <section class="page" id="pg-map" role="tabpanel" aria-labelledby="tab-map" hidden>
+      <div class="mapwrap">
+        <div class="map" id="map" role="img" aria-label="Map of the route and where you are"></div>
+        <canvas class="crumb" id="crumb" hidden aria-hidden="true"></canvas>
+        <div class="mapfields">
+          <div><span class="k">Speed</span><b class="num" id="m-speed">—</b></div>
+          <div><span class="k">To go</span><b class="num" id="m-left">—</b></div>
+          <div><span class="k">Arrive</span><b class="num" id="m-eta">—</b></div>
+        </div>
+        <div class="mapbtns">
+          <button type="button" class="chip" id="m-center" aria-label="Follow my position">◎</button>
+          <button type="button" class="chip" id="m-orient" aria-label="Heading up or north up">▲ Up</button>
+          <button type="button" class="chip" id="m-zin" aria-label="Zoom in">+</button>
+          <button type="button" class="chip" id="m-zout" aria-label="Zoom out">−</button>
+        </div>
+        <p class="mapnote" id="mapnote" hidden></p>
+      </div>
+      <div class="routebar">
+        <span class="rname" id="route-name">No route loaded</span>
+        <button type="button" class="chip primary" id="btn-routes">Routes</button>
+      </div>
     </section>
 
-    <section class="rtiles">
-      <div class="rtile"><span class="k">Time</span><span class="v num" id="t-time">0:00</span></div>
-      <button type="button" class="rtile unit-flip" aria-label="Distance; tap to switch imperial / metric"><span class="k">Distance</span><span class="v num" id="t-dist">0.0</span></button>
-      <button type="button" class="rtile unit-flip" aria-label="Speed; tap to switch imperial / metric"><span class="k">Speed</span><span class="v num" id="t-speed">—</span></button>
-      <div class="rtile"><span class="k" id="t-cad-k">Cadence</span><span class="v num" id="t-cad">—</span></div>
-      <div class="rtile"><span class="k">Avg HR</span><span class="v num" id="t-avg">—</span></div>
-      <div class="rtile"><span class="k">Load</span><span class="v num" id="t-load">0</span></div>
+    <section class="page rmain" id="pg-ahead" role="tabpanel" aria-labelledby="tab-ahead" hidden>
+      <div class="empty" id="ahead-empty">
+        <p>Load a GPX or TCX route to see the climbs, turns and stops ahead, with turn-by-turn directions and a map.</p>
+        <button type="button" class="chip primary" id="btn-routes-2">Load a route</button>
+      </div>
+      <div id="ahead" hidden>
+        <section class="rtiles three">
+          <div class="rtile"><span class="k">Done</span><span class="v num" id="a-done">—</span><span class="s" id="a-pct"></span></div>
+          <div class="rtile"><span class="k">To go</span><span class="v num" id="a-left">—</span><span class="s" id="a-gain"></span></div>
+          <div class="rtile"><span class="k">Arrive</span><span class="v num" id="a-eta">—</span><span class="s" id="a-sun"></span></div>
+        </section>
+        <figure class="prof">
+          <figcaption class="k">Whole route</figcaption>
+          <canvas id="prof-all" height="96" role="img" aria-label="Elevation profile of the whole route"></canvas>
+        </figure>
+        <figure class="prof">
+          <figcaption class="k" id="prof-next-k">Next 5 mi</figcaption>
+          <canvas id="prof-next" height="120" role="img" aria-label="Elevation profile of the next stretch"></canvas>
+        </figure>
+        <section class="climb" id="climb" hidden>
+          <div class="k" id="climb-k">Next climb</div>
+          <div class="climbrow"><b class="num" id="climb-main">—</b><span id="climb-sub"></span></div>
+          <div class="climbbar" aria-hidden="true"><span id="climb-bar"></span></div>
+        </section>
+        <section class="list"><h2 class="k">Turns</h2><ol id="turn-list"></ol></section>
+        <section class="list" id="poi-wrap" hidden><h2 class="k">Stops &amp; points</h2><ol id="poi-list"></ol></section>
+        <section class="list"><h2 class="k">Wind ahead</h2><p id="wind-ahead" class="note">Fetched with the weather at Start.</p></section>
+      </div>
     </section>
 
-    <section class="rtiles wxbar" id="wxbar" hidden aria-label="Weather">
-      <div class="rtile"><span class="k">Temp</span><span class="v num" id="wx-temp">—</span><span class="s" id="wx-feels"></span></div>
-      <div class="rtile"><span class="k">Wind</span><span class="v num"><i class="arrow" id="wx-arrow" aria-hidden="true">↑</i><span id="wx-wind">—</span></span><span class="s" id="wx-dir"></span></div>
-      <div class="rtile"><span class="k">On your line</span><span class="v" id="wx-rel">—</span><span class="s" id="wx-src"></span></div>
+    <section class="page rmain" id="pg-data" role="tabpanel" aria-labelledby="tab-data" hidden>
+      <section class="rtiles big" id="data-grid">
+        <div class="rtile"><span class="k">Ride time</span><span class="v num" id="d-time">0:00</span></div>
+        <div class="rtile"><span class="k">Moving</span><span class="v num" id="d-moving">0:00</span></div>
+        <div class="rtile"><span class="k">Distance</span><span class="v num" id="d-dist">0.0</span></div>
+        <div class="rtile"><span class="k">Speed</span><span class="v num" id="d-speed">—</span></div>
+        <div class="rtile"><span class="k">Avg speed</span><span class="v num" id="d-avgspd">—</span></div>
+        <div class="rtile"><span class="k">Max speed</span><span class="v num" id="d-maxspd">—</span></div>
+        <div class="rtile"><span class="k">Climbed</span><span class="v num" id="d-asc">0</span></div>
+        <div class="rtile"><span class="k">Grade</span><span class="v num" id="d-grade">—</span></div>
+        <div class="rtile"><span class="k">Heart rate</span><span class="v num" id="d-hr">—</span></div>
+        <div class="rtile"><span class="k">Max HR</span><span class="v num" id="d-maxhr">—</span></div>
+        <div class="rtile"><span class="k" id="d-pw-k">Power</span><span class="v num" id="d-pw">—</span></div>
+        <div class="rtile"><span class="k">Cadence</span><span class="v num" id="d-cad">—</span></div>
+        <div class="rtile"><span class="k">Time of day</span><span class="v num" id="d-clock">—</span></div>
+        <div class="rtile"><span class="k">Sunset</span><span class="v num" id="d-sunset">—</span></div>
+        <div class="rtile"><span class="k">Elevation</span><span class="v num" id="d-ele">—</span></div>
+        <div class="rtile"><span class="k">Battery</span><span class="v num" id="d-batt">—</span></div>
+      </section>
     </section>
 
-    <div class="fuel" id="fuel" hidden role="alert"><b>Eat &amp; drink</b><span id="fuel-text"></span><button type="button" class="chip" id="fuel-ok">Done</button></div>
-    <p class="note" id="note"></p>
+    <section class="page rmain" id="pg-laps" role="tabpanel" aria-labelledby="tab-laps" hidden>
+      <div class="lapnow"><span class="k">Lap <span id="lap-no">1</span></span><b class="num" id="lap-time">0:00</b><span class="num" id="lap-sub"></span></div>
+      <table class="laps"><caption class="sr">Laps</caption>
+        <thead><tr><th scope="col">#</th><th scope="col">Time</th><th scope="col" id="lap-dist-h">mi</th><th scope="col">Speed</th><th scope="col">HR</th><th scope="col">W</th></tr></thead>
+        <tbody id="lap-rows"></tbody>
+      </table>
+      <p class="note"><button type="button" class="chip" id="btn-rides">Saved rides</button> Every ride is kept on this phone with its laps, and exports as FIT, GPX or TCX for Garmin Connect, Strava or TrainingPeaks.</p>
+    </section>
   </main>
 
   <footer class="rfoot">
     <button type="button" class="big go" id="btn-start">Start</button>
+    <button type="button" class="big" id="btn-lap" disabled>Lap</button>
     <button type="button" class="big" id="btn-skip" disabled aria-label="Next step">Next</button>
     <button type="button" class="big end" id="btn-end" disabled>End</button>
   </footer>
 
-  <dialog id="settings">
+  <dialog id="settings" aria-labelledby="settings-h">
     <form method="dialog" class="sform">
-      <h2>Ride settings</h2>
+      <h2 id="settings-h">Ride settings</h2>
       <label>Threshold HR (LTHR) <input id="s-lthr" type="number" inputmode="numeric" min="100" max="220"></label>
       <label>Max HR <input id="s-max" type="number" inputmode="numeric" min="120" max="230"></label>
       <label>Resting HR <input id="s-rest" type="number" inputmode="numeric" min="30" max="100"></label>
+      <label>FTP, watts (0 = no power targets) <input id="s-ftp" type="number" inputmode="numeric" min="0" max="600"></label>
       <label>Wheel circumference (m) <input id="s-wheel" type="number" inputmode="decimal" step="0.01" min="1.5" max="2.5"></label>
       <label>Fuel reminder every (min, 0 = off) <input id="s-fuel" type="number" inputmode="numeric" min="0" max="60"></label>
+      <label>Auto lap every (mi or km, 0 = off) <input id="s-autolap" type="number" inputmode="decimal" step="0.5" min="0" max="50"></label>
       <label class="row"><input id="s-voice" type="checkbox"> Spoken cues</label>
+      <label class="row"><input id="s-autopause" type="checkbox"> Auto-pause when stopped</label>
+      <label class="row"><input id="s-steplap" type="checkbox"> A lap at each workout step</label>
+      <label class="row"><input id="s-climbs" type="checkbox"> Hold efforts for the next climb (on a route)</label>
+      <label class="row"><input id="s-reroute" type="checkbox"> Reroute automatically when off course</label>
+      <label>Routing for detours
+        <select id="s-profile">
+          <option value="trekking">Mixed roads &amp; gravel</option>
+          <option value="fastbike">Road bike</option>
+          <option value="safety">Quiet roads</option>
+          <option value="mtb">Mountain bike</option>
+          <option value="shortest">Shortest</option>
+        </select>
+      </label>
       <div class="unitrow"><span>Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="chip" data-theme-pick="light" aria-pressed="true">Light</button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false">Dark</button></div></div>
       <div class="unitrow"><span>Units</span><div class="seg" role="group" aria-label="Units"><button type="button" class="chip" data-units="mi" aria-pressed="true">Imperial</button><button type="button" class="chip" data-units="km" aria-pressed="false">Metric</button></div></div>
       <div class="actions"><button type="submit" class="chip" value="cancel">Cancel</button><button type="submit" class="chip primary" value="save" id="s-save">Save</button></div>
     </form>
   </dialog>
 
-  <dialog id="summary">
+  <dialog id="tailor" aria-labelledby="tailor-h">
     <form method="dialog" class="sform">
-      <h2>Ride summary</h2>
+      <h2 id="tailor-h">Tailor the workout</h2>
+      <p class="note" id="tl-load"></p>
+      <div class="tgrid" role="group" aria-label="This step and set">
+        <button type="button" class="chip" data-tl="less">−1 min</button>
+        <button type="button" class="chip" data-tl="more">+1 min</button>
+        <button type="button" class="chip" data-tl="more5">+5 min</button>
+        <button type="button" class="chip" data-tl="back">Previous step</button>
+        <button type="button" class="chip" data-tl="rep">One more rep</button>
+        <button type="button" class="chip" data-tl="cut">Cut the set</button>
+        <button type="button" class="chip" data-tl="load" id="tl-hit" hidden>Hit today's load</button>
+      </div>
+      <label>Time I have left (min) <input id="tl-left" type="number" inputmode="numeric" min="5" max="600"></label>
+      <div class="actions left"><button type="button" class="chip primary" data-tl="fit">Fit the rest to it</button></div>
+      <h3 class="k">Switch to a quick workout</h3>
+      <label>Workout
+        <select id="tl-kind"></select>
+      </label>
+      <label>Minutes <input id="tl-min" type="number" inputmode="numeric" min="15" max="360" value="60"></label>
+      <div class="actions left"><button type="button" class="chip primary" data-tl="quick">Start it now</button></div>
+      <div class="actions"><button type="submit" class="chip" value="close">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="routes" aria-labelledby="routes-h">
+    <form method="dialog" class="sform">
+      <h2 id="routes-h">Routes</h2>
+      <p class="note">GPX or TCX from Ride with GPS, Komoot, Strava, Garmin Connect or a race site. On Android you can also <b>share</b> a GPX file to Training from any app.</p>
+      <label class="filebtn chip primary">Load a GPX / TCX file<input id="route-file" type="file" accept=".gpx,.tcx,.geojson,.json,application/gpx+xml,application/vnd.garmin.tcx+xml,application/geo+json,application/xml,text/xml" multiple class="sr"></label>
+      <p class="note" id="route-msg" role="status"></p>
+      <ul class="rlist" id="route-list"></ul>
+      <div class="actions"><button type="button" class="chip" id="route-clear">Ride without a route</button><button type="submit" class="chip" value="close">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="rides" aria-labelledby="rides-h">
+    <form method="dialog" class="sform">
+      <h2 id="rides-h">Saved rides</h2>
+      <ul class="rlist" id="ride-list"></ul>
+      <div class="actions"><button type="submit" class="chip" value="close">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="summary" aria-labelledby="summary-h">
+    <form method="dialog" class="sform">
+      <h2 id="summary-h">Ride summary</h2>
       <div id="sum-body"></div>
+      <div class="exports" id="sum-exports" hidden>
+        <button type="button" class="chip primary" data-export="fit">FIT</button>
+        <button type="button" class="chip" data-export="gpx">GPX</button>
+        <button type="button" class="chip" data-export="tcx">TCX</button>
+        <button type="button" class="chip" data-export="share">Share…</button>
+        <button type="button" class="chip" data-export="delete">Delete</button>
+      </div>
       <div class="actions"><button type="submit" class="chip primary" value="close">Close</button></div>
     </form>
   </dialog>
 
   <script type="application/json" id="ride-data">__RIDE_DATA__</script>
+  <script>/*__RIDE_CORE__*/</script>
   <script>/*__RIDE_APP__*/</script>
 </body>
 </html>

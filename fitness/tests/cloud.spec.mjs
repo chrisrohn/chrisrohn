@@ -4,6 +4,8 @@
 import { test, expect } from "@playwright/test";
 import { DATA, watch, axe } from "./fixtures.mjs";
 
+test.use({ baseURL: "http://127.0.0.1:8766" });   // the Training app's own origin (playwright.config.mjs)
+
 const REPO = "me/training-data";
 const SYNCED = { synced: new Date().toISOString(), ok: true, garmin: { connected: true, days: 200, error: null }, strava: { connected: true, client_id: "4242", activities: 310, error: null } };
 const FRESH = { synced: null, ok: true, garmin: { connected: false, days: 0, error: null }, strava: { connected: false, client_id: "4242", activities: 0, error: null } };
@@ -43,7 +45,7 @@ test.describe("GitHub sync", () => {
   test("connecting with a token loads what the sync left, and refuses a bad token", async ({ page }) => {
     const problems = watch(page);
     await github(page);
-    await page.goto("/fitness/");
+    await page.goto("/");
     await page.locator(".welcome [data-action=settings]").click();
     await page.locator("#cloud-repo").fill("https://github.com/" + REPO);
     await page.locator("#cloud-token").fill("github_pat_wrong");
@@ -61,7 +63,7 @@ test.describe("GitHub sync", () => {
 
   test("health data only ever goes to a private repository", async ({ page }) => {
     await github(page, { isPrivate: false });
-    await page.goto("/fitness/");
+    await page.goto("/");
     await page.locator(".welcome [data-action=settings]").click();
     await page.locator("#cloud-repo").fill(REPO);
     await page.locator("#cloud-token").fill("github_pat_good");
@@ -76,7 +78,7 @@ test.describe("GitHub sync", () => {
     const recent = DATA.recent.map(a => a.id === ride.id ? { ...a, start: `${DATA.today}T07:00:00` } : a);
     const elsewhere = { [DATA.today]: { legs: 4, energy: 4, stress: 3, mood: 4, sick: "none" } };   // made on another device
     const gh = await github(page, { data: { ...DATA, recent, checkins: elsewhere, rpe: {} } });
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await expect(page.locator(".checkin summary")).toContainText("Legs good");                    // the sync's check-in shows here
@@ -98,7 +100,7 @@ test.describe("GitHub sync", () => {
   test("opening the app after a while syncs on its own, and only once", async ({ page }) => {
     const hoursAgo = { ...SYNCED, synced: new Date(Date.now() - 3 * 36e5).toISOString() };
     const gh = await github(page, { status: hoursAgo });   // the run "lands" without news: the reload mustn't start another
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await expect.poll(() => gh.dispatches.length).toBe(1);
@@ -112,7 +114,7 @@ test.describe("GitHub sync", () => {
 
   test("bike jobs and Silca's pressures go to the sync as a service run", async ({ page }) => {
     const gh = await github(page);
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await page.locator("#tab-ride").click();
@@ -134,7 +136,7 @@ test.describe("GitHub sync", () => {
 
   test("the morning notification can be turned on from the data sheet", async ({ page }) => {
     await github(page, { status: { ...SYNCED, push: { key: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", devices: 0, last: null, error: null } } });
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await page.locator("#databar [data-action=settings]").click();
@@ -145,7 +147,7 @@ test.describe("GitHub sync", () => {
 
   test("Sync now starts the workflow, follows the run and loads the new numbers", async ({ page }) => {
     const gh = await github(page, { onDispatch: (_i, g) => { g.status = { ...SYNCED, synced: new Date().toISOString() }; } });
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await expect(page.locator("#tab-today")).toBeVisible();
@@ -166,7 +168,7 @@ test.describe("GitHub sync", () => {
         g.data = DATA;
       }
     } });
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await expect(page.locator(".welcome")).toContainText("Garmin not connected");
@@ -185,26 +187,26 @@ test.describe("GitHub sync", () => {
   test("connecting Strava: its authorize page, and the code it sends back starts connect-strava", async ({ page }) => {
     const gh = await github(page, { status: { ...SYNCED, strava: FRESH.strava } });
     await page.route("https://www.strava.com/**", route => route.fulfill({ status: 200, contentType: "text/html", body: "<title>Strava</title>" }));
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await page.locator("#databar [data-action=connect-strava]").click();
     await page.waitForURL(url => url.hostname === "www.strava.com");
     const auth = new URL(page.url());
     expect(Object.fromEntries(auth.searchParams)).toMatchObject({ client_id: "4242", response_type: "code", scope: "read,activity:read_all", state: "strava",
-      redirect_uri: "http://127.0.0.1:8765/fitness/" });
-    await page.goto("/fitness/?state=strava&code=abc123&scope=read,activity:read_all");
+      redirect_uri: "http://127.0.0.1:8766/" });
+    await page.goto("/?state=strava&code=abc123&scope=read,activity:read_all");
     await expect.poll(() => gh.dispatches.length).toBe(1);
     expect(gh.dispatches[0].inputs).toEqual({ action: "connect-strava", code: "abc123" });
     expect(new URL(page.url()).search).toBe("");                                     // the one-time code leaves the address bar
-    await page.goto("/fitness/?state=strava&code=x&scope=read");                     // "private activities" unticked
+    await page.goto("/?state=strava&code=x&scope=read");                     // "private activities" unticked
     await expect(page.locator("#databar")).toContainText("private activities");
   });
 
   test("without Strava's secrets the app never asks for Strava (its API needs a paid subscription)", async ({ page }) => {
     await github(page, { status: { ...FRESH, strava: { connected: false, client_id: null, activities: 812, error: null,
       export: { file: "activities.csv", rows: 812, at: new Date().toISOString() } } }, data: null });
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await expect(page.locator(".welcome [data-action=connect-garmin]")).toBeVisible();
@@ -215,7 +217,7 @@ test.describe("GitHub sync", () => {
 
   test("a failed sync says what went wrong, from status.json", async ({ page }) => {
     await github(page, { onDispatch: (_i, g) => { g.runs[0].conclusion = "failure"; g.status = { ...SYNCED, garmin: { ...SYNCED.garmin, error: "Garmin is rate-limiting this account" } }; } });
-    await page.goto("/fitness/");
+    await page.goto("/");
     await signIn(page);
     await page.reload();
     await page.locator("#databar [data-action=sync]").click();

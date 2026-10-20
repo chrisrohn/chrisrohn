@@ -65,7 +65,7 @@
   // ── GitHub sync: your private repository's `state` branch, and its "Training sync" workflow ─────────────────
   const WORKFLOW = "training.yml", RAW = "application/vnd.github.raw+json";
   const TOKEN_URL = "https://github.com/settings/personal-access-tokens/new?" + new URLSearchParams({
-    name: "Training app", description: "chrisrohn.com/fitness reads the sync's data and starts its runs", expires_in: "none", actions: "write", contents: "read" });
+    name: "Training app", description: "The Training app reads the sync's data and starts its runs", expires_in: "none", actions: "write", contents: "read" });
   /** @returns {{repo: string, token: string, branch?: string} | null} */
   const cloud = () => { try { const c = JSON.parse(ls.get("fitness-cloud") || "null"); return c && c.repo && c.token ? c : null; } catch { return null; } };
   let status = null, cloudProblem = "";
@@ -98,7 +98,21 @@
   const timeout = (p, ms) => Promise.race([p, sleep(ms).then(() => { throw new Error("GitHub is slow to answer: showing this device's copy"); })]);
   const problems = st => !st ? [] : [st.garmin && st.garmin.error && `Garmin: ${st.garmin.error}`, st.strava && st.strava.error && `Strava: ${st.strava.error}`, st.feel && st.feel.error && `Check-in: ${st.feel.error}`, st.error && `Build: ${st.error}`].filter(Boolean);
 
+  /** The move from chrisrohn.com/fitness/ (fitness/build-app.mjs): what this phone kept there arrives as #move=, deflated.
+   *  Only the app's own keys, and never over something this address already has. */
+  async function moveIn() {
+    const h = new URLSearchParams(location.hash.slice(1)), mv = h.get("move");
+    if (!mv) return;
+    try {
+      const got = JSON.parse(await inflate(mv));
+      for (const [k, v] of Object.entries(got || {})) if (/^fitness-[\w:-]+$/.test(k) && typeof v === "string" && ls.get(k) == null) ls.set(k, v);
+    } catch { /* a damaged link: start fresh here */ }
+    h.delete("move");
+    history.replaceState(null, "", location.pathname + location.search + (h.toString() ? `#${h}` : ""));
+  }
+
   async function load() {
+    await moveIn();
     const raw = ($("data") || { textContent: "" }).textContent.trim();
     if (raw.startsWith("{")) return { D: JSON.parse(raw), source: "build" };
     const frag = new URLSearchParams(location.hash.slice(1)).get("d");

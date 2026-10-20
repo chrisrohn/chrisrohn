@@ -1,41 +1,48 @@
-// The installable app (/fitness/, written by fitness/build-app.mjs from fitness/site): the hosted shell holds no one's
+// The installable app (its own origin, written by fitness/build-app.mjs from fitness/site): the hosted shell holds no one's
 // data, shows the welcome screen until data arrives, takes a phone link's #d= or a pasted/picked data file, keeps it
 // on the device (and hands ride mode its plan), passes axe under its CSP, and opens offline once installed.
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { deflateRawSync } from "node:zlib";
 import { DATA, watch, axe } from "./fixtures.mjs";
+import { APP_URL } from "../build-app.mjs";
 
-const phoneLink = d => "/fitness/#d=" + deflateRawSync(Buffer.from(JSON.stringify(d))).toString("base64url");
+test.use({ baseURL: "http://127.0.0.1:8766" });   // the Training app's own origin (playwright.config.mjs)
+
+const phoneLink = d => "/#d=" + deflateRawSync(Buffer.from(JSON.stringify(d))).toString("base64url");
 
 test.describe("installable app", () => {
-  test("has a complete manifest whose icons all load", async ({ request }) => {
-    const res = await request.get("/fitness/manifest.webmanifest");
+  test("has a complete manifest whose icons all load, on an origin of its own", async ({ request }) => {
+    const res = await request.get("/manifest.webmanifest");
     expect(res.ok()).toBe(true);
     const m = await res.json();
     expect(m).toMatchObject({ scope: "./", display: "standalone", short_name: "Training" });
-    // an app's identity is its id resolved against the ORIGIN (not the manifest's folder): it must not collide with the
-    // music app's at the site root, or the phone thinks this one is already installed
-    const root = await (await request.get("/manifest.webmanifest")).json();
-    const origin = "https://chrisrohn.com";
-    expect(new URL(m.id, origin).href).toBe(`${origin}/fitness/`);
-    expect(new URL(m.id, origin).href).not.toBe(new URL(root.id || root.start_url, origin).href);
+    // Android installs one app per scope. The music app's scope is all of chrisrohn.com, so this app must not live under
+    // it: it's served from its own origin, and chrisrohn.com/fitness/ carries no manifest at all
+    const music = await (await request.get("http://127.0.0.1:8765/manifest.webmanifest")).json();
+    expect(music.scope).toBe("/");
+    expect((await request.get("http://127.0.0.1:8765/fitness/manifest.webmanifest")).status()).toBe(404);
+    expect(new URL(m.id, "http://127.0.0.1:8766/").origin).not.toBe("http://127.0.0.1:8765");
     expect(m.start_url.startsWith("./")).toBe(true);
     expect(m.icons.map(i => i.sizes)).toEqual(expect.arrayContaining(["192x192", "512x512"]));
     expect(m.icons.some(i => /maskable/.test(i.purpose || ""))).toBe(true);
+    // a GPX shared from any app lands in ride mode
+    expect(m.share_target).toMatchObject({ action: "./ride.html?share=1", method: "POST", enctype: "multipart/form-data" });
+    expect(m.share_target.params.files[0].accept).toEqual(expect.arrayContaining([".gpx", ".tcx"]));
     for (const src of [...m.icons.map(i => i.src), ...(m.shortcuts || []).map(s => s.url.split("?")[0])]) {
-      expect((await request.get(new URL(src, "http://x/fitness/").pathname)).ok(), src).toBe(true);
+      expect((await request.get(new URL(src, "http://x/").pathname)).ok(), src).toBe(true);
     }
-    const sw = await (await request.get("/fitness/sw.js")).text();
+    const sw = await (await request.get("/sw.js")).text();
     expect(sw).not.toContain("__VERSION__");
     expect(sw).toMatch(/const CACHE = "fitness-[0-9a-f]{10}"/);
+    for (const f of ["vendor/maplibre-gl.mjs", "vendor/maplibre-gl-worker.mjs", "vendor/maplibre-gl.css", ".nojekyll", "robots.txt"]) expect((await request.get(`/${f}`)).ok(), f).toBe(true);
   });
 
   test("the hosted shell holds no data: welcome screen, clean CSP, passes axe", async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const problems = watch(page);
-    await page.goto("/fitness/");
+    await page.goto("/");
     await expect(page.locator(".welcome")).toBeVisible();
     expect(await page.locator("#data").textContent()).not.toContain("{");
     const policy = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
@@ -61,9 +68,9 @@ test.describe("installable app", () => {
     await expect(page.locator("#databar")).toContainText("Data from");
     await page.reload();                                                         // kept on this device
     await expect(page.locator("#tab-today")).toBeVisible();
-    await page.goto("/fitness/ride.html");                                       // ride mode reads the same copy
+    await page.goto("/ride.html");                                       // ride mode reads the same copy
     await expect(page.locator("#day option").first()).toContainText(DATA.ride.days.find(d => d.steps && d.steps.length).title);   // rest days have no steps to ride
-    await page.goto("/fitness/");
+    await page.goto("/");
     await page.locator("#databar [data-action=settings]").click();
     page.once("dialog", d => d.accept());
     await page.locator("#import [data-action=forget]").click();
@@ -74,7 +81,7 @@ test.describe("installable app", () => {
   });
 
   test("importing a data file inside the installed app (iPhone apps keep their own storage)", async ({ page }) => {
-    await page.goto("/fitness/");
+    await page.goto("/");
     await page.locator(".welcome [data-action=import]").click();
     await page.locator("#import-file").setInputFiles({ name: "fitness-data.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(DATA)) });
     await expect(page.locator("#tab-today")).toBeVisible();
@@ -82,17 +89,36 @@ test.describe("installable app", () => {
     expect(await axe(page)).toEqual([]);
   });
 
-  test("the music app's service worker leaves this app's offline cache alone", async ({ browser }) => {
+  test("chrisrohn.com/fitness/ forwards to the app's own address, bringing this phone's settings along", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
-    await page.goto("/fitness/");
-    await page.evaluate(async () => { await navigator.serviceWorker.ready; });
-    await expect.poll(() => page.evaluate(async () => (await caches.keys()).filter(k => k.startsWith("fitness-")).length)).toBe(1);
-    await page.goto("/");                                                        // the music app's worker installs and activates
-    await page.evaluate(async () => { const r = await navigator.serviceWorker.ready; return r.active && r.active.state; });
-    await expect.poll(() => page.evaluate(async () => (await caches.keys()).some(k => k.startsWith("newmusic-") && k !== "newmusic-art"))).toBe(true);
-    expect(await page.evaluate(async () => (await caches.keys()).filter(k => k.startsWith("fitness-")).length)).toBe(1);
+    const home = new URL(APP_URL);
+    await page.route(`${home.origin}/**`, route => route.fulfill({ status: 200, contentType: "text/html", body: "<title>new home</title>" }));
+    await page.goto("http://127.0.0.1:8765/privacy.html");
+    await page.evaluate(() => { localStorage.setItem("fitness-cloud", JSON.stringify({ repo: "me/training-data", token: "github_pat_x" })); localStorage.setItem("fitness-units", "km"); localStorage.setItem("newmusic-x", "1"); });
+    await page.goto("http://127.0.0.1:8765/fitness/ride.html#z=abc");
+    await page.waitForURL(u => u.origin === home.origin);
+    const to = new URL(page.url()), hash = new URLSearchParams(to.hash.slice(1));
+    expect(to.pathname).toBe("/ride.html");
+    expect(hash.get("z")).toBe("abc");                                              // an old QR link still opens its plan
+    const moved = await page.evaluate(async b64 => {
+      const bin = Uint8Array.from(atob(b64.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+      return JSON.parse(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text());
+    }, hash.get("move"));
+    expect(moved).toEqual({ "fitness-cloud": JSON.stringify({ repo: "me/training-data", token: "github_pat_x" }), "fitness-units": "km" });   // only the app's own keys
     await ctx.close();
+  });
+
+  test("the app takes what the old address carried, without overwriting what it already has", async ({ page }) => {
+    const keep = { "fitness-cloud": JSON.stringify({ repo: "me/training-data", token: "github_pat_good", branch: "main" }), "fitness-units": "km", "not-ours": "x" };
+    const move = deflateRawSync(Buffer.from(JSON.stringify(keep))).toString("base64url");
+    await page.goto("/robots.txt");
+    await page.evaluate(() => localStorage.setItem("fitness-units", "mi"));
+    await page.goto(`/#move=${move}`);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("fitness-cloud"))).toBe(keep["fitness-cloud"]);
+    expect(await page.evaluate(() => localStorage.getItem("fitness-units"))).toBe("mi");
+    expect(await page.evaluate(() => localStorage.getItem("not-ours"))).toBeNull();
+    expect(new URL(page.url()).hash).not.toContain("move");
   });
 
   test("says what the plan did about a session that didn't happen", async ({ page }) => {
@@ -264,7 +290,7 @@ test.describe("installable app", () => {
     await expect(page.locator("#tab-today")).toBeFocused();
     await expect(page.locator("#panel-today")).toBeVisible();
     expect(new URL(page.url()).hash).toBe("");
-    await page.goto("/fitness/#season");                                         // a section's own link opens its tab
+    await page.goto("/#season");                                         // a section's own link opens its tab
     await expect(page.locator("#tab-plan")).toHaveAttribute("aria-selected", "true");
     await expect(page.locator("#season")).toBeVisible();
     await page.evaluate(() => { location.hash = "#bike"; });
@@ -312,7 +338,7 @@ test.describe("installable app", () => {
     await ctx.setOffline(true);
     await page.reload();
     await expect(page.locator("#tab-today")).toBeVisible();
-    await page.goto("/fitness/ride.html");
+    await page.goto("/ride.html");
     await expect(page.locator("#btn-start")).toBeVisible();
     await ctx.close();
   });

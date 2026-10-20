@@ -287,16 +287,17 @@ def test_ride_page_and_link(tmp_path, cfg):
     assert titles[i + 1] == "Commute home" and ride["days"][i]["check"] and ride["commute"]["in"]
     build.render(data, tmp_path / "index.html", cfg)
     page = (tmp_path / "ride.html").read_text()
-    assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' in page
+    assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' not in page   # the plan rides in the link
     assert 'ride.html' in (tmp_path / "index.html").read_text()
     link = build.ride_link(cfg, ride, "ride.html")
-    assert link.startswith("https://chrisrohn.com/fitness/ride.html#z=")
+    assert link.startswith("https://chrisrohn.github.io/ride.html#z=")
     blob = link.split("#z=")[1]
     assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == ride
     assert len(link) < 2400   # small enough for a QR code a phone camera reads off a laptop screen
-    assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == "ride.html"
+    assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == f"ride.html#z={blob}"   # the local copy, same fragment
     page = build.ride_page(None)
-    assert "__CSP__" not in page and "script-src 'sha256-" in page and "__RIDE_DATA__" not in page
+    assert "__CSP__" not in page and "script-src 'self' 'sha256-" in page and "__RIDE_DATA__" not in page and "/*__RIDE_CORE__*/" not in page
+    assert "connect-src 'self' https://api.github.com https://api.open-meteo.com https://tiles.openfreemap.org https://brouter.de;" in page
 
 
 def test_installable_app_and_phone_link(tmp_path, cfg):
@@ -310,7 +311,8 @@ def test_installable_app_and_phone_link(tmp_path, cfg):
     build.render(data, tmp_path / "index.html", {**cfg, "app": {**cfg["app"], "export_dir": str(export)}})
     manifest = json.loads((tmp_path / "manifest.webmanifest").read_text())
     assert manifest["display"] == "standalone" and manifest["start_url"].startswith("./") and manifest["scope"] == "./"
-    assert manifest["id"] == "/fitness/"   # resolved against the origin: "./" would be the music app's id at the root
+    assert manifest["id"] == "./"   # the app has an origin of its own (not under the music app's scope), so it's the root there
+    assert manifest["share_target"]["method"] == "POST"   # a GPX shared from any app opens ride mode
     assert {"192x192", "512x512"} <= {i["sizes"] for i in manifest["icons"]} and any("maskable" in i.get("purpose", "") for i in manifest["icons"])
     assert all((tmp_path / i["src"]).exists() for i in manifest["icons"])
     sw = (tmp_path / "sw.js").read_text()
@@ -321,7 +323,7 @@ def test_installable_app_and_phone_link(tmp_path, cfg):
     assert saved["today"] == "2026-10-08" and "ride_qr" not in saved and "phone_href" not in saved
     assert (export / "fitness-data.json").read_text() == (tmp_path / "fitness-data.json").read_text()
     link = build.phone_link(cfg, data)
-    assert link.startswith("https://chrisrohn.com/fitness/#d=")
+    assert link.startswith("https://chrisrohn.github.io/#d=")
     blob = link.split("#d=")[1]
     assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == saved
     assert build.phone_link({**cfg, "app": {"url": ""}}, data) is None

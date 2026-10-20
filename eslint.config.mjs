@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import globals from "globals";
 
 export default [
-  { ignores: ["dist/**", "fitness/dist/**", "node_modules/**", "test-results/**", "site/data/**"] },
+  { ignores: ["dist/**", "dist-app/**", "fitness/dist/**", "node_modules/**", "test-results/**", "site/data/**"] },
   js.configs.recommended,
   {
     files: ["site/src/**/*.js"],
@@ -14,5 +14,5 @@ export default [
   { files: ["site/sw.js"], languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: globals.serviceworker } },
   { files: ["site/theme.js"], languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: globals.browser } },   // the pre-paint theme switch, a classic script
   // the browser globals cover code handed to page.evaluate() in the smoke test and the screenshot script
-  { files: ["build.mjs", "screenshots.mjs", "playwright.config.mjs", "tests/site/**/*.mjs", "fitness/build-app.mjs", "fitness/tests/**/*.mjs"], languageOptions: { ecmaVersion: 2023, sourceType: "module", globals: { ...globals.node, ...globals.browser } } },
+  { files: ["build.mjs", "screenshots.mjs", "playwright.config.mjs", "tests/site/**/*.mjs", "fitness/build-app.mjs", "fitness/render-icons.mjs", "fitness/tests/**/*.mjs"], languageOptions: { ecmaVersion: 2023, sourceType: "module", globals: { ...globals.node, ...globals.browser } } },
 ];
