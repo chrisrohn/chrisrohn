@@ -727,21 +727,42 @@ window.startDashboard = D => {
     const R = D.race_day || [];
     if (!R.length) return "";
     const one = r => `<article class="race-day">
-      <div class="head"><h3>${esc(r.name)} · ${esc(r.label)}</h3><span class="sub">${fmtDow(r.date)} · ${r.days_out === 0 ? "today" : `${r.days_out} day${r.days_out === 1 ? "" : "s"} to go`}</span></div>
+      <div class="head"><h3>${esc(r.name)} · ${esc(r.label)}</h3><span class="sub">${fmtDow(r.date)}${r.start_set ? ` · ${r.wave ? `wave ${r.wave}, ` : ""}${esc(r.start)}` : ""} · ${r.days_out === 0 ? "today" : `${r.days_out} day${r.days_out === 1 ? "" : "s"} to go`}</span></div>
       <div class="grid">
         <div><h4>Race morning</h4><dl class="timeline">${r.timeline.map(t => `<dt class="num">${esc(t.at)}</dt><dd>${esc(t.what)}</dd>`).join("")}</dl>
-          ${r.start_set ? "" : `<p class="sub">Timed from a 10:00 start: set your wave's start time in config.toml (start = "HH:MM").</p>`}</div>
+          ${r.start_set ? "" : `<p class="sub">Timed from a 10:00 start: set your wave's start time in config.toml (start = "HH:MM", wave = N).</p>`}</div>
         <div><h4>The start</h4><p>${esc(r.strategy)}</p>
           <h4>Fuel</h4><p>${esc(r.fuel.setup)}.</p><p>${esc(r.fuel.sips[0].toUpperCase() + r.fuel.sips.slice(1))}${r.fuel.top_up ? `, plus ${r.fuel.top_up} g an hour from gels or chews` : ""}: about ${r.fuel.rate} g of carbs and ${r.fuel.sodium} mg of sodium an hour.</p>
           ${r.fuel.climate ? `<p>${esc(r.fuel.climate)}</p>` : ""}
           ${r.fuel.no_refill ? `<p class="sub">${esc(r.fuel.no_refill)}</p>` : ""}
-          ${r.forecast ? `<h4>Forecast at the start</h4><p>${esc(r.forecast.line)}.</p><p><b>Wear:</b> ${esc(r.forecast.kit)}. ${esc(r.forecast.warm)}</p>` : `<p class="sub">The race-morning forecast appears 16 days out.</p>`}</div>
+          ${r.conditions ? "" : r.forecast ? `<h4>Forecast at home</h4><p>${esc(r.forecast.line)}.</p><p><b>Wear:</b> ${esc(r.forecast.kit)}. ${esc(r.forecast.warm)}</p>` : `<p class="sub">The race-morning forecast appears 16 days out.</p>`}</div>
         <div><h4>The bike, the week before</h4><ul class="checks">${r.bike.map(b => `<li class="${b.ok ? "ok" : ""}"><span><span class="sr">${b.ok ? "Done: " : "To do: "}</span>${esc(b.job)}${b.note ? ` <span class="sub">${esc(b.note)}</span>` : ""}</span></li>`).join("")}</ul>
           <h4>Pack</h4><ul class="checks">${r.pack.map(x => `<li><span>${esc(x)}</span></li>`).join("")}</ul>
           <h4>Between now and the start</h4>${r.sessions_left.length ? `<ul class="plain">${r.sessions_left.map(x => `<li><b>${fmtDow(x.date)}</b> ${esc(x.title)}</li>`).join("")}</ul>` : `<p class="sub">No hard sessions left: it's all freshening up now.</p>`}
           <p class="sub">Taper: ${r.taper.days} days, arriving at form ${signed(r.taper.race_tsb)} (target ${r.taper.target_tsb[0]} to ${r.taper.target_tsb[1]}).</p></div>
-      </div></article>`;
+      </div>${conditionsHTML(r)}</article>`;
     return `<section id="race" class="card"><div class="head"><h2>Race day</h2><span class="sub">${R.length === 1 ? esc(R[0].name) : `${R.length} races in the next six weeks`}</span></div>${R.map(one).join("")}</section>`;
+  }
+
+  // the race's weather where you'll ride it, what it asks of you and the bike, and every other case (fitness/racewx.py)
+  function conditionsHTML(r) {
+    const C = r.conditions, list = xs => xs.length ? `<ul class="checks">${xs.map(x => `<li><span>${esc(x)}</span></li>`).join("")}</ul>` : "";
+    const part = (h, xs) => xs.length ? `<h4>${h}</h4>${list(xs)}` : "";
+    const caseHTML = c => `<details class="case${c.picked ? " picked" : ""}"${c.picked ? " open" : ""}><summary><b>${esc(c.label)}</b>${c.picked ? ` <span class="tag warn">This forecast</span>` : ""}
+        <span class="sub">${esc(c.when)}${c.psi ? ` Tires ${c.psi > 0 ? "+" : ""}${c.psi} psi.` : ""}</span></summary>
+        ${part("Wear", c.wear)}${part("Bike", c.bike)}${part("Ride", c.ride)}${part("Fuel", c.fuel)}</details>`;
+    const top = C ? `<h4>${C.where === "venue" ? "Weather at the course" : "Weather at home (the course forecast isn't in yet)"}</h4>
+        <dl class="timeline">${C.windows.pre ? `<dt>Warm-up</dt><dd>${esc(C.windows.pre)}</dd>` : ""}
+          <dt>Racing</dt><dd>${esc(C.windows.race)} <span class="sub">(${esc(r.start)}–${esc(r.finish)}, timed from ${esc(r.expected.from)})</span></dd>
+          ${C.windows.finish ? `<dt>Finish</dt><dd>${esc(C.windows.finish)}</dd>` : ""}</dl>
+        <p>${esc(C.trail.line)}.</p>
+        <div class="grid">
+          <div>${part("Wear", C.wear)}</div>
+          <div>${part("Bike", C.bike)}</div>
+          <div>${part("Ride", C.ride)}${part("Fuel", C.fuel)}</div>
+        </div>` : `<p class="sub">Race time: about ${esc(r.start)}–${esc(r.finish)}, from ${esc(r.expected.from)}. The forecast-specific plan appears 16 days out; until then, every case is below.</p>`;
+    return `<section class="conditions" aria-label="${esc(r.name)} conditions"><h3 class="mt-6">Conditions${C ? `: ${esc(r.playbook.filter(c => c.picked).map(c => c.label.toLowerCase()).join(", "))}` : ""}</h3>${top}
+      <details class="table"><summary>Every case on the ${esc((D.bike && D.bike.name) || "bike")} (${r.playbook.length})</summary><div class="cases">${r.playbook.map(caseHTML).join("")}</div></details></section>`;
   }
 
   // the bike: what's due, Silca's pressures, and "Done" to log a job (fitness/bike.py)

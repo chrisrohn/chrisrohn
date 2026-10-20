@@ -175,6 +175,64 @@ def notify(store: Store, data: dict, now: datetime, action: str, send: Callable 
     return {**out, "devices": len(kept), "last": sent.get("at"), "delivered": delivered}
 
 
+RACE_HOURS = (7, 21)     # race-forecast notices go out between these hours; the eve's brief from 17, race morning's from 5
+RACE_NOTICE_DAYS = 16    # how far out the venue forecast reaches
+
+
+def race_message(r: dict, kind: str) -> dict:
+    """A race notice: the wave and gun, the weather while you race, what it picks, and the pressures."""
+    c, short = r["conditions"], r["name"].replace("Bell's ", "").replace(" Cometh Challenge", "")
+    labels = [x["label"].lower() for x in r["playbook"] if x["picked"]]
+    title = {"new": f"{short}: the race forecast is in", "changed": f"{short}: the forecast changed",
+             "eve": f"{short} tomorrow · {'wave ' + str(r['wave']) + ', ' if r['wave'] else ''}{r['start']}",
+             "morning": f"{short} today · {'wave ' + str(r['wave']) + ', ' if r['wave'] else ''}{r['start']}"}[kind]
+    first_kit = c["wear"][0].split(": ", 1)[-1]
+    bits = [c["windows"]["race"], " and ".join(labels[:3]).capitalize(), f"Wear {first_kit[0].lower() + first_kit[1:]}",
+            f"Tires {c['tires']['front']:g}/{c['tires']['rear']:g} psi" if c["tires"]["front"] else None]
+    if kind == "eve":
+        bits.insert(0, f"Up at {r['timeline'][0]['at']}")
+    return {"title": title, "body": " · ".join(b for b in bits if b)[:230], "tag": f"race-{kind}", "url": "./?source=push#race"}
+
+
+def race_notify(store: Store, data: dict, now: datetime, send: Callable | None = None) -> list[str]:
+    """Race notices, each at most once: when the venue forecast first arrives, when it changes what to do (a new case,
+    a 3 °C swing, a different sky), the evening before, and race morning. Needs the venue forecast."""
+    from fitness import webpush
+    subs = json.loads(store.get("push_subs") or "[]")
+    if not subs or not data:
+        return []
+    send = send or webpush.send
+    keys, sent, out = _vapid(store), json.loads(store.get("race_push") or "{}"), []
+    for r in data.get("race_day") or []:
+        c = r.get("conditions")
+        if not c or c["where"] != "venue" or r["days_out"] > RACE_NOTICE_DAYS:
+            continue
+        key = f"{r['name']}|{r['date']}"
+        mine = sent.get(key, {})
+        kind = None
+        if r["days_out"] == 0 and now.hour >= 5 and not mine.get("morning"):
+            kind = "morning"
+        elif r["days_out"] == 1 and 17 <= now.hour < RACE_HOURS[1] and not mine.get("eve"):
+            kind = "eve"
+        elif RACE_HOURS[0] <= now.hour < RACE_HOURS[1] and r["days_out"] >= 1:
+            if not mine.get("sig"):
+                kind = "new"
+            elif mine["sig"] != c["sig"] and mine.get("day") != data["today"]:
+                kind = "changed"
+        if not kind:
+            continue
+        msg = race_message(r, kind)
+        for sub in subs:
+            send(sub, msg, keys["private"])
+        mine = {**mine, "sig": c["sig"], "day": data["today"], **({kind: True} if kind in ("eve", "morning") else {})}
+        sent[key] = mine
+        out.append(kind)
+    if out:
+        store.set("race_push", json.dumps(sent))
+        print(f"Race notices: {', '.join(out)}")
+    return out
+
+
 def _why(e: BaseException) -> str:
     text = str(e).strip() or type(e).__name__
     return text.splitlines()[0][:300]
@@ -249,11 +307,17 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
         except Exception as e:   # the day's call still works without the weather
             forecast = None
             print(f"Weather: skipped ({_why(e)})")
+        try:
+            race_weather = build.race_forecasts(store, cfg, today or date.today(), datetime.now())
+        except Exception as e:   # race day falls back to the home forecast
+            race_weather = None
+            print(f"Race weather: skipped ({_why(e)})")
 
     data = None
     if days or acts:
         try:
-            data = build.assemble(cfg, days, acts, today or date.today(), profile, weather=forecast, bike_state=bike_state, traces=traces, felt=felt)
+            data = build.assemble(cfg, days, acts, today or date.today(), profile, weather=forecast, bike_state=bike_state, traces=traces, felt=felt,
+                                  race_weather=race_weather)
             (out / DATA_FILE).write_text(json.dumps(build.phone_data(data), separators=(",", ":")))
         except Exception as e:
             errors["build"] = _why(e)
@@ -261,6 +325,8 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
     try:
         with Store(config.DB_PATH) as store:
             push = notify(store, data, datetime.now(), action)
+            if action not in ("push-test", "push-subscribe"):
+                race_notify(store, data, datetime.now())
     except Exception as e:   # a notification problem never fails the sync
         errors.setdefault("push", f"the notification didn't go out: {_why(e)}")
 

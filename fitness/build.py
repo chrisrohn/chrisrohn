@@ -17,7 +17,7 @@ from fitness import bike, feel, fuel, power, raceday, streams
 from fitness import metrics as m
 from fitness import weather as wxm
 from fitness.activities import merge
-from fitness.config import DIST_DIR, SITE_DIR, nth_weekday, workday
+from fitness.config import DIST_DIR, SITE_DIR, nth_weekday, race_dates, workday
 from fitness.plan import _replaced, adapt, fit, in_indoor, season
 
 CHART_DAYS, SLEEP_DAYS, WEEKS = 180, 90, 16
@@ -29,7 +29,7 @@ def _iso(d: date) -> str:
 
 def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date, profile: dict | None = None,
              now: datetime | None = None, weather: dict | None = None, bike_state: dict | None = None,
-             traces: dict[str, str] | None = None, felt: dict | None = None) -> dict:
+             traces: dict[str, str] | None = None, felt: dict | None = None, race_weather: dict | None = None) -> dict:
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
@@ -168,10 +168,15 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
             near = not race["every"] or abs((day - nth_weekday(race["every"], day.year)).days) <= 7   # skips recon rides and watch parties
             if match and any(w in a["name"].lower() for w in match) and near and a["group"] == "ride" and not a.get("indoor"):
                 r = by_day.get(a["start"][:10], {})
-                rows_e.append({"date": a["start"][:10], "name": a["name"], "moving_s": a["moving_s"], "distance_m": a["distance_m"],
+                rows_e.append({"date": a["start"][:10], "name": a["name"], "moving_s": a["moving_s"], "elapsed_s": a.get("duration_s") or a["moving_s"],
+                               "distance_m": a["distance_m"],
                                "elev_m": a["elev_m"], "avg_hr": a["avg_hr"], "np": a.get("np"), "ctl": r.get("ctl"), "tsb": r.get("tsb"),
                                "speed_kph": round(a["distance_m"] / a["moving_s"] * 3.6, 1) if a["moving_s"] else None})
-        editions[race["name"]] = rows_e
+        longest = {}
+        for e in rows_e:   # one edition a day: the race itself, not a ride to or from it that shares the name
+            if e["date"] not in longest or e["distance_m"] > longest[e["date"]]["distance_m"]:
+                longest[e["date"]] = e
+        editions[race["name"]] = sorted(longest.values(), key=lambda e: e["date"])
 
     zones = [0.0] * 5
     for a in acts:
@@ -181,7 +186,8 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     trend = _weight_trend((profile or {}).get("weigh_ins") or [], today)
     weight = cfg["athlete"].get("weight_kg") or (trend or {}).get("kg") or (profile or {}).get("weight_kg")
     upkeep = bike.upkeep(acts, bike_state or {}, cfg, today, wx, weight, plan["races"] if plan else [])
-    races_soon = raceday.pages(plan, cfg, wx, th, weight, upkeep, today)
+    venue = {name: {k: wxm.Wx(raw) if raw else None for k, raw in pts.items()} for name, pts in (race_weather or {}).items()}
+    races_soon = raceday.pages(plan, cfg, wx, th, weight, upkeep, today, editions=editions, venue=venue)
 
     ytd = [a for a in acts if a["start"][:4] == str(today.year) and a["group"] == "ride"]
     indoor = _indoor_season(acts, cfg, today)
@@ -223,6 +229,26 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "race_day": races_soon,
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
     }
+
+
+def race_forecasts(store, cfg: dict, today: date, now: datetime, get=None) -> dict[str, dict]:
+    """Each race's own forecast at its start (and finish) once it's within Open-Meteo's 16 days: race week's
+    weather where you'll ride, not at home. Cached per point like the home forecast."""
+    out = {}
+    if not cfg.get("weather", {}).get("enabled", True):
+        return out
+    tz = cfg["athlete"]["timezone"]
+    for r in cfg["races"]:
+        _, nxt = race_dates(r, today)
+        if not r.get("start_ll") or not 0 <= (nxt - today).days <= 15:
+            continue
+        pts = {}
+        for k in ("start_ll", "finish_ll"):
+            if r.get(k):
+                kw = {"get": get} if get else {}
+                pts[k[:-3]] = wxm.load(store, tuple(r[k]), tz, now, key_name=f"weather:{bike._race_key(r['name'])}:{k[:-3]}", **kw)
+        out[r["name"]] = pts
+    return out
 
 
 def forecast_for(store, cfg: dict, today: date, now: datetime, get=None) -> dict | None:
