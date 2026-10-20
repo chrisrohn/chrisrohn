@@ -612,7 +612,7 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
     prof = cfg["commute"].get("profile")
     models = {leg: {"model": v["model"], "speed": v["speed"], "hr": v["hr"]} for leg, v in prof["legs"].items()} if prof else None
     nxt = (plan or {}).get("races", [{}])[0] if plan else {}
-    return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "days": days,
+    return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "ftp": round(th["ftp"]) if th.get("ftp") else 0, "days": days,
             "race": {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None,
             "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models,
             "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")},
@@ -674,12 +674,11 @@ def ride_qr(link: str) -> str | None:
 
 
 def csp(html: str) -> str:
-    """Fill the page's Content-Security-Policy: only its own inline scripts (by hash) may run, nothing may load, and the
-    only place it may talk to is GitHub's API (the sync's private repository)."""
+    """Fill the page's Content-Security-Policy (site/csp.txt): only its own inline scripts (by hash) and its own files run, and
+    it talks only to GitHub's API (the sync's private repository), Open-Meteo, OpenFreeMap's map tiles and the BRouter router."""
     hashes = [f"'sha256-{base64.b64encode(hashlib.sha256(m.group(1).encode()).digest()).decode()}'"
               for m in re.finditer(r"<script(?![^>]*application/json)[^>]*>(.*?)</script>", html, re.S)]
-    policy = (f"default-src 'none'; script-src {' '.join(hashes)}; style-src 'unsafe-inline'; img-src 'self' data:; connect-src https://api.github.com https://api.open-meteo.com; manifest-src 'self'; worker-src 'self'; "
-              "base-uri 'none'; form-action 'none'")   # the same policy fitness/build-app.mjs sets on the hosted pages
+    policy = (SITE_DIR / "csp.txt").read_text().strip().replace("%SCRIPTS%", " ".join(hashes))   # the same policy fitness/build-app.mjs sets on the hosted pages
     return html.replace("__CSP__", policy)
 
 
@@ -691,6 +690,7 @@ def ride_page(ride: dict | None) -> str:
     page = (SITE_DIR / "ride.html").read_text()
     page = (page.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
                 .replace("/*__RIDE_STYLE__*/", (SITE_DIR / "ride.css").read_text())
+                .replace("/*__RIDE_CORE__*/", (SITE_DIR / "ride-core.js").read_text())
                 .replace("/*__RIDE_APP__*/", (SITE_DIR / "ride.js").read_text()))
     return csp(_inline(page, ride, "__RIDE_DATA__") if ride else page.replace("__RIDE_DATA__", ""))
 
@@ -706,6 +706,11 @@ def render_public_ride(out: Path | None = None) -> Path:
 def app_files(out_dir: Path, pages: list[str]) -> None:
     """The manifest, icons and service worker that make a built folder installable (when it's served over HTTPS)."""
     shutil.copytree(SITE_DIR / "icons", out_dir / "icons", dirs_exist_ok=True)
+    maplibre = SITE_DIR.parent.parent / "node_modules" / "maplibre-gl" / "dist"   # the map, when `npm ci` has run; else ride mode draws the route itself
+    if (maplibre / "maplibre-gl.mjs").exists():
+        (out_dir / "vendor").mkdir(exist_ok=True)
+        for f in ("maplibre-gl.mjs", "maplibre-gl-worker.mjs", "maplibre-gl.css"):
+            shutil.copy2(maplibre / f, out_dir / "vendor" / f)
     (out_dir / "manifest.webmanifest").write_text((SITE_DIR / "manifest.webmanifest").read_text())
     version = hashlib.sha256("".join((out_dir / p).read_text() for p in pages if (out_dir / p).exists()).encode()).hexdigest()[:10]
     (out_dir / "sw.js").write_text((SITE_DIR / "sw.js").read_text().replace("__VERSION__", version))

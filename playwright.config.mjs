@@ -26,7 +26,7 @@ const executablePath = browserPath();
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["tests/site/**/*.spec.mjs", "fitness/tests/**/*.spec.mjs"],   // the site, plus fitness's ride page
+  testMatch: ["tests/site/**/*.spec.mjs", "fitness/tests/**/*.spec.mjs"],   // the site, plus the Training app (served on :8766)
   timeout: 30_000,
   // one retry on CI, for the runner rather than the app: a renderer that dies mid-navigation on a loaded GitHub
   // runner ("Page crashed") is not a site bug, and must not block a deploy. The list reporter still marks the test
@@ -39,10 +39,18 @@ export default defineConfig({
     headless: true,
     launchOptions: executablePath ? { executablePath } : {},
   },
-  webServer: {
-    command: "node build.mjs && python3 -m http.server -d dist 8765 --bind 127.0.0.1",
-    url: "http://127.0.0.1:8765/index.html",
-    reuseExistingServer: true,
-    timeout: 20_000,
-  },
+  webServer: [
+    {
+      command: "node build.mjs && python3 -m http.server -d dist 8765 --bind 127.0.0.1",
+      url: "http://127.0.0.1:8765/index.html",
+      reuseExistingServer: true,
+      timeout: 20_000,
+    },
+    {   // the Training app, on an origin of its own as it is in production (fitness/build-app.mjs → its Pages site)
+      command: "node fitness/build-app.mjs dist-app && python3 -m http.server -d dist-app 8766 --bind 127.0.0.1",
+      url: "http://127.0.0.1:8766/index.html",
+      reuseExistingServer: true,
+      timeout: 20_000,
+    },
+  ],
 });

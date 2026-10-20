@@ -1,0 +1,1 @@
+default-src 'none'; script-src 'self' %SCRIPTS%; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org; font-src 'self'; connect-src 'self' https://api.github.com https://api.open-meteo.com https://tiles.openfreemap.org https://brouter.de; manifest-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'

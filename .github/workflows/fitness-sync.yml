@@ -1,7 +1,7 @@
 name: Fitness sync
 
 # The training dashboard's sync, so nothing has to run on a computer: Garmin + Strava → fitness-data.json for the app at
-# chrisrohn.com/fitness/. It is called from a PRIVATE repository (the caller is fitness/cloud/training.yml) on a schedule
+# chrisrohn.github.io. It is called from a PRIVATE repository (the caller is fitness/cloud/training.yml) on a schedule
 # and from the app's buttons; it never runs here, so everything it prints and stores lands in that private repository.
 #
 # Between runs the caller's `state` branch holds three files, replaced in one commit each run (no history piles up):

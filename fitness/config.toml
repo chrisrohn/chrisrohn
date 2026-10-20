@@ -137,10 +137,11 @@ chain = 1000
 [weather]
 enabled = true
 
-# The installable app: chrisrohn.com/fitness/ (dashboard + ride mode), built data-free by build.mjs. The dashboard's
+# The installable app (dashboard + ride mode) on an origin of its own, apart from the music app at chrisrohn.com (Android
+# installs one app per scope, and the music app's is the whole site), built data-free by fitness/build-app.mjs. The dashboard's
 # "Phone app" panel hands your data to it in a link's #fragment, which never reaches the server, or as a data file.
 [app]
-url = "https://chrisrohn.com/fitness/"   # "" = local-only: no phone link, ride mode served from dist/
+url = "https://chrisrohn.github.io/"   # its Pages site (see README → The app on your phone); "" = local-only: no phone link, ride mode from dist/
 export_dir = ""           # also write fitness-data.json here on every build, e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/Fitness"
                           # (iCloud Drive) or a Google Drive folder, so the phone app can Import it from Files
 

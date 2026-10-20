@@ -2,7 +2,8 @@
 
 Your Garmin Venu Sq wellness data and your full Strava history, turned into one private page: a daily
 **train / easy / rest call**, your own **sleep score**, a **readiness** score against your own normal, the
-**fitness / fatigue / form** model, a phone **ride mode** with live HR and interval cues, and a day-by-day **season plan** that re-optimizes every time it's built.
+**fitness / fatigue / form** model, a phone **ride mode** that works like a cycling computer (GPX routes, turn by turn,
+maps, climbs ahead, recorded rides, workouts you can reshape mid-ride), and a day-by-day **season plan** that re-optimizes every time it's built.
 The plan runs through the Iceman Cometh (Nov 7, 2026 · wave 14, 9:24 AM) and a Zwift / MyWoosh trainer winter (Dec 1 – Feb 28) to
 Barry-Roubaix (Apr 17, 2027), with the 100k and 50k compared side by side.
 
@@ -10,7 +11,7 @@ Barry-Roubaix (Apr 17, 2027), with the 100k and 50k compared side by side.
 python -m fitness demo --open        # see it with a synthetic athlete first; no accounts needed
 ```
 
-It installs as an app on your phone from **<https://chrisrohn.com/fitness/>**, with your data kept only on the phone
+It installs as an app on your phone from **<https://chrisrohn.github.io/>**, with your data kept only on the phone
 (see [The app on your phone](#the-app-on-your-phone)).
 
 ## What the Venu Sq can and can't give you
@@ -87,8 +88,7 @@ the phone. The forecast is cached for 50 minutes. `[weather] enabled = false` tu
 
 ### The morning notification
 
-Settings → *Morning notification* → **Turn on**. It works in Chrome without installing the app, so the Music app on
-the same site doesn't get in the way.
+Settings → *Morning notification* → **Turn on**, in the installed app (or in Chrome without installing it).
 
 - **What arrives:** the day's call, between 5 and 11 am, once last night's sleep is in (or from 9 am regardless).
   One update follows if the call changes before 5 pm, for example when the forecast turns or the afternoon check
@@ -272,7 +272,48 @@ moves: rising means aerobic fitness, and a drop that lasts a week means fatigue.
 commutes. At 6+ bpm high it shows (and says) *running hot: keep it easy, skip the intervals*. That's the honest
 answer to "should I do the workout on the way home?". At 4+ bpm low it tells you it's a good day for the work.
 
-## Ride mode: live data on the phone on your bars
+## Ride mode: a cycling computer on the phone on your bars
+
+Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data · Laps**.
+
+- **Routes.** Load a **GPX or TCX** (Ride with GPS, Komoot, Strava, Garmin Connect, a race site) under **Map → Routes**,
+  or on Android **share** the file to Training from any app (Files, Gmail, Komoot…); desktop Chrome opens .gpx files
+  with it. Routes stay on the phone, with **Reverse**, **GPX** out and **Delete**. A file with no heights gets them
+  from Open-Meteo's elevation API.
+- **Turn by turn.** The file's own cues when it has them (Ride with GPS cue sheets, Garmin and TCX course points),
+  otherwise turns read off the line itself. A banner and voice: *"In 500 feet, turn left onto Fox Rd"*, then *"Turn
+  left now"* with a beep and a buzz, timed to your speed. Street names come from the map's own data.
+- **Off course and wrong way.** 40 m+ off the line for 6 s says *Off course*, with an arrow and the distance back.
+  With signal it asks **BRouter** (free, no key) for a way back to the route ahead and guides you turn by turn until
+  you're on it (automatic, or the **Reroute** button; Settings picks mixed / gravel, road, quiet roads, MTB or
+  shortest). Far from the start? **Directions** to it.
+- **The map.** OpenFreeMap's vector map (MapLibre), heading-up or north-up, zooming with your speed and in for a
+  turn: the route ahead in red, done in grey, climbs by steepness, your track in blue. **It saves itself for
+  offline**: loading a route online stores every map tile along it (±800 m, zoom 8–14) in the phone's cache. No
+  WebGL or no tiles: a drawn breadcrumb of the route and your track stands in.
+- **What's ahead.** Done / to go / still to climb, arrival time (and *after sunset: lights* when it is), the elevation
+  profile of the whole route and the next 5 miles colored by grade, **ClimbPro-style** climbs (*next climb in 1.2 mi:
+  0.9 mi at 5.1%, 240 ft up*, then on it: distance and height to the top, grade now), the next turns, water / food /
+  aid stops from the file's waypoints, and the **wind on the next 10 miles** (headwind / tailwind / cross shares).
+- **Data.** Ride and moving time, distance, speed, average and max, climbed, grade, HR and max, power (10 s) and
+  cadence, time of day, sunset, elevation, phone battery (a spoken warning at 15%).
+- **Laps and recording.** **Lap** button, a lap per workout step and auto laps every N mi / km (Settings), with
+  **auto-pause** at stops. Every second is recorded on the phone (it survives a reload), and **End** keeps the ride
+  under **Laps → Saved rides**, exporting **FIT** (Garmin Connect *Import data*, Strava *Upload*, TrainingPeaks),
+  **GPX** or **TCX**, or **Share…** straight to another app. The watch's file stays the official record.
+- **The workout, tailored as you ride.**
+  - **Easier / Harder** moves the work targets 5% at a time; **+1 min** on the step you're on.
+  - **Tailor…**: ±1 / +5 min, previous step, **one more rep**, **cut the set**, **fit the rest into the minutes you
+    have** (long easy riding and the cool-down shrink first, then reps come off the end, the step you're on keeps
+    going), **hit today's load** (endurance added to reach the planned TSS), or switch to a **quick workout**
+    (endurance, tempo, sweet spot, threshold, VO2, 30/30s, hill repeats, sprints, recovery) fitted to your minutes.
+  - **It suggests, you decide:** two reps in a row where HR never reaches the target → *cut the set?*; two well over
+    it → *5% easier?*; the commute check running hot → *skip the intervals?*; the session done short of its load →
+    *add endurance?*
+  - **Efforts on the climbs.** On a route, the easy step before an interval waits (up to 10 min) for the foot of the
+    next climb, and says so.
+  - **Power.** With an FTP (Settings, or the dashboard's), each step gets a watt range beside the HR one, and with a
+    power meter the status follows 10-second power, so even short efforts get a number.
 
 **Your Venu Sq can't send live data to a phone.** It broadcasts heart rate over ANT+ only. iPhones have no ANT+
 radio and few current Android phones do, and the Garmin Connect app doesn't show live workout data. So
@@ -288,7 +329,7 @@ the phone needs its own sensor.
   too, if you ever get one.
 
 `python -m fitness build` writes **`dist/ride.html`**, and the dashboard header gets a **Ride mode** button.
-On the phone it shows:
+The Workout screen shows:
 
 - **Live readings:** heart rate, with your zone and a marker on the zone bar; time, distance, speed (from the
   wheel sensor, else GPS), cadence or power, average HR, and live load against the planned TSS.
@@ -326,10 +367,11 @@ to *Never* for rides, in case the browser ignores the keep-awake request.
 
 Once connected, a sensor is remembered and reconnects by itself when it's back in range (Chrome).
 
-**Where it lives: <https://chrisrohn.com/fitness/ride.html>**, inside the installed app. The site build
-(`fitness/build-app.mjs`, called from `build.mjs`) publishes it with the rest of chrisrohn.com. It's a data-free page: no zones, plan or history are
-in it, and it's `noindex`. A strict Content-Security-Policy lets only its own scripts run and nothing load,
-because it shares an origin with the music app. HTTPS is what phones require for Bluetooth and GPS.
+**Where it lives: <https://chrisrohn.github.io/ride.html>**, inside the installed app (see
+[The app on your phone](#the-app-on-your-phone)). It's a data-free page: no zones, plan or history are in it, and it's
+`noindex`. Its Content-Security-Policy ([`site/csp.txt`](site/csp.txt)) lets only its own scripts and files run, and
+lets it talk only to GitHub's API, Open-Meteo, OpenFreeMap's tiles and BRouter. HTTPS is what phones require for
+Bluetooth and GPS.
 
 **Getting the week onto the phone:** open the dashboard, then **Body → Phone app**, and scan the QR
 code. You can also tap **copy the link** and send it to yourself. The link carries your HR anchors and the next 7
@@ -348,7 +390,7 @@ A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen
 Everything runs on GitHub and your phone. A **private** repository of yours syncs Garmin (and Strava, if you use it) every hour
 while you're up (5:17 to 22:17 Michigan time; a run takes about 30 seconds) and whenever you open the app with data more than
 45 minutes old, with [`fitness-sync.yml`](../.github/workflows/fitness-sync.yml), and the app
-at <https://chrisrohn.com/fitness/> reads the result with a token that can only see that repository. Garmin's
+at <https://chrisrohn.github.io/> reads the result with a token that can only see that repository. Garmin's
 official API is for approved companies only, so this signs in the way Garmin's own mobile app does.
 
 **One-time setup, about 10 minutes, all from the phone's browser:**
@@ -382,7 +424,7 @@ imports it once:
    any time; each file is imported once, and rides the watch also recorded are merged with their Garmin copy.
 
 **Strava (optional, live).** Strava's API needs a paid Strava subscription since June 2026. With one, create an app at
-<https://www.strava.com/settings/api> (*Authorization Callback Domain* `chrisrohn.com`), add `STRAVA_CLIENT_ID` and
+<https://www.strava.com/settings/api> (*Authorization Callback Domain* `chrisrohn.github.io`), add `STRAVA_CLIENT_ID` and
 `STRAVA_CLIENT_SECRET` as secrets, and **Connect Strava** appears in the app. Without it, the sync and the app
 simply leave Strava out.
 
@@ -624,9 +666,23 @@ Silca weight comes from the same figure.
 
 ## The app on your phone
 
-**<https://chrisrohn.com/fitness/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
+**<https://chrisrohn.github.io/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
 and it opens offline. The hosted copy holds no one's data; yours arrives from the [cloud sync](#cloud-sync-no-computer)
 (or by hand from a computer, below) and stays on the phone.
+
+**Why its own address.** Android installs one app per *scope*, and the music app's scope is all of chrisrohn.com, so
+an app under chrisrohn.com/fitness/ could only ever offer *Open in New Music*. On its own origin it installs as its own
+app, with its own icon, storage and notifications.
+
+- **The site** is the GitHub Pages site of the public `chrisrohn/chrisrohn.github.io` repository. Its
+  `deploy.yml` workflow builds the app from this repository's `main` (`node fitness/build-app.mjs <dir>`) every hour
+  when `fitness/` has changed, and on demand (*Actions → Deploy the Training app → Run workflow*, any branch).
+- **The old address** (chrisrohn.com/fitness/, and every QR link from before) now forwards there, bringing what the
+  phone kept at the old address along (the GitHub connection, settings, the saved plan) and retiring the old offline
+  copy. Turn the morning notification on again in the new app: notifications belong to an address.
+- **Your own domain instead** (e.g. `training.chrisrohn.com`): add a DNS CNAME record `training` →
+  `chrisrohn.github.io`, set `[app] url = "https://training.chrisrohn.com/"` in [`config.toml`](config.toml) (the
+  build then writes the Pages `CNAME` file), and the Strava callback domain to match.
 
 1. **Install.** iPhone: open it in Safari → **Share** → **Add to Home Screen**. Android: Chrome → **Install**
    (the button in the top bar, or the ⋮ menu). Desktop Chrome / Edge: the install icon in the address bar.
@@ -661,7 +717,7 @@ pip install -r fitness/requirements.txt
 2. **Strava history.** On strava.com go to *Settings → My Account → Download or Delete Your Account → Request your archive*.
    When the zip arrives: `python -m fitness import-strava ~/Downloads/export_12345.zip`.
 3. **Strava ongoing.** Create an app at <https://www.strava.com/settings/api> with
-   *Authorization Callback Domain* `chrisrohn.com` (Strava always allows `localhost` too), then
+   *Authorization Callback Domain* `chrisrohn.github.io` (Strava always allows `localhost` too), then
    `STRAVA_CLIENT_ID=… STRAVA_CLIENT_SECRET=… python -m fitness login strava`. Keep `STRAVA_CLIENT_SECRET` in the
    environment for later syncs too (e.g. `export` it in your shell profile): it's never written to disk.
    This is how your Zwift and MyWoosh rides arrive, with their power. If you also record a trainer ride on the
@@ -746,10 +802,11 @@ legs actually felt on the bike.
 | `power.py` | the power-duration curve, critical power and eFTP |
 | `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` and `dist/ride.html` |
-| `build-app.mjs` | writes the public, data-free app to `chrisrohn.com/fitness/` during the site build: the dashboard shell, ride mode, manifest, icons and the offline service worker |
+| `build-app.mjs` | writes the public, data-free app for its own site (`node fitness/build-app.mjs <dir>`: the dashboard shell, ride mode, MapLibre, manifest, icons, the offline service worker) and, during the chrisrohn.com build, the forwarding page at `/fitness/` |
+| `render-icons.mjs` | renders the PNG icons from `site/icons/*.svg` (the heartbeat as the bike's top tube) |
 | `raceday.py`, `racewx.py` | race day: the morning timeline from your wave's gun, pacing, bottles, and the course forecast turned into kit, tire pressures, bike prep and riding for every weather case |
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
-| `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page) and ride mode, styles, SVG charts, `manifest.webmanifest`, `sw.js` and `icons/` (no dependencies, works offline) |
+| `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page), ride mode (`ride-core.js`: routes, navigation, climbs, the sun, workout tailoring, FIT / GPX / TCX; `ride.js`: the screens, sensors, map and recording), styles, SVG charts, `csp.txt`, `manifest.webmanifest`, `sw.js` (offline, map tiles, the share target) and `icons/` |
 | `demo.py` | the synthetic athlete |
 
-Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off). CI runs both. This is a personal analysis tool, not medical advice.
+Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target). CI runs both. This is a personal analysis tool, not medical advice.

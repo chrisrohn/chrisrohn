@@ -1,9 +1,11 @@
-// Ride mode (/fitness/ride.html, written by fitness/build-app.mjs from fitness/site): it loads clean under its own CSP, passes axe, takes
+// Ride mode (/ride.html on the app's own origin, written by fitness/build-app.mjs from fitness/site): it loads clean under its own CSP, passes axe, takes
 // its plan from a #z= link without ever executing what the link carries, and its settings sheet works under
 // form-action 'none'.
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { deflateRawSync } from "node:zlib";
+
+test.use({ baseURL: "http://127.0.0.1:8766" });   // the Training app's own origin (playwright.config.mjs)
 
 const today = new Date();
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -15,7 +17,7 @@ const PLAN = {
       steps: [step("Warm-up <b>x</b>", 15, 81, 89), step("VO2 1/2", 3, 100, 106), step("Easy", 3, 0, 81), step("VO2 2/2", 3, 100, 106)] },
   ],
 };
-const link = plan => "/fitness/ride.html#z=" + deflateRawSync(Buffer.from(JSON.stringify(plan))).toString("base64url");
+const link = plan => "/ride.html#z=" + deflateRawSync(Buffer.from(JSON.stringify(plan))).toString("base64url");
 
 /** @param {import("@playwright/test").Page} page */
 function watch(page) {
@@ -30,11 +32,11 @@ test.describe("ride mode", () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const problems = watch(page);
-    await page.goto("/fitness/ride.html");
+    await page.goto("/ride.html");
     await expect(page.locator("#btn-start")).toBeVisible();
     expect(await page.locator('meta[name="robots"]').getAttribute("content")).toBe("noindex, nofollow");
     const policy = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
-    expect(policy).toMatch(/^default-src 'none'; script-src 'sha256-[^']+' 'sha256-[^']+';/);
+    expect(policy).toMatch(/^default-src 'none'; script-src 'self'( 'sha256-[^']+'){3};/);   // the theme, the engine and the app, by hash
     const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"]).analyze();
     expect(r.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(" ")).join(", ")}`)).toEqual([]);
     expect(problems).toEqual([]);
@@ -82,7 +84,7 @@ test.describe("ride mode", () => {
     await expect(page.locator("#step-target")).toContainText("first: Warm-up <b>x</b>");
     await page.reload();                                                         // and kept on the phone
     await expect(page.locator("#day option")).toHaveCount(2);
-    await page.goto("/fitness/ride.html#z=not-a-plan");                                  // junk is ignored, the saved plan stays
+    await page.goto("/ride.html#z=not-a-plan");                                  // junk is ignored, the saved plan stays
     await expect(page.locator("#day option")).toHaveCount(2);
     expect(problems).toEqual([]);
   });
