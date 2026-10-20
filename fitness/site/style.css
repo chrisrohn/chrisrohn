@@ -425,3 +425,11 @@ footer p { max-width: 64ch; }
   .tools, .tabs { display: none; }
   .panel[hidden] { display: grid; }
 }
+.race-day .conditions { margin-top: var(--sp-4); }
+.race-day .conditions .timeline dt { font-weight: 600; }
+.race-day .cases { display: grid; gap: var(--sp-2); margin-top: var(--sp-2); }
+.race-day details.case { border-left: var(--rule-minor) solid var(--ink); padding-left: var(--sp-3); }
+.race-day details.case.picked { border-left-width: 3px; }
+.race-day details.case summary { cursor: pointer; display: grid; gap: var(--sp-1); }
+.race-day details.case summary { text-transform: none; letter-spacing: normal; font-size: var(--fs-body, 1rem); font-weight: 400; }
+.race-day details.case summary .sub { display: block; }

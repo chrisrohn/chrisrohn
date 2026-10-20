@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fitness.config import race_dates, workday
 from fitness.metrics import ATL_DAYS, CTL_DAYS
@@ -163,7 +163,9 @@ def upcoming(cfg: dict, today: date, choices: dict[str, str] | None = None) -> t
         if nxt >= today and (nxt - today).days <= HORIZON:
             key = (choices or {}).get(r["name"], r["distance"])
             key = key if key in r["options"] else r["distance"]
-            ahead.append({**r, "date": nxt, "option": key, "opt": r["options"][key]})
+            own = nxt == r["date"]   # start and wave are for the configured edition, not a year it rolled forward to
+            ahead.append({**r, "date": nxt, "option": key, "opt": r["options"][key],
+                          "start": r["start"] if own else "", "wave": r["wave"] if own else 0})
     return sorted(ahead, key=lambda r: r["date"]), last
 
 
@@ -418,7 +420,7 @@ def _segment(start: date, race: dict, ctl: float, atl: float, cfg: dict, prev_ra
                "options": [{"key": k, "label": v["label"]} for k, v in race["options"].items()], "km": race["opt"]["km"],
                "climbing_ft": race["opt"]["climbing_ft"], "hours": race["opt"]["hours"], "target_ctl": race["opt"]["target_ctl"],
                "race_ctl": round(race_ctl, 1), "race_tsb": round(tsb, 1), "in_band": lo <= tsb <= hi, "target_tsb": [lo, hi],
-               "taper_days": taper, "volume_floor": floor, "match": race["match"]}
+               "taper_days": taper, "volume_floor": floor, "match": race["match"], "start": race.get("start", ""), "wave": race.get("wave", 0)}
     return rows, summary
 
 
@@ -566,9 +568,11 @@ def _session(r: dict, race: dict, cfg: dict, counters: Counter, ftp_tests: set[s
     gravel = race["kind"] == "gravel"
     apps = " / ".join(a.capitalize() if a != "mywoosh" else "MyWoosh" for a in cfg["indoor"]["apps"]) or "the trainer"
     if role == "race":
+        when = race.get("start") and datetime.strptime(race["start"], "%H:%M").strftime("%-I:%M %p")
+        wave = f" · wave {race['wave']}, {when}" if race.get("wave") and when else f" · {when} start" if when else ""
         if gravel:
-            return f"Race day — {race['name']} ({race['opt']['label']})", "Warm up 15 min with two 30 s efforts; line up early and expect a fast start — position before the first dirt; 80–90 g carbs an hour"
-        return f"Race day — {race['name']}", "Warm up 15 min with two 30 s efforts; 60–90 g carbs an hour from the gun; start hard, settle by the first two-track"
+            return f"Race day — {race['name']} ({race['opt']['label']}){wave}", "Warm up 15 min with two 30 s efforts; line up early and expect a fast start — position before the first dirt; 80–90 g carbs an hour"
+        return f"Race day — {race['name']}{wave}", "Warm up 15 min with two 30 s efforts; 60–90 g carbs an hour from the gun; start hard, settle by the first two-track"
     if role == "openers":
         tires = "gravel tire pressure dialed" if gravel else "tire pressure set for sand"
         return "Openers", f"40 min easy with 3 × 1 min at race pace and 3 × 10 s sprints; last bike check, {tires}"

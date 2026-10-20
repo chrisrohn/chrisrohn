@@ -3,7 +3,7 @@
 Your Garmin Venu Sq wellness data and your full Strava history, turned into one private page: a daily
 **train / easy / rest call**, your own **sleep score**, a **readiness** score against your own normal, the
 **fitness / fatigue / form** model, a phone **ride mode** with live HR and interval cues, and a day-by-day **season plan** that re-optimizes every time it's built.
-The plan runs through the Iceman Cometh (Nov 7, 2026) and a Zwift / MyWoosh trainer winter (Dec 1 – Feb 28) to
+The plan runs through the Iceman Cometh (Nov 7, 2026 · wave 14, 9:24 AM) and a Zwift / MyWoosh trainer winter (Dec 1 – Feb 28) to
 Barry-Roubaix (Apr 17, 2027), with the 100k and 50k compared side by side.
 
 ```bash
@@ -452,11 +452,24 @@ Recovery weeks, tapers and race weeks aren't rearranged: there, a missed session
 ## Race day
 
 The **Race** section covers each race in the next six weeks (the next one always):
-- the race-morning timeline, counted back from your wave's start (`start = "HH:MM"` in the race's config block;
-  10:00 until set), including a low-fiber carb breakfast (not the Nutty Pudding that day);
+- the race-morning timeline, counted back from your wave's start (`start = "HH:MM"` and `wave = N` in the race's
+  config block; 10:00 until set, and set aside once the race rolls to next year's date), including a low-fiber carb breakfast (not the Nutty Pudding that day);
 - how to ride the start and the heart rate to settle at;
 - the bottles and gels for your expected time;
-- the forecast and what to wear, from 16 days out;
+- the race's length from your own past editions (the median of the last three, by elapsed time; one edition per
+  day, so a ride to or from the venue that shares the name doesn't count), else the option's `hours`;
+- from 16 days out, the forecast **at the course** (`start_ll` / `finish_ll` in the race's block; the home forecast
+  until then) for the warm-up, the race from your gun to your expected finish, and the finish, plus the trail the
+  48 hours before leave behind (dry and loose, damp and packed, soaked, snow, frozen) and the head- or tailwind along
+  the start→finish line;
+- what that forecast asks of you, the bike and the bottles (`fitness/racewx.py`): kit for racing effort (about 10 °F
+  warmer than the feels-like), the corral and the finish; the race's Silca pressures moved for the case, with the
+  cold correction for pumping indoors (Gay-Lussac); and the bike, riding and fueling lines for the Cube's tubeless
+  Riddler 45s, AXS, hydraulic Rivals and Super Secret drip;
+- every case written out on the page, the forecast's picks first: dry sand, damp and packed, rain, mud, cold and
+  wet, snow, frozen ground, freezing rain, bitter cold, warm, windy, thunderstorms;
+- race notices to your phone: when the course forecast first arrives, when it changes what to do (once a day at
+  most), the evening before (wake time, kit, pressures) and race morning;
 - the bike checklist for the week before;
 - a pack list;
 - the key sessions still to come.
@@ -734,6 +747,7 @@ legs actually felt on the bike.
 | `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` and `dist/ride.html` |
 | `build-app.mjs` | writes the public, data-free app to `chrisrohn.com/fitness/` during the site build: the dashboard shell, ride mode, manifest, icons and the offline service worker |
+| `raceday.py`, `racewx.py` | race day: the morning timeline from your wave's gun, pacing, bottles, and the course forecast turned into kit, tire pressures, bike prep and riding for every weather case |
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
 | `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page) and ride mode, styles, SVG charts, `manifest.webmanifest`, `sw.js` and `icons/` (no dependencies, works offline) |
 | `demo.py` | the synthetic athlete |

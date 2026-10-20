@@ -41,11 +41,12 @@ def fetch(lat: float, lon: float, tz: str, get: Callable[[str], dict] = _get) ->
     return get(f"{API}?{urlencode(q)}")
 
 
-def load(store, where: tuple[float, float] | None, tz: str, now: datetime, get: Callable[[str], dict] = _get) -> dict | None:
-    """The forecast for `where`, from the store when it's under MAX_AGE_MIN old; the last one if the fetch fails."""
+def load(store, where: tuple[float, float] | None, tz: str, now: datetime, get: Callable[[str], dict] = _get,
+         key_name: str = "weather") -> dict | None:
+    """The forecast for `where`, from the store (under `key_name`) when it's under MAX_AGE_MIN old; the last one if the fetch fails."""
     if not where:
         return None
-    cached = json.loads(store.get("weather") or "null")
+    cached = json.loads(store.get(key_name) or "null")
     key = [round(where[0], 2), round(where[1], 2)]
     if cached and cached["where"] == key and now - datetime.fromisoformat(cached["at"]) < timedelta(minutes=MAX_AGE_MIN):
         return cached["data"]
@@ -54,7 +55,7 @@ def load(store, where: tuple[float, float] | None, tz: str, now: datetime, get: 
     except Exception as e:
         print(f"Weather: couldn't reach Open-Meteo ({str(e)[:80]}); using the last forecast" if cached else f"Weather: unavailable ({str(e)[:80]})")
         return cached["data"] if cached else None
-    store.set("weather", json.dumps({"where": key, "at": now.isoformat(timespec="minutes"), "data": data}))
+    store.set(key_name, json.dumps({"where": key, "at": now.isoformat(timespec="minutes"), "data": data}))
     return data
 
 
@@ -199,7 +200,7 @@ def kit(feels_c: float, wet: bool) -> str:
 
 def describe(w: dict, units: str) -> str:
     """"52°F, dry, wind 9 mph SW (a headwind)" for one ride window."""
-    sky = {"storm": "thunderstorms", "ice": "icy", "wet": f"rain ({w['rain_mm']:g} mm)", "showers": f"{w['pop']}% chance of showers", "dry": "dry"}[w["verdict"]]
+    sky = {"storm": "thunderstorms", "ice": "icy", "snow": "snow", "wet": f"rain ({w['rain_mm']:g} mm)", "showers": f"{w['pop']}% chance of showers", "dry": "dry"}[w["verdict"]]
     t = temp(w["temp_min"], units) if abs(w["temp_max"] - w["temp_min"]) < 2 else f"{temp(w['temp_min'], units)}–{temp(w['temp_max'], units)}"
     wind = f"wind {speed(w['wind'], units)} {compass(w['wind_dir'])}".rstrip()
     if w.get("head") is not None and abs(w["head"]) >= 10:

@@ -16,7 +16,7 @@ from fitness import bike, build, config, demo, raceday, webpush  # noqa: E402
 from fitness import metrics as m  # noqa: E402
 from fitness import weather as wxm  # noqa: E402
 from fitness.activities import activity  # noqa: E402
-from fitness.plan import adapt, season  # noqa: E402
+from fitness.plan import adapt, season, upcoming  # noqa: E402
 from fitness.store import Store  # noqa: E402
 
 HOME, WORK = (42.300, -85.600), (42.300, -85.240)          # a made-up flat 30 km commute due east
@@ -258,13 +258,32 @@ def test_race_day_page(cfg):
     pages = raceday.pages(plan, cfg, wx, {"lthr": 160}, 84, up, today)
     iceman = pages[0]
     assert iceman["name"].startswith("Bell's Iceman") and len(pages) == 1                    # Barry is months away
-    assert iceman["timeline"][0]["at"] == "6:30 AM" and iceman["timeline"][-1]["at"] == "10:00 AM" and not iceman["start_set"]
+    assert iceman["timeline"][0]["at"] == "5:54 AM" and iceman["timeline"][-2]["at"] == "9:24 AM" and iceman["start_set"]
+    assert iceman["start"] == "9:24 AM" and iceman["wave"] == 14 and iceman["finish"] == "11:39 AM"   # no past editions: config's 2:15
+    assert "wave 14’s corral" in iceman["timeline"][-3]["what"] and iceman["timeline"][-2]["what"].startswith("Wave 14 goes.")
+    assert iceman["timeline"][-1]["what"].startswith("Finish, about 2:15") and iceman["conditions"]["where"] == "home"
+    assert "catching riders from the waves ahead" in iceman["strategy"]
     assert "Not the Nutty Pudding" in iceman["timeline"][1]["what"] and "210 g" in iceman["timeline"][1]["what"]
     assert "147–155 bpm" in iceman["strategy"] and iceman["fuel"]["rate"] >= 60
-    assert iceman["forecast"]["warm"] and "Winter" in iceman["forecast"]["kit"] or "Thermal" in iceman["forecast"]["kit"]
+    assert iceman["forecast"]["warm"] and iceman["forecast"]["kit"].startswith("Long-sleeve")             # 32°F feels, dressed for racing
+    assert "thermal jacket" in iceman["conditions"]["wear"][1]                                              # the corral is colder
     assert any(b["job"].startswith("Tire pressure: 24 front / 26 rear") and b["ok"] for b in iceman["bike"])
     assert iceman["sessions_left"] and all(s["date"] < iceman["date"] for s in iceman["sessions_left"])
 
+
+
+def test_race_start_and_wave_stay_with_their_edition(cfg):
+    iceman = next(r for r in cfg["races"] if "Iceman" in r["name"])
+    assert (iceman["start"], iceman["wave"]) == ("09:24", 14)
+    today = date(2026, 11, 20)                                              # this year's Iceman is done: it rolls to 2027
+    nxt = next(r for r in upcoming(cfg, today)[0] if "Iceman" in r["name"])
+    assert nxt["date"] == date(2027, 11, 6) and (nxt["start"], nxt["wave"]) == ("", 0)
+    plan = season(date(2026, 10, 9), 40, 40, cfg)
+    race_day = next(d for d in plan["days"] if d["date"] == "2026-11-07")
+    assert race_day["title"].endswith("· wave 14, 9:24 AM")
+    with pytest.raises(ValueError, match="HH:MM"):
+        config._race({"name": "X", "date": "2026-11-07", "start": "9.24"})
+    assert config._race({"name": "X", "date": "2026-11-07", "start": "9:24"})["start"] == "09:24"
 
 def test_ride_mode_carries_a_day_and_a_half_of_hourly_weather(cfg):
     wx = wxm.Wx(forecast(date(2026, 10, 9), days=3, wind=18, wind_from=250))

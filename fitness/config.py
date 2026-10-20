@@ -28,7 +28,7 @@ DEFAULTS: dict = {
     "commute": {"enabled": False, "km_each_way": 0, "climb_m": [0, 0], "days": ["tue", "thu", "wed", "mon", "fri"], "per_week": [1, 3], "winter": False, "holidays": "us-federal"},
 }
 OPTION_DEFAULTS = {"label": "", "km": 0, "climbing_ft": 0, "hours": 2.0, "target_ctl": 55, "long_ride_h": 3.0, "taper_days": [6, 14]}
-RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}, "start": ""}
+RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}, "start": "", "wave": 0, "start_ll": [], "finish_ll": []}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 MONTHS = [m.lower() for m in calendar.month_abbr]
 
@@ -67,6 +67,17 @@ def _race(raw: dict) -> dict:
     if not opts:   # a race with no options block is its own single option
         opts = {"race": {**OPTION_DEFAULTS, **{k: raw[k] for k in OPTION_DEFAULTS if k in raw}, "label": raw.get("distance") or "race"}}
     race["options"] = opts
+    if race["start"]:
+        hh, _, mm = str(race["start"]).partition(":")
+        if not (hh.isdigit() and mm.isdigit() and int(hh) < 24 and int(mm) < 60 and len(mm) == 2):
+            raise ValueError(f'{race["name"]}: start needs "HH:MM" (24-hour), got {race["start"]!r}')
+        race["start"] = f"{int(hh):02d}:{mm}"
+    race["wave"] = int(race["wave"] or 0)
+    for k in ("start_ll", "finish_ll"):
+        ll = race[k] or []
+        if ll and not (len(ll) == 2 and -90 <= ll[0] <= 90 and -180 <= ll[1] <= 180):
+            raise ValueError(f'{race["name"]}: {k} needs [lat, lon]')
+        race[k] = [float(x) for x in ll]
     if race["distance"] not in opts:
         race["distance"] = next(iter(opts))
     return race
