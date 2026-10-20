@@ -645,10 +645,10 @@ def app_url(cfg: dict) -> str:
 
 
 def ride_link(cfg: dict, ride: dict, local: str) -> str:
-    """The hosted ride page with the config deflated into the #fragment (never sent to the server; short enough for
-    a QR code), or the local copy when no hosted page is configured."""
-    base = app_url(cfg)
-    return f"{base}ride.html#z={_pack(ride)}" if base else local
+    """The ride page with the config deflated into the #fragment (never sent to a server; short enough for a QR code):
+    the hosted page, or the local copy when no hosted page is configured. Either way the page itself holds no data."""
+    base = app_url(cfg) or local
+    return f"{base}{'ride.html' if base.endswith('/') else ''}#z={_pack(ride)}"
 
 
 def phone_link(cfg: dict, data: dict) -> str | None:
@@ -686,7 +686,7 @@ def _inline(text: str, data: dict, token: str) -> str:
     return text.replace(token, json.dumps(data, separators=(",", ":")).replace("</", "<\\/"))
 
 
-def ride_page(ride: dict | None) -> str:
+def ride_page(ride: dict | None = None) -> str:
     page = (SITE_DIR / "ride.html").read_text()
     page = (page.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
                 .replace("/*__RIDE_STYLE__*/", (SITE_DIR / "ride.css").read_text())
@@ -721,8 +721,8 @@ def render(data: dict, out: Path | None = None, cfg: dict | None = None) -> Path
     out.parent.mkdir(parents=True, exist_ok=True)
     ride_name = "ride.html" if out.name == "index.html" else f"{out.stem}-ride.html"
     if data.get("ride"):
-        out.with_name(ride_name).write_text(ride_page(data["ride"]))
-        href = ride_link(cfg, data["ride"], ride_name) if cfg else ride_name
+        out.with_name(ride_name).write_text(ride_page())   # data-free, like the hosted page: its plan rides in the link
+        href = ride_link(cfg or {}, data["ride"], ride_name)
         data = {**data, "ride_href": href, "ride_qr": ride_qr(href)}
     if cfg:
         data = {**data, "phone_href": phone_link(cfg, data)}

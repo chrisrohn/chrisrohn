@@ -1321,18 +1321,27 @@
   let shown = null;
   function showRide(r, justNow = false) {
     shown = r;
-    const zt = r.zones.reduce((a, b) => a + b, 0) || 1;
-    $("sum-body").innerHTML = `<div class="sum">
-      <div>Time<b>${clock(r.elapsed)}</b></div><div>Moving<b>${clock(r.moving)}</b></div>
-      <div>Distance<b>${distTxt(r.dist)} ${unitD()}</b></div><div>Avg speed<b>${r.moving ? speedTxt(r.dist / r.moving) : "—"} ${unitS()}</b></div>
-      <div>Avg HR<b>${r.avgHr ? Math.round(r.avgHr) : "—"}</b></div><div>Max HR<b>${r.maxHr || "—"}</b></div>
-      <div>Load (hrTSS)<b>${r.tss}${r.planned ? ` / ${r.planned}` : ""}</b></div><div>Avg cadence<b>${r.avgCad ? Math.round(r.avgCad) : "—"}</b></div>
-      <div>Climbed<b>${eleTxt(r.ascent || 0)} ${unitE()}</b></div><div>${r.avgPower ? "Avg power" : "Max speed"}<b>${r.avgPower ? `${Math.round(r.avgPower)} W` : `${speedTxt(r.maxSpeed || 0)} ${unitS()}`}</b></div>
-    </div><div class="zbar sumbar" style="grid-template-columns:${r.zones.map(z => `${Math.max(0.5, z / zt * 100)}fr`).join(" ")}"><span></span><span></span><span></span><span></span><span></span></div>
-    <p class="note mt-2">${r.zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")}</p>
-    ${r.laps && r.laps.length > 1 ? `<p class="note">${r.laps.length} laps · ${r.laps.slice(0, 12).map((l, i) => `${i + 1}: ${clock(l.time)}`).join(" · ")}${r.laps.length > 12 ? " …" : ""}</p>` : ""}
-    ${r.check ? `<p class="note">Commute check: HR ${r.check.diff >= 0 ? "+" : "−"}${Math.abs(Math.round(r.check.diff))} bpm against your usual for the speed (${r.check.verdict}).</p>` : ""}
-    <p class="note">${justNow ? "Saved on this phone. " : ""}FIT goes straight into Garmin Connect (Import data), Strava (Upload) or TrainingPeaks. The watch's own file is still the official record, so upload this one only for rides the watch didn't record.</p>`;
+    // built from text nodes only: a saved ride is data from this phone's storage, and never becomes markup
+    const n = x => (Number.isFinite(+x) ? +x : 0);
+    const zones = (Array.isArray(r.zones) ? r.zones : [0, 0, 0, 0, 0]).slice(0, 5).map(n), zt = zones.reduce((a, b) => a + b, 0) || 1;
+    const node = (tag, cls, ...kids) => { const e = document.createElement(tag); if (cls) e.className = cls; e.append(...kids.filter(k => k != null && k !== "").map(k => (typeof k === "object" ? k : String(k)))); return e; };
+    const cell = (k, v) => node("div", "", k, node("b", "", v));
+    const laps = Array.isArray(r.laps) ? r.laps : [];
+    const grid = node("div", "sum",
+      cell("Time", clock(n(r.elapsed))), cell("Moving", clock(n(r.moving))),
+      cell("Distance", `${distTxt(n(r.dist))} ${unitD()}`), cell("Avg speed", `${n(r.moving) ? speedTxt(n(r.dist) / n(r.moving)) : "—"} ${unitS()}`),
+      cell("Avg HR", r.avgHr ? Math.round(n(r.avgHr)) : "—"), cell("Max HR", r.maxHr ? Math.round(n(r.maxHr)) : "—"),
+      cell("Load (hrTSS)", `${Math.round(n(r.tss))}${r.planned ? ` / ${Math.round(n(r.planned))}` : ""}`), cell("Avg cadence", r.avgCad ? Math.round(n(r.avgCad)) : "—"),
+      cell("Climbed", `${eleTxt(n(r.ascent))} ${unitE()}`),
+      r.avgPower ? cell("Avg power", `${Math.round(n(r.avgPower))} W`) : cell("Max speed", `${speedTxt(n(r.maxSpeed))} ${unitS()}`));
+    const bar = node("div", "zbar sumbar", node("span"), node("span"), node("span"), node("span"), node("span"));
+    bar.style.gridTemplateColumns = zones.map(z => `${Math.max(0.5, z / zt * 100)}fr`).join(" ");
+    const v = r.check && ["hot", "fresh", "normal"].includes(r.check.verdict) ? r.check : null;
+    $("sum-body").replaceChildren(...[grid, bar,
+      node("p", "note mt-2", zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")),
+      laps.length > 1 ? node("p", "note", `${laps.length} laps · ${laps.slice(0, 12).map((l, i) => `${i + 1}: ${clock(n(l.time))}`).join(" · ")}${laps.length > 12 ? " …" : ""}`) : null,
+      v ? node("p", "note", `Commute check: HR ${n(v.diff) >= 0 ? "+" : "−"}${Math.abs(Math.round(n(v.diff)))} bpm against your usual for the speed (${v.verdict}).`) : null,
+      node("p", "note", `${justNow ? "Saved on this phone. " : ""}FIT goes straight into Garmin Connect (Import data), Strava (Upload) or TrainingPeaks. The watch's own file is still the official record, so upload this one only for rides the watch didn't record.`)].filter(Boolean));
     $("sum-exports").hidden = false;
     $("summary").showModal();
   }

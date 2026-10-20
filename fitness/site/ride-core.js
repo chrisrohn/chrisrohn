@@ -1,6 +1,6 @@
 "use strict";
 // Ride mode's engine, kept free of the page so the specs can drive it directly (window.RideCore):
-//   routes      GPX / TCX / GeoJSON in → distance, elevation, climbs, turns and points of interest
+//   routes      GPX / TCX / GeoJSON in (read as data, never as a DOM) → distance, elevation, climbs, turns and points of interest
 //   navigation  where you are on a route, off course, wrong way, what's ahead, and BRouter detours back to it
 //   sun         sunrise and sunset for the place and day (light left on the ride)
 //   workouts    the session tailored mid-ride: intensity, time left, one more rep, cut the set, quick workouts
@@ -28,17 +28,50 @@ self.RideCore = (() => {
     [/sprint/i, "sprint"], [/valley/i, "valley"], [/finish|end/i, "finish"],
   ];
   const kindOf = (text, table) => { for (const [re, k] of table) if (re.test(text)) return k; return null; };
-  const el = (node, name) => { const x = node.getElementsByTagNameNS("*", name); return x.length ? x[0] : null; };
-  const txt = (node, name) => { const x = el(node, name); return x ? x.textContent.trim() : ""; };
-  const kids = (node, name) => [...node.getElementsByTagNameNS("*", name)];
+  // A small XML reader for route files: elements (by local name, prefixes dropped), attributes, text, CDATA and the five
+  // entities plus numeric ones. It builds plain objects, never a DOM, so nothing in a file can ever become markup.
+  const ENT = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+  const decode = s => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
+    if (e[0] !== "#") return ENT[e.toLowerCase()] ?? m;
+    const cp = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+    return cp > 0 && cp <= 0x10FFFF ? String.fromCodePoint(cp) : "";
+  });
+  const local = n => n.slice(n.indexOf(":") + 1);
+  function parseXML(src) {
+    const root = { name: "#document", attrs: {}, kids: [], text: "" }, stack = [root];
+    const re = /<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|<\/\s*([^\s>]+)\s*>|<([^\s/>!?]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>|([^<]+)/gy;
+    let m;
+    while (re.lastIndex < src.length) {
+      const at = re.lastIndex;
+      if (!(m = re.exec(src)) || re.lastIndex === at) throw new Error("bad xml");
+      const top = stack[stack.length - 1];
+      if (m[1] != null) top.text += m[1];
+      else if (m[6] != null) { if (stack.length > 1) top.text += decode(m[6]); }
+      else if (m[2] != null) { if (stack.length < 2 || top.name !== local(m[2])) throw new Error("bad xml"); stack.pop(); }
+      else if (m[3] != null) {
+        const attrs = {};
+        for (const a of m[4].matchAll(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) attrs[local(a[1])] = decode(a[2] ?? a[3] ?? "");
+        const node = { name: local(m[3]), attrs, kids: [], text: "" };
+        top.kids.push(node);
+        if (!m[5]) stack.push(node);
+      }
+    }
+    if (stack.length !== 1 || root.kids.length !== 1) throw new Error("bad xml");
+    return root.kids[0];
+  }
+  const textOf = n => n.text + n.kids.map(textOf).join("");
+  /** Every element under a node with this local name, in document order (what getElementsByTagNameNS("*", name) gives). */
+  const kids = (node, name, out = []) => { for (const k of node.kids) { if (k.name === name) out.push(k); kids(k, name, out); } return out; };
+  const el = (node, name) => kids(node, name)[0] || null;
+  const txt = (node, name) => { const x = el(node, name); return x ? textOf(x).trim() : ""; };
 
   /** Text of a GPX, TCX or GeoJSON file → { name, points: [{lat, lon, ele}], marks: [{lat, lon, name, kind, cue}] } */
   function parseRoute(text, filename = "") {
     const t = String(text || "").replace(/^\uFEFF/, "").trim();
     if (t.startsWith("{")) return parseGeoJSON(JSON.parse(t), filename);
-    const doc = new DOMParser().parseFromString(t, "application/xml");
-    if (doc.getElementsByTagName("parsererror").length) throw new Error("That file isn't valid GPX or TCX.");
-    const root = doc.documentElement.localName.toLowerCase();
+    let doc;
+    try { doc = parseXML(t); } catch { throw new Error("That file isn't valid GPX or TCX."); }
+    const root = doc.name.toLowerCase();
     const base = filename.replace(/\.[a-z0-9]+$/i, "").replace(/[_-]+/g, " ").trim();
     let out;
     if (root === "gpx") out = parseGPX(doc);
@@ -49,7 +82,7 @@ self.RideCore = (() => {
     return out;
   }
   function parseGPX(doc) {
-    const pt = n => ({ lat: num(n.getAttribute("lat")), lon: num(n.getAttribute("lon")), ele: num(txt(n, "ele")) });
+    const pt = n => ({ lat: num(n.attrs.lat), lon: num(n.attrs.lon), ele: num(txt(n, "ele")) });
     const ok = p => p.lat != null && p.lon != null && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
     let points = kids(doc, "trkpt").map(pt).filter(ok);
     const rtepts = kids(doc, "rtept");

@@ -77,6 +77,8 @@ test.describe("the cycling computer", () => {
       const t = C.analyze(C.parseRoute(tcx, "iceman.tcx"));
       let bad = "";
       try { C.parseRoute("<html></html>", "x.html"); } catch (e) { bad = e.message; }
+      const evil = C.parseRoute(g1.replace("<name>Gull Lake loop</name>", "<name>&lt;img src=x onerror=&quot;window.__pwned=1&quot;&gt;<![CDATA[<b>x</b>]]></name>"), "e.gpx");
+      if (evil.name !== '<img src=x onerror="window.__pwned=1"><b>x</b>') bad = `markup changed: ${evil.name}`;   // read as text, never parsed as HTML
       const sun = C.sunTimes(new Date("2026-11-07T12:00:00-05:00"), 44.7, -85.6);
       return { name: a.name, total: Math.round(a.total), gain: Math.round(a.gain), climbs: a.climbs.map(c => ({ len: Math.round(c.len / 100) * 100, g: Math.round(c.grade * 100) })),
         turns: a.turns.map(x => [x.kind, x.name, Math.round(x.along / 100) * 100]), pois: a.pois.map(p => [p.kind, p.name]),

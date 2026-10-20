@@ -287,14 +287,14 @@ def test_ride_page_and_link(tmp_path, cfg):
     assert titles[i + 1] == "Commute home" and ride["days"][i]["check"] and ride["commute"]["in"]
     build.render(data, tmp_path / "index.html", cfg)
     page = (tmp_path / "ride.html").read_text()
-    assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' in page
+    assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' not in page   # the plan rides in the link
     assert 'ride.html' in (tmp_path / "index.html").read_text()
     link = build.ride_link(cfg, ride, "ride.html")
     assert link.startswith("https://chrisrohn.github.io/ride.html#z=")
     blob = link.split("#z=")[1]
     assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == ride
     assert len(link) < 2400   # small enough for a QR code a phone camera reads off a laptop screen
-    assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == "ride.html"
+    assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == f"ride.html#z={blob}"   # the local copy, same fragment
     page = build.ride_page(None)
     assert "__CSP__" not in page and "script-src 'self' 'sha256-" in page and "__RIDE_DATA__" not in page and "/*__RIDE_CORE__*/" not in page
     assert "connect-src 'self' https://api.github.com https://api.open-meteo.com https://tiles.openfreemap.org https://brouter.de;" in page
