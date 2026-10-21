@@ -292,9 +292,12 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   otherwise turns read off the line itself. A banner and voice: *"In 500 feet, turn left onto Fox Rd"*, then *"Turn
   left now"* with a beep and a buzz, timed to your speed. Street names come from the map's own data.
 - **Off course and wrong way.** 40 m+ off the line for 6 s says *Off course*, with an arrow and the distance back.
-  With signal it asks **BRouter** (free, no key) for a way back to the route ahead and guides you turn by turn until
-  you're on it (automatic, or the **Reroute** button; Settings picks mixed / gravel, road, quiet roads, MTB or
-  shortest). Far from the start? **Directions** to it.
+  With signal it asks **BRouter** (free, no key) for a way back and guides you turn by turn until you're on the route
+  (automatic, or the **Reroute** button; Settings picks mixed / gravel, road, quiet roads, MTB or shortest). The way
+  back **looks forward**: it knows your direction of travel and where the route goes, so it rejoins ahead of both
+  where you left it and where you are now (a parallel road leads you on, not back). Up to three places ahead are
+  routed at once, the spot where you left the route is a no-go (a locked gate stays locked), and the shortest way
+  that doesn't start with a U-turn wins. Far from the start? **Directions** to it.
 - **The map.** OpenFreeMap's vector map (MapLibre), heading-up or north-up, zooming with your speed and in for a
   turn: the route ahead in red, done in grey, climbs by steepness, your track in blue. **It saves itself for
   offline**: loading a route online stores every map tile along it (±800 m, zoom 8–14) in the phone's cache. No
@@ -305,12 +308,16 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   aid stops from the file's waypoints, and the **wind on the next 10 miles** (headwind / tailwind / cross shares).
 - **Data.** Ride and moving time, distance, speed, average and max, climbed, grade, HR and max, power (10 s) and
   cadence, time of day, sunset, elevation, phone battery (a spoken warning at 15%).
+- **What this ride did.** At End, before the numbers: the work on target (minutes and %, and what that says), the zone
+  split, the load against plan and what it does to fitness and tomorrow's form, the next event's fitness target and
+  how far there is to go, and the commute check. Kept with the ride under Saved rides.
 - **Laps and recording.** **Lap** button, a lap per workout step and auto laps every N mi / km (Settings), with
   **auto-pause** at stops. Every second is recorded on the phone (it survives a reload), and **End** keeps the ride
   under **Laps → Saved rides**, exporting **FIT** (Garmin Connect *Import data*, Strava *Upload*, TrainingPeaks),
   **GPX** or **TCX**, or **Share…** straight to another app. The watch's file stays the official record.
 - **The app does the thinking.** Before the ride, **Today** says why this ride: the day's call, readiness and the
-  overnight markers that moved it, form, and the days to the next event. The session itself is already the one the
+  overnight markers that moved it, fitness and form against the next event's fitness target, the commute's speed per
+  heartbeat against your earlier commutes, where your zones came from, and the days to the event. The session itself is already the one the
   morning allows (see [When the plan doesn't happen](#when-the-plan-doesnt-happen)). On the bike it adjusts itself,
   says what it changed, and offers **Undo** for 30 s:
   - two reps in a row where HR never reaches the target: fatigue, so the rest of the set is cut;
@@ -741,7 +748,11 @@ pip install -r fitness/requirements.txt
 4. `python -m fitness sync` (the first run backfills `sync.history_days` of Garmin data, about 2 requests a day),
    then `python -m fitness build --open`.
 5. Set `max_hr`, `lthr` and, if you have a power meter, `ftp` in [`config.toml`](config.toml). Any value you leave
-   at 0 is estimated from your data, and the page lists which ones were estimated.
+   at 0 is estimated from your data, and the page lists which ones were estimated. **LTHR is learned from your
+   rides** (`streams.lthr_from`): the best gap-free 20 minutes × 0.95 or the best hour (Friel's field markers) across
+   the last year's heart-rate traces, the second-best once five rides were hard (a strap glitch can't set your zones),
+   80–95% of max HR; it waits for three genuinely hard rides, and 89% of max HR stands in until then. Every zone,
+   target and load follows it.
 
 ## Daily use
 

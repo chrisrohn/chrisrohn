@@ -322,3 +322,7 @@ body.nav .rmain { gap: var(--sp-2); }
   .rbar .chip { padding: 0 6px; }
 }
 @media (max-height: 660px) { body.riding .cue, body.riding .next { display: none; } }
+/* after the ride: what it did */
+.did { border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); margin-bottom: var(--sp-3); display: grid; gap: var(--sp-1); }
+.did ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-body); line-height: 1.35; }
+.did li::before { content: "— "; color: var(--muted); }

@@ -269,7 +269,7 @@ self.RideCore = (() => {
   /** Where a point sits on the route: its distance along, how far off it is, and the course there.
    *  `near` (a distance along) keeps the search on the stretch you're riding, so an out-and-back or a figure eight
    *  doesn't jump to the other side; with nothing close there it falls back to the whole route. */
-  function project(route, p, near = null, ahead = 2500, behind = 300) {
+  function project(route, p, near = null, ahead = 2500, behind = 300, strict = false) {
     const { xs, ys, cum, frame } = route, n = xs.length;
     const px = (p.lon - frame.lon) * frame.kx, py = (p.lat - frame.lat) * frame.ky;
     const scan = (lo, hi) => {
@@ -285,7 +285,7 @@ self.RideCore = (() => {
     const idx = d => { let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= d) lo = m; else hi = m; } return lo; };
     let best = null;
     if (near != null) best = scan(idx(Math.max(0, near - behind)), Math.min(n - 1, idx(Math.min(route.total, near + ahead)) + 1));
-    if (!best || best.off > 75) { const all = scan(0, n - 1); if (!best || all.off + 25 < best.off) best = all; }
+    if (!best || (best.off > 75 && !strict)) { const all = scan(0, n - 1); if (!best || all.off + 25 < best.off) best = all; }
     const a = route.pts[best.i], b = route.pts[Math.min(n - 1, best.i + 1)];
     return { along: best.along, off: best.off, i: best.i, brg: bearing(a, b) };
   }
@@ -333,18 +333,32 @@ self.RideCore = (() => {
       if (s.left < 30 && !st.said.has("arrive")) { st.said.add("arrive"); out.push({ kind: "arrive" }); }
       return out;
     }
-    /** Where to rejoin: the nearest point of the route ahead of the last one you were on, weighing distance from here
-     *  against skipping route (300 m of skipped route costs like 100 m of detour). */
-    function rejoin(fix) {
-      let best = null;
-      for (let d = st.lastOnAlong + 150; d <= Math.min(route.total, st.lastOnAlong + 4000); d += 50) {
-        const p = pointAt(route, d), cost = hav(fix, p) + (d - st.lastOnAlong) / 3;
-        if (!best || cost < best.cost) best = { cost, along: d, lat: p.lat, lon: p.lon };
+    /** Where to rejoin, looking forward: places on the route ahead of both where you left it and where you are now
+     *  (your position projected onto it), so a parallel road leads you on rather than back. Each is weighed by distance
+     *  from here, more when it lies behind your direction of travel (×1.4 past 60°, ×2.5 past 110°), plus a third of
+     *  the route it skips, plus 250 m when you'd meet the route head-on. The best three, 400 m+ apart, go to the router
+     *  together (fromBRouter + pickDetour); `avoid` is just past where you left, the likely blockage (a locked gate,
+     *  a closed bridge), so no way back runs through it. */
+    function rejoinOptions(fix, heading = null) {
+      const here = project(route, fix, st.lastOnAlong, 8000, 100, true);
+      const minAlong = Math.min(route.total, Math.max(st.lastOnAlong + 150, here.along + 100));
+      const all = [];
+      for (let d = minAlong; d <= Math.min(route.total, minAlong + 6000); d += 50) {
+        const p = pointAt(route, d), dist = hav(fix, p), brg = bearing(fix, p);
+        const ang = heading == null || dist < 40 ? 0 : Math.abs(turnAngle(heading, brg));
+        const against = dist > 60 && Math.abs(turnAngle(brg, p.brg)) > 120;
+        all.push({ along: d, lat: p.lat, lon: p.lon, dist, cost: dist * (ang > 110 ? 2.5 : ang > 60 ? 1.4 : 1) + (d - minAlong) * 0.3 + (against ? 250 : 0) });
       }
-      return best || { along: route.total, ...pointAt(route, route.total) };
+      all.sort((a, b) => a.cost - b.cost);
+      const options = [];
+      for (const c of all) if (options.length < 3 && options.every(o => Math.abs(o.along - c.along) >= 400)) options.push(c);
+      if (!options.length) options.push({ along: route.total, ...pointAt(route, route.total), dist: hav(fix, route.pts[route.pts.length - 1]), cost: 0 });
+      const left = pointAt(route, Math.min(route.total, st.lastOnAlong + 60));
+      return { options, minAlong, avoid: st.lastOnAlong > 0 && st.lastOnAlong < route.total - 100 ? { lat: left.lat, lon: left.lon, r: 40 } : null };
     }
+    const rejoin = (fix, heading = null) => rejoinOptions(fix, heading).options[0];
     const toRoute = fix => { const p = pointAt(route, project(route, fix, st.lastOnAlong).along); return { dist: hav(fix, p), brg: bearing(fix, p), lat: p.lat, lon: p.lon }; };
-    return { update, status, callouts, rejoin, toRoute, state: st, seek(along) { st.along = along; st.lastOnAlong = along; st.said.clear(); } };
+    return { update, status, callouts, rejoin, rejoinOptions, toRoute, state: st, seek(along) { st.along = along; st.lastOnAlong = along; st.said.clear(); } };
   }
 
   /** A BRouter answer (GeoJSON, with voicehints when asked for) → a parsed route whose turns are the router's. */
@@ -369,8 +383,25 @@ self.RideCore = (() => {
     return r;
   }
   /** The URL of a BRouter route from → to (the public server: free, no key, cycling profiles). */
-  const brouterUrl = (from, to, profile = "trekking", server = "https://brouter.de/brouter") =>
-    `${server}?lonlats=${from.lon.toFixed(6)},${from.lat.toFixed(6)}|${to.lon.toFixed(6)},${to.lat.toFixed(6)}&profile=${encodeURIComponent(profile)}&alternativeidx=0&format=geojson&timode=3`;
+  const brouterUrl = (from, to, profile = "trekking", server = "https://brouter.de/brouter", nogos = []) =>
+    `${server}?lonlats=${from.lon.toFixed(6)},${from.lat.toFixed(6)}|${to.lon.toFixed(6)},${to.lat.toFixed(6)}&profile=${encodeURIComponent(profile)}&alternativeidx=0&format=geojson&timode=3`
+    + (nogos.length ? `&nogos=${nogos.map(g => `${g.lon.toFixed(6)},${g.lat.toFixed(6)},${Math.round(g.r)}`).join("|")}` : "");
+  /** The best of several ways back (parsed BRouter routes, one per rejoin option): the shortest ride once a U-turn at the
+   *  start (600 m), arriving against the route's direction (300 m) and a third of the route skipped are counted in.
+   *  @returns {{detour: any, option: any, score: number} | null} */
+  function pickDetour(route, tries, heading = null, minAlong = 0) {
+    let best = null;
+    for (const { detour, option } of tries) {
+      if (!detour) continue;
+      const a = detour.pts[0], b = pointAt(detour, Math.min(detour.total, 80));
+      const back = heading != null && detour.total > 80 && Math.abs(turnAngle(heading, bearing(a, b))) > 110;
+      const end = detour.pts[detour.pts.length - 1], before = pointAt(detour, Math.max(0, detour.total - 60));
+      const against = detour.total > 60 && Math.abs(turnAngle(bearing(before, end), pointAt(route, option.along).brg)) > 135;
+      const score = detour.total + (back ? 600 : 0) + (against ? 300 : 0) + Math.max(0, option.along - minAlong) * 0.3;
+      if (!best || score < best.score) best = { detour, option, score, back, against };
+    }
+    return best;
+  }
 
   // ── the sun (after Agafonkin's SunCalc, from the NOAA / Astronomical Almanac formulas) ────────────────────────
   function sunTimes(date, lat, lon) {
@@ -708,6 +739,6 @@ self.RideCore = (() => {
   const unstore = row => ({ id: row.id, name: row.name, points: row.points.map(p => ({ lat: p[0], lon: p[1], ele: p[2] })), marks: row.marks || [] });
   const reversed = raw => ({ ...raw, name: `${raw.name} (reversed)`, points: [...raw.points].reverse(), marks: (raw.marks || []).filter(m => !m.cue) });
 
-  return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
+  return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, pickDetour, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
     commuteCheck, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed };
 })();

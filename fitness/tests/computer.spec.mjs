@@ -114,6 +114,30 @@ test.describe("the cycling computer", () => {
     expect(r.ftp).toBeGreaterThan(92); expect(r.ftp).toBeLessThan(98);
   });
 
+  test("rerouting looks forward: places on the route ahead in your direction, the blockage avoided, no U-turn start", async ({ page }) => {
+    await page.goto("/ride.html");
+    const r = await page.evaluate(([at0, kx, ky]) => {
+      const C = /** @type {any} */ (window).RideCore, at = (e, n) => ({ lat: at0[0] + n / ky, lon: at0[1] + e / kx });
+      const pts = []; for (let e = 0; e <= 3000; e += 20) pts.push({ ...at(e, 0), ele: 200 });
+      const route = C.analyze({ name: "R", points: pts }), nav = C.navigator(route);
+      let t = 0;
+      for (const e of [900, 950, 1000]) nav.update(at(e, 0), 90, 6, t += 2000);        // on the route, then a locked gate at 1050
+      const here = at(1500, 250);                                                      // 250 m north on a parallel road, eastbound
+      const o = nav.rejoinOptions(here, 90);
+      const line = ps => C.fromBRouter({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: ps.map(p => [p.lon, p.lat]) } }] });
+      const uturn = line([here, at(1300, 250), at(1300, 0), at(1650, 0)]), ahead = line([here, at(1900, 250), at(1900, 0), at(2000, 0)]);
+      const best = C.pickDetour(route, [{ detour: uturn, option: { along: 1650 } }, { detour: ahead, option: { along: 2000 } }], 90, o.minAlong);
+      return { first: Math.round(o.options[0].along), all: o.options.map(x => x.along >= 1550), n: o.options.length, gate: Math.round(C.hav(o.avoid, at(1060, 0))),
+        pick: best.option.along, url: C.brouterUrl(here, o.options[0], "trekking", undefined, [o.avoid]) };
+    }, [[LAT0, LON0], KX, KY]);
+    expect(r.n).toBe(3);
+    expect(r.all).toEqual([true, true, true]);                                         // all ahead of where you are, none back at the gate
+    expect(r.first).toBeGreaterThan(1550); expect(r.first).toBeLessThan(1800);
+    expect(r.gate).toBeLessThan(5);                                                    // the spot you left becomes a no-go
+    expect(r.url).toMatch(/&nogos=-85\.5\d+,42\.29\d*,40$/);
+    expect(r.pick).toBe(2000);                                                         // the forward way back beats the U-turn
+  });
+
   test("the commute check judges steady riding only: stop-and-go city riding gets no verdict", async ({ page }) => {
     await page.goto("/ride.html");
     const r = await page.evaluate(() => {
@@ -251,6 +275,7 @@ test.describe("the cycling computer", () => {
     await page.locator("#btn-end").click();
     await expect(page.locator("#summary")).toBeVisible();
     await expect(page.locator("#sum-body")).toContainText("laps");
+    await expect(page.locator("#sum-body .did")).toContainText("What this ride did");
     expect(await axe(page)).toEqual([]);
     const get = async kind => { const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(`[data-export=${kind}]`).click()]); return { name: dl.suggestedFilename(), body: readFileSync(await dl.path()) }; };
     const fit = await get("fit");

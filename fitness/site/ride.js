@@ -121,7 +121,7 @@
   // ── ride state (saved every few seconds so a reload mid-ride picks up where it was) ───────────────────────
   const fresh = () => ({ running: false, paused: false, elapsed: 0, moving: 0, dist: 0, step: 0, stepStart: 0, hrSum: 0, hrSecs: 0, hrMax: 0, zones: [0, 0, 0, 0, 0],
     trimp: 0, cadSum: 0, cadSecs: 0, pwSum: 0, pwSecs: 0, fuelAt: 0, fuelDue: false, ended: false, plan: [], intensity: 1, quick: null, rideId: "", wallStart: 0, chunk: 0,
-    laps: [], lapStart: 0, lapElapsed: 0, lapDist: 0, pauses: [], autoPaused: false, still: 0, ascent: 0, maxSpeed: 0, held: 0, missed: 0, hot: 0, loadOffered: false, navAlong: 0, battSaid: false });
+    laps: [], lapStart: 0, lapElapsed: 0, lapDist: 0, pauses: [], autoPaused: false, still: 0, ascent: 0, maxSpeed: 0, held: 0, missed: 0, hot: 0, loadOffered: false, navAlong: 0, battSaid: false, tgtSecs: 0, tgtOn: 0, workSecs: 0, workOn: 0 });
   const S = fresh();
   const live = { heading: null, anchor: null, hr: null, hrAt: 0, cad: null, cadAt: 0, power: null, powerAt: 0, pw: [], wheelSpeed: null, wheelAt: 0, gpsSpeed: null, gpsAt: 0, lastFix: null, alt: null, battery: null };
   let samples = [];
@@ -401,7 +401,7 @@
   };
 
   // ── routes: GPX / TCX in, kept on this phone, one chosen for the ride ─────────────────────────────────────
-  const NAV = { route: null, nav: null, st: null, detour: null, routing: false, lastReroute: 0, lastAt: 0, names: new Map(), offSaid: false, lastWrong: 0 };
+  const NAV = { route: null, nav: null, st: null, detour: null, routing: false, lastReroute: 0, lastAt: 0, names: new Map(), offSaid: false, lastWrong: 0, avoid: [] };
   const routeMsg = $("route-msg");
   async function importFile(file) {
     const text = await file.text();
@@ -454,7 +454,7 @@
     if (!row) { NAV.route = NAV.nav = NAV.st = NAV.detour = null; ls.set("fitness-ride-route", null); paintRouteBits(); return; }
     const route = C.analyze(C.unstore(row));
     const along = keepProgress && NAV.nav ? NAV.nav.state.along : S.running ? S.navAlong : 0;
-    NAV.route = route; NAV.nav = C.navigator(route, { startAlong: along }); NAV.st = NAV.nav.status(); NAV.detour = null; NAV.names.clear();
+    NAV.route = route; NAV.nav = C.navigator(route, { startAlong: along }); NAV.st = NAV.nav.status(); NAV.detour = null; NAV.avoid = []; NAV.names.clear();
     ls.set("fitness-ride-route", id);
     paintRouteBits();
     mapRoute();
@@ -593,23 +593,39 @@
     }
     paintMap(fix);
   }
-  /** A way back to the route (or to its start) from BRouter, followed turn by turn until you're on the route again. */
+  /** A way back to the route (or to its start) from BRouter, followed turn by turn until you're on the route again.
+   *  Back to the route looks forward (RideCore navigator.rejoinOptions): up to three places on the route ahead of you
+   *  are routed at once, the spot where you left the route is a no-go (the locked gate stays locked), and the best way
+   *  is the shortest that doesn't start with a U-turn (RideCore.pickDetour). */
   async function reroute(kind) {
     const fix = live.lastFix;
     if (NAV.routing || !NAV.route || !fix) return;
     NAV.routing = true; NAV.lastReroute = Date.now();
-    const target = kind === "start" ? { along: 0, ...C.pointAt(NAV.route, 0) } : NAV.nav.rejoin(fix);
     paintBanner();
-    try {
-      const r = await timed(C.brouterUrl(fix, target, P.profile), 15000);
-      if (!r.ok) throw new Error(`router ${r.status}`);
-      const d = C.fromBRouter(await r.json(), kind === "start" ? "To the start" : "Back to the route");
-      NAV.detour = { route: d, nav: C.navigator(d), target, kind };
+    const heading = (speedNow() ?? 0) > 1.5 ? live.heading : null;
+    const name = kind === "start" ? "To the start" : "Back to the route";
+    let options = [{ along: 0, ...C.pointAt(NAV.route, 0) }], minAlong = 0;
+    if (kind !== "start") {
+      const r = NAV.nav.rejoinOptions(fix, heading);
+      options = r.options; minAlong = r.minAlong;
+      if (r.avoid && !NAV.avoid.some(g => hav(g, r.avoid) < 30)) NAV.avoid = [...NAV.avoid, r.avoid].slice(-3);
+    }
+    const ask = async option => {
+      try {
+        const res = await timed(C.brouterUrl(fix, option, P.profile, undefined, kind === "start" ? [] : NAV.avoid), 15000);
+        return res.ok ? { detour: C.fromBRouter(await res.json(), name), option } : { detour: null, option };
+      } catch { return { detour: null, option }; }
+    };
+    const best = C.pickDetour(NAV.route, await Promise.all(options.map(ask)), heading, minAlong);
+    if (best) {
+      const d = best.detour;
+      NAV.detour = { route: d, nav: C.navigator(d), target: best.option, kind };
       NAV.detour.st = NAV.detour.nav.update(fix, live.heading, speedNow() ?? 0);
-      const t = d.turns[0];
-      say(kind === "start" ? `Directions to the start: ${nearSay(d.total)}.` : `Rerouting. ${nearSay(d.total)} back to the route.${t ? ` First, in ${nearSay(t.along)}, ${turnText(t).replace(" · ", ", ")}.` : ""}`);
+      const t = d.turns[0], skip = best.option.along - (NAV.nav.state.lastOnAlong || 0);
+      say(kind === "start" ? `Directions to the start: ${nearSay(d.total)}.`
+        : `Rerouting ahead. ${nearSay(d.total)} to rejoin the route${skip > 400 ? `, ${nearSay(skip)} further along it` : ""}.${t ? ` First, in ${nearSay(t.along)}, ${turnText(t).replace(" · ", ", ")}.` : ""}`);
       mapDetour();
-    } catch {
+    } else {
       const back = NAV.nav.toRoute(fix);
       note.textContent = `No way back from the router (no signal?). The route is ${nearTxt(back.dist)} ${compass(back.brg)} of you.`;
       if (S.running) say(`The route is ${nearSay(back.dist)} to the ${({ N: "north", NE: "northeast", E: "east", SE: "southeast", S: "south", SW: "southwest", W: "west", NW: "northwest" })[compass(back.brg)]}.`, false);
@@ -1109,6 +1125,11 @@
         if (st.length && S.step < st.length) {
           const s = st[S.step], inStep = S.elapsed - S.stepStart, left = s.min * 60 - inStep, hrLive = live.hr && now - live.hrAt < 5000 ? live.hr : null;
           if (C.isWork(s) && hrLive && inStep > s.min * 60 * 0.5 && !rolling()) { const [lo, hi] = tgt(s); rep.n++; if (hrLive < lo - 3) rep.under++; if (hrLive > hi + 5) rep.high++; }
+          if (hrLive && !rolling() && inStep > 45) {   // time on target, for the after-ride note (HR gets 45 s to arrive)
+            const [lo, hi] = tgt(s), on = hrLive >= lo - 2 && hrLive <= hi + 2;
+            S.tgtSecs += dt; if (on) S.tgtOn += dt;
+            if (C.isWork(s)) { S.workSecs += dt; if (on) S.workOn += dt; }
+          }
           // efforts on the climbs: an easy step before a work step waits (up to 10 min) for the foot of the next climb
           const nxt = st[S.step + 1], ns = NAV.st;
           const holding = P.climbs && NAV.route && ns && !ns.offCourse && !C.isWork(s) && C.isWork(nxt) && left <= 0 && S.held < 600 && ns.toClimb != null && ns.toClimb > Math.max(15, (spd || 4) * 4) && ns.toClimb / Math.max(3, spd || 3) < 600 - S.held;
@@ -1143,6 +1164,18 @@
     if (hr != null) mark.style.left = pos(hr);
   }
 
+  /** What the sync learned, in a line each: what moved readiness, fitness and form against the next event's target,
+   *  the commute's speed per heartbeat over time, and where the zones came from. */
+  function briefLines(B) {
+    const out = [...(B.why || [])];
+    const T = B.target, raceName = cfg.race && cfg.race.name ? cfg.race.name.replace(/^Bell's\s+/, "") : "the race";
+    if (B.ctl != null) out.push(`Fitness ${B.ctl.toFixed(0)}${B.tsb != null ? `, form ${B.tsb > 0 ? "+" : ""}${B.tsb}` : ""}${T ? ` · ${raceName} asks for ${T.ctl}${T.race_ctl != null ? `, on course for ${Math.round(T.race_ctl)}` : ""}` : ""}`);
+    else if (B.tsb != null) out.push(`Form ${B.tsb > 0 ? "+" : ""}${B.tsb}`);
+    if (B.ef_trend != null && Math.abs(B.ef_trend) >= 0.5) out.push(`Commute: ${B.ef_trend > 0 ? "+" : "−"}${Math.abs(B.ef_trend).toFixed(1)}% speed per heartbeat vs your earlier commutes${B.ef_trend > 0 ? " (fitter)" : ""}`);
+    if (B.zones) out.push(B.zones);
+    return out;
+  }
+
   /** Before the ride: why today's ride is today's ride (the sync's call, readiness and what moved it, the next event). */
   function paintBrief() {
     const B = cfg.brief, box = $("brief");
@@ -1152,7 +1185,7 @@
     sc.textContent = B.score != null ? String(B.score) : "—"; sc.dataset.level = B.level || "";
     sc.setAttribute("aria-label", B.score != null ? `Readiness ${B.score}` : "No readiness yet");
     $("b-title").textContent = B.title || "";
-    $("b-why").replaceChildren(...(B.why || []).concat(B.tsb != null ? [`Form ${B.tsb > 0 ? "+" : ""}${B.tsb}`] : []).map(t => { const li = document.createElement("li"); li.textContent = String(t); return li; }));
+    $("b-why").replaceChildren(...briefLines(B).map(t => { const li = document.createElement("li"); li.textContent = String(t); return li; }));
     const race = cfg.race && cfg.race.date ? Math.round((new Date(cfg.race.date + "T12:00:00") - new Date(iso(today) + "T12:00:00")) / 864e5) : null;
     $("b-race").textContent = race != null && race >= 0 ? ` · ${cfg.race.name} in ${race} day${race === 1 ? "" : "s"}` : "";
   }
@@ -1356,12 +1389,30 @@
 
   // ── saved rides: summary, laps and exports ───────────────────────────────────────────────────────────────
   const slug = s => String(s || "ride").replace(/[^\w\d-]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "ride";
+  /** What this ride did, in a few lines: the work against the target, the training effect on fitness and form, the
+   *  next event, and the commute check. */
+  function rideNote(tss) {
+    const B = cfg.brief && cfg.brief.date === iso(new Date(S.wallStart || Date.now())) ? cfg.brief : null, out = [];
+    if (S.workSecs >= 120) out.push(`Work on target ${Math.round(S.workOn / 60)} of ${Math.round(S.workSecs / 60)} min (${Math.round(S.workOn / S.workSecs * 100)}%)${S.workOn / S.workSecs >= 0.7 ? ": the session did its job" : S.workOn / S.workSecs >= 0.4 ? ": most of what it asked" : ": heart rate rarely got there — a sign to rest more before the next hard day"}.`);
+    else if (S.tgtSecs >= 300) out.push(`Heart rate on target ${Math.round(S.tgtOn / S.tgtSecs * 100)}% of the time${S.tgtOn / S.tgtSecs >= 0.7 ? ", easy where easy was asked: that's the aerobic work that builds the base" : ""}.`);
+    const zt = S.zones.reduce((a, b) => a + b, 0);
+    if (zt >= 300) out.push(`Zones: ${Math.round((S.zones[0] + S.zones[1]) / zt * 100)}% in Z1–Z2, ${Math.round((S.zones[3] + S.zones[4]) / zt * 100)}% at Z4–Z5.`);
+    if (B && B.ctl != null && B.atl != null) {
+      const ctl = B.ctl + (tss - B.ctl) / 42, atl = B.atl + (tss - B.atl) / 7;
+      out.push(`Load ${tss}${planned && planned.load ? ` of ${Math.round(+planned.load)} planned` : ""}: fitness ${B.ctl.toFixed(1)} → ${ctl.toFixed(1)}, form tomorrow about ${Math.round(ctl - atl) > 0 ? "+" : ""}${Math.round(ctl - atl)}.`);
+      const T = B.target, raceName = cfg.race && cfg.race.name ? cfg.race.name.replace(/^Bell's\s+/, "") : "the race";
+      if (T && T.days != null) out.push(T.ctl - ctl > 1 ? `${raceName} in ${T.days} days asks for fitness ${T.ctl}: ${(T.ctl - ctl).toFixed(1)} to go, and the plan's coming weeks are built for it.` : `${raceName} in ${T.days} days: fitness is at its target ${T.ctl}, so the job now is arriving fresh.`);
+    } else out.push(`Load ${tss}${planned && planned.load ? ` of ${Math.round(+planned.load)} planned` : ""}.`);
+    if (checkSaid === "hot") out.push("The commute check ran hot on steady riding: worth an easy day and an early night.");
+    else if (checkSaid === "fresh") out.push("The commute check ran fresh: lower heart rate than usual for the speed.");
+    return out;
+  }
   async function saveRide(now) {
     const tss = Math.round(tssNow());
     const name = `${planned ? planned.title : NAV.route ? NAV.route.name : "Ride"} · ${new Date(S.wallStart || now).toLocaleDateString([], { month: "short", day: "numeric" })}`;
     const meta = { id: S.rideId || uid(), name, start: S.wallStart || now - S.elapsed * 1000, end: now, elapsed: S.elapsed, moving: S.moving, dist: S.dist, ascent: S.ascent, maxSpeed: S.maxSpeed,
       avgHr: S.hrSecs ? S.hrSum / S.hrSecs : null, maxHr: S.hrMax || null, avgCad: S.cadSecs ? S.cadSum / S.cadSecs : null, avgPower: S.pwSecs ? S.pwSum / S.pwSecs : null, tss, planned: planned && planned.load ? Math.round(+planned.load) : null,
-      zones: S.zones, laps: S.laps, pauses: S.pauses, route: NAV.route ? NAV.route.name : null, check, indoor: !samples.some(s => s[1] != null) };
+      zones: S.zones, laps: S.laps, pauses: S.pauses, route: NAV.route ? NAV.route.name : null, check, indoor: !samples.some(s => s[1] != null), note: rideNote(tss) };
     try {
       await DB.put("tracks", { id: meta.id, samples });
       await DB.put("rides", meta);
@@ -1389,7 +1440,8 @@
     const bar = node("div", "zbar sumbar", node("span"), node("span"), node("span"), node("span"), node("span"));
     bar.style.gridTemplateColumns = zones.map(z => `${Math.max(0.5, z / zt * 100)}fr`).join(" ");
     const v = r.check && ["hot", "fresh", "normal"].includes(r.check.verdict) ? r.check : null;
-    $("sum-body").replaceChildren(...[grid, bar,
+    const did = Array.isArray(r.note) && r.note.length ? node("div", "did", node("h3", "k", "What this ride did"), node("ul", "", ...r.note.slice(0, 6).map(t => node("li", "", String(t))))) : null;
+    $("sum-body").replaceChildren(...[did, grid, bar,
       node("p", "note mt-2", zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")),
       laps.length > 1 ? node("p", "note", `${laps.length} laps · ${laps.slice(0, 12).map((l, i) => `${i + 1}: ${clock(n(l.time))}`).join(" · ")}${laps.length > 12 ? " …" : ""}`) : null,
       v ? node("p", "note", `Commute check: HR ${n(v.diff) >= 0 ? "+" : "−"}${Math.abs(Math.round(n(v.diff)))} bpm against your usual for the speed (${v.verdict}).`) : null,

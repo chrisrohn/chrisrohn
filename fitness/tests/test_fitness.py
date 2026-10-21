@@ -785,6 +785,33 @@ def test_ride_mode_gets_the_session_the_call_allows(cfg):
     assert leg["steps"][0]["min"] == 70 and leg["steps"][0]["zone"] == "z2" and leg["check"]
 
 
+def test_threshold_hr_is_learned_from_your_hardest_sustained_efforts():
+    """LTHR from the rides, not 89% of max: best gap-free 20 min × 0.95 or best 60 min, the second-best once there are
+    five hard rides (one strap glitch can't set your zones), and nothing until three rides were genuinely hard."""
+    from fitness.streams import best_mean, lthr_from
+    assert best_mean([150, 160, None, 170, 172, 174], 3) == 172 and best_mean([150, None], 2) is None
+    today = date(2026, 10, 21)
+    def ride(i, hr20, hr60=None, n=70):
+        trace = [140.0] * n
+        for k in range(10, 30):
+            trace[k] = hr20
+        if hr60:
+            trace = [hr60] * 65 + [140.0] * (n - 65)
+        return {"id": f"r{i}", "group": "ride", "start": f"2026-{9 + i // 28:02d}-{1 + i % 28:02d}T17:00:00", "name": f"Ride {i}"}, {"hr": trace, "v": [8.0] * n, "p": None}
+    rides = [ride(0, 172), ride(1, 170), ride(2, 168)]
+    acts, traces = [a for a, _ in rides], {a["id"]: t for a, t in rides}
+    got = lthr_from(acts, traces, today, 185)
+    assert got == {"lthr": 163, "from": "Ride 0", "date": "2026-09-01", "by": "20 min", "rides": 3}      # 172 × 0.95
+    assert lthr_from(acts[:2], traces, today, 185) is None                                                # two hard rides aren't enough
+    rides += [ride(3, 171), ride(4, 200, n=70)]                                                           # one glitchy strap at 200
+    acts, traces = [a for a, _ in rides], {a["id"]: t for a, t in rides}
+    assert lthr_from(acts, traces, today, 185)["lthr"] == 163                                            # the second-best, not the glitch
+    race = ride(5, 150, hr60=166)
+    assert lthr_from(acts + [race[0]], {**traces, "r5": race[1]}, today, 185)["lthr"] == 166            # an hour flat out, a race
+    easy = [ride(i, 150) for i in range(6, 12)]
+    assert lthr_from([a for a, _ in easy], {a["id"]: t for a, t in easy}, today, 185) is None            # easy rides teach nothing
+
+
 def test_rest_is_earned_a_missed_weekend_rides_on_a_holiday_monday(cfg):
     """Columbus Day after a weekend off the bike: Monday's rest has nothing to recover from, so Saturday's long ride is
     on today; a workday gets steady endurance; a rest day after real riding stays a rest day."""

@@ -34,6 +34,10 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     days = {k: v for k, v in days.items() if not v.get("empty") and k <= _iso(today)}
     acts = [a for a in merge(raw_acts) if a["start"][:10] <= _iso(today)]
     th = m.thresholds(cfg, acts, days, today)
+    if not cfg["athlete"]["lthr"] and traces:   # threshold HR learned from your hardest sustained efforts, not 89% of max
+        learned = streams.lthr_from(acts, {k: json.loads(v) for k, v in traces.items()}, today, th["max_hr"])
+        if learned:
+            th = {**th, "lthr": learned["lthr"], "lthr_learned": learned}
     m.mark_commutes(acts, cfg)
     for a in acts:
         a["load"], a["load_src"] = m.session_load(a, th)
@@ -221,7 +225,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "ytd": {"rides": len(ytd), "hours": round(sum(a["moving_s"] for a in ytd) / 3600, 1), "km": round(sum(a["distance_m"] for a in ytd) / 1000),
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
         "coverage": coverage,
-        "ride": {**ride_config(cfg, th, plan, wx, now, rec), "brief": _brief(t, rec, ready_today, form_now)},
+        "ride": {**ride_config(cfg, th, plan, wx, now, rec), "brief": _brief(t, rec, ready_today, form_now, plan, commute, th)},
         "commute": {**commute, "today": commute_today} if commute else None,
         "fuel": _fuel(cfg, plan, rec, commute_today, today, {**(profile or {}), **({"weight_kg": trend["kg"]} if trend else {})}, wx),
         "weight": trend,
@@ -627,11 +631,19 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
             "wx": _ride_wx(wx, now or datetime.now()) if wx else None}
 
 
-def _brief(today: str, rec: dict, ready: dict | None, form: dict) -> dict:
-    """Why today's ride is today's ride, for ride mode's start screen: the call, readiness and what moved it, form."""
+def _brief(today: str, rec: dict, ready: dict | None, form: dict, plan: dict | None = None, commute: dict | None = None, th: dict | None = None) -> dict:
+    """Why today's ride is today's ride, for ride mode's start screen and its after-the-ride note: the call, readiness
+    and what moved it, fitness and form, the next event's fitness target, the commute's efficiency trend, and where the
+    heart-rate zones came from."""
     reasons = [r["text"] for r in (ready or {}).get("reasons", []) if r.get("tone") == "bad"] or [r["text"] for r in (ready or {}).get("reasons", [])]
+    race = (plan or {}).get("races", [None])[0] if plan else None
+    learned = (th or {}).get("lthr_learned")
     return {"date": today, "title": rec.get("title"), "level": rec.get("level"), "score": (ready or {}).get("score"),
-            "why": [x.split(" — ")[0] if len(x) > 70 else x for x in reasons[:3]], "tsb": round(form["tsb"]) if form.get("tsb") is not None else None}
+            "why": [x.split(" — ")[0] if len(x) > 70 else x for x in reasons[:3]], "tsb": round(form["tsb"]) if form.get("tsb") is not None else None,
+            "ctl": round(form["ctl"], 1) if form.get("ctl") is not None else None, "atl": round(form["atl"], 1) if form.get("atl") is not None else None,
+            "target": {"ctl": race["target_ctl"], "race_ctl": race.get("race_ctl"), "days": race.get("days_out")} if race and race.get("target_ctl") else None,
+            "ef_trend": (commute or {}).get("ef_trend_pct"),
+            "zones": f"LTHR {learned['lthr']} learned from {learned['from']} ({learned['date']}, your best {learned['by']})" if learned else None}
 
 
 EASED = ["rest", "easy", "moderate", "hard"]
