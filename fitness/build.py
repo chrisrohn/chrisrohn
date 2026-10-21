@@ -16,6 +16,7 @@ from pathlib import Path
 from fitness import bike, feel, fuel, power, raceday, streams
 from fitness import metrics as m
 from fitness import weather as wxm
+from fitness import workouts as wo
 from fitness.activities import merge
 from fitness.config import DIST_DIR, SITE_DIR, nth_weekday, race_dates, workday
 from fitness.plan import _replaced, adapt, fit, in_indoor, season
@@ -74,7 +75,11 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     now = now or datetime.now()
     hour = now.hour if now.date() == today else 6
     commute_days = {date.fromisoformat(a["start"][:10]) for a in acts if a.get("commute")}
-    adjust = adapt(today, hour, cfg, load, commute_days, by_day)
+    # this morning's readiness (and check-in) decides today's intensity before the plan is built, so the plan you get is
+    # the one to follow: a hard day the body isn't ready for becomes easy, and its session moves to a free day this week
+    pre = feel.ease(m.recommend(ready.get(t), None), feel.blended(ready.get(t), (felt or {}).get("checkins", {}).get(t)), None)
+    adjust = adapt(today, hour, cfg, load, commute_days, by_day,
+                   {"level": pre.get("level"), "score": (ready.get(t) or {}).get("score")} if ready.get(t) or pre.get("eased") else None)
     monday = _iso(today - timedelta(days=today.weekday()))
     lifted = sorted({a["start"][:10] for a in acts if a["group"] == "strength" and a["start"][:10] >= monday})
     adjust["strength_done"] = len(lifted)                                 # this week's strength quota counts what's logged
@@ -216,7 +221,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "ytd": {"rides": len(ytd), "hours": round(sum(a["moving_s"] for a in ytd) / 3600, 1), "km": round(sum(a["distance_m"] for a in ytd) / 1000),
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
         "coverage": coverage,
-        "ride": ride_config(cfg, th, plan, wx, now),
+        "ride": {**ride_config(cfg, th, plan, wx, now, rec), "brief": _brief(t, rec, ready_today, form_now)},
         "commute": {**commute, "today": commute_today} if commute else None,
         "fuel": _fuel(cfg, plan, rec, commute_today, today, {**(profile or {}), **({"weight_kg": trend["kg"]} if trend else {})}, wx),
         "weight": trend,
@@ -599,9 +604,10 @@ def _coverage(days: dict[str, dict], today: date) -> list[dict]:
     return [{"field": f, "days": n, "of": total, "device": dev, "note": note} for f, n, dev, note in checks]
 
 
-def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None, now: datetime | None = None) -> dict:
+def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None, now: datetime | None = None, rec: dict | None = None) -> dict:
     """What ride mode needs, and nothing else: HR anchors, the next week of sessions with their steps, and the next
-    day and a half of hourly weather (ride mode's fallback when it can't fetch the conditions where you are)."""
+    day and a half of hourly weather (ride mode's fallback when it can't fetch the conditions where you are).
+    Today's session is the one the day's call allows (`rec`): ride mode never asks for more than the morning does."""
     days = []
     for d in (plan or {}).get("days", []):
         if d.get("legs"):
@@ -609,6 +615,8 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
                       "indoor": False, "steps": leg["steps"], "leg": leg["leg"], "check": True} for leg in d["legs"]]
         elif d.get("steps") is not None:
             days.append({k: d[k] for k in ("date", "title", "session", "minutes", "load", "indoor", "steps")})
+    if plan and rec:
+        days = _eased(days, rec, plan["days"][0] if plan["days"] else None)
     prof = cfg["commute"].get("profile")
     models = {leg: {"model": v["model"], "speed": v["speed"], "hr": v["hr"]} for leg, v in prof["legs"].items()} if prof else None
     nxt = (plan or {}).get("races", [{}])[0] if plan else {}
@@ -617,6 +625,44 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
             "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models,
             "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")},
             "wx": _ride_wx(wx, now or datetime.now()) if wx else None}
+
+
+def _brief(today: str, rec: dict, ready: dict | None, form: dict) -> dict:
+    """Why today's ride is today's ride, for ride mode's start screen: the call, readiness and what moved it, form."""
+    reasons = [r["text"] for r in (ready or {}).get("reasons", []) if r.get("tone") == "bad"] or [r["text"] for r in (ready or {}).get("reasons", [])]
+    return {"date": today, "title": rec.get("title"), "level": rec.get("level"), "score": (ready or {}).get("score"),
+            "why": [x.split(" — ")[0] if len(x) > 70 else x for x in reasons[:3]], "tsb": round(form["tsb"]) if form.get("tsb") is not None else None}
+
+
+EASED = ["rest", "easy", "moderate", "hard"]
+
+
+def _eased(days: list[dict], rec: dict, plan_today: dict | None) -> list[dict]:
+    """Today's ride-mode sessions held to the day's call when it's easier than the plan (readiness, the check-in, the
+    commute call): intervals out, steady Z2 (or a recovery spin) in, with the reason ride mode shows and says at Start."""
+    if not plan_today or rec.get("level") not in EASED or plan_today.get("level") not in EASED \
+            or EASED.index(rec["level"]) >= EASED.index(plan_today["level"]):
+        return days
+    why = rec.get("title") or "Today's call says ease off"
+    out = []
+    for d in days:
+        if d["date"] != plan_today["date"]:
+            out.append(d)
+            continue
+        mins = round(d.get("minutes") or 60)
+        if d.get("leg"):          # a commute leg: the same ride, steady the whole way
+            zone = "z1" if rec["level"] == "rest" else "z2"
+            steps = [wo.step("Steady, easy" if zone == "z2" else "Truly easy", mins, zone, "No intervals today")]
+            out.append({**d, "title": f"{d['title']} (easy)", "steps": steps, "load": round(mins * (25 if zone == "z1" else 45) / 60), "check": d.get("check"), "eased": why})
+        elif rec["level"] == "rest":
+            m_ = min(30, mins)
+            out.append({**d, "title": "Recovery spin (optional)", "minutes": m_, "load": round(m_ * 25 / 60), "eased": why,
+                        "steps": [wo.step("Recovery spin", m_, "z1", "Legs turning, nothing more — or take the day off")]})
+        else:
+            m_ = max(45, min(75, mins))
+            out.append({**d, "title": "Endurance (eased)", "minutes": m_, "load": round(m_ * 45 / 60), "eased": why,
+                        "steps": wo.wu(10) + [wo.step("Endurance", m_ - 15, "z2", "Steady, conversational")] + wo.cd(5)})
+    return out
 
 
 def _ride_wx(wx: wxm.Wx, now: datetime) -> list[list]:

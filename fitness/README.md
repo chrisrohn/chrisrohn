@@ -267,12 +267,20 @@ weekday ride of about the commute's length starting at 5–10 am or 2–8 pm. Sa
 it a free, repeated test. The Training section charts speed per 100 bpm for each direction and tells you when it
 moves: rising means aerobic fitness, and a drop that lasts a week means fatigue.
 
-**The in-ride check.** Ride mode has *Commute in* and *Commute home* sessions. After 8 minutes it compares your last
-5 minutes of heart rate with what you usually need for that speed on that leg, using a line fitted to your past
-commutes. At 6+ bpm high it shows (and says) *running hot: keep it easy, skip the intervals*. That's the honest
-answer to "should I do the workout on the way home?". At 4+ bpm low it tells you it's a good day for the work.
+**The in-ride check.** Ride mode has *Commute in* and *Commute home* sessions. It compares your heart rate with what
+you usually need for that speed on that leg (a line fitted to your past commutes), **on steady riding only**: rolling
+15 km/h+ at an even speed, a minute or more after a stop. City riding (lights, traffic, the sprint away from each stop)
+puts heart rate out of step with speed, so it needs 4 steady minutes in the last 8, and 4+ stops in 10 minutes means
+stop-and-go: no verdict at all. 8+ bpm high, held for 2 minutes, means fatigue, illness or heat: the app takes the
+intervals off and says so (Undo is there for 30 s). 5+ bpm low tells you it's a good day for the work. After every
+stop, 45 s of *Rolling again* lets heart rate catch up before any ▲ Push / ▼ Ease off.
 
 ## Ride mode: a cycling computer on the phone on your bars
+
+Set like the rest of the app, a 1970s transit sign (Helvetica, heavy rules, square everything, red only where it
+matters), **dark by default** (true black on the phone's OLED; light in Settings, shared with the dashboard), with the
+five heart-rate zones as flat signal colors, like a subway map's lines. Every Workout field fits a Pixel 7 without
+scrolling, turn banner and all.
 
 Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data · Laps**.
 
@@ -301,15 +309,18 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   **auto-pause** at stops. Every second is recorded on the phone (it survives a reload), and **End** keeps the ride
   under **Laps → Saved rides**, exporting **FIT** (Garmin Connect *Import data*, Strava *Upload*, TrainingPeaks),
   **GPX** or **TCX**, or **Share…** straight to another app. The watch's file stays the official record.
-- **The workout, tailored as you ride.**
-  - **Easier / Harder** moves the work targets 5% at a time; **+1 min** on the step you're on.
-  - **Tailor…**: ±1 / +5 min, previous step, **one more rep**, **cut the set**, **fit the rest into the minutes you
-    have** (long easy riding and the cool-down shrink first, then reps come off the end, the step you're on keeps
-    going), **hit today's load** (endurance added to reach the planned TSS), or switch to a **quick workout**
-    (endurance, tempo, sweet spot, threshold, VO2, 30/30s, hill repeats, sprints, recovery) fitted to your minutes.
-  - **It suggests, you decide:** two reps in a row where HR never reaches the target → *cut the set?*; two well over
-    it → *5% easier?*; the commute check running hot → *skip the intervals?*; the session done short of its load →
-    *add endurance?*
+- **The app does the thinking.** Before the ride, **Today** says why this ride: the day's call, readiness and the
+  overnight markers that moved it, form, and the days to the next event. The session itself is already the one the
+  morning allows (see [When the plan doesn't happen](#when-the-plan-doesnt-happen)). On the bike it adjusts itself,
+  says what it changed, and offers **Undo** for 30 s:
+  - two reps in a row where HR never reaches the target: fatigue, so the rest of the set is cut;
+  - two reps well over it: the rest of the set is 5% easier;
+  - the commute check running hot on steady riding: the intervals are off, the rest is easy;
+  - the session done short of its planned load: easy endurance added to finish the day's work.
+- **Change** (beside the step) is for when life changes the ride: ±1 / +5 min, previous step, one more rep, cut the
+  set, **fit the rest into the minutes you have** (long easy riding and the cool-down shrink first, then reps come off
+  the end), or a **quick workout** (endurance, tempo, sweet spot, threshold, VO2, 30/30s, hill repeats, sprints,
+  recovery) fitted to your minutes.
   - **Efforts on the climbs.** On a route, the easy step before an interval waits (up to 10 min) for the foot of the
     next climb, and says so.
   - **Power.** With an FTP (Settings, or the dashboard's), each step gets a watt range beside the HR one, and with a
@@ -479,6 +490,11 @@ what changed under **Plan adjusted**:
   rather than crammed in.
 - **A missed commute** (weather, a meeting) is rebooked later in the week. Commutes you've already ridden count
   toward the week's 1–3, so a skipped one is made up and none is doubled.
+- **The body decides today's intensity.** When this morning's readiness (or your check-in) says easy or rest on a key
+  session or long ride, today becomes easy riding (or rest), and the session moves like a missed one: to a free day
+  this week with no hard day beside it, or it's dropped rather than crammed in. Ride mode gets the eased session, and
+  any day the call is easier than the plan (a commute call, a late check-in) has its ride held to it: intervals out,
+  steady Z2 (or a recovery spin) in, with the reason shown and said at Start.
 - **Today, as it happens.** If no ride in is logged by 10:00 on a commute day, today stops being a commute. The
   session it replaced comes back for the evening, on the trainer or outside, and the food plan follows. If nothing is
   logged by 19:00 on a long-ride day, the long ride moves to tomorrow when tomorrow is free.

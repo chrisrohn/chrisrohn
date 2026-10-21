@@ -751,6 +751,40 @@ def test_missed_key_session_with_no_room_is_dropped_not_crammed(cfg):
     assert not a["roles"] and any("Thursday's key session didn't happen. No free day" in n for n in a["notes"])
 
 
+def test_readiness_eases_a_key_day_and_the_session_moves(cfg):
+    """The body decides today: a key session on a morning readiness calls easy becomes easy riding, and the session
+    moves to a free day with no hard day beside it (Sunday here), or is dropped when there's none; a good morning
+    changes nothing."""
+    from fitness.plan import adapt
+    cfg = {**cfg, "commute": {**cfg["commute"], "enabled": False}}
+    a = adapt(date(2026, 10, 15), 6, cfg, {"2026-10-13": 80}, set(), _week_state(), {"level": "easy", "score": 52})
+    assert a["roles"][date(2026, 10, 15)] == "easy" and a["eased"] == {"level": "easy", "role": "key", "score": 52}
+    assert a["notes"] == ["Readiness 52 says recover: today is easy riding only, and the key session is dropped this week rather than crammed in (no free day is left for it)."]
+    today = season(date(2026, 10, 15), 55, 55, cfg, adapt=a)["days"][0]
+    assert today["level"] == "easy" and today["role"] == "easy"
+    fine = adapt(date(2026, 10, 15), 6, cfg, {"2026-10-13": 80}, set(), _week_state(), {"level": "hard", "score": 80})
+    assert not fine["roles"] and "eased" not in fine
+    sat = adapt(date(2026, 10, 17), 6, cfg, {"2026-10-13": 80, "2026-10-15": 70}, set(), _week_state(), {"level": "rest", "score": 38})
+    assert sat["roles"] == {date(2026, 10, 17): "rest", date(2026, 10, 18): "long"}            # the long ride goes to Sunday
+    assert "Readiness 38 says recover: today is rest (or 30 min truly easy), and the long ride moves to Sunday." in sat["notes"]
+
+
+def test_ride_mode_gets_the_session_the_call_allows(cfg):
+    """Whatever eased the day (readiness, the check-in, the commute call), ride mode's today is held to it, with why."""
+    from fitness.build import _eased
+    days = [{"date": "2026-10-15", "title": "VO2", "session": "5 × 4", "minutes": 70, "load": 80, "indoor": False, "steps": [{"name": "VO2 1/5"}]},
+            {"date": "2026-10-16", "title": "Endurance", "session": "", "minutes": 90, "load": 60, "indoor": False, "steps": [{"name": "Endurance"}]}]
+    plan_today = {"date": "2026-10-15", "level": "hard"}
+    eased = _eased(days, {"level": "easy", "title": "Keep it easy"}, plan_today)
+    assert eased[0]["title"] == "Endurance (eased)" and eased[0]["eased"] == "Keep it easy" and [s["zone"] for s in eased[0]["steps"]] == ["z2", "z2", "z1"]
+    assert sum(s["min"] for s in eased[0]["steps"]) == 70 and eased[1] == days[1]                 # tomorrow is untouched
+    rest = _eased(days, {"level": "rest", "title": "Rest today"}, plan_today)[0]
+    assert rest["minutes"] == 30 and rest["steps"][0]["zone"] == "z1"
+    assert _eased(days, {"level": "hard", "title": "Green light"}, plan_today) == days                # never harder
+    leg = _eased([{**days[0], "leg": "home", "check": True}], {"level": "easy", "title": "Ride home easy"}, plan_today)[0]
+    assert leg["steps"][0]["min"] == 70 and leg["steps"][0]["zone"] == "z2" and leg["check"]
+
+
 def test_rest_is_earned_a_missed_weekend_rides_on_a_holiday_monday(cfg):
     """Columbus Day after a weekend off the bike: Monday's rest has nothing to recover from, so Saturday's long ride is
     on today; a workday gets steady endurance; a rest day after real riding stays a rest day."""

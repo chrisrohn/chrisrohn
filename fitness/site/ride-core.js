@@ -502,6 +502,28 @@ self.RideCore = (() => {
   const PCT = [[0, 0], [68, 45], [81, 56], [90, 76], [94, 91], [100, 101], [106, 118], [110, 135]];
   const ftpPct = lthrPct => { for (let i = 1; i < PCT.length; i++) if (lthrPct <= PCT[i][0]) { const [a, pa] = PCT[i - 1], [b, pb] = PCT[i]; return pa + (pb - pa) * (lthrPct - a) / (b - a); } return 150; };
 
+  // ── the commute check: the same road every day makes heart rate at a speed a daily fitness reading ───────────
+  /** Judged on steady riding only. City riding (stops, lights, sprints away from them) puts heart rate out of step with
+   *  speed, so: samples count only when rolling 15 km/h+ at an even speed a minute or more after a stop (the caller marks
+   *  them `steady`), it needs 4 minutes of those in the last 8, and 4+ stops in the last 10 minutes means stop-and-go:
+   *  no verdict at all. Hot is 8+ bpm over what this leg usually costs at that speed; fresh is 5+ under.
+   *  @param {{t: number, hr: number, kmh: number, steady: boolean}[]} samples  t in seconds of ride time
+   *  @param {any} model  cfg.commute[leg]: {model: [a, b]} (HR = a + b × km/h) or {hr, speed}
+   *  @param {number[]} stops  ride-time seconds each stop began */
+  function commuteCheck(samples, model, stops, now) {
+    if (!model || now < 480) return null;
+    if (stops.filter(t => t > now - 600).length >= 4) return { verdict: "city" };
+    const recent = samples.filter(x => x.steady && x.t > now - 480);
+    if (recent.length < 240) return null;
+    const hr = recent.reduce((a, x) => a + x.hr, 0) / recent.length, kmh = recent.reduce((a, x) => a + x.kmh, 0) / recent.length;
+    let usual = null;
+    if (Array.isArray(model.model)) usual = model.model[0] + model.model[1] * kmh;
+    else if (model.hr && Math.abs(kmh - model.speed) < 1.5) usual = model.hr;
+    if (usual == null) return null;
+    const diff = hr - usual;
+    return { diff, kmh, verdict: diff >= 8 ? "hot" : diff <= -5 ? "fresh" : "normal", minutes: recent.length / 60 };
+  }
+
   // ── files: the recorded ride out ────────────────────────────────────────────────────────────────────────
   // A sample is [t ms, lat, lon, ele m, hr, cadence, power, speed m/s, distance m]; nulls where a sensor said nothing.
   const FIT_EPOCH = 631065600;   // 1989-12-31T00:00:00Z
@@ -622,6 +644,48 @@ self.RideCore = (() => {
     return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Training ride mode" xmlns="http://www.topografix.com/GPX/1/1">\n${wpts}\n<trk><name>${xml(route.name)}</name><trkseg>\n${pts}\n</trkseg></trk>\n</gpx>\n`;
   }
 
+  // ── the map at night: OpenFreeMap's day style turned dark, the way a bike computer's night mode is ───────────
+  // Every color in the style's paint is flipped in lightness (paper becomes near-black, dark labels become light) and
+  // calmed a little, so the route and your position are the brightest things on the screen.
+  const COLOR_KEYS = new Set(["background-color", "fill-color", "fill-outline-color", "line-color", "text-color", "text-halo-color", "icon-color", "icon-halo-color",
+    "circle-color", "circle-stroke-color", "fill-extrusion-color", "hillshade-shadow-color", "hillshade-highlight-color", "hillshade-accent-color"]);
+  function parseColor(c) {
+    let m = /^#([0-9a-f]{3,8})$/i.exec(c);
+    if (m) {
+      let h = m[1];
+      if (h.length <= 4) h = [...h].map(x => x + x).join("");
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1];
+    }
+    if ((m = /^rgba?\(([^)]+)\)$/i.exec(c))) { const v = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat); return [v[0], v[1], v[2], v[3] ?? 1]; }
+    if ((m = /^hsla?\(([^)]+)\)$/i.exec(c))) {
+      const v = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat), hh = v[0] / 360, ss = v[1] / 100, ll = v[2] / 100;
+      const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss, p = 2 * ll - q;
+      const f = t => { t = (t + 1) % 1; return 255 * (t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p); };
+      return [f(hh + 1 / 3), f(hh), f(hh - 1 / 3), v[3] ?? 1];
+    }
+    return null;
+  }
+  function nightColor(c) {
+    const rgb = typeof c === "string" ? parseColor(c.trim()) : null;
+    if (!rgb) return c;
+    const [r, g, b, a] = rgb.map((x, i) => (i < 3 ? x / 255 : x)), mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+    const d = mx - mn, sat = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+    let h = 0;
+    if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    const L = 0.05 + (1 - l) * 0.82, S = sat * 0.6;
+    return `hsla(${Math.round((h * 60 + 360) % 360)}, ${Math.round(S * 100)}%, ${Math.round(L * 100)}%, ${Math.round(a * 100) / 100})`;
+  }
+  const nightValue = v => Array.isArray(v) ? v.map(nightValue) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, nightValue(x)])) : nightColor(v);
+  /** A copy of a MapLibre style with its paint colors at night. */
+  function nightStyle(style) {
+    const out = JSON.parse(JSON.stringify(style));
+    for (const l of out.layers || []) {
+      if (!l.paint) continue;
+      for (const k of Object.keys(l.paint)) if (COLOR_KEYS.has(k)) l.paint[k] = nightValue(l.paint[k]);
+    }
+    return out;
+  }
+
   // ── tiles: the web-mercator tiles covering a corridor along the route ─────────────────────────────────────
   const tileXY = (lat, lon, z) => { const n = 2 ** z, x = (lon + 180) / 360 * n, s = Math.sin(rad(clamp(lat, -85.05, 85.05))); return [x, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n]; };
   function corridorTiles(route, zmin = 8, zmax = 14, buffer = 800) {
@@ -645,5 +709,5 @@ self.RideCore = (() => {
   const reversed = raw => ({ ...raw, name: `${raw.name} (reversed)`, points: [...raw.points].reverse(), marks: (raw.marks || []).filter(m => !m.cue) });
 
   return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
-    ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed };
+    commuteCheck, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed };
 })();

@@ -618,6 +618,10 @@
     paintBanner(); renderAhead(true);
   }
   function paintBanner() {
+    paintBannerInner();
+    document.body.classList.toggle("nav", !$("navbanner").hidden);
+  }
+  function paintBannerInner() {
     const b = $("navbanner"), A = active(), page = curPage();
     if (!A || !NAV.st) { b.hidden = true; return; }
     const st = NAV.detour ? NAV.detour.st || NAV.detour.nav.status() : NAV.st;
@@ -664,7 +668,10 @@
       const lib = await import("./vendor/maplibre-gl.mjs");
       MAP.lib = lib;
       const r = NAV.route, c = live.lastFix ? [live.lastFix.lon, live.lastFix.lat] : r ? [r.pts[0].lon, r.pts[0].lat] : [-84.5, 42.7];
-      const map = new lib.Map({ container: "map", style: STYLE_URL, center: c, zoom: r && !live.lastFix ? 11 : 14, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 0, cooperativeGestures: false });
+      // the day style, or the same style turned dark (RideCore.nightStyle) when the app is dark
+      let style = STYLE_URL;
+      try { const res = await timed(STYLE_URL, 8000); if (res.ok) { const j = await res.json(); style = isDark() ? C.nightStyle(j) : j; } } catch { /* MapLibre tries the URL itself */ }
+      const map = new lib.Map({ container: "map", style, center: c, zoom: r && !live.lastFix ? 11 : 14, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false, maxPitch: 0, fadeDuration: 0, cooperativeGestures: false });
       MAP.map = map;
       const t = setTimeout(() => { if (!MAP.ready) { $("crumb").hidden = false; mapNote(navigator.onLine ? "The map is slow to load; showing the route meanwhile." : "No signal and no saved map here: showing the route and your track. Routes → a route's map saves itself when you load it online."); drawCrumb(); } }, 9000);
       map.on("error", () => { /* a missing tile offline is expected; the breadcrumb covers a missing style */ });
@@ -673,15 +680,15 @@
         for (const l of map.getStyle().layers || []) if (l["source-layer"] === "poi" || /^poi/.test(l.id)) map.setLayoutProperty(l.id, "visibility", "none");   // a bike screen, not a guidebook
         const add = (id, data) => map.addSource(id, { type: "geojson", data: data || { type: "FeatureCollection", features: [] } });
         add("route"); add("climbs"); add("done"); add("detour"); add("trail"); add("marks");
-        const ink = css("--ink"), acc = css("--accent");
-        map.addLayer({ id: "route-casing", type: "line", source: "route", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 5, 16, 12] } });
+        const ink = css("--ink"), acc = css("--accent"), dark = isDark(), halo = dark ? "#000000" : "#ffffff", blue = dark ? "#5b8fe0" : "#1f5bb5";
+        map.addLayer({ id: "route-casing", type: "line", source: "route", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": halo, "line-width": ["interpolate", ["linear"], ["zoom"], 10, 5, 16, 12] } });
         map.addLayer({ id: "route-line", type: "line", source: "route", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": acc, "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7] } });
         map.addLayer({ id: "climb-line", type: "line", source: "climbs", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": ["step", ["get", "g"], "#fab219", 6, "#ec835a", 9, "#7a1f12"], "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7] } });
-        map.addLayer({ id: "done-line", type: "line", source: "done", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#8a8780", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7] } });
-        map.addLayer({ id: "trail-line", type: "line", source: "trail", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#1f5bb5", "line-width": 3, "line-opacity": 0.85 } });
-        map.addLayer({ id: "detour-line", type: "line", source: "detour", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#1f5bb5", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7], "line-dasharray": [1.5, 1] } });
-        map.addLayer({ id: "marks-dot", type: "circle", source: "marks", paint: { "circle-radius": ["case", ["==", ["get", "t"], "turn"], 4, 6], "circle-color": ["case", ["==", ["get", "t"], "turn"], "#ffffff", ink], "circle-stroke-color": ink, "circle-stroke-width": 2 } });
-        map.addLayer({ id: "marks-label", type: "symbol", source: "marks", filter: ["!=", ["get", "t"], "turn"], minzoom: 12, layout: { "text-field": ["get", "label"], "text-size": 13, "text-offset": [0, 1.1], "text-anchor": "top", "text-font": ["Noto Sans Bold"] }, paint: { "text-color": ink, "text-halo-color": "#ffffff", "text-halo-width": 2 } });
+        map.addLayer({ id: "done-line", type: "line", source: "done", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": dark ? "#5c5a56" : "#8a8780", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7] } });
+        map.addLayer({ id: "trail-line", type: "line", source: "trail", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": blue, "line-width": 3, "line-opacity": 0.9 } });
+        map.addLayer({ id: "detour-line", type: "line", source: "detour", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": blue, "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 16, 7], "line-dasharray": [1.5, 1] } });
+        map.addLayer({ id: "marks-dot", type: "circle", source: "marks", paint: { "circle-radius": ["case", ["==", ["get", "t"], "turn"], 4, 6], "circle-color": ["case", ["==", ["get", "t"], "turn"], halo, ink], "circle-stroke-color": ink, "circle-stroke-width": 2 } });
+        map.addLayer({ id: "marks-label", type: "symbol", source: "marks", filter: ["!=", ["get", "t"], "turn"], minzoom: 12, layout: { "text-field": ["get", "label"], "text-size": 13, "text-offset": [0, 1.1], "text-anchor": "top", "text-font": ["Noto Sans Bold"] }, paint: { "text-color": ink, "text-halo-color": halo, "text-halo-width": 2 } });
         const el = document.createElement("div"); el.className = "me"; el.setAttribute("aria-hidden", "true");
         MAP.marker = new lib.Marker({ element: el, rotationAlignment: "map", pitchAlignment: "map" }).setLngLat(c);
         if (live.lastFix) { MAP.marker.addTo(map); MAP.markerOn = true; }
@@ -690,6 +697,14 @@
       map.on("dragstart", () => { MAP.follow = false; $("m-center").classList.add("primary"); });
       map.on("idle", () => nameTurns());
     } catch { giveUp("The map couldn't start here; showing the route and your track."); }
+  }
+  const isDark = () => (document.documentElement.dataset.theme || "dark") === "dark";
+  /** A theme change rebuilds the map in the other style (the route layers come back with it). */
+  function restyleMap() {
+    if (!MAP.map) return;
+    MAP.map.remove();
+    Object.assign(MAP, { map: null, ready: false, loading: false, failed: false, markerOn: false, marker: null });
+    if (curPage() === "map") ensureMap();
   }
   const line = pts => ({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: pts.map(p => [p.lon, p.lat]) } });
   const set = (id, data) => { const s = MAP.map && MAP.ready && MAP.map.getSource(id); if (s) /** @type {any} */ (s).setData(data); };
@@ -780,8 +795,9 @@
       if (NAV.st) path(r.pts.filter((_, i) => r.cum[i] <= NAV.st.along), "#8a8780", 5);
       for (const t of r.turns) { const [x, y] = xy(C.pointAt(r, t.along)); g.beginPath(); g.arc(x, y, 4, 0, 7); g.fillStyle = css("--page"); g.fill(); g.strokeStyle = css("--ink"); g.lineWidth = 2; g.stroke(); }
     }
-    if (NAV.detour) path(NAV.detour.route.pts, "#1f5bb5", 5, [8, 6]);
-    path(samples.filter(s => s[1] != null).map(s => ({ lat: s[1], lon: s[2] })), "#1f5bb5", 3);
+    const blue = isDark() ? "#5b8fe0" : "#1f5bb5";
+    if (NAV.detour) path(NAV.detour.route.pts, blue, 5, [8, 6]);
+    path(samples.filter(s => s[1] != null).map(s => ({ lat: s[1], lon: s[2] })), blue, 3);
     if (live.lastFix) {
       g.save(); g.translate(cx, cy); g.rotate(((live.heading ?? 0) * Math.PI / 180) + rot);
       g.beginPath(); g.moveTo(0, -13); g.lineTo(9, 10); g.lineTo(0, 5); g.lineTo(-9, 10); g.closePath();
@@ -802,7 +818,8 @@
 
   // ── what's ahead: profile, climb, turns, stops, wind ──────────────────────────────────────────────────────
   let aheadAt = 0;
-  const gradeColor = g => g >= 9 ? "#7a1f12" : g >= 6 ? css("--serious") : g >= 3 ? css("--warn") : css("--z2");
+  // climb colors as a bike computer shows them: flat in the ground's own grey, then yellow, orange, red and dark red
+  const gradeColor = g => g >= 12 ? "#8e1b10" : g >= 9 ? css("--zc5") : g >= 6 ? css("--zc4") : g >= 3 ? "#f2c200" : css("--muted");
   function drawProfile(cv, r, from, to, at) {
     const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 320, H = cv.clientHeight || +cv.getAttribute("height");
     cv.width = W * dpr; cv.height = H * dpr;
@@ -939,24 +956,27 @@
   const projected = () => { const st = steps(); if (!st.length) return null; const cur = st[S.step]; let t = tssNow(); if (cur) t += Math.max(0, cur.min * 60 - (S.elapsed - S.stepStart)) / 60 * tssPerMin(cur); for (let i = S.step + 1; i < st.length; i++) t += st[i].min * tssPerMin(st[i]); return t; };
   const doneIn = () => Math.max(0, (S.elapsed - S.stepStart) / 60);
   const replan = (next, why) => { S.plan = next; if (S.step >= S.plan.length) S.step = S.plan.length; save(); render(); if (why) { note.hidden = false; note.textContent = why; } };
-  let suggestion = null;
-  const suggest = (text, yes, speak = true) => {
-    if (suggestion && suggestion.text === text) return;
-    suggestion = { text, yes };
+  // ── the app decides, you ride: every change it makes on its own is said, shown, and can be undone for 30 s ──────
+  let undo = null, undoTimer = 0;
+  const auto = (text, change) => {
+    const before = { plan: S.plan.map(x => ({ ...x })), intensity: S.intensity, step: S.step, stepStart: S.stepStart };
+    change();
+    undo = before;
     $("suggest-text").textContent = text; $("suggest").hidden = false;
-    if (speak) say(text, false);
-    beep(700, 120, 2);
+    say(text, false); beep(700, 120, 2); buzz([120, 60, 120]);
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => { $("suggest").hidden = true; undo = null; }, 30000);
+    save(); render();
   };
-  const unsuggest = () => { suggestion = null; $("suggest").hidden = true; };
-  $("suggest-yes").addEventListener("click", () => { const s = suggestion; unsuggest(); if (s) s.yes(); });
-  $("suggest-no").addEventListener("click", unsuggest);
-  const setIntensity = k => { S.intensity = Math.max(0.8, Math.min(1.15, Math.round(k * 100) / 100)); save(); render(); say(`Targets at ${Math.round(S.intensity * 100)} percent.`, false); };
-  $("w-easier").addEventListener("click", () => setIntensity(S.intensity - 0.05));
-  $("w-harder").addEventListener("click", () => setIntensity(S.intensity + 0.05));
-  $("w-more").addEventListener("click", () => { if (steps()[S.step]) replan(C.extend(steps(), S.step, 1, doneIn())); });
-  const easyHome = () => {   // the rest of the session as easy endurance, same time
+  $("suggest-yes").addEventListener("click", () => {
+    if (undo) { Object.assign(S, undo); undo = null; say("Changed back.", false); save(); render(); }
+    $("suggest").hidden = true;
+  });
+  $("suggest-no").addEventListener("click", () => { $("suggest").hidden = true; undo = null; });
+  const setIntensity = k => { S.intensity = Math.max(0.8, Math.min(1.15, Math.round(k * 100) / 100)); };
+  const easyHomeNow = () => {   // the rest of the session as easy endurance, same time
     const st = steps(), rest = Math.max(0, st[S.step] ? st[S.step].min - doneIn() : 0) + st.slice(S.step + 1).reduce((a, s) => a + s.min, 0);
-    replan([...st.slice(0, S.step), { name: "Easy (intervals skipped)", min: Math.max(1, doneIn() + rest), zone: "z2", lo: 0, hi: 89, cue: "Endurance only today" }], "Intervals skipped: the rest is easy endurance.");
+    S.plan = [...st.slice(0, S.step), { name: "Easy (intervals off)", min: Math.max(1, doneIn() + rest), zone: "z2", lo: 0, hi: 89, cue: "Endurance only today" }];
   };
   const kindSel = $("tl-kind");
   kindSel.innerHTML = Object.entries(C.QUICK).map(([k, q]) => `<option value="${k}">${esc(/** @type {any} */ (q).label)}</option>`).join("");
@@ -965,7 +985,6 @@
     /** @type {HTMLInputElement} */ ($("tl-left")).value = String(Math.max(5, left));
     const pr = projected(), goal = planned && planned.load ? Math.round(+planned.load) : null;
     $("tl-load").textContent = st.length ? `Load so far ${Math.round(tssNow())}${goal ? ` of ${goal} planned` : ""} · on pace for ${Math.round(pr ?? tssNow())} at the end of the session.` : `No session: pick a quick workout below, or ride free. Load so far ${Math.round(tssNow())}.`;
-    $("tl-hit").hidden = !(goal && pr != null && pr < goal * 0.95);
     $("tailor").showModal();
   });
   $("tailor").addEventListener("click", e => {
@@ -988,18 +1007,8 @@
     else if (act === "rep") replan(C.addRep(st, Math.min(S.step, st.length - 1)), "One more rep added.");
     else if (act === "cut") replan(C.cutSet(st, Math.min(S.step, st.length - 1)), "Rest of the set cut.");
     else if (act === "fit") { const m = +(/** @type {HTMLInputElement} */ ($("tl-left")).value); if (m > 0 && st[S.step]) replan(C.fitTime(st, S.step, doneIn(), m), `The rest fits ${m} min.`); }
-    else if (act === "load") addLoad();
     $("tailor").close();
   });
-  /** Endurance added before the cool-down to reach the planned load. */
-  function addLoad() {
-    const goal = planned && planned.load ? +planned.load : 0, pr = projected() ?? tssNow();
-    if (!goal || pr >= goal) return;
-    const z2 = { name: "Endurance (to hit the load)", min: 0, zone: "z2", lo: 81, hi: 89, cue: "Steady, conversational" }, m = Math.min(90, Math.ceil((goal - pr) / tssPerMin(z2) / 5) * 5);
-    const st = steps(), cool = st.length - 1 > S.step && /cool/i.test(st[st.length - 1].name) ? st.length - 1 : st.length;
-    replan([...st.slice(0, cool), { ...z2, min: m }, ...st.slice(cool)], `${m} min of endurance added to reach ${Math.round(goal)} TSS.`);
-  }
-
   // ── the loop ────────────────────────────────────────────────────────────────────────────────────────────
   const k = cfg.sex === "female" ? [0.86, 1.67] : [0.64, 1.92];
   const trimpRate = hr => { const r = Math.max(0, Math.min(1, (hr - P.rest) / Math.max(1, P.max - P.rest))); return r * k[0] * Math.exp(k[1] * r); };
@@ -1014,8 +1023,9 @@
   function advance(manual) {
     const st = steps();
     if (!st.length) return;
-    endRep(st[S.step]);
+    const then = endRep(st[S.step]);
     S.step += 1; S.stepStart = S.elapsed; S.held = 0;
+    if (then) setTimeout(then, 0);   // what the app decided about the set, once the next step has begun
     if (P.stepLap && S.running) lap(1);
     if (S.step >= st.length) { say("Workout complete. Ride easy or finish up."); beep(660, 300, 2); offerLoad(); return; }
     const s = st[S.step], [lo, hi] = tgt(s), pt = pwTgt(s);
@@ -1023,40 +1033,32 @@
     say(`${s.name}. ${Math.round(s.min) >= 1 ? `${Math.round(s.min)} minute${Math.round(s.min) === 1 ? "" : "s"}` : `${Math.round(s.min * 60)} seconds`}. ${target}`);
     if (!manual) { beep(s.zone === "z1" || s.zone === "z2" ? 660 : 990, 220, 2); buzz([200, 100, 200]); }
   }
-  /** At the end of a work step: did HR reach the target, or run well over it? Two such reps in a row → a suggestion. */
+  /** At the end of a work step: did HR reach the target, or run well over it? Two such reps in a row and the app acts. */
   function endRep(s) {
-    if (!s || !C.isWork(s) || s.min < 3 || rep.n < 30) { rep = { under: 0, high: 0, n: 0 }; return; }
+    if (!s || !C.isWork(s) || s.min < 3 || rep.n < 30) { rep = { under: 0, high: 0, n: 0 }; return null; }
     const under = rep.under / rep.n > 0.6, high = rep.high / rep.n > 0.5;
     S.missed = under ? S.missed + 1 : 0; S.hot = high ? S.hot + 1 : 0;
     rep = { under: 0, high: 0, n: 0 };
     const set = C.setOf(steps(), S.step), more = set && set.last > S.step;
-    if (S.missed >= 2 && more) { S.missed = 0; suggest("Heart rate isn't reaching the target on these reps: fatigue shows. Cut the rest of the set?", () => replan(C.cutSet(steps(), S.step), "Rest of the set cut.")); }
-    else if (S.hot >= 2 && more) { S.hot = 0; suggest("You're running well over the target. Make the rest 5% easier?", () => setIntensity(S.intensity - 0.05)); }
+    if (S.missed >= 2 && more) { S.missed = 0; return () => auto("Heart rate isn't reaching the target on these reps: that's fatigue, so the rest of the set is cut.", () => { S.plan = C.cutSet(steps(), S.step); }); }
+    else if (S.hot >= 2 && more) { S.hot = 0; return () => auto("Heart rate is running well over the target: the rest of the set is 5% easier.", () => setIntensity(S.intensity - 0.05)); }
+    return null;
   }
   function offerLoad() {
     const goal = planned && planned.load ? +planned.load : 0;
     if (!goal || S.loadOffered || tssNow() >= goal * 0.9) return;
     S.loadOffered = true;
-    suggest(`Load ${Math.round(tssNow())} of ${Math.round(goal)} planned. Add endurance to hit it?`, () => { S.step = steps().length; addLoad(); });
+    const m = Math.min(90, Math.ceil((goal - tssNow()) / tssPerMin({ lo: 81, hi: 89 }) / 5) * 5);
+    auto(`Load ${Math.round(tssNow())} of ${Math.round(goal)} planned: ${m} more minutes of easy endurance finish the day's work.`, () => {
+      S.plan = [...steps(), { name: "Endurance (the day's load)", min: m, zone: "z2", lo: 81, hi: 89, cue: "Steady, conversational" }]; S.stepStart = S.elapsed;
+    });
   }
-  // ── commute check: same route every time, so HR at a given speed is a daily fitness reading ─────────────
-  // After 8 minutes, the last 5 minutes' average HR is compared with what this leg usually costs at that speed
-  // (a line fitted to your past commutes). 6+ bpm high: fatigue, illness or heat, so skip the intervals.
-  const hrSpeed = [];
-  let check = null, checkSaid = "";
-  function commuteCheck() {
-    const model = planned && planned.check && cfg.commute && cfg.commute[planned.leg];
-    if (!model || S.elapsed < 480) return null;
-    const recent = hrSpeed.filter(x => x.t > S.elapsed - 300);
-    if (recent.length < 120) return null;
-    const hr = recent.reduce((a, x) => a + x.hr, 0) / recent.length, kmh = recent.reduce((a, x) => a + x.kmh, 0) / recent.length;
-    let usual = null;
-    if (Array.isArray(model.model)) usual = model.model[0] + model.model[1] * kmh;
-    else if (model.hr && Math.abs(kmh - model.speed) < 1.5) usual = model.hr;
-    if (usual == null) return null;
-    const diff = hr - usual;
-    return { diff, kmh, verdict: diff >= 6 ? "hot" : diff <= -4 ? "fresh" : "normal" };
-  }
+  // ── commute check (RideCore.commuteCheck): steady riding only, so lights and traffic don't read as fatigue ─────
+  const hrSpeed = [], stops = [];
+  let check = null, checkSaid = "", hotFrom = 0, lastSpd = [], moving = false, rollAt = 0;
+  const commuteModel = () => planned && planned.check && cfg.commute && cfg.commute[planned.leg];
+  /** Rolling again after a stop: for 45 s heart rate is still catching up (or coming down), so nothing is judged. */
+  const rolling = () => !!rollAt && S.elapsed - rollAt < 45;
 
   function tick() {
     const now = Date.now(), dt = last ? Math.min(5, (now - last) / 1000) : 1;
@@ -1080,21 +1082,33 @@
         }
         if (live.cad && now - live.cadAt < 4000 && live.cad > 0) { S.cadSum += live.cad * dt; S.cadSecs += dt; }
         if (now - live.powerAt < 4000 && live.power != null) { S.pwSum += live.power * dt; S.pwSecs += dt; }
+        // stops and starts: a stop is under 1.5 m/s after moving; rolling again opens a 45 s grace for the coaching
+        if (spd != null) {
+          if (moving && spd < 1.5) { moving = false; stops.push(S.elapsed); }
+          else if (!moving && spd > 3) { moving = true; rollAt = stops.length ? S.elapsed : 0; }
+          lastSpd.push(spd); if (lastSpd.length > 15) lastSpd.shift();
+        }
         if (live.hr && now - live.hrAt < 5000 && spd != null && spd > 3) {
-          hrSpeed.push({ t: S.elapsed, hr: live.hr, kmh: spd * 3.6 });
+          const even = lastSpd.length >= 10 && Math.max(...lastSpd) - Math.min(...lastSpd) < 2.5;
+          const sinceStop = stops.length ? S.elapsed - stops[stops.length - 1] : Infinity;
+          hrSpeed.push({ t: S.elapsed, hr: live.hr, kmh: spd * 3.6, steady: spd > 4.2 && even && sinceStop > 60 && !rolling() });
           if (hrSpeed.length > 900) hrSpeed.shift();
         }
         record(now);
-        check = commuteCheck();
-        if (check && check.verdict !== "normal" && checkSaid !== check.verdict) {
-          checkSaid = check.verdict;
-          if (check.verdict === "hot") { buzz([300, 120, 300]); suggest("Heart rate is running high for this speed. Keep it easy today: skip the intervals?", easyHome); }
-          else say("You're running fresh today: lower heart rate than usual for this speed.");
+        // a hot verdict must hold 2 minutes of steady riding before the app acts on it; stop-and-go gets no verdict
+        check = C.commuteCheck(hrSpeed, commuteModel(), stops, S.elapsed);
+        if (check && check.verdict === "hot") { if (!hotFrom) hotFrom = S.elapsed; } else hotFrom = 0;
+        const verdict = check ? (check.verdict === "hot" && S.elapsed - hotFrom < 120 ? "" : check.verdict) : "";
+        if (verdict && verdict !== "normal" && verdict !== "city" && checkSaid !== verdict) {
+          checkSaid = verdict;
+          if (verdict === "hot" && steps().slice(S.step).some(C.isWork)) auto(`Heart rate is ${Math.round(check.diff)} beats above your usual for this speed on steady riding: the intervals are off today, the rest is easy.`, easyHomeNow);
+          else if (verdict === "hot") say("Heart rate is running high for this speed: keep it easy.", false);
+          else say("You're running fresh today: lower heart rate than usual for this speed.", false);
         }
         const st = steps();
         if (st.length && S.step < st.length) {
           const s = st[S.step], inStep = S.elapsed - S.stepStart, left = s.min * 60 - inStep, hrLive = live.hr && now - live.hrAt < 5000 ? live.hr : null;
-          if (C.isWork(s) && hrLive && inStep > s.min * 60 * 0.5) { const [lo, hi] = tgt(s); rep.n++; if (hrLive < lo - 3) rep.under++; if (hrLive > hi + 5) rep.high++; }
+          if (C.isWork(s) && hrLive && inStep > s.min * 60 * 0.5 && !rolling()) { const [lo, hi] = tgt(s); rep.n++; if (hrLive < lo - 3) rep.under++; if (hrLive > hi + 5) rep.high++; }
           // efforts on the climbs: an easy step before a work step waits (up to 10 min) for the foot of the next climb
           const nxt = st[S.step + 1], ns = NAV.st;
           const holding = P.climbs && NAV.route && ns && !ns.offCourse && !C.isWork(s) && C.isWork(nxt) && left <= 0 && S.held < 600 && ns.toClimb != null && ns.toClimb > Math.max(15, (spd || 4) * 4) && ns.toClimb / Math.max(3, spd || 3) < 600 - S.held;
@@ -1116,12 +1130,43 @@
     render();
   }
 
+  /** The target gauge: the step's range as a band in its zone's color, heart rate as the marker, 20 bpm either side. */
+  function paintGauge(s, hr = null, lo = 0, hi = 0) {
+    const g = $("gauge");
+    g.hidden = !s;
+    if (!s) return;
+    const a = (lo > 0 ? lo : hi - 30) - 20, b = hi + 20, pos = x => `${Math.max(0, Math.min(100, (x - a) / (b - a) * 100))}%`;
+    const band = $("g-band"), mark = $("g-mark");
+    band.style.left = pos(lo > 0 ? lo : a); band.style.right = `calc(100% - ${pos(hi)})`;
+    band.dataset.zone = String(zoneOf(bpm((s.lo > 0 ? (s.lo + s.hi) / 2 : s.hi - 5))));
+    mark.hidden = hr == null;
+    if (hr != null) mark.style.left = pos(hr);
+  }
+
+  /** Before the ride: why today's ride is today's ride (the sync's call, readiness and what moved it, the next event). */
+  function paintBrief() {
+    const B = cfg.brief, box = $("brief");
+    box.hidden = !B || B.date !== iso(today) || S.running;
+    if (box.hidden) return;
+    const sc = $("b-score");
+    sc.textContent = B.score != null ? String(B.score) : "—"; sc.dataset.level = B.level || "";
+    sc.setAttribute("aria-label", B.score != null ? `Readiness ${B.score}` : "No readiness yet");
+    $("b-title").textContent = B.title || "";
+    $("b-why").replaceChildren(...(B.why || []).concat(B.tsb != null ? [`Form ${B.tsb > 0 ? "+" : ""}${B.tsb}`] : []).map(t => { const li = document.createElement("li"); li.textContent = String(t); return li; }));
+    const race = cfg.race && cfg.race.date ? Math.round((new Date(cfg.race.date + "T12:00:00") - new Date(iso(today) + "T12:00:00")) / 864e5) : null;
+    $("b-race").textContent = race != null && race >= 0 ? ` · ${cfg.race.name} in ${race} day${race === 1 ? "" : "s"}` : "";
+  }
+
   // ── drawing ─────────────────────────────────────────────────────────────────────────────────────────────
   function render() {
     const now = Date.now();
     const hrLive = live.hr && now - live.hrAt < 5000 ? live.hr : null;
     $("hr").textContent = hrLive ?? "—";
+    $("hr").classList.toggle("idle", !hrLive);
+    $("hrcard").hidden = !S.running && !hrLive && !live.hrAt;   // before the ride, no strap: the brief has the room
+    if (hrLive) $("hr-zone").dataset.n = String(zoneOf(hrLive)); else delete $("hr-zone").dataset.n;
     const zm = $("zmark");
+    $("hrcard").dataset.zone = hrLive ? String(zoneOf(hrLive)) : "";
     if (hrLive) { zm.style.display = "block"; zm.style.left = `${Math.max(0, Math.min(100, (hrLive / P.lthr * 100 - 60) / 52 * 100))}%`; $("hr-zone").textContent = ZNAME[zoneOf(hrLive)]; }
     else { zm.style.display = "none"; $("hr-zone").textContent = live.hrAt ? "signal lost" : "bpm"; }
 
@@ -1138,15 +1183,14 @@
       $("step-target").innerHTML = `${lo > 0 ? `Target <b>${lo}–${hi}</b> bpm` : `Target <b>under ${hi}</b> bpm`}${pt ? ` · <b>${pt[0] ? `${pt[0]}–${pt[1]}` : `&lt;${pt[1]}`}</b> W` : ""}`;
       $("step-bar").style.width = `${Math.min(100, elapsedInStep / (s.min * 60) * 100)}%`;
       const ns = NAV.st;
-      $("step-cue").textContent = S.held && ns && ns.toClimb != null ? `Holding for the climb: the effort starts at its foot, ${nearTxt(ns.toClimb)} ahead.`
-        : check ? `HR vs usual at ${speedTxt(check.kmh / 3.6)} ${unitS()}: ${check.diff >= 0 ? "+" : "−"}${Math.abs(Math.round(check.diff))} bpm · ${check.verdict === "hot" ? "running hot: keep it easy, skip the intervals" : check.verdict === "fresh" ? "fresh: a good day for the work" : "normal"}`
-          : nb(s.cue);
-      $("step-cue").classList.toggle("hot", !!check && check.verdict === "hot");
+      $("step-cue").textContent = S.held && ns && ns.toClimb != null ? `Holding for the climb: the effort starts at its foot, ${nearTxt(ns.toClimb)} ahead.` : nb(s.cue);
+      paintGauge(s, hrLive, lo, hi);
       const n = list[S.step + 1];
       $("step-next").textContent = n ? `Next: ${n.name} · ${n.min >= 1 ? `${Math.round(n.min)} min` : `${Math.round(n.min * 60)} s`}` : "Last step";
       const byFeel = s.cue && s.cue.includes("by feel");
       const usePower = pt && p10 != null && C.isWork(s);
       if (S.autoPaused) { st.classList.add("feel"); st.textContent = "Auto-paused"; }
+      else if (rolling() && !usePower) { st.classList.add("feel"); st.textContent = "Rolling again"; }   // after a stop: HR catches up, nothing to chase
       else if (usePower && elapsedInStep >= 5) {   // power has no lag: short efforts get a number too
         if (p10 < pt[0] - 5) { st.classList.add("up"); st.textContent = `▲ Push · ${p10} W`; }
         else if (p10 > pt[1] + 5) { st.classList.add("down"); st.textContent = `▼ Ease · ${p10} W`; }
@@ -1161,17 +1205,17 @@
       $("step-name").textContent = planned ? planned.title : "Free ride";
       $("step-time").textContent = clock(list.reduce((a, x) => a + x.min * 60, 0));
       $("step-target").innerHTML = `${list.length} step${list.length === 1 ? "" : "s"} · first: <b>${esc(s.name)}</b>`;
-      $("step-cue").textContent = planned ? nb(planned.session) : "";
+      $("step-cue").textContent = planned ? nb(planned.eased ? `${planned.eased}: ${planned.title.toLowerCase()} instead of the planned session.` : planned.session) : "";
       $("step-next").textContent = "";
       $("step-bar").style.width = "0";
+      paintGauge(null);
     } else {
+      paintGauge(null);
       $("step-name").textContent = S.step >= list.length && list.length ? "Workout done" : planned ? planned.title : "Free ride";
       $("step-time").textContent = clock(S.elapsed);
       $("step-target").textContent = list.length ? "Ride easy home" : NAV.route ? `${NAV.route.name}: follow the route` : "No steps — just ride";
       $("step-cue").textContent = ""; $("step-next").textContent = ""; $("step-bar").style.width = "0";
     }
-    $("w-int").textContent = `${Math.round(S.intensity * 100)}%`;
-    for (const id of ["w-easier", "w-harder", "w-more"]) /** @type {HTMLButtonElement} */ ($(id)).disabled = !list.length || S.step >= list.length;
 
     $("t-time").textContent = clock(S.elapsed);
     $("t-dist").innerHTML = `${distTxt(S.dist)}<small>${unitD()}</small>`;
@@ -1186,6 +1230,9 @@
     $("fuel").hidden = !S.fuelDue;
     if (S.fuelDue) $("fuel-text").textContent = fuelText();
 
+    $("sb-clock").textContent = hhmm(now);
+    paintBrief();
+    $("sb-batt").textContent = live.battery ? `${Math.round(live.battery.level * 100)}%` : "";
     const page = curPage();
     if (page === "data") paintData(now, spd);
     if (page === "laps") { $("lap-no").textContent = String(S.laps.length + 1); $("lap-time").textContent = clock(S.elapsed - S.lapElapsed); $("lap-sub").textContent = `${distTxt(S.dist - S.lapDist)} ${unitD()}`; }
@@ -1217,9 +1264,14 @@
     const p10 = pw10();
     $("d-pw").innerHTML = p10 != null ? `${p10}<small>W 10s</small>` : S.pwSecs ? `${Math.round(S.pwSum / S.pwSecs)}<small>W avg</small>` : "—";
     $("d-cad").innerHTML = live.cad != null && now - live.cadAt < 4000 ? `${live.cad}<small>rpm</small>` : "—";
-    $("d-clock").textContent = hhmm(now);
+    const ampm = t => { const x = hhmm(t), m = x.match(/^(.*?)\s*([AaPp]\.?[Mm]\.?)$/); return m ? `${esc(m[1])}<small>${esc(m[2])}</small>` : esc(x); };
+    $("d-clock").innerHTML = ampm(now);
     const p = live.lastFix || (NAV.route && NAV.route.pts[0]);
-    if (p) { const sun = C.sunTimes(new Date(), p.lat, p.lon), left = (sun.sunset - now) / 60000; $("d-sunset").textContent = left > 0 ? `${hhmm(sun.sunset)} · ${left >= 60 ? `${Math.floor(left / 60)}h ${Math.round(left % 60)}m` : `${Math.round(left)} min`}` : hhmm(sun.sunset); }
+    if (p) {
+      const sun = C.sunTimes(new Date(), p.lat, p.lon), left = (sun.sunset - now) / 60000;
+      $("d-sunset").innerHTML = left > 0 ? (left >= 60 ? `${Math.floor(left / 60)}<small>h</small> ${Math.round(left % 60)}<small>m</small>` : `${Math.round(left)}<small>min</small>`) : "Dark";
+      $("d-sunset-at").textContent = `sunset ${hhmm(sun.sunset)}`;
+    }
     const e = NAV.route && NAV.st && !NAV.st.offCourse && NAV.route.hasEle ? NAV.st.ele : live.alt;
     $("d-ele").innerHTML = e == null ? "—" : `${eleTxt(e)}<small>${unitE()}</small>`;
     $("d-batt").textContent = live.battery ? `${Math.round(live.battery.level * 100)}%${live.battery.charging ? " ⚡" : ""}` : "—";
@@ -1268,9 +1320,9 @@
     if (!S.running) {
       const plan = S.plan, quick = S.quick, intensity = S.intensity;
       Object.assign(S, fresh(), { running: true, plan, quick, intensity, rideId: uid(), wallStart: now, lapStart: now });
-      samples = []; hrSpeed.length = 0; check = null; checkSaid = ""; rep = { under: 0, high: 0, n: 0 };
+      samples = []; hrSpeed.length = 0; stops.length = 0; check = null; checkSaid = ""; hotFrom = 0; rollAt = 0; moving = false; rep = { under: 0, high: 0, n: 0 };
       const st = steps();
-      if (st.length) { const s = st[0]; say(`${planned ? planned.title : "Workout"}. First, ${s.name}, ${Math.round(s.min)} minutes.`); }
+      if (st.length) { const s = st[0]; say(`${planned && planned.eased ? `${planned.eased}. ` : ""}${planned ? planned.title : "Workout"}. First, ${s.name}, ${Math.round(s.min)} minutes.`); }
       else if (NAV.route) say(`${NAV.route.name}. ${nearSay(NAV.route.total)}${NAV.route.hasEle ? `, ${eleTxt(NAV.route.gain)} ${P.km ? "metres" : "feet"} of climbing` : ""}.`);
       if (NAV.nav) NAV.nav.seek(0);
       beep(880, 200, 2);
@@ -1415,8 +1467,8 @@
 
   // light / dark: light (paper) unless chosen otherwise; shared with the dashboard. Applies the moment it's tapped.
   const themeBtns = [...document.querySelectorAll("[data-theme-pick]")];
-  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.themePick === (document.documentElement.dataset.theme || "light"))));
-  themeBtns.forEach(b => b.addEventListener("click", () => { document.documentElement.dataset.theme = /** @type {HTMLElement} */ (b).dataset.themePick; ls.set("fitness-theme", /** @type {HTMLElement} */ (b).dataset.themePick); paintTheme(); drawCrumb(); renderAhead(true); }));
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.themePick === (document.documentElement.dataset.theme || "dark"))));
+  themeBtns.forEach(b => b.addEventListener("click", () => { document.documentElement.dataset.theme = /** @type {HTMLElement} */ (b).dataset.themePick; ls.set("fitness-theme", /** @type {HTMLElement} */ (b).dataset.themePick); paintTheme(); drawCrumb(); renderAhead(true); restyleMap(); }));
   paintTheme();
 
   // installed-app offline: the same service worker as the dashboard (scope: this folder)
@@ -1431,5 +1483,5 @@
   setInterval(tick, 1000);
   show(page);
   paintLaps();
-  /** @type {any} */ (window).__ride = { S, NAV, P, MAP, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB };
+  /** @type {any} */ (window).__ride = { S, NAV, P, MAP, get rep() { return rep; }, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB };
 })();

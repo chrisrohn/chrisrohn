@@ -114,6 +114,23 @@ test.describe("the cycling computer", () => {
     expect(r.ftp).toBeGreaterThan(92); expect(r.ftp).toBeLessThan(98);
   });
 
+  test("the commute check judges steady riding only: stop-and-go city riding gets no verdict", async ({ page }) => {
+    await page.goto("/ride.html");
+    const r = await page.evaluate(() => {
+      const C = /** @type {any} */ (window).RideCore, model = { model: [100, 1.6] };      // usual HR = 100 + 1.6 × km/h
+      const ride = (hr, steady) => Array.from({ length: 480 }, (_, i) => ({ t: 100 + i, hr, kmh: 25, steady }));
+      return {
+        hot: C.commuteCheck(ride(150, true), model, [], 580).verdict,                       // +10 on steady riding
+        normal: C.commuteCheck(ride(143, true), model, [], 580).verdict,                    // +3
+        fresh: C.commuteCheck(ride(133, true), model, [], 580).verdict,
+        city: C.commuteCheck(ride(160, true), model, [200, 300, 400, 500], 580).verdict,     // 4 stops in 10 min
+        lights: C.commuteCheck(ride(160, false), model, [], 580),                           // never steady: no verdict
+        early: C.commuteCheck(ride(160, true), model, [], 300),                             // under 8 minutes in
+      };
+    });
+    expect(r).toEqual({ hot: "hot", normal: "normal", fresh: "fresh", city: "city", lights: null, early: null });
+  });
+
   test("a FIT file a decoder accepts: header, CRCs, records, laps, session", async ({ page }) => {
     await page.goto("/ride.html");
     const bytes = await page.evaluate(() => {
@@ -253,23 +270,28 @@ test.describe("the cycling computer", () => {
     await ctx.close();
   });
 
-  test("tailoring on the bike: harder, one more rep, fit the time left, and a quick workout", async ({ page }) => {
+  test("the app adjusts the session itself and says so, with Undo; the Change sheet is for when life changes the ride", async ({ page }) => {
     const problems = watch(page);
     await world(page);
     await page.goto(link(PLAN));
+    await expect(page.locator("#w-easier, #w-harder")).toHaveCount(0);                     // no knobs: the app decides
     await page.locator("#btn-start").click();
     await expect(page.locator("#step-name")).toContainText("Warm-up  ·  1/7");
-    await expect(page.locator("#step-target")).toContainText("130–142");                       // warm-up targets never move
+    await expect(page.locator("#step-target")).toContainText("130–142");
     await page.locator("#btn-skip").click();
     await expect(page.locator("#step-target")).toContainText("160–170");
     await expect(page.locator("#step-target")).toContainText("W");                              // FTP from the plan: a power target too
-    await page.locator("#w-harder").click();
-    await expect(page.locator("#w-int")).toHaveText("105%");
-    await expect(page.locator("#step-target")).toContainText("168–178");
+    // two reps where heart rate never reached the target: the rest of the set is cut, announced, and can be undone
+    await page.evaluate(() => { const r = /** @type {any} */ (window).__ride; r.S.missed = 1; r.rep.n = 60; r.rep.under = 60; });
+    await page.locator("#btn-skip").click();
+    await expect(page.locator("#suggest-text")).toContainText("rest of the set is cut");
+    expect(await page.evaluate(() => /** @type {any} */ (window).__ride.S.plan.map(s => s.name))).toEqual(["Warm-up", "VO2 1/3", "Easy", "Cool-down"]);
+    await page.locator("#suggest-yes").click();                                                // Undo
+    expect(await page.evaluate(() => /** @type {any} */ (window).__ride.S.plan.length)).toBe(7);
     await page.locator("#w-tailor").click();
     expect(await axe(page)).toEqual([]);
     await page.locator("[data-tl=rep]").click();
-    await expect(page.locator("#step-name")).toContainText("VO2 1/4  ·  2/9");
+    await expect(page.locator("#step-name")).toContainText("Easy  ·  3/9");
     await page.locator("#w-tailor").click();
     await page.locator("#tl-left").fill("20");
     await page.locator("[data-tl=fit]").click();

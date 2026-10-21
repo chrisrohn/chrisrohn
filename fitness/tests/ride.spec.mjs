@@ -103,17 +103,29 @@ test.describe("ride mode", () => {
     await expect(page.locator("#t-dist")).toContainText("mi");
   });
 
-  test("light / dark: paper by default, switches the moment it's tapped, and the choice sticks", async ({ page }) => {
+  test("dark by default (true black, for the OLED), light on a tap, and the choice sticks", async ({ page }) => {
     await page.goto(link(PLAN));
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(0, 0, 0)");
     await page.click("#btn-settings");
-    await page.click('#settings [data-theme-pick="dark"]');
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator('#settings [data-theme-pick="dark"]')).toHaveAttribute("aria-pressed", "true");
-    const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-    expect(bg).toBe("rgb(20, 20, 20)");
+    await page.click('#settings [data-theme-pick="light"]');
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(245, 242, 234)");   // the paper
     await page.reload();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+
+  test("before the ride: why today's ride is today's ride, from the sync", async ({ page }) => {
+    const brief = { date: iso(today), title: "Keep it easy", level: "easy", score: 52, why: ["Resting HR 58 bpm — 4.0 above your 60-day norm"], tsb: -18 };
+    await page.goto(link({ ...PLAN, brief, race: { name: "Iceman Cometh", date: iso(new Date(Date.now() + 10 * 864e5)) } }));
+    await expect(page.locator("#b-score")).toHaveText("52");
+    await expect(page.locator("#b-title")).toHaveText("Keep it easy");
+    await expect(page.locator("#b-why")).toContainText("Resting HR 58 bpm");
+    await expect(page.locator("#b-why")).toContainText("Form -18");
+    await expect(page.locator("#b-race")).toHaveText(" · Iceman Cometh in 10 days");
+    await page.click("#btn-start");
+    await expect(page.locator("#brief")).toBeHidden();                                  // on the bike, the brief steps aside
   });
 
   test("settings save under form-action 'none' and move the targets", async ({ page }) => {

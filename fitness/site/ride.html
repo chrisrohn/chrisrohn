@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#000000">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Ride Mode</title>
   <meta name="application-name" content="Training">
@@ -16,7 +16,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <script>try { const t = localStorage.getItem("fitness-theme"); document.documentElement.dataset.theme = t || "light"; } catch (e) { document.documentElement.dataset.theme = "light"; }</script>
+  <script>try { const t = localStorage.getItem("fitness-theme"); document.documentElement.dataset.theme = t || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
   <style>/*__STYLE__*/</style>
   <style>/*__RIDE_STYLE__*/</style>
 </head>
@@ -24,9 +24,11 @@
   <header class="rtop">
   <div class="rbar">
     <label class="day"><span class="sr">Session</span><select id="day"></select></label>
+    <span class="sbclock num" id="sb-clock" aria-hidden="true"></span>
     <button type="button" class="chip sensor" id="btn-hr" aria-label="Connect heart-rate sensor"><i></i>HR</button>
     <button type="button" class="chip sensor" id="btn-csc" aria-label="Connect cadence, speed or power sensor"><i></i>Cad</button>
     <span class="chip sensor" id="gps-chip"><i></i>GPS</span>
+    <span class="sbbatt num" id="sb-batt" aria-hidden="true"></span>
     <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙</button>
   </div>
 
@@ -50,15 +52,22 @@
 
     <section class="page rmain" id="pg-workout" role="tabpanel" aria-labelledby="tab-workout">
       <section class="stepcard" id="stepcard" aria-live="polite">
-        <div class="stepname" id="step-name">Free ride</div>
+        <div class="stephead"><div class="stepname" id="step-name">Free ride</div><button type="button" class="chip more" id="w-tailor" aria-label="Change the workout">Change</button></div>
         <div class="steptime num" id="step-time">—</div>
         <div class="target" id="step-target"></div>
+        <div class="gauge" id="gauge" hidden aria-hidden="true"><span class="band" id="g-band"></span><b class="mark" id="g-mark"></b></div>
         <div class="progress" aria-hidden="true"><span id="step-bar"></span></div>
         <div class="cue" id="step-cue"></div>
         <div class="next" id="step-next"></div>
       </section>
 
-      <div class="suggest" id="suggest" hidden role="status"><span id="suggest-text"></span><span class="sbtns"><button type="button" class="chip primary" id="suggest-yes">Yes</button><button type="button" class="chip" id="suggest-no">No</button></span></div>
+      <div class="suggest" id="suggest" hidden role="status"><span id="suggest-text"></span><span class="sbtns"><button type="button" class="chip" id="suggest-yes">Undo</button><button type="button" class="chip primary" id="suggest-no">OK</button></span></div>
+
+      <section class="brief" id="brief" hidden aria-label="Today">
+        <div class="k">Today<span id="b-race"></span></div>
+        <div class="call"><span class="score" id="b-score"></span><span id="b-title"></span></div>
+        <ul id="b-why"></ul>
+      </section>
 
       <section class="hrcard" id="hrcard">
         <div class="hrval num" id="hr">—</div>
@@ -74,14 +83,6 @@
         <div class="rtile"><span class="k">Avg HR</span><span class="v num" id="t-avg">—</span></div>
         <div class="rtile"><span class="k">Load</span><span class="v num" id="t-load">0</span></div>
       </section>
-
-      <div class="tailor" role="group" aria-label="Tailor the workout">
-        <button type="button" class="chip" id="w-easier" aria-label="Easier: targets down 5%">Easier</button>
-        <span class="chip ghost num" id="w-int" aria-live="polite">100%</span>
-        <button type="button" class="chip" id="w-harder" aria-label="Harder: targets up 5%">Harder</button>
-        <button type="button" class="chip" id="w-more" aria-label="One more minute on this step">+1 min</button>
-        <button type="button" class="chip primary" id="w-tailor">Tailor</button>
-      </div>
 
       <section class="rtiles wxbar" id="wxbar" hidden aria-label="Weather">
         <div class="rtile"><span class="k">Temp</span><span class="v num" id="wx-temp">—</span><span class="s" id="wx-feels"></span></div>
@@ -161,7 +162,7 @@
         <div class="rtile"><span class="k" id="d-pw-k">Power</span><span class="v num" id="d-pw">—</span></div>
         <div class="rtile"><span class="k">Cadence</span><span class="v num" id="d-cad">—</span></div>
         <div class="rtile"><span class="k">Time of day</span><span class="v num" id="d-clock">—</span></div>
-        <div class="rtile"><span class="k">Sunset</span><span class="v num" id="d-sunset">—</span></div>
+        <div class="rtile"><span class="k">Light left</span><span class="v num" id="d-sunset">—</span><span class="s" id="d-sunset-at"></span></div>
         <div class="rtile"><span class="k">Elevation</span><span class="v num" id="d-ele">—</span></div>
         <div class="rtile"><span class="k">Battery</span><span class="v num" id="d-batt">—</span></div>
       </section>
@@ -216,7 +217,8 @@
 
   <dialog id="tailor" aria-labelledby="tailor-h">
     <form method="dialog" class="sform">
-      <h2 id="tailor-h">Tailor the workout</h2>
+      <h2 id="tailor-h">Change the workout</h2>
+      <p class="note">The app adjusts the session on its own (readiness, fatigue, heat, the day's load). This is for when life changes the ride: less time, more time, a different workout.</p>
       <p class="note" id="tl-load"></p>
       <div class="tgrid" role="group" aria-label="This step and set">
         <button type="button" class="chip" data-tl="less">−1 min</button>
@@ -225,7 +227,6 @@
         <button type="button" class="chip" data-tl="back">Previous step</button>
         <button type="button" class="chip" data-tl="rep">One more rep</button>
         <button type="button" class="chip" data-tl="cut">Cut the set</button>
-        <button type="button" class="chip" data-tl="load" id="tl-hit" hidden>Hit today's load</button>
       </div>
       <label>Time I have left (min) <input id="tl-left" type="number" inputmode="numeric" min="5" max="600"></label>
       <div class="actions left"><button type="button" class="chip primary" data-tl="fit">Fit the rest to it</button></div>
