@@ -244,7 +244,7 @@ details.table .scroll { max-height: 264px; overflow: auto; margin-top: var(--sp-
 .phase { display: inline-flex; align-items: center; min-height: 18px; padding: 0 5px; border: 1px solid var(--ink); color: var(--ink); white-space: nowrap; }
 .phase.taper { border-color: var(--s2); color: var(--s2); }
 .phase.openers { border-color: var(--accent-ink); color: var(--accent-ink); }
-.phase.race { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.phase.race { background: #b8281a; border-color: #b8281a; color: #ffffff; }   /* the darker red: white type at AA in both themes */
 .phase.indoor { background: var(--ink); color: var(--page); }
 .phase.recovery, .phase.transition { border-color: var(--hair); color: var(--ink-2); }
 .phase.commute { border-color: var(--s2); color: var(--s2); }

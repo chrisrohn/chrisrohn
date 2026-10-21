@@ -35,9 +35,9 @@
     deferred = null; installBtn.hidden = true;
   });
 
-  // ── theme: follows the device until a button is pressed, then that choice sticks (shared with ride mode) ──
+  // ── theme: dark unless light is chosen; the choice sticks and is shared with ride mode ──
   const themeBtns = [...document.querySelectorAll("[data-theme-pick]")], deviceDark = matchMedia("(prefers-color-scheme: dark)");
-  const effective = () => document.documentElement.dataset.theme || (deviceDark.matches ? "dark" : "light");
+  const effective = () => document.documentElement.dataset.theme || "dark";
   const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === effective())));
   for (const b of themeBtns) b.addEventListener("click", () => { document.documentElement.dataset.theme = b.dataset.themePick; ls.set("fitness-theme", b.dataset.themePick); paintTheme(); });
   deviceDark.addEventListener("change", paintTheme);

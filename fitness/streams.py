@@ -82,3 +82,50 @@ def verdict(pct: float) -> str:
     if pct < 10:
         return "fading in the second half: more long Z2 riding fixes it"
     return "a big fade: heat, under-fueling or fatigue, or the duration is past your aerobic base"
+
+
+def best_mean(series: list | None, minutes: int) -> float | None:
+    """The highest average over `minutes` consecutive minutes with a value in every one (no gaps, no stops)."""
+    if not series or len(series) < minutes:
+        return None
+    best, run, total = None, 0, 0.0
+    window: list[float] = []
+    for v in series:
+        if not v:
+            window, total, run = [], 0.0, 0
+            continue
+        window.append(v)
+        total += v
+        run += 1
+        if len(window) > minutes:
+            total -= window.pop(0)
+        if len(window) == minutes:
+            best = total / minutes if best is None or total / minutes > best else best
+    return best
+
+
+def lthr_from(acts: list[dict], traces: dict[str, dict], today, max_hr: float, days: int = 365) -> dict | None:
+    """Your lactate-threshold heart rate, learned from what you've ridden instead of guessed from max HR.
+
+    Friel's field markers: a hard 20 minutes averages about 105% of LTHR, and an hour flat out (a race) about 100%.
+    Each ride of the last year with a heart-rate trace gives its best gap-free 20 and 60 minutes; the estimate is the
+    highest of best-20 × 0.95 and best-60 across them, the second-highest when there are 5+ hard rides (one strap glitch
+    can't set your zones), bounded to 80–95% of max HR. It needs 3 rides with a genuinely hard 20 minutes (85%+ of
+    max HR); until then the 89%-of-max default stands."""
+    from datetime import timedelta
+    since = (today - timedelta(days=days)).isoformat()
+    cands = []
+    for a in acts:
+        s = traces.get(a.get("id"))
+        if a.get("group") != "ride" or a["start"][:10] < since or not s or s.get("none"):
+            continue
+        b20, b60 = best_mean(s.get("hr"), 20), best_mean(s.get("hr"), 60)
+        if b20 and b20 >= 0.85 * max_hr:
+            v = max(b20 * 0.95, b60 or 0)
+            cands.append({"lthr": v, "date": a["start"][:10], "name": a.get("name") or "a ride", "by": "60 min" if b60 and b60 >= b20 * 0.95 else "20 min"})
+    if len(cands) < 3:
+        return None
+    cands.sort(key=lambda c: c["lthr"], reverse=True)
+    pick = cands[1] if len(cands) >= 5 else cands[0]
+    lthr = round(min(0.95 * max_hr, max(0.80 * max_hr, pick["lthr"])))
+    return {"lthr": lthr, "from": pick["name"], "date": pick["date"], "by": pick["by"], "rides": len(cands)}

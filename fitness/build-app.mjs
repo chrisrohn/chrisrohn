@@ -112,7 +112,7 @@ export function buildApp(out) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Training has moved</title>
-  <style>body{font:16px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0;padding:32px 20px;background:#f5f2ea;color:#111}a{color:#b8281a;font-weight:700}main{max-width:36rem;border-top:6px solid #111;padding-top:12px}@media (prefers-color-scheme:dark){body{background:#141414;color:#f2efe8}main{border-color:#f2efe8}a{color:#e8442f}}</style>
+  <style>body{font:16px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0;padding:32px 20px;background:#000;color:#f2efe8}a{color:#ff5a3c;font-weight:700}main{max-width:36rem;border-top:6px solid #f2efe8;padding-top:12px}</style>
 </head>
 <body>
   <main>

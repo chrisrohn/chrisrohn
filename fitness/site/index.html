@@ -7,7 +7,7 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="light dark">
   <title>Training &amp; Recovery</title>
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#000000">
   <meta name="application-name" content="Training">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -16,7 +16,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <script>try { const t = localStorage.getItem("fitness-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem("fitness-theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
   <style>/*__STYLE__*/</style>
 </head>
 <body>

@@ -269,7 +269,7 @@ self.RideCore = (() => {
   /** Where a point sits on the route: its distance along, how far off it is, and the course there.
    *  `near` (a distance along) keeps the search on the stretch you're riding, so an out-and-back or a figure eight
    *  doesn't jump to the other side; with nothing close there it falls back to the whole route. */
-  function project(route, p, near = null, ahead = 2500, behind = 300) {
+  function project(route, p, near = null, ahead = 2500, behind = 300, strict = false) {
     const { xs, ys, cum, frame } = route, n = xs.length;
     const px = (p.lon - frame.lon) * frame.kx, py = (p.lat - frame.lat) * frame.ky;
     const scan = (lo, hi) => {
@@ -285,7 +285,7 @@ self.RideCore = (() => {
     const idx = d => { let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= d) lo = m; else hi = m; } return lo; };
     let best = null;
     if (near != null) best = scan(idx(Math.max(0, near - behind)), Math.min(n - 1, idx(Math.min(route.total, near + ahead)) + 1));
-    if (!best || best.off > 75) { const all = scan(0, n - 1); if (!best || all.off + 25 < best.off) best = all; }
+    if (!best || (best.off > 75 && !strict)) { const all = scan(0, n - 1); if (!best || all.off + 25 < best.off) best = all; }
     const a = route.pts[best.i], b = route.pts[Math.min(n - 1, best.i + 1)];
     return { along: best.along, off: best.off, i: best.i, brg: bearing(a, b) };
   }
@@ -333,18 +333,32 @@ self.RideCore = (() => {
       if (s.left < 30 && !st.said.has("arrive")) { st.said.add("arrive"); out.push({ kind: "arrive" }); }
       return out;
     }
-    /** Where to rejoin: the nearest point of the route ahead of the last one you were on, weighing distance from here
-     *  against skipping route (300 m of skipped route costs like 100 m of detour). */
-    function rejoin(fix) {
-      let best = null;
-      for (let d = st.lastOnAlong + 150; d <= Math.min(route.total, st.lastOnAlong + 4000); d += 50) {
-        const p = pointAt(route, d), cost = hav(fix, p) + (d - st.lastOnAlong) / 3;
-        if (!best || cost < best.cost) best = { cost, along: d, lat: p.lat, lon: p.lon };
+    /** Where to rejoin, looking forward: places on the route ahead of both where you left it and where you are now
+     *  (your position projected onto it), so a parallel road leads you on rather than back. Each is weighed by distance
+     *  from here, more when it lies behind your direction of travel (×1.4 past 60°, ×2.5 past 110°), plus a third of
+     *  the route it skips, plus 250 m when you'd meet the route head-on. The best three, 400 m+ apart, go to the router
+     *  together (fromBRouter + pickDetour); `avoid` is just past where you left, the likely blockage (a locked gate,
+     *  a closed bridge), so no way back runs through it. */
+    function rejoinOptions(fix, heading = null) {
+      const here = project(route, fix, st.lastOnAlong, 8000, 100, true);
+      const minAlong = Math.min(route.total, Math.max(st.lastOnAlong + 150, here.along + 100));
+      const all = [];
+      for (let d = minAlong; d <= Math.min(route.total, minAlong + 6000); d += 50) {
+        const p = pointAt(route, d), dist = hav(fix, p), brg = bearing(fix, p);
+        const ang = heading == null || dist < 40 ? 0 : Math.abs(turnAngle(heading, brg));
+        const against = dist > 60 && Math.abs(turnAngle(brg, p.brg)) > 120;
+        all.push({ along: d, lat: p.lat, lon: p.lon, dist, cost: dist * (ang > 110 ? 2.5 : ang > 60 ? 1.4 : 1) + (d - minAlong) * 0.3 + (against ? 250 : 0) });
       }
-      return best || { along: route.total, ...pointAt(route, route.total) };
+      all.sort((a, b) => a.cost - b.cost);
+      const options = [];
+      for (const c of all) if (options.length < 3 && options.every(o => Math.abs(o.along - c.along) >= 400)) options.push(c);
+      if (!options.length) options.push({ along: route.total, ...pointAt(route, route.total), dist: hav(fix, route.pts[route.pts.length - 1]), cost: 0 });
+      const left = pointAt(route, Math.min(route.total, st.lastOnAlong + 60));
+      return { options, minAlong, avoid: st.lastOnAlong > 0 && st.lastOnAlong < route.total - 100 ? { lat: left.lat, lon: left.lon, r: 40 } : null };
     }
+    const rejoin = (fix, heading = null) => rejoinOptions(fix, heading).options[0];
     const toRoute = fix => { const p = pointAt(route, project(route, fix, st.lastOnAlong).along); return { dist: hav(fix, p), brg: bearing(fix, p), lat: p.lat, lon: p.lon }; };
-    return { update, status, callouts, rejoin, toRoute, state: st, seek(along) { st.along = along; st.lastOnAlong = along; st.said.clear(); } };
+    return { update, status, callouts, rejoin, rejoinOptions, toRoute, state: st, seek(along) { st.along = along; st.lastOnAlong = along; st.said.clear(); } };
   }
 
   /** A BRouter answer (GeoJSON, with voicehints when asked for) → a parsed route whose turns are the router's. */
@@ -369,8 +383,25 @@ self.RideCore = (() => {
     return r;
   }
   /** The URL of a BRouter route from → to (the public server: free, no key, cycling profiles). */
-  const brouterUrl = (from, to, profile = "trekking", server = "https://brouter.de/brouter") =>
-    `${server}?lonlats=${from.lon.toFixed(6)},${from.lat.toFixed(6)}|${to.lon.toFixed(6)},${to.lat.toFixed(6)}&profile=${encodeURIComponent(profile)}&alternativeidx=0&format=geojson&timode=3`;
+  const brouterUrl = (from, to, profile = "trekking", server = "https://brouter.de/brouter", nogos = []) =>
+    `${server}?lonlats=${from.lon.toFixed(6)},${from.lat.toFixed(6)}|${to.lon.toFixed(6)},${to.lat.toFixed(6)}&profile=${encodeURIComponent(profile)}&alternativeidx=0&format=geojson&timode=3`
+    + (nogos.length ? `&nogos=${nogos.map(g => `${g.lon.toFixed(6)},${g.lat.toFixed(6)},${Math.round(g.r)}`).join("|")}` : "");
+  /** The best of several ways back (parsed BRouter routes, one per rejoin option): the shortest ride once a U-turn at the
+   *  start (600 m), arriving against the route's direction (300 m) and a third of the route skipped are counted in.
+   *  @returns {{detour: any, option: any, score: number} | null} */
+  function pickDetour(route, tries, heading = null, minAlong = 0) {
+    let best = null;
+    for (const { detour, option } of tries) {
+      if (!detour) continue;
+      const a = detour.pts[0], b = pointAt(detour, Math.min(detour.total, 80));
+      const back = heading != null && detour.total > 80 && Math.abs(turnAngle(heading, bearing(a, b))) > 110;
+      const end = detour.pts[detour.pts.length - 1], before = pointAt(detour, Math.max(0, detour.total - 60));
+      const against = detour.total > 60 && Math.abs(turnAngle(bearing(before, end), pointAt(route, option.along).brg)) > 135;
+      const score = detour.total + (back ? 600 : 0) + (against ? 300 : 0) + Math.max(0, option.along - minAlong) * 0.3;
+      if (!best || score < best.score) best = { detour, option, score, back, against };
+    }
+    return best;
+  }
 
   // ── the sun (after Agafonkin's SunCalc, from the NOAA / Astronomical Almanac formulas) ────────────────────────
   function sunTimes(date, lat, lon) {
@@ -502,6 +533,28 @@ self.RideCore = (() => {
   const PCT = [[0, 0], [68, 45], [81, 56], [90, 76], [94, 91], [100, 101], [106, 118], [110, 135]];
   const ftpPct = lthrPct => { for (let i = 1; i < PCT.length; i++) if (lthrPct <= PCT[i][0]) { const [a, pa] = PCT[i - 1], [b, pb] = PCT[i]; return pa + (pb - pa) * (lthrPct - a) / (b - a); } return 150; };
 
+  // ── the commute check: the same road every day makes heart rate at a speed a daily fitness reading ───────────
+  /** Judged on steady riding only. City riding (stops, lights, sprints away from them) puts heart rate out of step with
+   *  speed, so: samples count only when rolling 15 km/h+ at an even speed a minute or more after a stop (the caller marks
+   *  them `steady`), it needs 4 minutes of those in the last 8, and 4+ stops in the last 10 minutes means stop-and-go:
+   *  no verdict at all. Hot is 8+ bpm over what this leg usually costs at that speed; fresh is 5+ under.
+   *  @param {{t: number, hr: number, kmh: number, steady: boolean}[]} samples  t in seconds of ride time
+   *  @param {any} model  cfg.commute[leg]: {model: [a, b]} (HR = a + b × km/h) or {hr, speed}
+   *  @param {number[]} stops  ride-time seconds each stop began */
+  function commuteCheck(samples, model, stops, now) {
+    if (!model || now < 480) return null;
+    if (stops.filter(t => t > now - 600).length >= 4) return { verdict: "city" };
+    const recent = samples.filter(x => x.steady && x.t > now - 480);
+    if (recent.length < 240) return null;
+    const hr = recent.reduce((a, x) => a + x.hr, 0) / recent.length, kmh = recent.reduce((a, x) => a + x.kmh, 0) / recent.length;
+    let usual = null;
+    if (Array.isArray(model.model)) usual = model.model[0] + model.model[1] * kmh;
+    else if (model.hr && Math.abs(kmh - model.speed) < 1.5) usual = model.hr;
+    if (usual == null) return null;
+    const diff = hr - usual;
+    return { diff, kmh, verdict: diff >= 8 ? "hot" : diff <= -5 ? "fresh" : "normal", minutes: recent.length / 60 };
+  }
+
   // ── files: the recorded ride out ────────────────────────────────────────────────────────────────────────
   // A sample is [t ms, lat, lon, ele m, hr, cadence, power, speed m/s, distance m]; nulls where a sensor said nothing.
   const FIT_EPOCH = 631065600;   // 1989-12-31T00:00:00Z
@@ -622,6 +675,48 @@ self.RideCore = (() => {
     return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Training ride mode" xmlns="http://www.topografix.com/GPX/1/1">\n${wpts}\n<trk><name>${xml(route.name)}</name><trkseg>\n${pts}\n</trkseg></trk>\n</gpx>\n`;
   }
 
+  // ── the map at night: OpenFreeMap's day style turned dark, the way a bike computer's night mode is ───────────
+  // Every color in the style's paint is flipped in lightness (paper becomes near-black, dark labels become light) and
+  // calmed a little, so the route and your position are the brightest things on the screen.
+  const COLOR_KEYS = new Set(["background-color", "fill-color", "fill-outline-color", "line-color", "text-color", "text-halo-color", "icon-color", "icon-halo-color",
+    "circle-color", "circle-stroke-color", "fill-extrusion-color", "hillshade-shadow-color", "hillshade-highlight-color", "hillshade-accent-color"]);
+  function parseColor(c) {
+    let m = /^#([0-9a-f]{3,8})$/i.exec(c);
+    if (m) {
+      let h = m[1];
+      if (h.length <= 4) h = [...h].map(x => x + x).join("");
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1];
+    }
+    if ((m = /^rgba?\(([^)]+)\)$/i.exec(c))) { const v = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat); return [v[0], v[1], v[2], v[3] ?? 1]; }
+    if ((m = /^hsla?\(([^)]+)\)$/i.exec(c))) {
+      const v = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat), hh = v[0] / 360, ss = v[1] / 100, ll = v[2] / 100;
+      const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss, p = 2 * ll - q;
+      const f = t => { t = (t + 1) % 1; return 255 * (t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p); };
+      return [f(hh + 1 / 3), f(hh), f(hh - 1 / 3), v[3] ?? 1];
+    }
+    return null;
+  }
+  function nightColor(c) {
+    const rgb = typeof c === "string" ? parseColor(c.trim()) : null;
+    if (!rgb) return c;
+    const [r, g, b, a] = rgb.map((x, i) => (i < 3 ? x / 255 : x)), mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+    const d = mx - mn, sat = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+    let h = 0;
+    if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    const L = 0.05 + (1 - l) * 0.82, S = sat * 0.6;
+    return `hsla(${Math.round((h * 60 + 360) % 360)}, ${Math.round(S * 100)}%, ${Math.round(L * 100)}%, ${Math.round(a * 100) / 100})`;
+  }
+  const nightValue = v => Array.isArray(v) ? v.map(nightValue) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, nightValue(x)])) : nightColor(v);
+  /** A copy of a MapLibre style with its paint colors at night. */
+  function nightStyle(style) {
+    const out = JSON.parse(JSON.stringify(style));
+    for (const l of out.layers || []) {
+      if (!l.paint) continue;
+      for (const k of Object.keys(l.paint)) if (COLOR_KEYS.has(k)) l.paint[k] = nightValue(l.paint[k]);
+    }
+    return out;
+  }
+
   // ── tiles: the web-mercator tiles covering a corridor along the route ─────────────────────────────────────
   const tileXY = (lat, lon, z) => { const n = 2 ** z, x = (lon + 180) / 360 * n, s = Math.sin(rad(clamp(lat, -85.05, 85.05))); return [x, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n]; };
   function corridorTiles(route, zmin = 8, zmax = 14, buffer = 800) {
@@ -644,6 +739,6 @@ self.RideCore = (() => {
   const unstore = row => ({ id: row.id, name: row.name, points: row.points.map(p => ({ lat: p[0], lon: p[1], ele: p[2] })), marks: row.marks || [] });
   const reversed = raw => ({ ...raw, name: `${raw.name} (reversed)`, points: [...raw.points].reverse(), marks: (raw.marks || []).filter(m => !m.cue) });
 
-  return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
-    ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed };
+  return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, pickDetour, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
+    commuteCheck, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed };
 })();

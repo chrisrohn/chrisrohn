@@ -651,7 +651,8 @@ COMMUTE_BY, LONG_BY = 10, 19          # local hour by which a commute day's ride
 IDLE_DAYS, IDLE_TSS, IDLE_TSB = 3, 30, -15   # three days with under 30 TSS ridden and form above −15: nothing to rest from
 
 
-def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], commute_days: set[date], state: dict[str, dict]) -> dict:
+def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], commute_days: set[date], state: dict[str, dict],
+          ready: dict | None = None) -> dict:
     """What this week's plan has to absorb: sessions that didn't happen, and what to do about them.
 
     The plan is rebuilt from scratch at every sync, so this works it out the same way: the week as it was planned on
@@ -661,6 +662,9 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
     - A missed commute is rebooked: commutes already ridden count toward the week's per_week, the rest are re-picked.
     - Today: no ride in by 10:00 on a commute day means no commute (the session it replaced is back, for the evening);
       nothing logged by 19:00 on a long-ride day means it moves to tomorrow if tomorrow is free.
+    - The body decides today's intensity: when this morning's readiness (`ready`: its level from metrics.recommend and its
+      score) says easy or rest on a key session or long ride, today becomes that easy day or rest, and the session moves
+      like a missed one: to a free day with no hard day either side this week, or it's dropped, not crammed in.
     - Rest is earned: a planned rest day after three days with next to nothing ridden (a missed weekend, a busy
       stretch) has nothing to recover from. It becomes the long ride those days owed, last week's included, on a day
       off work (a weekend or a holiday), or steady endurance on a workday. Readiness still eases it when the morning
@@ -692,6 +696,14 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
 
     misses = [d for d in week if d < today and missed(d)]
     p_today = planned.get(today)
+    eased = None
+    if p_today and ready and ready.get("level") in ("easy", "rest") and p_today["phase"] in ("base", "build", "transition") and done[today] < 10:
+        role = "key" if p_today.get("commute") == "workout" else p_today["role"]
+        if role in ("key", "long"):
+            eased = ready["level"]
+            misses.append(today)
+            out["roles"][today] = eased
+            out["eased"] = {"level": eased, "role": role, "score": ready.get("score")}
     if p_today and p_today.get("commute") and now_hour >= COMMUTE_BY and today not in commute_days:
         out["no_commute"].add(today)
         out["notes"].append(f"No ride in this morning, so no commute today: {_replaced(p_today)}.")
@@ -723,6 +735,14 @@ def adapt(today: date, now_hour: int, cfg: dict, load_by_day: dict[str, float], 
         what = "long ride" if role == "long" else "key session"
         when = "today's" if d == today else f"{DAY[d.weekday()]}'s"
         spot = next((e for e in week if free(e) and (role == "long" or not (hard(e - timedelta(days=1)) or hard(e + timedelta(days=1))))), None)
+        if d == today and eased:   # not missed: the morning said recover
+            score = f" {out['eased']['score']}" if out["eased"].get("score") is not None else ""
+            today_is = "easy riding only" if eased == "easy" else "rest (or 30 min truly easy)"
+            moved = f"moves to {DAY[spot.weekday()]}" if spot else "is dropped this week rather than crammed in (no free day is left for it)"
+            if spot:
+                out["roles"][spot] = role
+            out["notes"].append(f"Readiness{score} says recover: today is {today_is}, and the {what} {moved}.")
+            continue
         if spot:
             out["roles"][spot] = role
             out["notes"].append(f"{when.capitalize()} {what} didn't happen: it's on {'today' if spot == today else DAY[spot.weekday()]} instead.")
