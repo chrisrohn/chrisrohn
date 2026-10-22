@@ -120,8 +120,8 @@ test.describe("GitHub sync", () => {
     await page.locator("#tab-ride").click();
     const done = page.locator("#bike [data-action=service][data-code=drip]");
     await expect(done).toBeVisible();
-    page.once("dialog", d => d.accept());
     await done.click();
+    await page.locator("#ask-yes").click();   // the app's own confirmation sheet
     await expect.poll(() => gh.dispatches.length).toBe(1);
     expect(gh.dispatches[0].inputs).toEqual({ action: "service", code: "drip" });
     await expect(page.locator("#job-text")).toHaveCount(0, { timeout: 15_000 });                   // reloaded with the run's results

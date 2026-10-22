@@ -30,7 +30,7 @@
     <button type="button" class="chip sensor" id="btn-trainer" aria-label="Connect smart trainer"><i></i>Trainer</button>
     <span class="chip sensor" id="gps-chip"><i></i>GPS</span>
     <span class="sbbatt num" id="sb-batt" aria-hidden="true"></span>
-    <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙</button>
+    <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙&#xFE0E;</button>
   </div>
 
   <div class="rtabs" role="tablist" aria-label="Ride screens">
@@ -333,6 +333,14 @@
         <button type="button" class="chip" data-export="delete">Delete</button>
       </div>
       <div class="actions"><button type="submit" class="chip primary" value="close">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ask" class="ask" aria-labelledby="ask-h" aria-describedby="ask-p">
+    <form method="dialog" class="sform">
+      <h2 id="ask-h">Are you sure?</h2>
+      <p id="ask-p" class="note"></p>
+      <div class="askbtns"><button type="submit" class="big" value="no" id="ask-no">Cancel</button><button type="submit" class="big go" value="yes" id="ask-yes">OK</button></div>
     </form>
   </dialog>
 

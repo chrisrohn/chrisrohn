@@ -16,6 +16,16 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const standalone = () => matchMedia("(display-mode: standalone)").matches || /** @type {any} */ (navigator).standalone === true;
   const sleep = ms => new Promise(res => setTimeout(res, ms));
+  /** A yes/no question in the app's own sheet (the browser's confirm() box is grey, small and off-theme). Cancel has
+   *  the focus, so a stray Enter never deletes anything. @returns {Promise<boolean>} */
+  function ask(title, text, yes, { danger = false } = {}) {
+    const d = /** @type {HTMLDialogElement | null} */ ($("ask"));
+    if (!d || typeof d.showModal !== "function") return Promise.resolve(confirm(`${title} ${text}`.trim()));
+    $("ask-h").textContent = title; $("ask-p").textContent = text; $("ask-p").hidden = !text;
+    const y = $("ask-yes"); y.textContent = yes; y.classList.toggle("danger", danger); y.classList.toggle("primary", !danger);
+    d.returnValue = "";
+    return new Promise(res => { d.addEventListener("close", () => res(d.returnValue === "yes"), { once: true }); d.showModal(); $("ask-no").focus(); });
+  }
   const when = iso => new Date(iso).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
   // ── offline ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -293,12 +303,16 @@
     if (act === "send-code") sendCode();
     if (act === "service") {
       const label = /** @type {HTMLElement} */ (t).dataset.label || "that";
-      if (confirm(`Mark “${label}” done today?`)) job("service", `Logging: ${label.toLowerCase()}`, { code: /** @type {HTMLElement} */ (t).dataset.code || "" });
+      const code = /** @type {HTMLElement} */ (t).dataset.code || "";
+      ask(`Mark “${label}” done?`, "Logged to your sync as done today: its count starts again from now.", "Mark done")
+        .then(ok => { if (ok) job("service", `Logging: ${label.toLowerCase()}`, { code }); });
     }
     if (act === "reload") location.reload();
     if (act === "forget") {
       e.preventDefault();
-      if (confirm("Remove the dashboard data from this device?")) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin", "fitness-rpe", "fitness-feel-sent", "fitness-feel-pending"]) ls.set(k, null); location.reload(); }
+      if (dlg) dlg.close();
+      ask("Remove from this device?", "The dashboard data, check-ins and ride ratings on this phone are deleted. Anything already sent to your sync stays there.", "Remove", { danger: true })
+        .then(ok => { if (ok) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin", "fitness-rpe", "fitness-feel-sent", "fitness-feel-pending"]) ls.set(k, null); location.reload(); } else openSheet(); });
     }
   });
   // the morning check-in and ride ratings (app.js): a quiet "service" run takes them to the sync, so the next build's

@@ -72,8 +72,8 @@ test.describe("installable app", () => {
     await expect(page.locator("#day option").first()).toContainText(DATA.ride.days.find(d => d.steps && d.steps.length).title);   // rest days have no steps to ride
     await page.goto("/");
     await page.locator("#databar [data-action=settings]").click();
-    page.once("dialog", d => d.accept());
     await page.locator("#import [data-action=forget]").click();
+    await page.locator("#ask-yes").click();   // the app's own confirmation sheet
     await expect(page.locator(".welcome")).toBeVisible();
     await page.goto(phoneLink(DATA));                                            // a link opened while the app is up
     await expect(page.locator("#tab-today")).toBeVisible();

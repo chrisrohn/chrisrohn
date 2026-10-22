@@ -22,7 +22,7 @@
 <body>
   <header class="top">
     <div class="bar">
-      <h1>Training &amp; Recovery</h1>
+      <h1>Training<span class="h1-more"> &amp; Recovery</span></h1>
       <div class="tools">
         <button type="button" class="chip" id="install" hidden>Install</button>
         <a class="chip" id="ride-link" href="ride.html">Ride mode</a>
@@ -64,6 +64,13 @@
       <input id="import-file" type="file" accept=".json,application/json,text/plain">
       <p id="import-error" class="error" role="alert"></p>
       <div class="actions"><button type="button" class="chip" data-action="forget">Remove from this device</button><button type="submit" class="chip" value="cancel">Close</button></div>
+    </form>
+  </dialog>
+  <dialog id="ask" aria-labelledby="ask-h" aria-describedby="ask-p">
+    <form method="dialog" class="sheet ask">
+      <h2 id="ask-h">Are you sure?</h2>
+      <p id="ask-p" class="sub"></p>
+      <div class="actions"><button type="submit" class="chip" value="no" id="ask-no">Cancel</button><button type="submit" class="chip primary" value="yes" id="ask-yes">OK</button></div>
     </form>
   </dialog>
   <footer id="foot"></footer>

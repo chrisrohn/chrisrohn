@@ -18,6 +18,15 @@
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private mode */ } },
   };
+  /** A yes/no question in ride mode's own sheet: two full-width buttons a gloved thumb can hit on a moving bike, Cancel
+   *  focused, so a bump or a stray Enter never ends a ride or deletes one. @returns {Promise<boolean>} */
+  function ask(title, text, yes) {
+    const d = /** @type {HTMLDialogElement | null} */ ($("ask"));
+    if (!d || typeof d.showModal !== "function") return Promise.resolve(confirm(`${title} ${text}`.trim()));
+    $("ask-h").textContent = title; $("ask-p").textContent = text; $("ask-p").hidden = !text; $("ask-yes").textContent = yes;
+    d.returnValue = "";
+    return new Promise(res => { d.addEventListener("close", () => res(d.returnValue === "yes"), { once: true }); d.showModal(); $("ask-no").focus(); });
+  }
   const jget = (k, d) => { try { return JSON.parse(ls.get(k) || "null") ?? d; } catch { return d; } };
 
   // ── config: a link from the dashboard (#z= deflate-raw, or #c= plain; base64url JSON) > inlined by the build >
@@ -627,7 +636,7 @@
       const row = await DB.get("routes", b.dataset.get);
       download(new Blob([C.routeGPX(C.analyze(C.unstore(row)))], { type: "application/gpx+xml" }), `${slug(row.name)}.gpx`);
     } else if (b.dataset.del) {
-      if (!confirm("Delete this route from the phone?")) return;
+      if (!await ask("Delete this route?", "It's removed from this phone; the file you loaded it from isn't touched.", "Delete")) return;
       await DB.del("routes", b.dataset.del);
       if (NAV.route && NAV.route.id === b.dataset.del) await useRoute(null);
     }
@@ -1934,7 +1943,7 @@
     render();
   });
   $("btn-end").addEventListener("click", async () => {
-    if (!confirm("End the ride?")) return;
+    if (!await ask("End the ride?", "The ride is saved on this phone with its laps, ready to export or send to your sync.", "End ride")) return;
     const now = Date.now();
     lap(0, now);
     S.running = false; S.paused = false; S.autoPaused = false;
@@ -2028,7 +2037,7 @@
     if (!b || !shown) return;
     const kind = b.dataset.export, r = shown;
     if (kind === "delete") {
-      if (!confirm("Delete this ride from the phone?")) return;
+      if (!await ask("Delete this ride?", "It's removed from this phone for good. A copy already sent to your sync or Garmin Connect stays there.", "Delete")) return;
       await DB.del("rides", r.id).catch(() => {}); await DB.del("tracks", r.id).catch(() => {});
       $("summary").close(); paintRides(); return;
     }

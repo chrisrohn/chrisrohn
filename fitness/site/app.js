@@ -468,10 +468,12 @@ window.startDashboard = D => {
     const c = D.commute && D.commute.today;
     if (!c) return "";
     const headline = pToday0() && pToday0().commute;   // on a planned commute day the call above already is the commute
+    const fuel = c.fuel && !D.fuel;
+    if (headline && !fuel) return "";                  // nothing left to say under the label: no orphaned heading
     const mark = { ride: "▲", easy: "■", optional: "□", wet: "☂\uFE0E", skip: "▼" }[c.verdict] || "■";
     return `<div class="commute-call ${esc(c.verdict)}"><span class="label">Bike commute</span>
       ${headline ? "" : `<p><b>${mark} ${esc(c.title)}.</b> ${esc(c.detail)}</p>`}
-      ${c.fuel && !D.fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
+      ${fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
   }
 
   // the fallback for weather or a short day; a rest day's "feeling great?" only when the morning says so
@@ -595,7 +597,7 @@ window.startDashboard = D => {
     const week = plan.days.slice(0, 7);
     const hours = week.reduce((a, d) => a + (d.minutes || 0), 0) / 60, commutes = week.filter(d => d.commute).length, lifts = week.filter(d => d.strength).length;
     return `<div class="week-ahead"><span class="label">The next 7 days · ${hours.toFixed(1)} h${commutes ? ` · ${commutes} commute${commutes === 1 ? "" : "s"}` : ""}${lifts ? ` · ${lifts} strength` : ""}</span>
-      <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i>
+      <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i><span class="sr">${esc(LEVEL[d.level] || d.level)}: </span>
         <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}${d.strength ? " · + strength" : ""}</span>${wxChip(d.wx)}</summary>
         <p class="sub">${esc(d.session)}</p>${d.strength ? `<p class="sub"><b>+ ${esc(d.strength.title)} · ${d.strength.minutes} min:</b> ${esc(d.strength.detail)}</p>` : ""}${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}${d.indoor && d.steps && d.steps.length ? `<p><button type="button" class="chip" data-zwo="${esc(d.date)}">Zwift / MyWoosh file (.zwo)</button></p>` : ""}</details></li>`).join("")}</ol>
       <p class="sub">Rebuilt at every sync from what you actually rode, slept and recovered: a missed day moves, a good week grows.</p></div>`;

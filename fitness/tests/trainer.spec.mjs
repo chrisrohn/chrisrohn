@@ -135,9 +135,9 @@ test.describe("beyond the road", () => {
     // a wheel too slow for the watts: the trainer flags it, the screen says which gear
     for (let i = 0; i < 3; i++) { await pedal(page, 3, 120, 60, 1); await page.waitForTimeout(400); }
     await expect(page.locator("#step-cue")).toContainText("harder gear");
-    page.once("dialog", d => d.accept());
     await page.evaluate(() => { /** @type {any} */ (window).__ride.S.elapsed = 30; });
     await page.locator("#btn-end").click();
+    await page.locator("#ask-yes").click();   // the app's own confirmation sheet
     const last = (await sent(page, 0x33)).pop();
     expect(last && (last[9] | (last[10] << 8))).toBe(20000);                                    // flat road again at the end
     expect(quiet(problems)).toEqual([]);
@@ -162,8 +162,8 @@ test.describe("beyond the road", () => {
     await page.waitForTimeout(1300);
     const learned = await page.evaluate(() => JSON.parse(localStorage.getItem("fitness-ride-erg") || "{}"));
     expect(learned["85"]).toBe(held);                                                           // the Z2 watts, for next time
-    page.once("dialog", d => d.accept());
     await page.locator("#btn-end").click();
+    await page.locator("#ask-yes").click();   // the app's own confirmation sheet
     await page.locator("#summary button[value=close]").click();
 
     // a free ride along a route, indoors: the grade under you, your place moved by the wheel
@@ -288,8 +288,8 @@ test.describe("beyond the road", () => {
     await page.locator("#btn-start").click();
     await page.evaluate(() => { const w = /** @type {any} */ (window).__ride; w.S.elapsed = 1800; w.S.moving = 1750; w.S.dist = 12000; w.live.hr = 142; w.live.hrAt = Date.now() + 5000; });
     await page.waitForTimeout(2500);
-    page.once("dialog", d => d.accept());
     await page.locator("#btn-end").click();
+    await page.locator("#ask-yes").click();   // the app's own confirmation sheet
     await expect.poll(() => gh.dispatches.length).toBe(1);
     const { auth, body } = gh.dispatches[0];
     expect(auth).toBe("Bearer github_pat_test");
