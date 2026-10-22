@@ -278,9 +278,18 @@ stop, 45 s of *Rolling again* lets heart rate catch up before any ▲ Push / ▼
 ## Ride mode: a cycling computer on the phone on your bars
 
 Set like the rest of the app, a 1970s transit sign (Helvetica, heavy rules, square everything, red only where it
-matters), **dark by default** (true black on the phone's OLED; light in Settings, shared with the dashboard), with the
-five heart-rate zones as flat signal colors, like a subway map's lines. Every Workout field fits a Pixel 7 without
-scrolling, turn banner and all.
+matters), **dark by default** (true black on the phone's OLED; light or auto, following the phone, in Settings, shared
+with the dashboard), with the five heart-rate zones as flat signal colors, like a subway map's lines, and stops and
+places as sign pictograms in the 1974 AIGA/DOT manner (water, food, bike shop, restroom, aid, summit…). Every Workout
+field fits a Pixel 7 without scrolling, turn banner and all.
+
+The type is Helvetica on every phone: iPhones use their own Helvetica Neue, and Android (where "Helvetica" is only a
+name for Roboto) and Windows get URW's Nimbus Sans L, the Helvetica clone, served with the app (19 KB a weight; GPL,
+source and license in [`fonts/`](fonts)).
+
+- **On the bars: hold, don't tap.** Tap **End** and it asks first; hold it for a second and the ride ends without
+  asking. The **lock** beside End (or *Lock the screen at Start* in Settings) makes the screen ignore rain and bumps:
+  the readings stay in view, and only a one-second hold on the bar along the bottom unlocks it.
 
 Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data · Laps**.
 
@@ -780,7 +789,7 @@ app, with its own icon, storage and notifications.
 
 On iPhone an installed app keeps its own storage, separate from Safari, so import *inside* the app after installing.
 Ride mode (also a long-press shortcut on the icon on Android) reads the same copy, so its zones and the week's sessions are
-already there. Theme and units follow you between the two. A new build of the site replaces the cached app the
+already there. Theme (light, auto or dark) and units follow you between the two. A new build of the site replaces the cached app the
 next time it opens with signal.
 
 ## Setup on a computer (optional)
@@ -895,5 +904,6 @@ legs actually felt on the bike.
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
 | `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page), ride mode (`ride-core.js`: routes, navigation, climbs, the sun, workout tailoring, FIT / GPX / TCX, smart-trainer protocols, offline routing from vector tiles, the battery forecast, the ride packed for the sync; `ride.js`: the screens, sensors and trainer, map, recording and sending), styles, SVG charts, `csp.txt`, `manifest.webmanifest`, `sw.js` (offline, map tiles, the share target) and `icons/` |
 | `demo.py` | the synthetic athlete |
+| `fonts/` | Nimbus Sans L (URW, GPL v2): the source OTFs, the license, and `subset.sh`, which writes the app's `site/fonts/*.woff2` |
 
 Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target). CI runs both. This is a personal analysis tool, not medical advice.

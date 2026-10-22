@@ -6,7 +6,7 @@
 //     index.html          the dashboard shell — holds no one's data; a phone link or a data file brings it, kept on the device
 //     ride.html           ride mode, the cycling computer (ride-core.js + ride.js inlined)
 //     vendor/             MapLibre GL, for the map (loaded only on the Map screen)
-//     manifest.webmanifest, sw.js, icons/, .nojekyll, robots.txt   installable, offline, not indexed
+//     manifest.webmanifest, sw.js, icons/, fonts/, .nojekyll, robots.txt   installable, offline, not indexed
 //   buildApp(out)         <out>/fitness/ on chrisrohn.com — the move: carries anything this phone kept there to the new
 //                         address, retires the old service worker, and forwards (QR links from before still work)
 //
@@ -79,6 +79,7 @@ export function buildStandalone(out) {
   const host = new URL(APP_URL).hostname;
   if (!host.endsWith(".github.io")) writeFileSync(join(out, "CNAME"), host + "\n");   // a custom domain for the app's Pages site
   cpSync(join(SITE, "icons"), join(out, "icons"), { recursive: true });
+  cpSync(join(SITE, "fonts"), join(out, "fonts"), { recursive: true });   // Nimbus Sans L, the Helvetica on Android and Windows
   return { version, hasMap };
 }
 

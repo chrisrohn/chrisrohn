@@ -163,6 +163,21 @@ button.big:disabled { color: var(--muted); cursor: default; }
 button.big.go { background: #c42b1b; color: #ffffff; font-size: var(--fs-body); }   /* the sign's red, deep enough for white type at AA */
 button.big.go.paused { background: var(--raised); color: var(--ink); }
 button.big.end:not(:disabled) { color: var(--accent-ink); }
+/* press and hold (End, the unlock bar): the button fills with the sign's red from the left while it's held */
+button.big.hold { background-image: linear-gradient(#c42b1b, #c42b1b); background-repeat: no-repeat; background-size: 0% 100%; }
+button.big.hold.holding { background-size: 100% 100%; transition: background-size var(--hold-ms, 900ms) linear; color: #ffffff; }
+/* the lock: a narrow fifth cell beside End while riding */
+.lockbtn { display: none; }
+body.riding .rfoot { grid-template-columns: 1.5fr 1fr 1fr 1fr 56px; }
+body.riding .lockbtn { display: grid; place-items: center; }
+.lockbtn .picto, #btn-unlock .picto { width: 22px; height: 22px; }
+/* locked: the readings stay in view behind a veil that takes every touch; only the bar along the bottom unlocks */
+.lockveil { position: fixed; left: 0; right: 0; top: 0; height: var(--app-h, 100dvh); z-index: 40; display: flex; flex-direction: column; justify-content: flex-end; touch-action: none; }
+#btn-unlock { display: flex; align-items: center; justify-content: center; gap: var(--sp-3); width: 100%; font-size: var(--fs-body);
+  min-height: calc(68px + var(--rule-major) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); border-top: var(--rule-major) solid var(--accent); }   /* exactly over the footer */
+#btn-unlock b { color: var(--accent-ink); }
+@media (max-height: 760px) { #btn-unlock { min-height: calc(60px + var(--rule-major) + env(safe-area-inset-bottom)); } }
+@media (max-height: 640px) { #btn-unlock { min-height: calc(52px + var(--rule-major) + env(safe-area-inset-bottom)); } }
 
 /* ── the turn banner ───────────────────────────────────────────────────────────────────────────────────────── */
 .navbanner { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--gutter); background: #111111; color: #ffffff; min-height: 72px; border-left: var(--sp-3) solid var(--zc2); border-bottom: 1px solid #2a2a2a; }
@@ -217,6 +232,10 @@ html[data-theme="dark"] .maplibregl-ctrl-attrib-button { filter: invert(1); }
 .list ol { list-style: none; margin: 0; padding: 0; }
 .list li { display: grid; grid-template-columns: 2rem 5.5rem minmax(0, 1fr); align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) 0; border-top: var(--rule-hair) solid var(--hair); font-size: var(--fs-body); }
 .list li .ta { font-size: 1.4rem; line-height: 1; text-align: center; }
+.list li .ta .picto { width: 1.75rem; height: 1.75rem; vertical-align: middle; }
+.sform .chip[data-near] { gap: var(--sp-2); }
+.sform .chip[data-near] .picto { width: 20px; height: 20px; }
+.rl-main b .picto { width: 1.4em; height: 1.4em; margin-right: var(--sp-2); }
 .list li b { font-size: var(--fs-lead); font-family: var(--num); }
 .list li.none, .rlist li.none { display: block; color: var(--ink-2); }
 

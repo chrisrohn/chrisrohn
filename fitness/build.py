@@ -773,6 +773,7 @@ def render_public_ride(out: Path | None = None) -> Path:
 def app_files(out_dir: Path, pages: list[str]) -> None:
     """The manifest, icons and service worker that make a built folder installable (when it's served over HTTPS)."""
     shutil.copytree(SITE_DIR / "icons", out_dir / "icons", dirs_exist_ok=True)
+    shutil.copytree(SITE_DIR / "fonts", out_dir / "fonts", dirs_exist_ok=True)   # Nimbus Sans L: Helvetica off Apple devices
     maplibre = SITE_DIR.parent.parent / "node_modules" / "maplibre-gl" / "dist"   # the map, when `npm ci` has run; else ride mode draws the route itself
     if (maplibre / "maplibre-gl.mjs").exists():
         (out_dir / "vendor").mkdir(exist_ok=True)

@@ -138,8 +138,7 @@ test.describe("beyond the road", () => {
     await page.evaluate(() => { /** @type {any} */ (window).__ride.S.elapsed = 30; });
     await page.locator("#btn-end").click();
     await page.locator("#ask-yes").click();   // the app's own confirmation sheet
-    const last = (await sent(page, 0x33)).pop();
-    expect(last && (last[9] | (last[10] << 8))).toBe(20000);                                    // flat road again at the end
+    await expect.poll(async () => { const last = (await sent(page, 0x33)).pop(); return last && (last[9] | (last[10] << 8)); }).toBe(20000);   // flat road again at the end
     expect(quiet(problems)).toEqual([]);
   });
 

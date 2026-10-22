@@ -16,7 +16,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <script>try { document.documentElement.dataset.theme = localStorage.getItem("fitness-theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
+  <script>try { const t = localStorage.getItem("fitness-theme") || "dark"; document.documentElement.dataset.theme = t === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : t; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
   <style>/*__STYLE__*/</style>
 </head>
 <body>
@@ -30,7 +30,7 @@
           <button type="button" class="chip" data-units="mi" aria-pressed="true"><span class="long">Imperial</span><span class="short">mi</span></button><button type="button" class="chip" data-units="km" aria-pressed="false"><span class="long">Metric</span><span class="short">km</span></button>
         </div>
         <div class="seg" role="group" aria-label="Theme">
-          <button type="button" class="chip" data-theme-pick="light" aria-pressed="false"><span class="long">Light</span><span class="short" aria-hidden="true">☀</span><span class="sr">Light</span></button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false"><span class="long">Dark</span><span class="short" aria-hidden="true">☾</span><span class="sr">Dark</span></button>
+          <button type="button" class="chip" data-theme-pick="light" aria-pressed="false"><span class="long">Light</span><span class="short" aria-hidden="true">☀</span><span class="sr">Light</span></button><button type="button" class="chip" data-theme-pick="auto" aria-pressed="false" title="Follow the phone's setting"><span class="long">Auto</span><span class="short" aria-hidden="true">A</span><span class="sr">Auto</span></button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false"><span class="long">Dark</span><span class="short" aria-hidden="true">☾</span><span class="sr">Dark</span></button>
         </div>
       </div>
       <nav id="tabs" class="tabs" aria-label="Sections" hidden></nav>

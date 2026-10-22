@@ -45,12 +45,14 @@
     deferred = null; installBtn.hidden = true;
   });
 
-  // ── theme: dark unless light is chosen; the choice sticks and is shared with ride mode ──
+  // ── theme: dark unless light or auto (the phone's own setting) is chosen; the choice sticks and is shared with ride
+  //    mode. The page always carries the light or dark it shows (<html data-theme>); "auto" is only the preference.
   const themeBtns = [...document.querySelectorAll("[data-theme-pick]")], deviceDark = matchMedia("(prefers-color-scheme: dark)");
-  const effective = () => document.documentElement.dataset.theme || "dark";
-  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === effective())));
-  for (const b of themeBtns) b.addEventListener("click", () => { document.documentElement.dataset.theme = b.dataset.themePick; ls.set("fitness-theme", b.dataset.themePick); paintTheme(); });
-  deviceDark.addEventListener("change", paintTheme);
+  const pref = () => ls.get("fitness-theme") || "dark";
+  const applyTheme = () => { const t = pref(); document.documentElement.dataset.theme = t === "auto" ? (deviceDark.matches ? "dark" : "light") : t; };
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === pref())));
+  for (const b of themeBtns) b.addEventListener("click", () => { ls.set("fitness-theme", b.dataset.themePick); applyTheme(); paintTheme(); });
+  deviceDark.addEventListener("change", () => { applyTheme(); paintTheme(); });
   paintTheme();
 
   // ── data ────────────────────────────────────────────────────────────────────────────────────────────────

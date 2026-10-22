@@ -10,6 +10,23 @@
 (async () => {
   const C = /** @type {any} */ (window).RideCore;
   const $ = id => document.getElementById(id);
+  // stops and places as transit-sign pictograms in the 1974 AIGA/DOT manner: a white mark on a black tile, drawn here
+  // (emoji are coloured, differ by phone, and don't belong on a sign)
+  const ST = 'stroke="currentColor" fill="none"';
+  const KIND_PICTO = {
+    water: `<path d="M12 3c3.6 5 6 8.3 6 11.3a6 6 0 0 1-12 0C6 11.3 8.4 8 12 3z"/>`,
+    food: `<rect x="4.5" y="3" width="1.6" height="6"/><rect x="7.2" y="3" width="1.6" height="6"/><rect x="9.9" y="3" width="1.6" height="6"/><path d="M4.5 8.5h7v1a3 3 0 0 1-2.5 2.9V21H7v-8.6A3 3 0 0 1 4.5 9.5z"/><path d="M15 3c2.9 1 4 4.5 4 9h-2.2v9H15z"/>`,
+    bike: `<g ${ST} stroke-width="1.8"><circle cx="6" cy="15.5" r="4"/><circle cx="18" cy="15.5" r="4"/><path d="M6 15.5L9.5 8.5h6.5L12 15.5H6M9.5 8.5L12 15.5M16 8.5l2 7M8 6.5h3.5M14.5 5.5H17"/></g>`,
+    toilet: `<circle cx="6.5" cy="4.5" r="2"/><rect x="4.5" y="7.5" width="4" height="7"/><rect x="4.5" y="14" width="1.7" height="7"/><rect x="6.8" y="14" width="1.7" height="7"/><rect x="11.4" y="2" width="1.2" height="20"/><circle cx="17.5" cy="4.5" r="2"/><path d="M15.5 7.5h4l2 8h-8z"/><rect x="15.6" y="15" width="1.5" height="6"/><rect x="17.9" y="15" width="1.5" height="6"/>`,
+    aid: `<rect x="9" y="3.5" width="6" height="17"/><rect x="3.5" y="9" width="17" height="6"/>`,
+    summit: `<path d="M12 4l9 16H3z"/>`,
+    valley: `<path d="M3 4h18l-9 16z"/>`,
+    danger: `<path fill-rule="evenodd" d="M12 3l10 18H2zM11 9h2v6h-2zM11 16.5h2v2h-2z"/>`,
+    sprint: `<path d="M14 2L5 13.5h6L9 22l10-12h-6l2-8z"/>`,
+    finish: `<rect x="5" y="3" width="1.8" height="18"/><path d="M6.8 4H19l-3 4 3 4H6.8z"/>`,
+    generic: `<circle cx="12" cy="12" r="4"/>`,
+  };
+  const picto = kind => `<svg class="picto tile" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${KIND_PICTO[kind] || KIND_PICTO.generic}</svg>`;
   // keep figures with their units so a cue never breaks "3 / min" on a phone-width line
   const nb = t => String(t ?? "").replace(/ × /g, "\u00a0×\u00a0").replace(/(\d) (?=(?:min|h|s|mi|km|ft|m|bpm|W|g|rpm|TSS|%)(?!\w))/g, "$1\u00a0")
     .replace(/(RPE|Z\d|\+|−|~) (?=[\d(])/g, "$1\u00a0").replace(/(\d)–(?=\d)/g, "$1\u2060–\u2060");   // word joiners keep 88–93 whole
@@ -27,6 +44,9 @@
     d.returnValue = "";
     return new Promise(res => { d.addEventListener("close", () => res(d.returnValue === "yes"), { once: true }); d.showModal(); $("ask-no").focus(); });
   }
+  const deviceDark = matchMedia("(prefers-color-scheme: dark)");
+  /** The light or dark to show: the chosen one, or in "auto" the phone's. */
+  const themeNow = () => { const t = ls.get("fitness-theme") || "dark"; return t === "auto" ? (deviceDark.matches ? "dark" : "light") : t; };
   const jget = (k, d) => { try { return JSON.parse(ls.get(k) || "null") ?? d; } catch { return d; } };
 
   // ── config: a link from the dashboard (#z= deflate-raw, or #c= plain; base64url JSON) > inlined by the build >
@@ -58,10 +78,11 @@
     ftp: prefs.ftp ?? cfg.ftp ?? 0, autoPause: prefs.autoPause ?? true, stepLap: prefs.stepLap ?? true, autoLap: prefs.autoLap ?? 0,
     climbs: prefs.climbs ?? true, reroute: prefs.reroute ?? true, profile: prefs.profile || "trekking", headingUp: prefs.headingUp ?? true,
     trainer: prefs.trainer || "auto", weight: prefs.weight || cfg.weight_kg || 75, upload: prefs.upload ?? true, saver: prefs.saver || "auto",
+    autoLock: prefs.autoLock ?? false,
   };
   const savePrefs = () => ls.set("fitness-ride-prefs", JSON.stringify({ lthr: P.lthr, max: P.max, rest: P.rest, wheel: P.wheel, fuel: P.fuel, voice: P.voice, ftp: P.ftp,
     autoPause: P.autoPause, stepLap: P.stepLap, autoLap: P.autoLap, climbs: P.climbs, reroute: P.reroute, profile: P.profile, headingUp: P.headingUp,
-    trainer: P.trainer, weight: P.weight, upload: P.upload, saver: P.saver }));
+    trainer: P.trainer, weight: P.weight, upload: P.upload, saver: P.saver, autoLock: P.autoLock }));
 
   // ── formatting ──────────────────────────────────────────────────────────────────────────────────────────
   const clock = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
@@ -88,6 +109,7 @@
   const hhmm = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const compass = d => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(d / 45) % 8];
   const css = name => getComputedStyle(document.body).getPropertyValue(name).trim() || "#888";
+  const face = (px, bold = false) => `${bold ? "700 " : ""}${px}px ${css("--font").replace(/^#888$/, "sans-serif")}`;   // canvas text in the page's Helvetica
 
   // ── storage on this phone: routes, rides and the ride being recorded (IndexedDB) ──────────────────────────
   const DB = (() => {
@@ -895,6 +917,7 @@
   $("go-loop-again").addEventListener("click", () => makeLoop(true));
   const OVERPASS = "https://overpass-api.de/api/interpreter";
   const overpass = async (q, ms = 25000) => { const r = await timed(OVERPASS, ms, { method: "POST", body: new URLSearchParams({ data: q }) }); if (!r.ok) throw new Error(`places ${r.status}`); return C.fromOverpass(await r.json()); };
+  document.querySelectorAll("[data-near]").forEach(b => b.insertAdjacentHTML("afterbegin", picto(/** @type {HTMLElement} */ (b).dataset.near)));
   document.querySelectorAll("[data-near]").forEach(b => b.addEventListener("click", async () => {
     const kind = /** @type {HTMLElement} */ (b).dataset.near, f = live.lastFix, list = $("near-list");
     if (!f) { goMsg.textContent = "Waiting for a GPS fix."; startGps(); return; }
@@ -905,7 +928,7 @@
     goMsg.textContent = found.length ? "" : "Nothing within 3 km in OpenStreetMap.";
     list.replaceChildren(...found.map(p => {
       const li = document.createElement("li"), main = document.createElement("div"), nm = document.createElement("b"), sub = document.createElement("span"), go = document.createElement("button");
-      main.className = "rl-main"; nm.textContent = p.name; sub.textContent = `${nearTxt(p.d)} ${compass(bearing(f, p))}${p.hours ? ` · ${p.hours}` : ""}`;
+      main.className = "rl-main"; nm.textContent = p.name; nm.insertAdjacentHTML("afterbegin", picto(kind)); sub.textContent = `${nearTxt(p.d)} ${compass(bearing(f, p))}${p.hours ? ` · ${p.hours}` : ""}`;
       main.append(nm, sub);
       go.type = "button"; go.className = "chip primary"; go.textContent = "Go";
       go.addEventListener("click", async () => { if (await routeTo([{ lat: p.lat, lon: p.lon }], p.name)) $("goto").close(); });
@@ -951,7 +974,6 @@
 
   // ── navigation: position on the route, turns, off course and detours ──────────────────────────────────────
   const KIND_WORD = { bike: "Bike shop", water: "Water", food: "Food", aid: "Aid station", summit: "Summit", danger: "Caution", toilet: "Restroom", sprint: "Sprint", valley: "Valley", finish: "Finish", generic: "" };
-  const KIND_ICON = { bike: "🔧", water: "💧", food: "🍴", aid: "✚", summit: "▲", danger: "⚠", toilet: "WC", sprint: "⚡", valley: "▼", finish: "⚑", generic: "•" };
   const active = () => NAV.detour ? NAV.detour : NAV.route ? { route: NAV.route, nav: NAV.nav } : null;
   const turnText = t => {
     if (!t) return "";
@@ -1163,7 +1185,7 @@
     set("route", r ? line(r.pts) : { type: "FeatureCollection", features: [] });
     set("climbs", { type: "FeatureCollection", features: r ? r.climbs.map(c => { const pts = []; for (let d = c.start; d <= c.end; d += 25) pts.push(C.pointAt(r, d)); return { ...line(pts), properties: { g: c.grade * 100 } }; }) : [] });
     set("marks", { type: "FeatureCollection", features: r ? [...r.turns.map(t => { const p = C.pointAt(r, t.along); return { type: "Feature", properties: { t: "turn" }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } }; }),
-      ...r.pois.map(p => ({ type: "Feature", properties: { t: p.kind, label: `${KIND_ICON[p.kind] || "•"} ${p.name}`.slice(0, 40) }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } }))] : [] });
+      ...r.pois.map(p => ({ type: "Feature", properties: { t: p.kind, label: (p.name || KIND_WORD[p.kind] || "").slice(0, 40) }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } }))] : [] });
     if (r && !live.lastFix) MAP.map.fitBounds(r.bounds, { padding: 40, duration: 0 });
   }
   function mapDetour() { set("detour", NAV.detour ? line(NAV.detour.route.pts) : { type: "FeatureCollection", features: [] }); drawCrumb(); }
@@ -1231,7 +1253,7 @@
     g.scale(dpr, dpr);
     g.fillStyle = css("--page"); g.fillRect(0, 0, W, H);
     const r = NAV.route, fix = live.lastFix || (r ? { lat: r.pts[0].lat, lon: r.pts[0].lon } : null);
-    if (!fix) { g.fillStyle = css("--ink-2"); g.font = "15px sans-serif"; g.fillText("Waiting for GPS…", 16, 32); return; }
+    if (!fix) { g.fillStyle = css("--ink-2"); g.font = face(15); g.fillText("Waiting for GPS…", 16, 32); return; }
     const mpp = (r && !live.lastFix ? Math.max(r.total / Math.min(W, H) * 1.2, 2) : 4) / 2 ** MAP.zoom;
     const rot = P.headingUp && live.heading != null ? -live.heading * Math.PI / 180 : 0;
     const kx = 111320 * Math.cos(fix.lat * Math.PI / 180), ky = 110540, cx = W / 2, cy = P.headingUp && live.lastFix ? H * 0.65 : H / 2;
@@ -1252,10 +1274,10 @@
       g.fillStyle = css("--ink"); g.fill(); g.strokeStyle = css("--page"); g.lineWidth = 2; g.stroke(); g.restore();
     }
     // north arrow and scale
-    g.save(); g.translate(W - 24, 24); g.rotate(rot); g.fillStyle = css("--ink"); g.font = "bold 12px sans-serif"; g.textAlign = "center"; g.fillText("N", 0, -8); g.beginPath(); g.moveTo(0, -4); g.lineTo(5, 8); g.lineTo(-5, 8); g.closePath(); g.fill(); g.restore();
+    g.save(); g.translate(W - 24, 24); g.rotate(rot); g.fillStyle = css("--ink"); g.font = face(12, true); g.textAlign = "center"; g.fillText("N", 0, -8); g.beginPath(); g.moveTo(0, -4); g.lineTo(5, 8); g.lineTo(-5, 8); g.closePath(); g.fill(); g.restore();
     const bar = P.km ? [50, 100, 200, 500, 1000, 2000, 5000, 10000] : [30.48, 60.96, 152.4, 304.8, 402.3, 804.7, 1609.3, 3218.7, 8046.7];
     const len = bar.find(b => b / mpp > 60) || bar[bar.length - 1];
-    g.fillStyle = css("--ink"); g.fillRect(16, H - 22, len / mpp, 3); g.font = "12px sans-serif"; g.textAlign = "left"; g.fillText(nearTxt(len), 16, H - 28);
+    g.fillStyle = css("--ink"); g.fillRect(16, H - 22, len / mpp, 3); g.font = face(12); g.textAlign = "left"; g.fillText(nearTxt(len), 16, H - 28);
   }
   $("m-center").addEventListener("click", () => { MAP.follow = true; MAP.zoom = 0; $("m-center").classList.remove("primary"); paintMap(live.lastFix, true); drawCrumb(); });
   const paintOrient = () => { $("m-orient").textContent = P.headingUp ? "▲ Up" : "N Up"; $("m-orient").setAttribute("aria-pressed", String(P.headingUp)); };
@@ -1292,7 +1314,7 @@
       g.fillStyle = css("--accent"); g.fillRect(x - 1.5, top - 6, 3, bot - top + 6);
       g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); g.strokeStyle = css("--page"); g.lineWidth = 2; g.stroke();
     }
-    g.fillStyle = css("--ink-2"); g.font = "11px sans-serif"; g.textAlign = "left";
+    g.fillStyle = css("--ink-2"); g.font = face(11); g.textAlign = "left";
     g.fillText(`${eleTxt(hi)} ${unitE()}`, 2, 11); g.fillText(`${eleTxt(lo)} ${unitE()}`, 2, H - 3);
     g.textAlign = "right"; g.fillText(`${distTxt(to - from)} ${unitD()}`, W - 2, H - 3);
   }
@@ -1333,7 +1355,7 @@
     $("turn-list").innerHTML = turns.length ? turns.map(t => `<li><span class="ta" aria-hidden="true">${C.TURN_ARROWS[t.kind] || "↑"}</span><b class="num">${nearTxt(t.along - ast.along)}</b><span>${esc(turnText(t))}</span></li>`).join("") : `<li class="none">${A.route.turns.length ? "No more turns: straight to the finish." : "No turns in this file."}</li>`;
     const pois = r.pois.filter(q => q.along > at - 20).slice(0, 8);
     $("poi-wrap").hidden = !r.pois.length;
-    $("poi-list").innerHTML = pois.map(q => `<li><span class="ta" aria-hidden="true">${KIND_ICON[q.kind] || "•"}</span><b class="num">${nearTxt(Math.max(0, q.along - at))}</b><span>${esc(q.name)}${q.desc && q.desc !== q.name ? ` · ${esc(q.desc)}` : ""}</span></li>`).join("") || `<li class="none">None left.</li>`;
+    $("poi-list").innerHTML = pois.map(q => `<li><span class="ta">${picto(q.kind)}<span class="sr">${esc(KIND_WORD[q.kind] || "Point")}:</span></span><b class="num">${nearTxt(Math.max(0, q.along - at))}</b><span>${esc(q.name)}${q.desc && q.desc !== q.name ? ` · ${esc(q.desc)}` : ""}</span></li>`).join("") || `<li class="none">None left.</li>`;
     $("wind-ahead").textContent = windAhead(r, at);
     paintRace();
   }
@@ -1428,7 +1450,7 @@
     saver.on = on;
     document.body.classList.toggle("saver", on);
     const was = document.documentElement.dataset.theme;
-    document.documentElement.dataset.theme = on ? "dark" : ls.get("fitness-theme") || "dark";
+    document.documentElement.dataset.theme = on ? "dark" : themeNow();
     if (was !== document.documentElement.dataset.theme) { restyleMap(); drawCrumb(); }
   }
   /** Minutes of riding left: the route at your average speed, else the session's steps; null for a free ride. */
@@ -1927,6 +1949,7 @@
       setSaver(P.saver === "on");
       beep(880, 200, 2);
       wake();
+      if (P.autoLock) setTimeout(() => { if (S.running) setTouchLock(true); }, 1500);   // after the Start tap has landed
     } else {
       S.paused = !S.paused;
       if (S.paused) { S.pauses.push([now, 0]); if (lock) lock.release().catch(() => {}); flush(true); }
@@ -1942,8 +1965,47 @@
     if (S.running) { if (!S.tank) S.tank = C.tank(P.weight); C.eat(S.tank, fuelGrams()); if (S.tank.left / S.tank.full > 0.5) S.fuelSaid = 0; }
     render();
   });
-  $("btn-end").addEventListener("click", async () => {
-    if (!await ask("End the ride?", "The ride is saved on this phone with its laps, ready to export or send to your sync.", "End ride")) return;
+  // ── press and hold: End (and the unlock bar) fill from the left while held, and act when full. A tap on End asks
+  //    first instead; a keyboard press acts on the button as usual.
+  function holdable(btn, ms, done) {
+    let timer = 0, firedAt = 0;
+    btn.style.setProperty("--hold-ms", `${ms}ms`);
+    const stop = () => { clearTimeout(timer); btn.classList.remove("holding"); };
+    btn.addEventListener("pointerdown", e => {
+      if (/** @type {HTMLButtonElement} */ (btn).disabled || e.button > 0) return;
+      firedAt = 0; btn.classList.add("holding");
+      timer = window.setTimeout(() => { firedAt = Date.now(); stop(); buzz(40); done(); }, ms);
+    });
+    for (const ev of ["pointerup", "pointerleave", "pointercancel"]) btn.addEventListener(ev, stop);
+    btn.addEventListener("contextmenu", e => e.preventDefault());   // a long press is ours, not the browser's menu
+    // true once, just after a completed hold: the click that follows it is spent. Time-boxed, because a hold that hides
+    // or disables its button (End, unlock) never gets that click, and the next real tap must not be swallowed
+    return (/** @type {MouseEvent} */ e) => { if (e.detail === 0) return false; const f = Date.now() - firedAt < 600; firedAt = 0; return f; };   // a keyboard click is never a hold's
+  }
+  const endHeld = holdable($("btn-end"), 900, () => endRide());
+  $("btn-end").addEventListener("click", async e => {
+    if (endHeld(e) || !S.running) return;
+    if (!await ask("End the ride?", "The ride is saved on this phone with its laps, ready to export or send to your sync. Next time, hold End for a second to finish without this question.", "End ride")) return;
+    endRide();
+  });
+
+  // ── the touch lock: rain and bumps press buttons. Locked, the readings stay in view and nothing takes a touch but
+  //    the unlock bar along the bottom, which wants a one-second hold. Lock it from the footer, or at Start (Settings).
+  function setTouchLock(on) {
+    if (on === !$("lockveil").hidden) return;
+    $("lockveil").hidden = !on;
+    for (const el of [document.querySelector(".rtop"), $("pages"), document.querySelector(".rfoot")]) if (el) /** @type {any} */ (el).inert = on;
+    document.body.classList.toggle("locked", on);
+    buzz(30);
+    if (on) $("btn-unlock").focus(); else $("btn-lock").focus();
+  }
+  const unlockHeld = holdable($("btn-unlock"), 800, () => setTouchLock(false));
+  $("btn-unlock").addEventListener("click", e => { if (unlockHeld(e)) return; if (e.detail === 0) setTouchLock(false); });   // Enter / Space unlocks; a touch needs the hold
+  $("btn-lock").addEventListener("click", () => setTouchLock(true));
+
+  async function endRide() {
+    if (!S.running) return;
+    setTouchLock(false);
     const now = Date.now();
     lap(0, now);
     S.running = false; S.paused = false; S.autoPaused = false;
@@ -1957,7 +2019,7 @@
     showRide(ride, true);
     if (ride.elapsed >= 120) queueRide(ride.id);
     render();
-  });
+  }
   daySel.addEventListener("change", pickDay);
 
   // ── saved rides: summary, laps and exports ───────────────────────────────────────────────────────────────
@@ -2146,7 +2208,7 @@
   $("btn-settings").addEventListener("click", () => {
     inp("s-lthr").value = P.lthr; inp("s-max").value = P.max; inp("s-rest").value = P.rest; inp("s-wheel").value = P.wheel; inp("s-fuel").value = P.fuel;
     inp("s-ftp").value = P.ftp || 0; inp("s-autolap").value = P.autoLap || 0;
-    inp("s-voice").checked = P.voice; inp("s-autopause").checked = P.autoPause; inp("s-steplap").checked = P.stepLap; inp("s-climbs").checked = P.climbs; inp("s-reroute").checked = P.reroute;
+    inp("s-voice").checked = P.voice; inp("s-autopause").checked = P.autoPause; inp("s-autolock").checked = P.autoLock; inp("s-steplap").checked = P.stepLap; inp("s-climbs").checked = P.climbs; inp("s-reroute").checked = P.reroute;
     /** @type {HTMLSelectElement} */ ($("s-profile")).value = P.profile;
     /** @type {HTMLSelectElement} */ ($("s-trainer")).value = P.trainer; /** @type {HTMLSelectElement} */ ($("s-saver")).value = P.saver;
     inp("s-weight").value = P.weight; inp("s-upload").checked = P.upload;
@@ -2157,7 +2219,7 @@
     if (dlg.returnValue !== "save") return;
     const num = (id, d) => { const v = parseFloat(inp(id).value); return Number.isFinite(v) ? v : d; };
     Object.assign(P, { lthr: num("s-lthr", P.lthr), max: num("s-max", P.max), rest: num("s-rest", P.rest), wheel: num("s-wheel", P.wheel), fuel: num("s-fuel", P.fuel),
-      ftp: num("s-ftp", P.ftp), autoLap: num("s-autolap", P.autoLap), voice: inp("s-voice").checked, autoPause: inp("s-autopause").checked, stepLap: inp("s-steplap").checked,
+      ftp: num("s-ftp", P.ftp), autoLap: num("s-autolap", P.autoLap), voice: inp("s-voice").checked, autoPause: inp("s-autopause").checked, autoLock: inp("s-autolock").checked, stepLap: inp("s-steplap").checked,
       climbs: inp("s-climbs").checked, reroute: inp("s-reroute").checked, profile: /** @type {HTMLSelectElement} */ ($("s-profile")).value,
       trainer: /** @type {HTMLSelectElement} */ ($("s-trainer")).value, saver: /** @type {HTMLSelectElement} */ ($("s-saver")).value, weight: num("s-weight", P.weight), upload: inp("s-upload").checked });
     if (TR.kind === "Tacx FE-C") send(C.fecUser(P.weight, 9, P.wheel));
@@ -2174,10 +2236,18 @@
   document.querySelectorAll(".unit-flip").forEach(t => t.addEventListener("click", () => { setUnits(!P.km); beep(990, 60); }));
   paintUnits();
 
-  // light / dark: light (paper) unless chosen otherwise; shared with the dashboard. Applies the moment it's tapped.
+  // light / auto / dark: dark unless chosen otherwise; shared with the dashboard. Applies the moment it's tapped, and in
+  // auto follows the phone as it switches (battery saver keeps true black either way)
   const themeBtns = [...document.querySelectorAll("[data-theme-pick]")];
-  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.themePick === (document.documentElement.dataset.theme || "dark"))));
-  themeBtns.forEach(b => b.addEventListener("click", () => { document.documentElement.dataset.theme = /** @type {HTMLElement} */ (b).dataset.themePick; ls.set("fitness-theme", /** @type {HTMLElement} */ (b).dataset.themePick); paintTheme(); drawCrumb(); renderAhead(true); restyleMap(); }));
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.themePick === (ls.get("fitness-theme") || "dark"))));
+  const applyTheme = () => {
+    const was = document.documentElement.dataset.theme;
+    document.documentElement.dataset.theme = saver.on ? "dark" : themeNow();
+    paintTheme();
+    if (was !== document.documentElement.dataset.theme) { drawCrumb(); renderAhead(true); restyleMap(); }
+  };
+  themeBtns.forEach(b => b.addEventListener("click", () => { ls.set("fitness-theme", /** @type {HTMLElement} */ (b).dataset.themePick); applyTheme(); }));
+  deviceDark.addEventListener("change", applyTheme);
   paintTheme();
 
   // the screen's own height, measured: the footer's Start / Lap / Next / End must never sit under the system bars
@@ -2201,6 +2271,7 @@
   const lastRoute = ls.get("fitness-ride-route");
   if (lastRoute) await useRoute(lastRoute, false).catch(() => {});
   setInterval(tick, 1000);
+  if (document.fonts) document.fonts.ready.then(() => { if (NAV.route) renderAhead(true); }).catch(() => {});   // the profiles' figures, redrawn in Helvetica once it's in
   setTimeout(sendRides, 3000);   // anything waiting from an earlier ride
   show(page);
   paintLaps();

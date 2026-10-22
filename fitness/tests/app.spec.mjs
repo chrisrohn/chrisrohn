@@ -343,3 +343,65 @@ test.describe("installable app", () => {
     await ctx.close();
   });
 });
+
+test.describe("the dashboard, by hand and by eye", () => {
+  test("All normal answers the check-in in one tap; the other tabs catch up when opened, charts and all", async ({ page }) => {
+    const problems = watch(page);
+    const now = { ...DATA.now, readiness: { ...DATA.now.readiness, score: 82, illness: false } };
+    await page.goto(phoneLink({ ...DATA, now, checkins: {} }));
+    const call = page.locator("#today .call");
+    await expect(call.locator(".checkin")).toHaveAttribute("open", "");
+    const charts = await page.locator("#panel-body .chart").count();
+    await call.locator("[data-feel-all]").click();
+    await expect(call.locator(".checkin")).not.toHaveAttribute("open", "");                     // answered: folded away
+    await expect(call.locator(".checkin summary")).toContainText("Legs normal, energy normal, life stress normal and mood normal · feel 75");
+    await expect(call.locator("[data-feel-all]")).toHaveCount(0);                              // answered: no shortcut
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("fitness-checkin") || "{}"));
+    expect(Object.values(saved)[0]).toEqual({ legs: 3, energy: 3, stress: 3, mood: 3, sick: "none" });
+    await page.locator("#tab-body").click();                                                    // rebuilt as it's shown
+    await expect(page.locator("#panel-body .tile").filter({ hasText: "Readiness" })).toContainText("watch 82 · feel 75");
+    await expect(page.locator("#recovery .legend")).toContainText("How you felt");
+    expect(await page.locator("#panel-body .chart").count()).toBe(charts);                    // each chart drawn once, none doubled
+    expect(await axe(page)).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+
+  test("the level reads by shape as well as colour, and the week says it in words", async ({ page }) => {
+    await page.goto(phoneLink(DATA));
+    await page.locator("#tab-plan").click();
+    const fill = await page.evaluate(() => Object.fromEntries(["hard", "moderate", "easy", "rest"].map(l => {
+      const i = document.querySelector(`.week-ahead li.${l} summary i`) || document.querySelector(`.badge.${l} i`);
+      return [l, i ? getComputedStyle(i).getPropertyValue("--lf").trim() : null];
+    })));
+    for (const [l, f] of Object.entries({ hard: "100%", moderate: "60%", easy: "30%", rest: "0%" })) if (fill[l] != null) expect(fill[l], l).toBe(f);
+    await expect(page.locator(".week-ahead li").first().locator(".sr")).toHaveText(/^(Go hard|Train|Easy|Rest|Waiting for data): $/);
+  });
+
+  test("Light, Auto and Dark: Auto follows the phone as it switches, and sticks", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.goto(phoneLink(DATA));
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");                 // dark until chosen otherwise
+    await page.locator('.tools [data-theme-pick="auto"]').click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(page.locator('.tools [data-theme-pick="auto"]')).toHaveAttribute("aria-pressed", "true");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator('.tools [data-theme-pick="auto"]')).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("weather is drawn as pictograms, not emoji, and the masthead keeps to one row on a phone", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 740 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const days = DATA.plan.days.map((d, i) => i < 3 ? { ...d, wx: { code: [0, 61, 95][i], hi: 14, lo: 4, pop: [0, 70, 90][i] } } : d);
+    await page.goto(phoneLink({ ...DATA, plan: { ...DATA.plan, days } }));
+    await expect(page.locator(".tomorrow svg.picto")).toHaveCount(1);
+    await expect(page.locator(".tomorrow .sr")).toHaveText("rain");
+    expect(await page.locator("#panel-today").innerText()).not.toMatch(/[☀-➿]/);       // no ☀ ☂ ⚡ glyphs left
+    const bar = await page.locator("header.top .bar").boundingBox();
+    expect(bar && bar.height).toBeLessThan(70);                                                // title and tools on one row
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector("header.top")).position)).toBe("static");   // scrolls away: the tab bar is the navigation
+    await ctx.close();
+  });
+});
