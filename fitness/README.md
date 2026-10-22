@@ -341,6 +341,33 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
 - **What this ride did.** At End, before the numbers: the work on target (minutes and %, and what that says), the zone
   split, the load against plan and what it does to fitness and tomorrow's form, the next event's fitness target and
   how far there is to go, and the commute check. Kept with the ride under Saved rides.
+- **Race plan (like Garmin's Power Guide).** On *Ahead*, **Race plan** takes a finish time (or **Fastest I can hold**:
+  the time where the plan's intensity meets what you can hold that long, about 90% of FTP for two hours and 79% for
+  four) and the surface (road, gravel, mountain bike). The route splits into climbs, flats and descents, and each gets
+  watts, the heart-rate band they mean for you, and a speed: harder up the climbs, easier down, so the effort evens out.
+  It warns when a time asks more than you can hold. On the ride the Workout screen becomes the plan (on a free ride, or
+  once the session's steps are done): this section's targets, **how far ahead or behind the plan** you are (the big
+  number), what's next, a word at each new section, and a warning when the first half is ridden over the plan. FTP is
+  yours, else the sync's eFTP, else an estimate from your weight; your weight plus 10 kg of bike and kit is the mass.
+- **Fuel tank and W′ (real-time stamina).** From the first pedal stroke: the carbohydrate you're burning (from power,
+  or heart rate, at the share of carbs that intensity burns: about a third easy, nearly all at threshold) against a
+  fed rider's ~6.5 g/kg, filled by every **Done** on the eat-and-drink prompt. *Data* shows the tank's %, grams used and
+  eaten, and when it runs low at this pace; it says *eat something* at 40% and *eat now* at 25%, and the after-ride note
+  says how the fueling went. With power and the critical power and W′ the sync learned from your power curve, **W′
+  left** tracks the reserve above CP (Skiba's model) and says when it's nearly gone.
+- **Race your past self.** Load a route you've ridden with ride mode and *Ahead* shows **your best** (or last) ride
+  there; on the ride, how far ahead or behind it you are, said every quarter of the route. Each climb's time is said at
+  the top against your best on it (*a new record*, with a fanfare). **Save as route** in a ride's summary turns any ride,
+  like the commute, into a route to ride again against itself.
+- **Go somewhere.** *Map → Go*: **Home** (set once with *Set home here*), **a loop of N mi** from where you are, into the
+  wind first so it brings you home (*Another way round* for a different one), and **Nearby** water, food and coffee,
+  bike shops and restrooms from OpenStreetMap, with **Go** on each. **Long-press the map** to ride to that point. Each
+  becomes a route with turn by turn (BRouter, or the saved map with no signal). A route loaded online also gets the
+  water, food, restrooms and bike shops within 150 m of it from OpenStreetMap, saved with it for gravel with no signal
+  and listed with its own stops on *Ahead* and the map.
+- **Weather on the ride.** Every 15 minutes, Open-Meteo's 15-minute forecast where you are: *Rain in about 35
+  minutes* (and whether it's heavy), *rain easing*, the wind picking up or turning (*from the northwest at 28 km/h*),
+  and thunderstorms in the next three hours, each said once and shown on the weather bar.
 - **Laps and recording.** **Lap** button, a lap per workout step and auto laps every N mi / km (Settings), with
   **auto-pause** at stops. Every second is recorded on the phone (it survives a reload), and **End** keeps the ride
   under **Laps → Saved rides**, exporting **FIT** (Garmin Connect *Import data*, Strava *Upload*, TrainingPeaks),
@@ -419,7 +446,7 @@ Once connected, a sensor is remembered and reconnects by itself when it's back i
 **Where it lives: <https://chrisrohn.github.io/ride.html>**, inside the installed app (see
 [The app on your phone](#the-app-on-your-phone)). It's a data-free page: no zones, plan or history are in it, and it's
 `noindex`. Its Content-Security-Policy ([`site/csp.txt`](site/csp.txt)) lets only its own scripts and files run, and
-lets it talk only to GitHub's API, Open-Meteo, OpenFreeMap's tiles and BRouter. HTTPS is what phones require for
+lets it talk only to GitHub's API, Open-Meteo, OpenFreeMap's tiles, BRouter and OpenStreetMap's Overpass API. HTTPS is what phones require for
 Bluetooth and GPS.
 
 **Getting the week onto the phone:** open the dashboard, then **Body → Phone app**, and scan the QR

@@ -297,7 +297,7 @@ def test_ride_page_and_link(tmp_path, cfg):
     assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == f"ride.html#z={blob}"   # the local copy, same fragment
     page = build.ride_page(None)
     assert "__CSP__" not in page and "script-src 'self' 'sha256-" in page and "__RIDE_DATA__" not in page and "/*__RIDE_CORE__*/" not in page
-    assert "connect-src 'self' https://api.github.com https://api.open-meteo.com https://tiles.openfreemap.org https://brouter.de;" in page
+    assert "connect-src 'self' https://api.github.com https://api.open-meteo.com https://tiles.openfreemap.org https://brouter.de https://overpass-api.de;" in page
 
 
 def test_installable_app_and_phone_link(tmp_path, cfg):

@@ -255,7 +255,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .seg { display: inline-flex; }
 .seg .chip { min-height: var(--tap); padding: 0 var(--sp-3); }
 .seg .chip + .chip { border-left: 0; }
-.sform .actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+.sform .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
 .sform .actions.left { justify-content: flex-start; margin-top: 0; }
 .sform .actions .chip { min-height: var(--tap); padding: 0 var(--sp-4); }
 .sum { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--sp-4); color: var(--ink-2); }
@@ -335,3 +335,19 @@ body.nav .rmain { gap: var(--sp-2); }
 .did { border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); margin-bottom: var(--sp-3); display: grid; gap: var(--sp-1); }
 .did ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-body); line-height: 1.35; }
 .did li::before { content: "— "; color: var(--muted); }
+
+/* going somewhere: the long-press bar on the map */
+.mapgo { position: absolute; left: var(--sp-2); right: var(--sp-2); bottom: 64px; z-index: 3; display: flex; align-items: center; gap: var(--sp-2); background: var(--page); color: var(--ink); border: var(--rule-minor) solid var(--ink); padding: var(--sp-2); font-weight: 700; }
+.mapgo span { flex: 1 1 auto; min-width: 0; }
+.mapgo .chip { min-height: var(--tap); }
+/* the race plan and your past rides on Ahead */
+.rtiles.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.rtiles .v.ahead { color: var(--good); }
+.rtiles .v.behind { color: var(--crit); }
+.abtns { margin: var(--sp-2) 0; }
+.pclist { list-style: none; margin: 0; padding: 0; border-top: var(--rule-minor) solid var(--ink); }
+.pclist li { display: grid; grid-template-columns: 1.6rem 1fr auto; gap: var(--sp-2); align-items: baseline; padding: var(--sp-2) 0; border-bottom: 1px solid var(--line); font-size: var(--fs-small); }
+.pclist li b { font-variant-numeric: tabular-nums; }
+.pclist li .t { text-align: right; font-variant-numeric: tabular-nums; }
+.steptime.ahead { color: var(--good); }
+.steptime.behind { color: var(--crit); }
