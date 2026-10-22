@@ -28,9 +28,22 @@ window.startDashboard = D => {
   const hrs = h => h == null ? "—" : `${Math.floor(h)}h${String(Math.round((h % 1) * 60)).padStart(2, "0")}`;
   const dist = m => { const v = units === "mi" ? m / 1609.344 : m / 1000; return `${v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1)} ${units}`; };
   const deg = c => units === "mi" ? `${Math.round(c * 9 / 5 + 32)}°` : `${Math.round(c)}°`;
-  // WMO weather codes as a plain glyph (text presentation, so it takes the ink colour like the rest of the page)
-  const sky = c => (c >= 95 ? "\u26A1" : c >= 71 && c <= 86 && !(c >= 80 && c <= 82) ? "\u2744" : c >= 51 ? "\u2602" : c >= 45 ? "\u2248" : c >= 3 ? "\u2601" : c >= 1 ? "\u26C5" : "\u2600") + "\uFE0E";
+  // WMO weather codes as a pictogram in the 1974 AIGA/DOT manner: solid geometric marks in the ink colour, drawn here
+  // (a glyph like ☂ or ⛅ looks different on every phone, and some draw it as a colour emoji)
   const SKY = c => c >= 95 ? "thunderstorms" : c >= 71 && c <= 86 && !(c >= 80 && c <= 82) ? "snow" : c >= 51 ? "rain" : c >= 45 ? "fog" : c >= 3 ? "overcast" : c >= 1 ? "partly cloudy" : "clear";
+  const CLOUD = (dy = 0) => `<circle cx="8" cy="${14.5 + dy}" r="4.5"/><circle cx="13.5" cy="${11 + dy}" r="5.5"/><circle cx="18" cy="${15 + dy}" r="4"/><rect x="8" y="${13 + dy}" width="10" height="6"/>`;
+  const RAYS = (cx, cy, r0, r1, from = 0, to = 360) => { let d = ""; for (let a = from; a < to; a += 45) { const t = a * Math.PI / 180, c = Math.cos(t), s = Math.sin(t); d += `M${(cx + c * r0).toFixed(2)} ${(cy + s * r0).toFixed(2)}L${(cx + c * r1).toFixed(2)} ${(cy + s * r1).toFixed(2)}`; } return `<path d="${d}" stroke="currentColor" stroke-width="2" fill="none"/>`; };
+  const PICTO = {
+    clear: `<circle cx="12" cy="12" r="4.5"/>${RAYS(12, 12, 7, 10.5)}`,
+    "partly cloudy": `<circle cx="8" cy="8" r="3.2"/>${RAYS(8, 8, 5, 7.5, 135, 360)}${CLOUD(2)}`,
+    overcast: CLOUD(),
+    fog: `<rect x="3" y="6" width="18" height="2.5"/><rect x="5" y="10.75" width="16" height="2.5"/><rect x="3" y="15.5" width="15" height="2.5"/>`,
+    rain: `${CLOUD(-3)}<path d="M8.5 18.5l-1.5 3.5M12.5 18.5l-1.5 3.5M16.5 18.5l-1.5 3.5" stroke="currentColor" stroke-width="2" fill="none"/>`,
+    snow: `${CLOUD(-3)}<rect x="6.5" y="18.5" width="2.5" height="2.5"/><rect x="11" y="20.5" width="2.5" height="2.5"/><rect x="15.5" y="18.5" width="2.5" height="2.5"/>`,
+    thunderstorms: `${CLOUD(-4)}<path d="M13.5 13L8.5 19h3.5l-1.5 5 6-7h-3.5l1.5-4z"/>`,
+  };
+  /** The day's sky as a pictogram; the word goes to screen readers. */
+  const sky = c => `<svg class="picto" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${PICTO[SKY(c)]}</svg><span class="sr">${SKY(c)}</span>`;
   const elev = m => units === "mi" ? `${Math.round(m * 3.28084).toLocaleString()} ft` : `${Math.round(m).toLocaleString()} m`;
   const speed = kph => kph == null ? "—" : units === "mi" ? `${(kph / 1.609344).toFixed(1)} mph` : `${kph.toFixed(1)} km/h`;
   const signed = v => v == null ? "—" : (Math.round(v) > 0 ? "+" : Math.round(v) < 0 ? "−" : "") + Math.abs(Math.round(v));
@@ -63,6 +76,8 @@ window.startDashboard = D => {
   const swatch = s => `<i class="sw ${s.type === "bar" ? "" : s.wash ? "wash" : "line"}" style="background:${s.color}"></i>`;
 
   function chart(host, cfg) {
+    if (!host || host.dataset.drawn) return;   // drawn once per build of its panel; a panel not rebuilt keeps its chart
+    host.dataset.drawn = "1";
     host.classList.add("chart");
     host.tabIndex = 0;
     host.setAttribute("role", "img");
@@ -262,8 +277,9 @@ window.startDashboard = D => {
   const checkins = () => { const mine = stored(CHECK_KEY), all = { ...(D.checkins || {}) }; for (const [d, c] of Object.entries(mine)) all[d] = { ...(all[d] || {}), ...c }; return all; };
   const live = () => D.today === isoToday();                         // a check-in belongs to the morning it was made on
   const checkin = () => live() ? checkins()[D.today] || null : null;
-  const saveCheckin = (k, v) => {
-    const all = stored(CHECK_KEY), day = { ...(all[D.today] || {}), [k]: v };
+  const saveCheckin = (k, v) => saveAnswers({ [k]: v });
+  const saveAnswers = got => {
+    const all = stored(CHECK_KEY), day = { ...(all[D.today] || {}), ...got };
     all[D.today] = day;
     const keep = Object.keys(all).sort().slice(-90);                  // three months is plenty for the chart
     ls.set(CHECK_KEY, JSON.stringify(Object.fromEntries(keep.map(d => [d, all[d]]))));
@@ -351,6 +367,7 @@ window.startDashboard = D => {
     const B = blended();
     const said = done ? FEEL.map(([k, name, words]) => `${name.toLowerCase()} ${words[c[k] - 1].toLowerCase()}`).concat(c.sick !== "none" ? [SICK.find(s => s[0] === c.sick)[1].toLowerCase()] : []) : [];
     return `<details class="checkin"${done && !feelOpen ? "" : " open"}><summary><span class="label">How do you feel?</span>${done ? ` <span class="said">${esc(listOf(said))}${B && B.feel != null ? ` · feel ${B.feel}` : ""}</span>` : ""}</summary>
+      ${done ? "" : `<p class="feel-quick"><button type="button" class="chip primary" data-feel-all="1">All normal · not sick</button> <span class="sub">or tap each below</span></p>`}
       <div class="feel-in">${FEEL.map(([k, name, words]) => group(k, name, words.map((w, i) => [i + 1, w]))).join("")}${group("sick", "Feeling sick?", SICK)}</div>
       <p class="sub">Kept on this phone. It eases the call when your body says so, never makes it harder.</p></details>`;
   }
@@ -359,20 +376,30 @@ window.startDashboard = D => {
     if (!r) return;
     rateRide(/** @type {HTMLElement} */ (r).dataset.rpe, Number(/** @type {HTMLElement} */ (r).dataset.v));
     const y = window.scrollY;
-    render();
+    render("today");
     window.scrollTo(0, y);
   });
   app.addEventListener("click", e => {
     const t = e.target instanceof Element ? e.target : null;
     const sum = t && t.closest(".checkin > summary");
     if (sum) { feelOpen = !(/** @type {HTMLDetailsElement} */ (sum.parentElement).open); return; }
+    if (t && t.closest("[data-feel-all]")) {                         // the usual morning: everything normal, not sick
+      feelOpen = false;
+      saveAnswers({ ...Object.fromEntries(FEEL.map(([k]) => [k, 3])), sick: "none" });
+      const y = window.scrollY;
+      render("today");
+      window.scrollTo(0, y);
+      const sum2 = document.querySelector(".checkin > summary");
+      if (sum2 instanceof HTMLElement) sum2.focus();
+      return;
+    }
     const b = t && t.closest("[data-feel]");
     if (!b) return;
     const k = /** @type {HTMLElement} */ (b).dataset.feel, raw = /** @type {HTMLElement} */ (b).dataset.v;
     feelOpen = answered(checkin());                                   // the answer that finishes it folds it away
     saveCheckin(k, k === "sick" ? raw : Number(raw));
     const y = window.scrollY;
-    render();
+    render("today");
     window.scrollTo(0, y);
     const again = document.querySelector(`[data-feel="${k}"][data-v="${raw}"]`);
     if (again instanceof HTMLElement && again.closest("details[open]")) again.focus();
@@ -468,10 +495,12 @@ window.startDashboard = D => {
     const c = D.commute && D.commute.today;
     if (!c) return "";
     const headline = pToday0() && pToday0().commute;   // on a planned commute day the call above already is the commute
-    const mark = { ride: "▲", easy: "■", optional: "□", wet: "☂\uFE0E", skip: "▼" }[c.verdict] || "■";
+    const fuel = c.fuel && !D.fuel;
+    if (headline && !fuel) return "";                  // nothing left to say under the label: no orphaned heading
+    const mark = { ride: "▲", easy: "■", optional: "□", wet: `<svg class="picto" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${PICTO.rain}</svg>`, skip: "▼" }[c.verdict] || "■";
     return `<div class="commute-call ${esc(c.verdict)}"><span class="label">Bike commute</span>
       ${headline ? "" : `<p><b>${mark} ${esc(c.title)}.</b> ${esc(c.detail)}</p>`}
-      ${c.fuel && !D.fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
+      ${fuel ? `<p class="sub">${esc(c.fuel)}</p>` : ""}</div>`;
   }
 
   // the fallback for weather or a short day; a rest day's "feeling great?" only when the morning says so
@@ -527,7 +556,11 @@ window.startDashboard = D => {
     const hash = location.hash.slice(1);
     show(HOME[hash] || (TABS.some(t => t[0] === ss.get("fitness-tab")) ? ss.get("fitness-tab") : "today"), HOME[hash] && hash !== HOME[hash] ? hash : "");
   }
+  /** @type {Record<string, string>} */
+  const pending = {};   // panels rebuilt off screen by a Today-only render, put in place when their tab is shown
   function show(id, anchor = "") {
+    const fresh = pending[id] != null && document.getElementById(`panel-${id}`);
+    if (fresh) { fresh.innerHTML = pending[id]; delete pending[id]; charts(); }
     for (const [t] of TABS) {
       const on = t === id, b = document.getElementById(`tab-${t}`), pnl = document.getElementById(`panel-${t}`);
       if (b) { b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; }
@@ -595,7 +628,7 @@ window.startDashboard = D => {
     const week = plan.days.slice(0, 7);
     const hours = week.reduce((a, d) => a + (d.minutes || 0), 0) / 60, commutes = week.filter(d => d.commute).length, lifts = week.filter(d => d.strength).length;
     return `<div class="week-ahead"><span class="label">The next 7 days · ${hours.toFixed(1)} h${commutes ? ` · ${commutes} commute${commutes === 1 ? "" : "s"}` : ""}${lifts ? ` · ${lifts} strength` : ""}</span>
-      <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i>
+      <ol>${week.map((d, i) => `<li class="${esc(d.level)}${i === 0 ? " today" : ""}"><details><summary><span class="dow">${i === 0 ? "Today" : DOW[asDate(d.date).getDay()]}</span><i aria-hidden="true"></i><span class="sr">${esc(LEVEL[d.level] || d.level)}: </span>
         <span class="what"><b>${esc(d.title)}</b>${d.minutes ? ` · ${dur(d.minutes * 60)}` : ""}${d.strength ? " · + strength" : ""}</span>${wxChip(d.wx)}</summary>
         <p class="sub">${esc(d.session)}</p>${d.strength ? `<p class="sub"><b>+ ${esc(d.strength.title)} · ${d.strength.minutes} min:</b> ${esc(d.strength.detail)}</p>` : ""}${d.alt ? `<p class="sub"><b>Plan B:</b> ${esc(d.alt)}</p>` : ""}${d.indoor && d.steps && d.steps.length ? `<p><button type="button" class="chip" data-zwo="${esc(d.date)}">Zwift / MyWoosh file (.zwo)</button></p>` : ""}</details></li>`).join("")}</ol>
       <p class="sub">Rebuilt at every sync from what you actually rode, slept and recovered: a missed day moves, a good week grows.</p></div>`;
@@ -813,7 +846,9 @@ window.startDashboard = D => {
     </section>`;
   }
 
-  function render() {
+  /** Builds the page. A tap on Today (the check-in, a ride rating) rebuilds only Today and leaves the other tabs to be
+   *  rebuilt when they're opened: no chart is redrawn for a tap. @param {"all" | "today"} [scope] */
+  function render(scope = "all") {
     const rd = now.readiness, sl = now.sleep, pToday = plan && plan.days[0], rec = feelCall(todayCall(pToday), pToday), next = plan && plan.races[0];
     const last7 = D.readiness.slice(-8, -1).map(r => r.score);
     const rAvg = mean(last7);
@@ -861,7 +896,7 @@ window.startDashboard = D => {
           <div class="phone-in">
             ${D.phone_href ? `<p>The whole dashboard, in the app on your phone: <button type="button" class="chip" data-copy="phone">Copy phone link</button> <button type="button" class="chip" data-save="1">Save data file</button></p>
             <p class="sub">Send the link to yourself (AirDrop, Messages, email) and paste it under <b>Import data</b> in the app, or put the file in iCloud Drive / Google Drive and pick it there. It carries this build's numbers after the <b>#</b>, which never reaches the server; the app keeps them on the phone, offline.</p>` : ""}
-            ${D.ride_qr ? `<div class="qr"><div class="qrimg" role="img" aria-label="QR code that opens ride mode with this week's sessions">${D.ride_qr}</div>
+            ${D.ride_qr ? `<div class="qr"><div class="qrimg"><img src="${esc(D.ride_qr)}" alt="QR code that opens ride mode with this week's sessions"></div>
             <p class="sub"><b>Just ride mode:</b> scan this with the phone on your bars, or <button type="button" class="chip" data-copy="ride">copy the ride link</button>. It opens ride mode with your HR zones and the next 7 days of sessions.</p></div>` : ""}
           </div></details>` : ""}</section>` : "";
 
@@ -943,6 +978,12 @@ window.startDashboard = D => {
       ride: `<section id="ride-mode" class="card ride-cta"><div class="head"><h2>Ride</h2></div><p><a class="chip big-chip primary" href="${esc(D.ride_href || "ride.html")}">Open ride mode</a> <span class="sub">Live heart rate, today's session as timed steps, the weather on your line.</span></p></section>`
         + training + bikeHTML(),
     };
+    if (scope === "today" && document.getElementById("panel-today")) {
+      document.getElementById("panel-today").innerHTML = panels.today;
+      for (const [id, inner] of Object.entries(panels)) if (id !== "today") pending[id] = inner;
+      return;
+    }
+    for (const id of Object.keys(pending)) delete pending[id];
     app.innerHTML = Object.entries(panels).map(([id, inner]) => `<div class="panel" id="panel-${id}" role="tabpanel" aria-labelledby="tab-${id}" tabindex="-1">${inner}</div>`).join("");
     tabs();
     document.getElementById("foot").innerHTML = `<p><b>How the numbers work.</b> TSS from power (when an FTP is set), else heart-rate TSS (Banister TRIMP, 1 h at threshold HR = 100), else a duration estimate. Fitness/fatigue are 42/7-day exponentially weighted load; form is yesterday's fitness minus fatigue. Readiness compares last night's resting HR, overnight stress (the Venu Sq's HRV-derived signal), Body Battery and breathing rate with your own 60-day normal, blends in the sleep score, and takes points off for deep fatigue or a load spike.</p>

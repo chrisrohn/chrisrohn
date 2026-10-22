@@ -271,8 +271,14 @@ test.describe("the cycling computer", () => {
     for (const e of [5, 10, 15]) { await ctx.setGeolocation(geo(e, 0)); await page.waitForTimeout(800); }
     await page.locator("#btn-lap").click();
     for (const e of [20, 25]) { await ctx.setGeolocation(geo(e, 0)); await page.waitForTimeout(800); }
-    page.once("dialog", d => d.accept());
+    await page.locator("#btn-end").click();                                     // a bump on End: Cancel keeps riding
+    await expect(page.locator("#ask")).toBeVisible();
+    await expect(page.locator("#ask-no")).toBeFocused();
+    await page.locator("#ask-no").click();
+    await expect(page.locator("#ask")).toBeHidden();
+    await expect(page.locator("#btn-end")).toBeEnabled();
     await page.locator("#btn-end").click();
+    await page.locator("#ask-yes").click();   // the app's own confirmation sheet
     await expect(page.locator("#summary")).toBeVisible();
     await expect(page.locator("#sum-body")).toContainText("laps");
     await expect(page.locator("#sum-body .did")).toContainText("What this ride did");

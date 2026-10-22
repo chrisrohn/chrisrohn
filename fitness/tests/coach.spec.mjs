@@ -274,8 +274,8 @@ test.describe("the coach on the bars", () => {
     await page.goto(link());
     await page.locator("#btn-start").click();
     for (const e of [20, 40, 60, 80, 100, 120]) { await ctx.setGeolocation(geo(e, 0)); await page.waitForTimeout(500); }
-    page.once("dialog", d => d.accept());
     await page.locator("#btn-end").click();
+    await page.locator("#ask-yes").click();   // the app's own confirmation sheet
     await page.locator("[data-export=route]").click();
     await expect(page.locator("#sum-sync")).toContainText("Saved as a route");
     const rows = await page.evaluate(async () => (await /** @type {any} */ (window).__ride.DB.all("routes")).map(r => ({ name: r.name, fromRide: !!r.fromRide, n: r.points.length })));

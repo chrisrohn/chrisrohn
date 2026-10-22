@@ -278,9 +278,18 @@ stop, 45 s of *Rolling again* lets heart rate catch up before any ▲ Push / ▼
 ## Ride mode: a cycling computer on the phone on your bars
 
 Set like the rest of the app, a 1970s transit sign (Helvetica, heavy rules, square everything, red only where it
-matters), **dark by default** (true black on the phone's OLED; light in Settings, shared with the dashboard), with the
-five heart-rate zones as flat signal colors, like a subway map's lines. Every Workout field fits a Pixel 7 without
-scrolling, turn banner and all.
+matters), **dark by default** (true black on the phone's OLED; light or auto, following the phone, in Settings, shared
+with the dashboard), with the five heart-rate zones as flat signal colors, like a subway map's lines, and stops and
+places as sign pictograms in the 1974 AIGA/DOT manner (water, food, bike shop, restroom, aid, summit…). Every Workout
+field fits a Pixel 7 without scrolling, turn banner and all.
+
+The type is Helvetica on every phone: iPhones use their own Helvetica Neue, and Android (where "Helvetica" is only a
+name for Roboto) and Windows get URW's Nimbus Sans L, the Helvetica clone, served with the app (19 KB a weight; GPL,
+source and license in [`fonts/`](fonts)).
+
+- **On the bars: hold, don't tap.** Tap **End** and it asks first; hold it for a second and the ride ends without
+  asking. The **lock** beside End (or *Lock the screen at Start* in Settings) makes the screen ignore rain and bumps:
+  the readings stay in view, and only a one-second hold on the bar along the bottom unlocks it.
 
 Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data · Laps**.
 
@@ -310,9 +319,26 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   profile of the whole route and the next 5 miles colored by grade, **ClimbPro-style** climbs (*next climb in 1.2 mi:
   0.9 mi at 5.1%, 240 ft up*, then on it: distance and height to the top, grade now), the next turns, water / food /
   aid stops from the file's waypoints, and the **wind on the next 10 miles** (headwind / tailwind / cross shares).
+  Within 2 km of a climb, and all the way up it, a **climb strip** on the Workout screen says how far, how long and
+  how steep, then the distance and height to the top (the weather steps aside for it).
+- **Climbs ahead with no route** (like Wahoo's Summit Freeride). Just ride: the app follows the road you're on through
+  the map tiles (the same ones the offline rerouting reads), straight on at each junction and staying with the road's
+  name, looks up its heights every 100 m (Open-Meteo, so this part needs signal), and finds the climbs on the next
+  6 km. They're on Ahead (the profile, the climb, the climbs further on), on the map in their grade colors, in the
+  Workout strip, and said 300 m before the foot. It looks again every few kilometres, or as soon as you turn off the
+  road. Settings: every climb, Cat 4 and up, Cat 3 and up, or off.
+- **The wind's cost** (like Wahoo's AirDrag / AirBoost, estimated). The ACE measures the air with a sensor; the phone
+  takes the forecast wind at rider height, turns it onto your direction of travel, and gives the extra (or missing)
+  drag and the watts it costs at your speed, under *On your line* and as a **Wind** field. Over the ride it adds up
+  what the wind did to the clock (your speed against the still-air speed for the same effort), and the summary says
+  it: *the wind cost you about 6 min; headwind 55% of the time*.
 - **Data.** Ride and moving time, distance, speed, average and max, climbed, grade, HR and max, power (10 s) and
-  cadence, time of day, sunset, elevation, and the phone's battery with **how long it lasts** at this ride's drain
-  (and whether that's enough for the ride left).
+  cadence, time of day, sunset, elevation, the climb, the wind, lap time, the fuel tank, W′, and the phone's battery
+  with **how long it lasts** at this ride's drain (and whether that's enough for the ride left). **Your fields:**
+  **Fields** picks the Workout screen's six and the Data screen's list and order; **2 · 3 · 4 a row** on the Data
+  screen is the zoom (fewer, bigger numbers on rough ground). Kept on the phone.
+- **Back to the start**, under **Go**: **Retrace my track** turns your own track around and guides you back the way
+  you came, turn by turn, climbs and all (no signal needed); **Quickest way back** routes to where you started.
 - **Battery saver.** When the forecast says the phone won't last the ride left (route at your average speed, or the
   session's steps), saver turns on by itself, says so, and offers **Undo**: true black, the map moved every 5 s
   without animation, the screens redrawn every 3 s. The timer, recording, cues and trainer keep their pace.
@@ -780,7 +806,7 @@ app, with its own icon, storage and notifications.
 
 On iPhone an installed app keeps its own storage, separate from Safari, so import *inside* the app after installing.
 Ride mode (also a long-press shortcut on the icon on Android) reads the same copy, so its zones and the week's sessions are
-already there. Theme and units follow you between the two. A new build of the site replaces the cached app the
+already there. Theme (light, auto or dark) and units follow you between the two. A new build of the site replaces the cached app the
 next time it opens with signal.
 
 ## Setup on a computer (optional)
@@ -895,5 +921,6 @@ legs actually felt on the bike.
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
 | `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page), ride mode (`ride-core.js`: routes, navigation, climbs, the sun, workout tailoring, FIT / GPX / TCX, smart-trainer protocols, offline routing from vector tiles, the battery forecast, the ride packed for the sync; `ride.js`: the screens, sensors and trainer, map, recording and sending), styles, SVG charts, `csp.txt`, `manifest.webmanifest`, `sw.js` (offline, map tiles, the share target) and `icons/` |
 | `demo.py` | the synthetic athlete |
+| `fonts/` | Nimbus Sans L (URW, GPL v2): the source OTFs, the license, and `subset.sh`, which writes the app's `site/fonts/*.woff2` |
 
 Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target). CI runs both. This is a personal analysis tool, not medical advice.

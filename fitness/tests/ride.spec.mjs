@@ -192,3 +192,64 @@ test.describe("ride mode", () => {
     expect(await page.evaluate(() => localStorage.getItem("fitness-ride-hr"))).toBe("hrm-823265");
   });
 });
+
+test.describe("ride mode, on the bars", () => {
+  test("End: a tap asks, a one-second hold ends the ride without asking", async ({ page }) => {
+    await page.goto(link(PLAN));
+    await page.locator("#btn-start").click();
+    await expect(page.locator("#btn-end")).toBeEnabled();
+    await page.locator("#btn-end").click();                                                    // a tap: the sheet, Cancel focused
+    await expect(page.locator("#ask")).toBeVisible();
+    await expect(page.locator("#ask-no")).toBeFocused();
+    await page.locator("#ask-no").click();
+    await expect(page.locator("#btn-end")).toBeEnabled();
+    await page.evaluate(() => { /** @type {any} */ (window).__ride.S.elapsed = 30; });
+    await page.locator("#btn-end").hover();
+    await page.mouse.down();
+    await expect(page.locator("#btn-end")).toHaveClass(/holding/);
+    await page.waitForTimeout(1100);
+    await page.mouse.up();
+    await expect(page.locator("#summary")).toBeVisible();                                      // ended, with no question
+    await expect(page.locator("#ask")).toBeHidden();
+  });
+
+  test("the touch lock: nothing takes a touch until the unlock bar is held", async ({ page }) => {
+    await page.goto(link(PLAN));
+    await page.locator("#btn-start").click();
+    await expect(page.locator("#btn-lock")).toBeVisible();                                     // only while riding
+    await page.locator("#btn-lock").click();
+    await expect(page.locator("#lockveil")).toBeVisible();
+    for (const sel of ["#pages", ".rfoot", ".rtop"]) expect(await page.locator(sel).evaluate(el => /** @type {any} */ (el).inert), sel).toBe(true);
+    await page.locator("#btn-unlock").click();                                                 // a tap (a raindrop) does nothing
+    await expect(page.locator("#lockveil")).toBeVisible();
+    await page.locator("#btn-unlock").hover();
+    await page.mouse.down();
+    await page.waitForTimeout(1000);
+    await page.mouse.up();
+    await expect(page.locator("#lockveil")).toBeHidden();
+    expect(await page.locator("#pages").evaluate(el => /** @type {any} */ (el).inert)).toBe(false);
+    await page.locator("#btn-lock").click();                                                   // and the keyboard unlocks at once
+    await page.locator("#btn-unlock").press("Enter");
+    await expect(page.locator("#lockveil")).toBeHidden();
+  });
+
+  test("Lock at Start (Settings) locks the screen as the ride begins", async ({ page }) => {
+    await page.goto(link(PLAN));
+    await page.click("#btn-settings");
+    await page.locator("#s-autolock").check();
+    await page.click("#s-save");
+    await page.locator("#btn-start").click();
+    await expect(page.locator("#lockveil")).toBeVisible({ timeout: 4000 });
+  });
+
+  test("Auto follows the phone's light or dark, and battery saver still keeps true black", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.goto(link(PLAN));
+    await page.click("#btn-settings");
+    await page.click('#settings [data-theme-pick="auto"]');
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator('#settings [data-theme-pick="auto"]')).toHaveAttribute("aria-pressed", "true");
+  });
+});

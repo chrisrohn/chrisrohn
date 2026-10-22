@@ -16,13 +16,13 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <script>try { document.documentElement.dataset.theme = localStorage.getItem("fitness-theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
+  <script>try { const t = localStorage.getItem("fitness-theme") || "dark"; document.documentElement.dataset.theme = t === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : t; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
   <style>/*__STYLE__*/</style>
 </head>
 <body>
   <header class="top">
     <div class="bar">
-      <h1>Training &amp; Recovery</h1>
+      <h1>Training<span class="h1-more"> &amp; Recovery</span></h1>
       <div class="tools">
         <button type="button" class="chip" id="install" hidden>Install</button>
         <a class="chip" id="ride-link" href="ride.html">Ride mode</a>
@@ -30,7 +30,7 @@
           <button type="button" class="chip" data-units="mi" aria-pressed="true"><span class="long">Imperial</span><span class="short">mi</span></button><button type="button" class="chip" data-units="km" aria-pressed="false"><span class="long">Metric</span><span class="short">km</span></button>
         </div>
         <div class="seg" role="group" aria-label="Theme">
-          <button type="button" class="chip" data-theme-pick="light" aria-pressed="false"><span class="long">Light</span><span class="short" aria-hidden="true">☀</span><span class="sr">Light</span></button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false"><span class="long">Dark</span><span class="short" aria-hidden="true">☾</span><span class="sr">Dark</span></button>
+          <button type="button" class="chip" data-theme-pick="light" aria-pressed="false"><span class="long">Light</span><span class="short" aria-hidden="true">☀</span><span class="sr">Light</span></button><button type="button" class="chip" data-theme-pick="auto" aria-pressed="false" title="Follow the phone's setting"><span class="long">Auto</span><span class="short" aria-hidden="true">A</span><span class="sr">Auto</span></button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false"><span class="long">Dark</span><span class="short" aria-hidden="true">☾</span><span class="sr">Dark</span></button>
         </div>
       </div>
       <nav id="tabs" class="tabs" aria-label="Sections" hidden></nav>
@@ -64,6 +64,13 @@
       <input id="import-file" type="file" accept=".json,application/json,text/plain">
       <p id="import-error" class="error" role="alert"></p>
       <div class="actions"><button type="button" class="chip" data-action="forget">Remove from this device</button><button type="submit" class="chip" value="cancel">Close</button></div>
+    </form>
+  </dialog>
+  <dialog id="ask" aria-labelledby="ask-h" aria-describedby="ask-p">
+    <form method="dialog" class="sheet ask">
+      <h2 id="ask-h">Are you sure?</h2>
+      <p id="ask-p" class="sub"></p>
+      <div class="actions"><button type="submit" class="chip" value="no" id="ask-no">Cancel</button><button type="submit" class="chip primary" value="yes" id="ask-yes">OK</button></div>
     </form>
   </dialog>
   <footer id="foot"></footer>

@@ -16,6 +16,16 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const standalone = () => matchMedia("(display-mode: standalone)").matches || /** @type {any} */ (navigator).standalone === true;
   const sleep = ms => new Promise(res => setTimeout(res, ms));
+  /** A yes/no question in the app's own sheet (the browser's confirm() box is grey, small and off-theme). Cancel has
+   *  the focus, so a stray Enter never deletes anything. @returns {Promise<boolean>} */
+  function ask(title, text, yes, { danger = false } = {}) {
+    const d = /** @type {HTMLDialogElement | null} */ ($("ask"));
+    if (!d || typeof d.showModal !== "function") return Promise.resolve(confirm(`${title} ${text}`.trim()));
+    $("ask-h").textContent = title; $("ask-p").textContent = text; $("ask-p").hidden = !text;
+    const y = $("ask-yes"); y.textContent = yes; y.classList.toggle("danger", danger); y.classList.toggle("primary", !danger);
+    d.returnValue = "";
+    return new Promise(res => { d.addEventListener("close", () => res(d.returnValue === "yes"), { once: true }); d.showModal(); $("ask-no").focus(); });
+  }
   const when = iso => new Date(iso).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
   // ── offline ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -35,12 +45,14 @@
     deferred = null; installBtn.hidden = true;
   });
 
-  // ── theme: dark unless light is chosen; the choice sticks and is shared with ride mode ──
+  // ── theme: dark unless light or auto (the phone's own setting) is chosen; the choice sticks and is shared with ride
+  //    mode. The page always carries the light or dark it shows (<html data-theme>); "auto" is only the preference.
   const themeBtns = [...document.querySelectorAll("[data-theme-pick]")], deviceDark = matchMedia("(prefers-color-scheme: dark)");
-  const effective = () => document.documentElement.dataset.theme || "dark";
-  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === effective())));
-  for (const b of themeBtns) b.addEventListener("click", () => { document.documentElement.dataset.theme = b.dataset.themePick; ls.set("fitness-theme", b.dataset.themePick); paintTheme(); });
-  deviceDark.addEventListener("change", paintTheme);
+  const pref = () => ls.get("fitness-theme") || "dark";
+  const applyTheme = () => { const t = pref(); document.documentElement.dataset.theme = t === "auto" ? (deviceDark.matches ? "dark" : "light") : t; };
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === pref())));
+  for (const b of themeBtns) b.addEventListener("click", () => { ls.set("fitness-theme", b.dataset.themePick); applyTheme(); paintTheme(); });
+  deviceDark.addEventListener("change", () => { applyTheme(); paintTheme(); });
   paintTheme();
 
   // ── data ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -53,13 +65,19 @@
     if (!ls.set("fitness-dashboard", JSON.stringify(d))) throw new Error("This browser won't store data (private mode?)");
     if (d.ride) ls.set("fitness-ride-config", JSON.stringify(d.ride));
   }
+  // Data from outside this page (a phone link, a pasted or imported file, the sync repository, this device's saved copy
+  // of those) never carries markup: every < and > in it becomes its full-width twin, which reads the same and is never a
+  // tag. The reviver catches one written as a \u003c escape. The build's own inlined data goes the same way: its one
+  // picture, the QR code, is a data URI (fitness/build.py ride_qr), not markup.
+  const noTags = s => String(s).replace(/</g, "\uFF1C").replace(/>/g, "\uFF1E");
+  const readData = t => JSON.parse(noTags(t), (k, v) => (typeof v === "string" ? noTags(v) : v));
   /** Text from a pasted link, a pasted blob, or a data file → dashboard data. */
   async function parse(text) {
     const t = String(text || "").trim();
-    if (t.startsWith("{")) return JSON.parse(t);
+    if (t.startsWith("{")) return readData(t);
     const m = t.match(/[#&?]d=([A-Za-z0-9_-]+)/) || t.match(/^([A-Za-z0-9_-]{200,})$/);
     if (!m) throw new Error("That isn't a phone link or a data file from the dashboard");
-    return JSON.parse(await inflate(m[1]));
+    return readData(await inflate(m[1]));
   }
 
   // ── GitHub sync: your private repository's `state` branch, and its "Training sync" workflow ─────────────────
@@ -88,7 +106,7 @@
     if (!res.ok) throw new Error(ghWhy(res.status, what));
     return res.status === 204 ? null : accept === RAW ? res.text() : res.json();
   }
-  const stateFile = async (c, name) => { const t = await gh(c, `/contents/${name}?ref=state`, { accept: RAW, allow404: true }); return t ? JSON.parse(t) : null; };
+  const stateFile = async (c, name) => { const t = await gh(c, `/contents/${name}?ref=state`, { accept: RAW, allow404: true }); return t ? readData(t) : null; };
   /** The sync's latest status and data. */
   async function pull(c) {
     const [st, d] = await Promise.all([stateFile(c, "status.json"), stateFile(c, "fitness-data.json")]);
@@ -114,7 +132,7 @@
   async function load() {
     await moveIn();
     const raw = ($("data") || { textContent: "" }).textContent.trim();
-    if (raw.startsWith("{")) return { D: JSON.parse(raw), source: "build" };
+    if (raw.startsWith("{")) return { D: readData(raw), source: "build" };
     const frag = new URLSearchParams(location.hash.slice(1)).get("d");
     if (frag) {
       history.replaceState(null, "", location.pathname + location.search);
@@ -124,7 +142,7 @@
       } catch (e) { cloudProblem = `That link couldn't be read: ${e.message}`; }
     }
     let saved = null;
-    try { saved = JSON.parse(ls.get("fitness-dashboard") || "null"); } catch { /* none */ }
+    try { saved = readData(ls.get("fitness-dashboard") || "null"); } catch { /* none */ }
     const c = cloud();
     if (c) {
       try {
@@ -293,12 +311,16 @@
     if (act === "send-code") sendCode();
     if (act === "service") {
       const label = /** @type {HTMLElement} */ (t).dataset.label || "that";
-      if (confirm(`Mark “${label}” done today?`)) job("service", `Logging: ${label.toLowerCase()}`, { code: /** @type {HTMLElement} */ (t).dataset.code || "" });
+      const code = /** @type {HTMLElement} */ (t).dataset.code || "";
+      ask(`Mark “${label}” done?`, "Logged to your sync as done today: its count starts again from now.", "Mark done")
+        .then(ok => { if (ok) job("service", `Logging: ${label.toLowerCase()}`, { code }); });
     }
     if (act === "reload") location.reload();
     if (act === "forget") {
       e.preventDefault();
-      if (confirm("Remove the dashboard data from this device?")) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin", "fitness-rpe", "fitness-feel-sent", "fitness-feel-pending"]) ls.set(k, null); location.reload(); }
+      if (dlg) dlg.close();
+      ask("Remove from this device?", "The dashboard data, check-ins and ride ratings on this phone are deleted. Anything already sent to your sync stays there.", "Remove", { danger: true })
+        .then(ok => { if (ok) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin", "fitness-rpe", "fitness-feel-sent", "fitness-feel-pending"]) ls.set(k, null); location.reload(); } else openSheet(); });
     }
   });
   // the morning check-in and ride ratings (app.js): a quiet "service" run takes them to the sync, so the next build's

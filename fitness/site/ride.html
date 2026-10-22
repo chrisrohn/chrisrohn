@@ -16,7 +16,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <script>try { const t = localStorage.getItem("fitness-theme"); document.documentElement.dataset.theme = t || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
+  <script>try { const t = localStorage.getItem("fitness-theme") || "dark"; document.documentElement.dataset.theme = t === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : t; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
   <style>/*__STYLE__*/</style>
   <style>/*__RIDE_STYLE__*/</style>
 </head>
@@ -30,7 +30,7 @@
     <button type="button" class="chip sensor" id="btn-trainer" aria-label="Connect smart trainer"><i></i>Trainer</button>
     <span class="chip sensor" id="gps-chip"><i></i>GPS</span>
     <span class="sbbatt num" id="sb-batt" aria-hidden="true"></span>
-    <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙</button>
+    <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙&#xFE0E;</button>
   </div>
 
   <div class="rtabs" role="tablist" aria-label="Ride screens">
@@ -76,19 +76,17 @@
         <div class="zbar" id="zbar" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><b id="zmark"></b></div>
       </section>
 
-      <section class="rtiles">
-        <div class="rtile"><span class="k">Time</span><span class="v num" id="t-time">0:00</span></div>
-        <button type="button" class="rtile unit-flip" aria-label="Distance; tap to switch imperial / metric"><span class="k">Distance</span><span class="v num" id="t-dist">0.0</span></button>
-        <button type="button" class="rtile unit-flip" aria-label="Speed; tap to switch imperial / metric"><span class="k">Speed</span><span class="v num" id="t-speed">—</span></button>
-        <div class="rtile"><span class="k" id="t-cad-k">Cadence</span><span class="v num" id="t-cad">—</span></div>
-        <div class="rtile"><span class="k">Avg HR</span><span class="v num" id="t-avg">—</span></div>
-        <div class="rtile"><span class="k">Load</span><span class="v num" id="t-load">0</span></div>
+      <section class="climbstrip" id="climbstrip" hidden aria-label="Climb">
+        <span class="k" id="cs-k">Climb ahead</span><b class="num" id="cs-main"></b><span class="cs-sub" id="cs-sub"></span>
+        <span class="climbbar" aria-hidden="true"><span id="cs-bar"></span></span>
       </section>
+
+      <div class="rtiles" id="w-tiles" role="group" aria-label="Your fields"></div>
 
       <section class="rtiles wxbar" id="wxbar" hidden aria-label="Weather">
         <div class="rtile"><span class="k">Temp</span><span class="v num" id="wx-temp">—</span><span class="s" id="wx-feels"></span></div>
         <div class="rtile"><span class="k">Wind</span><span class="v num"><i class="arrow" id="wx-arrow" aria-hidden="true">↑</i><span id="wx-wind">—</span></span><span class="s" id="wx-dir"></span></div>
-        <div class="rtile"><span class="k">On your line</span><span class="v" id="wx-rel">—</span><span class="s" id="wx-src"></span></div>
+        <div class="rtile"><span class="k">On your line</span><span class="v" id="wx-rel">—</span><span class="s" id="wx-cost"></span><span class="s" id="wx-src"></span></div>
       </section>
 
       <div class="fuel" id="fuel" hidden role="alert"><b>Eat &amp; drink</b><span id="fuel-text"></span><button type="button" class="chip" id="fuel-ok">Done</button></div>
@@ -121,6 +119,20 @@
     </section>
 
     <section class="page rmain" id="pg-ahead" role="tabpanel" aria-labelledby="tab-ahead" hidden>
+      <section class="free" id="free" hidden aria-labelledby="free-k">
+        <h2 class="k" id="free-k">Road ahead</h2>
+        <figure class="prof">
+          <figcaption class="k" id="free-prof-k">Next 5 mi</figcaption>
+          <canvas id="prof-free" height="120" role="img" aria-label="Elevation profile of the road ahead"></canvas>
+        </figure>
+        <section class="climb" id="free-climb" hidden>
+          <div class="k" id="free-climb-k">Next climb</div>
+          <div class="climbrow"><b class="num" id="free-climb-main">—</b><span id="free-climb-sub"></span></div>
+          <div class="climbbar" aria-hidden="true"><span id="free-climb-bar"></span></div>
+        </section>
+        <section class="list"><h2 class="k">Climbs ahead</h2><ol id="free-list"></ol></section>
+      </section>
+      <p class="note" id="free-note">No route? Ride, and the climbs on the road ahead appear here: the app follows the road you're on in the map and looks up its heights (heights need signal).</p>
       <div class="empty" id="ahead-empty">
         <p>Load a GPX or TCX route to see the climbs, turns and stops ahead, with turn-by-turn directions and a map.</p>
         <button type="button" class="chip primary" id="btn-routes-2">Load a route</button>
@@ -156,26 +168,12 @@
     </section>
 
     <section class="page rmain" id="pg-data" role="tabpanel" aria-labelledby="tab-data" hidden>
-      <section class="rtiles big" id="data-grid">
-        <div class="rtile"><span class="k">Ride time</span><span class="v num" id="d-time">0:00</span></div>
-        <div class="rtile"><span class="k">Moving</span><span class="v num" id="d-moving">0:00</span></div>
-        <div class="rtile"><span class="k">Distance</span><span class="v num" id="d-dist">0.0</span></div>
-        <div class="rtile"><span class="k">Speed</span><span class="v num" id="d-speed">—</span></div>
-        <div class="rtile"><span class="k">Avg speed</span><span class="v num" id="d-avgspd">—</span></div>
-        <div class="rtile"><span class="k">Max speed</span><span class="v num" id="d-maxspd">—</span></div>
-        <div class="rtile"><span class="k">Climbed</span><span class="v num" id="d-asc">0</span></div>
-        <div class="rtile"><span class="k">Grade</span><span class="v num" id="d-grade">—</span></div>
-        <div class="rtile"><span class="k">Heart rate</span><span class="v num" id="d-hr">—</span></div>
-        <div class="rtile"><span class="k">Max HR</span><span class="v num" id="d-maxhr">—</span></div>
-        <div class="rtile"><span class="k" id="d-pw-k">Power</span><span class="v num" id="d-pw">—</span></div>
-        <div class="rtile"><span class="k">Cadence</span><span class="v num" id="d-cad">—</span></div>
-        <div class="rtile"><span class="k">Time of day</span><span class="v num" id="d-clock">—</span></div>
-        <div class="rtile"><span class="k">Light left</span><span class="v num" id="d-sunset">—</span><span class="s" id="d-sunset-at"></span></div>
-        <div class="rtile"><span class="k">Elevation</span><span class="v num" id="d-ele">—</span></div>
-        <div class="rtile"><span class="k">Fuel tank</span><span class="v num" id="d-fuel">—</span><span class="s" id="d-fuel-s"></span></div>
-        <div class="rtile" id="d-wbal-t" hidden><span class="k">W′ left</span><span class="v num" id="d-wbal">—</span><span class="s" id="d-wbal-s"></span></div>
-        <div class="rtile"><span class="k">Battery</span><span class="v num" id="d-batt">—</span><span class="s" id="d-batt-left"></span></div>
-      </section>
+      <div class="datatools">
+        <span class="k" id="cols-k">Per row</span>
+        <div class="seg" role="group" aria-labelledby="cols-k"><button type="button" class="chip" data-cols="2">2</button><button type="button" class="chip" data-cols="3">3</button><button type="button" class="chip" data-cols="4">4</button></div>
+        <button type="button" class="chip" id="btn-fields">Fields</button>
+      </div>
+      <div class="rtiles big" id="data-grid" data-cols="2" role="group" aria-label="Ride data"></div>
     </section>
 
     <section class="page rmain" id="pg-laps" role="tabpanel" aria-labelledby="tab-laps" hidden>
@@ -192,8 +190,12 @@
     <button type="button" class="big go" id="btn-start">Start</button>
     <button type="button" class="big" id="btn-lap" disabled>Lap</button>
     <button type="button" class="big" id="btn-skip" disabled aria-label="Next step">Next</button>
-    <button type="button" class="big end" id="btn-end" disabled>End</button>
+    <button type="button" class="big end hold" id="btn-end" disabled>End</button>
+    <button type="button" class="big lockbtn" id="btn-lock" aria-label="Lock the screen: rain and bumps can't press anything"><svg class="picto" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10.5V7.5a5 5 0 0 1 10 0v3h-2.4v-3a2.6 2.6 0 0 0-5.2 0v3z"/><rect x="4.5" y="10.5" width="15" height="10.5"/></svg></button>
   </footer>
+  <div class="lockveil" id="lockveil" hidden>
+    <button type="button" class="big hold" id="btn-unlock"><svg class="picto" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10.5V7.5a5 5 0 0 1 10 0v3h-2.4v-3a2.6 2.6 0 0 0-5.2 0v3z"/><rect x="4.5" y="10.5" width="15" height="10.5"/></svg><span><b>Locked</b> · hold to unlock</span></button>
+  </div>
 
   <dialog id="settings" aria-labelledby="settings-h">
     <form method="dialog" class="sform">
@@ -207,8 +209,17 @@
       <label>Auto lap every (mi or km, 0 = off) <input id="s-autolap" type="number" inputmode="decimal" step="0.5" min="0" max="50"></label>
       <label class="row"><input id="s-voice" type="checkbox"> Spoken cues</label>
       <label class="row"><input id="s-autopause" type="checkbox"> Auto-pause when stopped</label>
+      <label class="row"><input id="s-autolock" type="checkbox"> Lock the screen at Start (hold to unlock: rain and bumps can't press anything)</label>
       <label class="row"><input id="s-steplap" type="checkbox"> A lap at each workout step</label>
       <label class="row"><input id="s-climbs" type="checkbox"> Hold efforts for the next climb (on a route)</label>
+      <label>Climbs ahead without a route
+        <select id="s-freeride">
+          <option value="all">Every climb</option>
+          <option value="cat4">Cat 4 and up</option>
+          <option value="cat3">Cat 3 and up</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
       <label class="row"><input id="s-reroute" type="checkbox"> Reroute automatically when off course</label>
       <label>Routing for detours
         <select id="s-profile">
@@ -236,9 +247,21 @@
         </select>
       </label>
       <label class="row"><input id="s-upload" type="checkbox"> Send rides to the training sync (counts in the plan; to Garmin Connect when the watch didn't record it)</label>
-      <div class="unitrow"><span>Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="chip" data-theme-pick="light" aria-pressed="true">Light</button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false">Dark</button></div></div>
+      <div class="unitrow"><span>Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="chip" data-theme-pick="light" aria-pressed="false">Light</button><button type="button" class="chip" data-theme-pick="auto" aria-pressed="false">Auto</button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="true">Dark</button></div></div>
       <div class="unitrow"><span>Units</span><div class="seg" role="group" aria-label="Units"><button type="button" class="chip" data-units="mi" aria-pressed="true">Imperial</button><button type="button" class="chip" data-units="km" aria-pressed="false">Metric</button></div></div>
       <div class="actions"><button type="submit" class="chip" value="cancel">Cancel</button><button type="submit" class="chip primary" value="save" id="s-save">Save</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="fields" aria-labelledby="fields-h">
+    <form method="dialog" class="sform">
+      <h2 id="fields-h">Data fields</h2>
+      <h3 class="k">Workout screen</h3>
+      <div class="slotgrid" id="fl-workout"></div>
+      <h3 class="k">Data screen</h3>
+      <p class="note">Tick what to show; ▲ ▼ set the order. Fewer, bigger fields read best on rough ground: set how many a row on the Data screen itself.</p>
+      <ol class="flist" id="fl-data"></ol>
+      <div class="actions"><button type="button" class="chip" id="fl-reset">Reset</button><button type="submit" class="chip primary" value="close">Done</button></div>
     </form>
   </dialog>
 
@@ -304,6 +327,8 @@
       <label id="go-loop-l">A loop of (mi) <input id="go-loop-n" type="number" inputmode="decimal" min="2" max="200" step="1" value="20"></label>
       <div class="actions left"><button type="button" class="chip primary" id="go-loop">Make a loop</button><button type="button" class="chip" id="go-loop-again">Another way round</button></div>
       <p class="note">A loop goes into the wind first, so the wind brings you home. To ride to any point, long-press it on the map.</p>
+      <h3 class="k">Back to the start</h3>
+      <div class="actions left"><button type="button" class="chip primary" id="go-retrace">Retrace my track</button><button type="button" class="chip" id="go-start">Quickest way back</button></div>
       <h3 class="k">Nearby</h3>
       <div class="actions left" role="group" aria-label="Find nearby"><button type="button" class="chip" data-near="water">Water</button><button type="button" class="chip" data-near="food">Food &amp; coffee</button><button type="button" class="chip" data-near="bike">Bike shop</button><button type="button" class="chip" data-near="toilet">Restroom</button></div>
       <p class="note" id="go-msg" role="status"></p>
@@ -333,6 +358,14 @@
         <button type="button" class="chip" data-export="delete">Delete</button>
       </div>
       <div class="actions"><button type="submit" class="chip primary" value="close">Close</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="ask" class="ask" aria-labelledby="ask-h" aria-describedby="ask-p">
+    <form method="dialog" class="sform">
+      <h2 id="ask-h">Are you sure?</h2>
+      <p id="ask-p" class="note"></p>
+      <div class="askbtns"><button type="submit" class="big" value="no" id="ask-no">Cancel</button><button type="submit" class="big go" value="yes" id="ask-yes">OK</button></div>
     </form>
   </dialog>
 
