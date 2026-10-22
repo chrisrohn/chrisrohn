@@ -41,6 +41,11 @@ def _client(cfg: dict, interactive: bool = False, prompt_mfa=None):
     return client
 
 
+def upload(cfg: dict, path: str) -> None:
+    """One activity file (FIT, GPX or TCX) up to Garmin Connect, with the saved session."""
+    _client(cfg).upload_activity(path)
+
+
 def login(cfg: dict) -> None:
     client = _client(cfg, interactive=True)
     print(f"Signed in as {client.get_full_name() or 'you'}; tokens saved to {cfg['sync']['garmin_tokens']} (treat them like a password).")

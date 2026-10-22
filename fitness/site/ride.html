@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="__CSP__">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#000000">
@@ -27,6 +27,7 @@
     <span class="sbclock num" id="sb-clock" aria-hidden="true"></span>
     <button type="button" class="chip sensor" id="btn-hr" aria-label="Connect heart-rate sensor"><i></i>HR</button>
     <button type="button" class="chip sensor" id="btn-csc" aria-label="Connect cadence, speed or power sensor"><i></i>Cad</button>
+    <button type="button" class="chip sensor" id="btn-trainer" aria-label="Connect smart trainer"><i></i>Trainer</button>
     <span class="chip sensor" id="gps-chip"><i></i>GPS</span>
     <span class="sbbatt num" id="sb-batt" aria-hidden="true"></span>
     <button type="button" class="chip" id="btn-settings" aria-label="Settings">⚙</button>
@@ -164,7 +165,7 @@
         <div class="rtile"><span class="k">Time of day</span><span class="v num" id="d-clock">—</span></div>
         <div class="rtile"><span class="k">Light left</span><span class="v num" id="d-sunset">—</span><span class="s" id="d-sunset-at"></span></div>
         <div class="rtile"><span class="k">Elevation</span><span class="v num" id="d-ele">—</span></div>
-        <div class="rtile"><span class="k">Battery</span><span class="v num" id="d-batt">—</span></div>
+        <div class="rtile"><span class="k">Battery</span><span class="v num" id="d-batt">—</span><span class="s" id="d-batt-left"></span></div>
       </section>
     </section>
 
@@ -209,6 +210,23 @@
           <option value="shortest">Shortest</option>
         </select>
       </label>
+      <label>Smart trainer
+        <select id="s-trainer">
+          <option value="auto">Auto: ERG on workouts, else the route's grade</option>
+          <option value="erg">Workout watts (ERG) only</option>
+          <option value="route">The route's grade only</option>
+          <option value="read">Read only: speed, power, cadence</option>
+        </select>
+      </label>
+      <label>Your weight, kg (the trainer's climbing feel) <input id="s-weight" type="number" inputmode="decimal" step="0.5" min="30" max="200"></label>
+      <label>Battery saver
+        <select id="s-saver">
+          <option value="auto">On by itself when the battery won't last the ride</option>
+          <option value="on">Always on</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label class="row"><input id="s-upload" type="checkbox"> Send rides to the training sync (counts in the plan; to Garmin Connect when the watch didn't record it)</label>
       <div class="unitrow"><span>Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="chip" data-theme-pick="light" aria-pressed="true">Light</button><button type="button" class="chip" data-theme-pick="dark" aria-pressed="false">Dark</button></div></div>
       <div class="unitrow"><span>Units</span><div class="seg" role="group" aria-label="Units"><button type="button" class="chip" data-units="mi" aria-pressed="true">Imperial</button><button type="button" class="chip" data-units="km" aria-pressed="false">Metric</button></div></div>
       <div class="actions"><button type="submit" class="chip" value="cancel">Cancel</button><button type="submit" class="chip primary" value="save" id="s-save">Save</button></div>

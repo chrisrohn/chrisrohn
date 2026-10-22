@@ -298,6 +298,10 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   where you left it and where you are now (a parallel road leads you on, not back). Up to three places ahead are
   routed at once, the spot where you left the route is a no-go (a locked gate stays locked), and the shortest way
   that doesn't start with a U-turn wins. Far from the start? **Directions** to it.
+  **No signal, still a way back:** when BRouter can't be reached, ride mode routes on the phone from the map tiles
+  it already holds (the corridor saved with the route, and every tile the map has shown): it reads their roads and
+  paths (one-ways kept, motorways left out, cycleways preferred, steps avoided), joins them across tile edges, and
+  finds the same forward rejoin, no-go and all, with turns named from the tiles' street names.
 - **The map.** OpenFreeMap's vector map (MapLibre), heading-up or north-up, zooming with your speed and in for a
   turn: the route ahead in red, done in grey, climbs by steepness, your track in blue. **It saves itself for
   offline**: loading a route online stores every map tile along it (±800 m, zoom 8–14) in the phone's cache. No
@@ -307,7 +311,33 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   0.9 mi at 5.1%, 240 ft up*, then on it: distance and height to the top, grade now), the next turns, water / food /
   aid stops from the file's waypoints, and the **wind on the next 10 miles** (headwind / tailwind / cross shares).
 - **Data.** Ride and moving time, distance, speed, average and max, climbed, grade, HR and max, power (10 s) and
-  cadence, time of day, sunset, elevation, phone battery (a spoken warning at 15%).
+  cadence, time of day, sunset, elevation, and the phone's battery with **how long it lasts** at this ride's drain
+  (and whether that's enough for the ride left).
+- **Battery saver.** When the forecast says the phone won't last the ride left (route at your average speed, or the
+  session's steps), saver turns on by itself, says so, and offers **Undo**: true black, the map moved every 5 s
+  without animation, the screens redrawn every 3 s. The timer, recording, cues and trainer keep their pace.
+  Settings: on by itself / always / off. A spoken warning at 15% either way.
+- **Smart trainer (Tacx Flow Smart, and any FTMS trainer).** **Trainer** in the top bar pairs it (a Flow Smart, T2240,
+  shows as *Tacx Flow 12345*; it speaks Tacx's FE-C over Bluetooth, which ride mode drives directly):
+  - **ERG on the workout:** each step's watts from your FTP, set the moment the step starts, and moved when the app
+    eases the session. **No FTP? Heart-rate ERG:** the watts are nudged every 20 s to hold the step's heart-rate
+    band (in small steps, because HR lags), and what held each band is remembered, so the next ride starts there.
+  - **A route on the trainer:** a free ride with a route loaded sets the route's grade under you, moves your place
+    along it with the trainer's wheel speed (turns, climbs and *Ahead* all follow), and records the climbing.
+  - Speed, power and cadence come from the trainer and are recorded (an indoor ride: no GPS track). A wheel-on trainer
+    can't brake hard at a low wheel speed, so when the Flow flags it the screen and voice say **shift to a harder
+    gear** (or easier, at the other end). At End it goes back to a flat road.
+  - **The Flow, wheel-on:** pump the tyre to the same pressure every time, press the roller with the same number of
+    turns, and run the spin-down calibration in Tacx's app now and then (ride mode says when the trainer asks for
+    one); that's what keeps its power honest. The older, non-smart Flow (T2200) has no Bluetooth and only works with
+    Tacx's own head unit. Settings: auto (ERG on a workout, else the route's grade) / ERG only / grade only / read only;
+    your weight sets how climbs feel.
+- **To the training sync, by itself.** With the sync connected (the dashboard's Cloud sync), **End** sends the ride to
+  it: the summary and heart rate, power, cadence and speed every 5 s, deflated, as one run of the sync. It counts in
+  the plan from that run; when the watch recorded the same ride the two become one (the watch's record wins and
+  takes the phone's power: a trainer ride with the watch on gets its watts); and a ride only the phone recorded goes up
+  to **Garmin Connect** (and from there Strava) 6 hours after it ends, if no other copy has turned up by then. No
+  signal at End: it goes when there is. The sync lists the rides it has, so one lost in GitHub's queue is sent again.
 - **What this ride did.** At End, before the numbers: the work on target (minutes and %, and what that says), the zone
   split, the load against plan and what it does to fitness and tomorrow's form, the next event's fitness target and
   how far there is to go, and the commute check. Kept with the ride under Saved rides.
@@ -369,7 +399,8 @@ The Workout screen shows:
   - **Survives a reload.** A reload or tab switch mid-ride restores the ride, paused.
   - **Summary:** a ride summary with time in zones at the end.
 
-The watch keeps recording the official file, and ride mode uploads nothing.
+The watch keeps recording the official file; ride mode's own copy goes only to your training sync (above), and to
+Garmin Connect only for a ride the watch didn't record (`[sync] upload_phone_rides = false` to never).
 
 **Browser.** Android: Chrome. iPhone: Safari and iOS Chrome can't use Bluetooth sensors, so install the free
 **Bluefy** browser and open ride mode in it. GPS, steps and cues work in any browser. On iPhone, also set Auto-Lock
@@ -401,7 +432,8 @@ You can also host it elsewhere: `python -m fitness ride-page` writes a data-free
 Put the folder's address in `[app] url`. To use the local copy with no hosting, set `url = ""` and serve it over
 Tailscale (`tailscale serve --bg 8765` alongside `python -m fitness serve`).
 
-A big GPS screen for hours drains the battery: for Barry-Roubaix, dim the screen or bring a small battery pack.
+A big GPS screen for hours drains the battery: the Data screen says how long it lasts and battery saver steps in, but
+for Barry-Roubaix dim the screen or bring a small battery pack.
 
 ## Cloud sync (no computer)
 
@@ -826,6 +858,7 @@ legs actually felt on the bike.
 | `activities.py` | sport mapping and the Garmin↔Strava duplicate merge |
 | `metrics.py` | load, PMC, sleep score, readiness, recommendation, insights (pure functions) |
 | `feel.py` | the app's morning check-in and ride ratings: parsing what the phone sends, storing it, blending it into the call |
+| `rides.py` | rides ride mode sends to the sync: decoded into an activity and a trace, merged with the watch's copy (its power added), uploaded to Garmin Connect when nothing else recorded them |
 | `power.py` | the power-duration curve, critical power and eFTP |
 | `plan.py` | season planner (phases, trainer season, taper optimizer) and session libraries |
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` and `dist/ride.html` |
@@ -833,7 +866,7 @@ legs actually felt on the bike.
 | `render-icons.mjs` | renders the PNG icons from `site/icons/*.svg` (the heartbeat as the bike's top tube) |
 | `raceday.py`, `racewx.py` | race day: the morning timeline from your wave's gun, pacing, bottles, and the course forecast turned into kit, tire pressures, bike prep and riding for every weather case |
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
-| `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page), ride mode (`ride-core.js`: routes, navigation, climbs, the sun, workout tailoring, FIT / GPX / TCX; `ride.js`: the screens, sensors, map and recording), styles, SVG charts, `csp.txt`, `manifest.webmanifest`, `sw.js` (offline, map tiles, the share target) and `icons/` |
+| `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page), ride mode (`ride-core.js`: routes, navigation, climbs, the sun, workout tailoring, FIT / GPX / TCX, smart-trainer protocols, offline routing from vector tiles, the battery forecast, the ride packed for the sync; `ride.js`: the screens, sensors and trainer, map, recording and sending), styles, SVG charts, `csp.txt`, `manifest.webmanifest`, `sw.js` (offline, map tiles, the share target) and `icons/` |
 | `demo.py` | the synthetic athlete |
 
 Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target). CI runs both. This is a personal analysis tool, not medical advice.

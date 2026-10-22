@@ -20,7 +20,7 @@ DEFAULTS: dict = {
                   "supplements": {}, "creatine": False},
     "indoor": {"start": "", "end": "", "apps": ["zwift", "mywoosh"], "long_ride_h": 2.5},
     "plan": {"weekly_pattern": [0.0, 1.3, 0.8, 1.2, 0.4, 1.7, 0.9], "max_ramp": 6, "base_ramp": 3, "fit": True},
-    "sync": {"garmin_tokens": "~/.garminconnect", "history_days": 400, "resync_days": 3},
+    "sync": {"garmin_tokens": "~/.garminconnect", "history_days": 400, "resync_days": 3, "upload_phone_rides": True},
     "ride": {"url": "", "wheel_m": 2.29, "fuel_every_min": 20},
     "app": {"url": "", "export_dir": ""},
     "bike": {"name": "Bike", "parts": "", "tire": "", "rim": "", "trainer": True, "every": {}},

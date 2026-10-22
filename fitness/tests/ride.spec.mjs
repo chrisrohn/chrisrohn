@@ -116,6 +116,21 @@ test.describe("ride mode", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   });
 
+  test("the controls are always on screen: Start / Lap / Next / End sit inside the visible window, whatever its height", async ({ browser }) => {
+    for (const [w, h] of [[412, 869], [412, 760], [360, 640]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, isMobile: true, hasTouch: true });
+      const page = await ctx.newPage();
+      await page.goto(link(PLAN));
+      for (const id of ["#btn-start", "#btn-end"]) {
+        const box = await page.locator(id).boundingBox();
+        expect(box && box.y + box.height, `${id} at ${w}×${h}`).toBeLessThanOrEqual(h);
+      }
+      await page.setViewportSize({ width: w, height: h - 90 });                        // the window shrinks (system bars, keyboard)
+      await expect.poll(async () => { const b = await page.locator("#btn-start").boundingBox(); return b && b.y + b.height <= h - 90; }).toBe(true);
+      await ctx.close();
+    }
+  });
+
   test("before the ride: why today's ride is today's ride, from the sync", async ({ page }) => {
     const brief = { date: iso(today), title: "Keep it easy", level: "easy", score: 52, why: ["Resting HR 58 bpm — 4.0 above your 60-day norm"], tsb: -18,
       ctl: 61.2, atl: 79, target: { ctl: 65, race_ctl: 66.4, days: 10 }, ef_trend: 2.3, zones: "LTHR 163 learned from Ride 0 (2026-09-01, your best 20 min)" };

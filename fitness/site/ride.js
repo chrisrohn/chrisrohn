@@ -4,8 +4,9 @@
 //   Map      the route, where you are and where you've been, turn by turn, offline along a downloaded route
 //   Ahead    the elevation profile, the next climb (ClimbPro-style), the turns, stops and the wind still to come
 //   Data     every live figure, big;  Laps  manual, per-step and auto laps
-// Sensors over Web Bluetooth, position from the phone's GPS, routes from GPX / TCX files (or shared from any app),
-// detours from BRouter. Rides are kept on this phone and export as FIT, GPX or TCX; nothing is uploaded by itself.
+// Sensors and smart trainers (FTMS, Tacx FE-C) over Web Bluetooth, position from the phone's GPS, routes from GPX / TCX
+// files (or shared from any app), detours from BRouter, or offline from the map tiles on the phone. Rides are kept on
+// this phone, export as FIT, GPX or TCX, and go to the training sync (when it's connected) to count in the plan.
 (async () => {
   const C = /** @type {any} */ (window).RideCore;
   const $ = id => document.getElementById(id);
@@ -47,9 +48,11 @@
     fuel: prefs.fuel ?? cfg.fuel_every_min ?? 20, voice: prefs.voice ?? true, km: (ls.get("fitness-units") || (cfg.units === "metric" ? "km" : "mi")) === "km",
     ftp: prefs.ftp ?? cfg.ftp ?? 0, autoPause: prefs.autoPause ?? true, stepLap: prefs.stepLap ?? true, autoLap: prefs.autoLap ?? 0,
     climbs: prefs.climbs ?? true, reroute: prefs.reroute ?? true, profile: prefs.profile || "trekking", headingUp: prefs.headingUp ?? true,
+    trainer: prefs.trainer || "auto", weight: prefs.weight || cfg.weight_kg || 75, upload: prefs.upload ?? true, saver: prefs.saver || "auto",
   };
   const savePrefs = () => ls.set("fitness-ride-prefs", JSON.stringify({ lthr: P.lthr, max: P.max, rest: P.rest, wheel: P.wheel, fuel: P.fuel, voice: P.voice, ftp: P.ftp,
-    autoPause: P.autoPause, stepLap: P.stepLap, autoLap: P.autoLap, climbs: P.climbs, reroute: P.reroute, profile: P.profile, headingUp: P.headingUp }));
+    autoPause: P.autoPause, stepLap: P.stepLap, autoLap: P.autoLap, climbs: P.climbs, reroute: P.reroute, profile: P.profile, headingUp: P.headingUp,
+    trainer: P.trainer, weight: P.weight, upload: P.upload, saver: P.saver }));
 
   // ── formatting ──────────────────────────────────────────────────────────────────────────────────────────
   const clock = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
@@ -177,7 +180,7 @@
         const dr = revs - wheel.revs, dt = ((t - wheel.time + 65536) % 65536) / 1024;
         if (dt > 0 && dr >= 0 && dr < 100) {
           live.wheelSpeed = dr * P.wheel / dt; live.wheelAt = now;
-          if (S.running && !S.paused && !S.autoPaused) S.dist += dr * P.wheel;
+          if (S.running && !S.paused && !S.autoPaused && !trainerLive(now)) S.dist += dr * P.wheel;
         }
       }
       wheel.revs = revs; wheel.time = t;
@@ -203,9 +206,13 @@
   const SENSORS = {
     hr: { id: "btn-hr", label: "heart-rate strap", services: ["heart_rate"], prefixes: ["HRM", "Polar", "TICKR", "Wahoo", "COOSPO", "Garmin"] },
     csc: { id: "btn-csc", label: "cadence, speed or power sensor", services: ["cycling_speed_and_cadence", "cycling_power"], prefixes: ["CAD", "SPD", "Garmin", "Wahoo", "RPM"] },
+    trainer: { id: "btn-trainer", label: "smart trainer", services: [C.FTMS.service, C.TACX.service, "cycling_power", "cycling_speed_and_cadence"],
+      prefixes: ["Tacx", "KICKR", "Wahoo KICKR", "Elite", "Saris", "Zwift Hub", "Wattbike", "JetBlack", "Van Rysel", "Magene", "ThinkRider"] },
   };
   const hooked = new WeakSet();
-  const helpHtml = kind => kind === "hr"
+  const helpHtml = kind => kind === "trainer"
+    ? "<b>Trainer not in the list?</b> Pedal to wake it (a Tacx Flow sleeps when the wheel stops), and close Tacx Training, Zwift or any other app holding it. A <b>Tacx Flow Smart</b> (T2240) shows as <b>Tacx Flow</b> followed by a number. The older, non-smart Flow (T2200) has no Bluetooth: it pairs only with Tacx's own head unit, so no phone app can drive it. Android: give Chrome <b>Nearby devices</b> permission and keep Location on."
+    : kind === "hr"
     ? "<b>Strap not in the list?</b> Wear it with the pads wet: it sleeps until it feels a heartbeat. If it shows in your phone's own Bluetooth settings, tap it there and choose <b>Forget</b> (or Unpair): a strap held by the phone stops advertising, so the browser never sees it. It takes only a couple of Bluetooth links at once, so close Garmin Connect, Zwift or any other app using it (the watch can stay on it over ANT+). Android: give Chrome <b>Nearby devices</b> permission and keep Location on."
     : "<b>Sensor not in the list?</b> Spin the crank or wheel to wake it. If it shows in your phone's own Bluetooth settings, choose <b>Forget</b> there, and close Garmin Connect, Zwift or any other app holding it. Android: give Chrome <b>Nearby devices</b> permission and keep Location on.";
   const help = (kind, lead = "") => {
@@ -227,13 +234,14 @@
       } catch { return false; }
     };
     if (kind === "hr") return hook("heart_rate", "heart_rate_measurement", onHr);
+    if (kind === "trainer") return hookTrainer(server, hook);
     const a = await hook("cycling_speed_and_cadence", "csc_measurement", onCsc);
     const b = await hook("cycling_power", "cycling_power_measurement", onPower);
     if (b) $("t-cad-k").textContent = "Power";
     return a || b;
   }
   // one live sensor per kind; a connection that fails says why (and what to try) instead of just turning red
-  const conn = { hr: null, csc: null };
+  const conn = { hr: null, csc: null, trainer: null };
   async function attach(device, kind, quiet = false) {
     const s = SENSORS[kind], name = device.name || `the ${s.label}`;
     if (conn[kind] === device && device.gatt.connected) { chip(s.id, "on"); return true; }   // already streaming: don't hook it twice
@@ -251,7 +259,7 @@
         return true;
       }
       chip(s.id, conn[kind] && conn[kind].gatt.connected ? "on" : "off");
-      if (!quiet) help(kind, `${name} connected but sends no ${kind === "hr" ? "heart rate" : "cadence, speed or power"}.`);
+      if (!quiet) help(kind, `${name} connected but sends no ${kind === "hr" ? "heart rate" : kind === "trainer" ? "trainer data" : "cadence, speed or power"}.`);
     } catch (e) {
       chip(s.id, conn[kind] && conn[kind] !== device && conn[kind].gatt.connected ? "on" : "off");
       if (!quiet) help(kind, `Couldn't connect to ${name}${e && e.message ? ` (${e.message})` : ""}.`);
@@ -295,15 +303,138 @@
   }
   $("btn-hr").addEventListener("click", () => connect("hr"));
   $("btn-csc").addEventListener("click", () => connect("csc"));
+  $("btn-trainer").addEventListener("click", () => connect("trainer"));
   if (!navigator.bluetooth) noBluetooth();
   else if (typeof navigator.bluetooth.getDevices === "function") {
     navigator.bluetooth.getDevices().then(list => {
-      for (const kind of ["hr", "csc"]) {
+      for (const kind of ["hr", "csc", "trainer"]) {
         const d = list.find(x => x.id === ls.get(`fitness-ride-${kind}`));
         if (d) { conn[kind] = d; rejoin(d, kind); }
       }
     }).catch(() => {});
   }
+
+  // ── smart trainer: a Tacx Flow Smart (FE-C over Bluetooth) or any FTMS trainer ─────────────────────────────
+  //   ERG    a workout step's watts from FTP, or heart-rate ERG with no FTP: watts nudged to hold the step's HR band,
+  //          and what held each band remembered for the next ride
+  //   Route  on a free ride with a route loaded: the route's grade under you, your place on it moved by the wheel
+  //   Read   speed, power and cadence only (the setting, or a trainer that takes no commands)
+  const TR = { kind: "", write: null, queue: Promise.resolve(), mode: "", watts: 0, sentW: -1, sentG: null, sentAt: 0, key: "", since: 0, hrErg: false, stepSecs: 0,
+    limit: null, limitAt: 0, limitSaid: "", calibrate: 0, virtual: false, along: 0, speedAt: 0, used: false };
+  const ergLearn = jget("fitness-ride-erg", {});   // % of LTHR (5 % steps) → the watts that held it on earlier rides
+  const trainerLive = (now = Date.now()) => !!conn.trainer && now - TR.speedAt < 3000;
+  const send = bytes => { if (TR.write) TR.queue = TR.queue.then(() => TR.write(bytes)).catch(() => {}); return TR.queue; };
+  function trainerData({ speed = null, power = null, cadence = null, hr = null }) {
+    const now = Date.now();
+    TR.used = true;
+    if (speed != null) {
+      if (TR.speedAt && S.running && !S.paused && !S.autoPaused) { const d = speed * Math.min(2, (now - TR.speedAt) / 1000); S.dist += d; if (TR.virtual) TR.along += d; }
+      live.wheelSpeed = speed; live.wheelAt = now; TR.speedAt = now;
+    }
+    if (power != null && power >= 0) {
+      live.power = power; live.powerAt = now; live.pw.push([now, power]);
+      while (live.pw.length && live.pw[0][0] < now - 10000) live.pw.shift();
+    }
+    if (cadence != null) { live.cad = cadence; live.cadAt = now; }
+    if (hr && !(conn.hr && now - live.hrAt < 4000)) { live.hr = hr; live.hrAt = now; }   // a strap wins
+  }
+  function onFec(dv) {
+    const m = C.parseFec(dv);
+    if (!m) return;
+    if (m.page === 0x10) trainerData({ speed: m.speed, hr: m.hr });
+    else if (m.page === 0x19) { trainerData({ power: m.power, cadence: m.cadence }); TR.limit = m.limit; TR.limitAt = Date.now(); TR.calibrate = m.calibrate; }
+  }
+  /** The trainer's services: Tacx FE-C first (a Flow Smart speaks it; FTMS only came with later firmware), then FTMS,
+   *  then a plain power / speed service, read only. */
+  async function hookTrainer(server, hook) {
+    TR.write = null; TR.kind = ""; TR.sentW = -1; TR.sentG = null;
+    try {
+      const svc = await server.getPrimaryService(C.TACX.service);
+      const rx = await svc.getCharacteristic(C.TACX.rx), tx = await svc.getCharacteristic(C.TACX.tx);
+      rx.addEventListener("characteristicvaluechanged", e => onFec(e.target.value));
+      await rx.startNotifications();
+      TR.kind = "Tacx FE-C";
+      TR.write = b => (tx.properties.writeWithoutResponse ? tx.writeValueWithoutResponse(b) : tx.writeValueWithResponse(b));
+      send(C.fecUser(P.weight, 9, P.wheel));
+      return true;
+    } catch { /* not a Tacx bridge */ }
+    try {
+      const svc = await server.getPrimaryService(C.FTMS.service);
+      const data = await svc.getCharacteristic(C.FTMS.data);
+      data.addEventListener("characteristicvaluechanged", e => trainerData(C.parseBikeData(e.target.value)));
+      await data.startNotifications();
+      TR.kind = "FTMS (read only)";
+      try {
+        const cp = await svc.getCharacteristic(C.FTMS.control);
+        cp.addEventListener("characteristicvaluechanged", () => {});
+        await cp.startNotifications();
+        TR.write = b => cp.writeValueWithResponse(b);
+        await send(C.ftms.control()); await send(C.ftms.start());
+        TR.kind = "FTMS";
+      } catch { TR.write = null; }
+      return true;
+    } catch { /* no FTMS */ }
+    const a = await hook("cycling_power", "cycling_power_measurement", onPower);
+    const b = await hook("cycling_speed_and_cadence", "csc_measurement", onCsc);
+    if (a || b) TR.kind = "power only";
+    return a || b;
+  }
+  const stepPct = s => (s.lo > 0 ? (s.lo + s.hi) / 2 * (C.isWork(s) ? S.intensity : 1) : s.hi - 6);
+  const learnKey = s => String(Math.round(stepPct(s) / 5) * 5);
+  /** Once a second: what the trainer should be doing now, sent when it changes (and every 10 s, which Tacx expects). */
+  function driveTrainer(now) {
+    const on = conn.trainer && conn.trainer.gatt && conn.trainer.gatt.connected;
+    if (!on) { TR.mode = ""; TR.virtual = false; return; }
+    const st = steps(), s = S.running && S.step < st.length ? st[S.step] : null;
+    const routeOk = !!(NAV.route && NAV.route.hasEle);
+    const mode = !TR.write || P.trainer === "read" ? "read" : s && P.trainer !== "route" ? "erg" : routeOk && P.trainer !== "erg" ? "route" : "";
+    // learn what held the heart-rate band when a step on heart-rate ERG ends
+    const key = s ? `${S.step}:${s.name}:${S.intensity}` : "";
+    if (key !== TR.key) {
+      const prev = TR.key && st[+TR.key.split(":")[0]];
+      if (prev && TR.hrErg && TR.stepSecs >= 180) { const k = learnKey(prev); ergLearn[k] = Math.round(ergLearn[k] ? ergLearn[k] * 0.6 + TR.watts * 0.4 : TR.watts); ls.set("fitness-ride-erg", JSON.stringify(ergLearn)); }
+      TR.key = key; TR.since = 0; TR.stepSecs = 0; TR.limitSaid = "";
+      if (s) { const w = C.ergWatts(s, P.ftp, S.intensity); TR.hrErg = w == null; TR.watts = w ?? (ergLearn[learnKey(s)] || C.ergGuess(stepPct(s))); }
+    }
+    const was = TR.mode;
+    TR.mode = mode;
+    const gpsMoving = now - live.gpsAt < 10000 && (live.gpsSpeed ?? 0) > 2.5;
+    const virtual = mode === "route" && !gpsMoving && S.running;
+    if (virtual && !TR.virtual) TR.along = NAV.st && !NAV.st.offCourse ? NAV.st.along : 0;
+    TR.virtual = virtual;
+    if (virtual) {   // your place on the route, moved by the trainer's wheel speed
+      const p = C.pointAt(NAV.route, Math.min(TR.along, NAV.route.total));
+      live.heading = p.brg;
+      const fix = { lat: p.lat, lon: p.lon, t: now, acc: 3 };
+      live.lastFix = fix; onFix(fix);
+    }
+    if (!S.running || S.paused || S.autoPaused) return;
+    const stale = now - TR.sentAt > 10000;
+    if (mode === "erg" && s) {
+      TR.stepSecs++; TR.since++;
+      if (TR.hrErg && !rolling() && S.elapsed - S.stepStart > 60) {
+        const [lo, hi] = tgt(s), hr = live.hr && now - live.hrAt < 5000 ? live.hr : null, w = C.hrErg(TR.watts, hr, lo, hi, TR.since);
+        if (w !== TR.watts) { TR.watts = w; TR.since = 0; }
+      }
+      if (stale || TR.watts !== TR.sentW || was !== "erg") { send(TR.kind === "Tacx FE-C" ? C.fecPower(TR.watts) : C.ftms.power(TR.watts)); TR.sentW = TR.watts; TR.sentAt = now; TR.sentG = null; }
+      // a wheel-on trainer can't brake hard at a low wheel speed, or lightly at a high one: say which gear to find
+      const lim = now - TR.limitAt < 5000 ? TR.limit : null;
+      if ((lim === "slow" || lim === "fast") && TR.limitSaid !== lim && TR.stepSecs > 8) { TR.limitSaid = lim; say(lim === "slow" ? `Shift to a harder gear: the trainer can't hold ${TR.watts} watts at this wheel speed.` : `Shift to an easier gear for ${TR.watts} watts.`, false); }
+    } else if (mode === "route") {
+      const along = TR.virtual ? TR.along : NAV.st ? NAV.st.along : 0, g = Math.round((C.gradeAt(NAV.route, along) ?? 0) * 2) / 2;
+      if (stale || TR.sentG == null || Math.abs(g - TR.sentG) >= 0.5) { send(TR.kind === "Tacx FE-C" ? C.fecGrade(g) : C.ftms.grade(g)); TR.sentG = g; TR.sentAt = now; TR.sentW = -1; }
+    }
+  }
+  /** Back to a light, flat road when the ride ends or pauses for good. */
+  const releaseTrainer = () => { if (TR.write) send(TR.kind === "Tacx FE-C" ? C.fecGrade(0) : C.ftms.grade(0)); TR.sentW = -1; TR.sentG = null; TR.virtual = false; };
+  /** What the trainer is doing, as [label, value, unit] for the step card (null when it isn't steering). */
+  const trainerLine = () => {
+    if (!TR.mode || TR.mode === "read") return null;
+    if (TR.mode === "erg") return [TR.hrErg ? "HR-ERG" : "ERG", String(Math.round(+TR.watts || 0)), "W"];
+    return ["Trainer grade", TR.sentG == null ? "—" : `${TR.sentG > 0 ? "+" : ""}${(+TR.sentG).toFixed(1)}`, "%"];
+  };
+  /** A line of plain text with bold figures, built from text nodes: [text, bold, text, bold, …]. */
+  const lineOf = (el, parts) => el.replaceChildren(...parts.map((t, i) => { if (i % 2 === 0) return String(t); const b = document.createElement("b"); b.textContent = String(t); return b; }));
 
   // ── GPS ─────────────────────────────────────────────────────────────────────────────────────────────────
   const hav = C.hav, bearing = C.bearing;
@@ -314,7 +445,7 @@
     watch = navigator.geolocation.watchPosition(pos => {
       const c = pos.coords, fix = { lat: c.latitude, lon: c.longitude, t: pos.timestamp || Date.now(), acc: c.accuracy };
       chip("gps-chip", c.accuracy <= 30 ? "on" : "wait");
-      if (c.accuracy > 50) return;
+      if (c.accuracy > 50 || TR.virtual) return;   // on the trainer along a route, the wheel moves you, not the GPS
       const prev = live.lastFix;
       live.lastFix = fix;
       if (c.altitude != null && Number.isFinite(c.altitude)) live.alt = live.alt == null ? c.altitude : live.alt + 0.15 * (c.altitude - live.alt);
@@ -577,7 +708,7 @@
       } else if (d.offCourse && v > 1 && now - NAV.lastReroute > 30000 && P.reroute) reroute("rejoin");
     } else if (NAV.st.offCourse) {
       if (!NAV.offSaid) { NAV.offSaid = true; say("Off course."); beep(440, 250, 2); buzz([300, 120, 300]); }
-      if (P.reroute && S.running && v > 1 && now - NAV.lastReroute > 30000 && navigator.onLine) reroute("rejoin");
+      if (P.reroute && S.running && v > 1 && now - NAV.lastReroute > 30000) reroute("rejoin");   // offline too, from the saved map
     } else if (NAV.offSaid) { NAV.offSaid = false; say("Back on course."); beep(990, 120); }
     if (NAV.st.wrongWay && now - NAV.lastWrong > 30000) { NAV.lastWrong = now; say("Wrong way. Turn around."); buzz([500, 200, 500]); }
     if (S.running && !S.paused) {
@@ -616,22 +747,58 @@
         return res.ok ? { detour: C.fromBRouter(await res.json(), name), option } : { detour: null, option };
       } catch { return { detour: null, option }; }
     };
-    const best = C.pickDetour(NAV.route, await Promise.all(options.map(ask)), heading, minAlong);
+    let tries = navigator.onLine ? await Promise.all(options.map(ask)) : [];
+    let offline = false;
+    if (!tries.some(t => t.detour)) { tries = await offlineWays(fix, options, kind === "start" ? [] : NAV.avoid, name); offline = tries.some(t => t.detour); }
+    const best = C.pickDetour(NAV.route, tries, heading, minAlong);
     if (best) {
       const d = best.detour;
       NAV.detour = { route: d, nav: C.navigator(d), target: best.option, kind };
       NAV.detour.st = NAV.detour.nav.update(fix, live.heading, speedNow() ?? 0);
       const t = d.turns[0], skip = best.option.along - (NAV.nav.state.lastOnAlong || 0);
       say(kind === "start" ? `Directions to the start: ${nearSay(d.total)}.`
-        : `Rerouting ahead. ${nearSay(d.total)} to rejoin the route${skip > 400 ? `, ${nearSay(skip)} further along it` : ""}.${t ? ` First, in ${nearSay(t.along)}, ${turnText(t).replace(" · ", ", ")}.` : ""}`);
+        : `Rerouting ahead${offline ? " on the offline map" : ""}. ${nearSay(d.total)} to rejoin the route${skip > 400 ? `, ${nearSay(skip)} further along it` : ""}.${t ? ` First, in ${nearSay(t.along)}, ${turnText(t).replace(" · ", ", ")}.` : ""}`);
       mapDetour();
     } else {
       const back = NAV.nav.toRoute(fix);
-      note.textContent = `No way back from the router (no signal?). The route is ${nearTxt(back.dist)} ${compass(back.brg)} of you.`;
+      note.textContent = `No way back found (no signal, and no saved map here). The route is ${nearTxt(back.dist)} ${compass(back.brg)} of you.`;
       if (S.running) say(`The route is ${nearSay(back.dist)} to the ${({ N: "north", NE: "northeast", E: "east", SE: "southeast", S: "south", SW: "southwest", W: "west", NW: "northwest" })[compass(back.brg)]}.`, false);
     }
     NAV.routing = false;
     paintBanner(); renderAhead(true);
+  }
+  /** No signal: the way back from the map tiles already on the phone (a downloaded route's corridor, and every tile the
+   *  map has shown), over their roads and paths, one-ways and the no-go where you left the route included. */
+  async function offlineWays(fix, options, avoid, name) {
+    const none = options.map(option => ({ detour: null, option }));
+    try {
+      const tmpl = await tileTemplate();
+      if (!tmpl) return none;
+      const cache = await caches.open(TILES), road = [], named = [];
+      for (const t of C.tilesAround([fix, ...options], 400)) {
+        const res = await cache.match(tmpl.replace("{z}", t.z).replace("{x}", t.x).replace("{y}", t.y));
+        if (!res) continue;
+        let buf = new Uint8Array(await res.arrayBuffer());
+        if (buf[0] === 0x1f && buf[1] === 0x8b) buf = new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+        const got = C.mvtLines(buf, t.z, t.x, t.y);
+        road.push(...got.transportation); named.push(...got.transportation_name);
+      }
+      if (!road.length) return none;
+      const g = C.roadGraph(C.nameRoads(road, named), avoid.map(a => ({ lat: a.lat, lon: a.lon, r: a.r || 40 })));
+      const ways = C.shortestWays(g, fix, options, Math.max(8000, 4 * Math.max(...options.map(o => hav(fix, o)))));
+      return options.map((option, i) => ({ detour: ways[i] && ways[i].points.length > 1 ? C.fromWay(ways[i], name) : null, option }));
+    } catch { return none; }
+  }
+  /** The vector tiles' URL pattern, from the style and TileJSON saved with the offline map. */
+  async function tileTemplate() {
+    if (!("caches" in window)) return null;
+    const cache = await caches.open(TILES), sres = await cache.match(STYLE_URL);
+    if (!sres) return null;
+    const style = await sres.json(), src = Object.values(style.sources || {}).find(s => /** @type {any} */ (s).type === "vector" && /** @type {any} */ (s).url);
+    const tres = src && await cache.match(/** @type {any} */ (src).url);
+    if (!tres) return null;
+    const tj = await tres.json();
+    return tj.tiles && tj.tiles[0] || null;
   }
   function paintBanner() {
     paintBannerInner();
@@ -650,14 +817,14 @@
       b.classList.add("alert");
       $("nb-arrow").textContent = "↑"; $("nb-arrow").style.transform = `rotate(${(back.brg - (live.heading ?? 0) + 360) % 360}deg)`;
       $("nb-dist").textContent = nearTxt(back.dist); $("nb-what").textContent = ` Off course · the route is ${compass(back.brg)}`;
-      act.textContent = "Reroute"; act.hidden = !navigator.onLine; act.dataset.kind = "rejoin";
+      act.textContent = "Reroute"; act.hidden = false; act.dataset.kind = "rejoin";
       b.hidden = false; return;
     }
     $("nb-arrow").style.transform = "";
     if (!NAV.detour && NAV.st.wrongWay) { b.classList.add("alert"); $("nb-arrow").textContent = "⮌"; $("nb-dist").textContent = ""; $("nb-what").textContent = "Wrong way — turn around"; b.hidden = false; return; }
     if (!NAV.detour && NAV.st.along < 50 && live.lastFix && hav(live.lastFix, NAV.route.pts[0]) > 250 && !NAV.route.loop) {
       $("nb-arrow").textContent = "⚑"; $("nb-dist").textContent = nearTxt(hav(live.lastFix, NAV.route.pts[0])); $("nb-what").textContent = " to the start of the route";
-      act.textContent = "Directions"; act.hidden = !navigator.onLine; act.dataset.kind = "start"; b.hidden = false; return;
+      act.textContent = "Directions"; act.hidden = false; act.dataset.kind = "start"; b.hidden = false; return;
     }
     const t = st.turn, far = Math.max(400, 40 * (speedNow() || 5));
     if (t && (page === "map" || page === "ahead" || st.toTurn <= far)) {
@@ -749,13 +916,13 @@
       if (upto.length > 1) set("done", line(upto));
     }
     if (samples.length > 1 && now - MAP.lastTrail > 5000) MAP.lastTrail = now, set("trail", line(samples.filter((s, i) => s[1] != null && (i % 3 === 0 || i === samples.length - 1)).map(s => ({ lat: s[1], lon: s[2] }))));
-    if (!MAP.follow || (!force && now - MAP.lastCam < 900)) return;
+    if (!MAP.follow || (!force && now - MAP.lastCam < (saver.on ? 5000 : 900))) return;
     MAP.lastCam = now;
     const st = NAV.detour ? NAV.detour.st : NAV.st;
     const near = st && st.toTurn != null && st.toTurn < 250 ? 0.6 : 0;
     const zoom = (v > 11 ? 14.6 : v > 7 ? 15.2 : v > 3 ? 15.8 : 16.2) + near + MAP.zoom;
     const h = $("map").clientHeight || 400;
-    MAP.map.easeTo({ center: [fix.lon, fix.lat], bearing: P.headingUp && live.heading != null && v > 1.5 ? live.heading : P.headingUp ? MAP.map.getBearing() : 0, zoom, duration: force ? 0 : 900, padding: { top: P.headingUp ? h * 0.35 : 0, bottom: 0, left: 0, right: 0 } });
+    MAP.map.easeTo({ center: [fix.lon, fix.lat], bearing: P.headingUp && live.heading != null && v > 1.5 ? live.heading : P.headingUp ? MAP.map.getBearing() : 0, zoom, duration: force || saver.on ? 0 : 900, padding: { top: P.headingUp ? h * 0.35 : 0, bottom: 0, left: 0, right: 0 } });
   }
   /** Street names for the turns ahead from the map's own tiles (OpenMapTiles' transportation_name layer). */
   function nameTurns() {
@@ -866,7 +1033,7 @@
   }
   function renderAhead(force = false) {
     const r = NAV.route;
-    if (!r || (!force && (curPage() !== "ahead" || Date.now() - aheadAt < 2000))) return;
+    if (!r || (!force && (curPage() !== "ahead" || Date.now() - aheadAt < (saver.on ? 10000 : 2000)))) return;
     aheadAt = Date.now();
     const st = NAV.st || NAV.nav.status(), at = st.along, v = avgSpeed();
     $("a-done").innerHTML = `${distTxt(at)}<small>${unitD()}</small>`; $("a-pct").textContent = `${Math.round(st.frac * 100)}% of ${distTxt(r.total)} ${unitD()}`;
@@ -938,9 +1105,9 @@
     samples = samples.slice(0, S.chunk * 60);
   }
   function record(now) {
-    const fix = live.lastFix && now - live.lastFix.t < 5000 ? live.lastFix : null;
+    const fix = !TR.virtual && live.lastFix && now - live.lastFix.t < 5000 ? live.lastFix : null;   // a ride along a route on the trainer is indoors: no track
     let ele = null;
-    if (NAV.route && NAV.route.hasEle && NAV.st && !NAV.st.offCourse && fix) ele = C.eleAt(NAV.route, NAV.st.along);
+    if (NAV.route && NAV.route.hasEle && NAV.st && !NAV.st.offCourse && (fix || TR.virtual)) ele = C.eleAt(NAV.route, NAV.st.along);
     else if (live.alt != null && fix) ele = live.alt;
     const hr = live.hr && now - live.hrAt < 5000 ? live.hr : null, cad = live.cad != null && now - live.cadAt < 4000 ? live.cad : null, pw = now - live.powerAt < 4000 ? live.power : null;
     const spd = speedNow(now);
@@ -964,6 +1131,45 @@
     $("lap-rows").innerHTML = per.length ? per.map((l, i) => `<tr><td>${per.length - i}</td><td class="num">${clock(l.time)}</td><td class="num">${distTxt(l.dist)}</td><td class="num">${l.time > 0 ? speedTxt(l.dist / l.time) : "—"}</td><td class="num">${l.hr ? Math.round(l.hr) : "—"}</td><td class="num">${l.pw ? Math.round(l.pw) : "—"}</td></tr>`).join("") : `<tr><td colspan="6" class="none">No laps yet: tap Lap, or let each workout step make one.</td></tr>`;
   }
 
+  // ── battery: this ride's drain → how long the phone lasts; a saver mode when that's shorter than the ride left ─────
+  //    Saver: true black, map and camera moved every 5 s without animation, the screens redrawn every 3 s (the timer,
+  //    the recording, the cues and the trainer keep their second-by-second pace)
+  const batt = { log: [], fc: null, at: 0 };
+  const saver = { on: false, auto: false, declined: false };
+  function setSaver(on) {
+    if (saver.on === on) return;
+    saver.on = on;
+    document.body.classList.toggle("saver", on);
+    const was = document.documentElement.dataset.theme;
+    document.documentElement.dataset.theme = on ? "dark" : ls.get("fitness-theme") || "dark";
+    if (was !== document.documentElement.dataset.theme) { restyleMap(); drawCrumb(); }
+  }
+  /** Minutes of riding left: the route at your average speed, else the session's steps; null for a free ride. */
+  const rideLeftMin = () => {
+    const A = active(), st = A ? (NAV.detour ? NAV.detour.st : NAV.st) : null, v = avgSpeed();
+    if (st && st.left > 0 && v > 1 && !TR.virtual) return st.left / v / 60;
+    const list = steps();
+    if (list.length && S.step < list.length) return Math.max(0, list[S.step].min - (S.elapsed - S.stepStart) / 60) + list.slice(S.step + 1).reduce((a, s) => a + s.min, 0);
+    return null;
+  };
+  const hm = h => (h >= 1 ? `${Math.floor(h)} h ${String(Math.round(h % 1 * 60)).padStart(2, "0")} m` : `${Math.round(h * 60)} min`);
+  const hmSay = h => (h >= 1 ? `${Math.floor(h)} hour${Math.floor(h) === 1 ? "" : "s"}${Math.round(h % 1 * 60) ? ` ${Math.round(h % 1 * 60)} minutes` : ""}` : `${Math.round(h * 60)} minutes`);
+  function batteryCheck(now) {
+    const b = live.battery;
+    if (!b) return;
+    const lastRow = batt.log[batt.log.length - 1];
+    if (!lastRow || lastRow[1] !== b.level || lastRow[2] !== b.charging) { batt.log.push([now, b.level, b.charging]); if (batt.log.length > 400) batt.log.shift(); }
+    if (now - batt.at < 30000) return;
+    batt.at = now;
+    batt.fc = b.charging ? null : C.batteryForecast(batt.log, now);
+    if (P.saver !== "auto" || !S.running || saver.on || saver.declined || !batt.fc) return;
+    const need = rideLeftMin();
+    if (need == null || batt.fc.hours * 60 >= need + 20) return;
+    saver.auto = true;
+    auto(`Battery lasts about ${hmSay(batt.fc.hours)} at this rate and the ride needs ${hmSay(need / 60)}: battery saver is on. Turning the screen brightness down helps most.`,
+      () => setSaver(true), () => { setSaver(false); saver.auto = false; saver.declined = true; });
+  }
+
   // ── tailoring the workout as you ride ─────────────────────────────────────────────────────────────────────
   const tgt = s => { const k = C.isWork(s) ? S.intensity : 1; return s.lo > 0 ? [bpm(s.lo * k), bpm(s.hi * k)] : [0, bpm(s.hi)]; };
   const pwTgt = s => { if (!(P.ftp > 0)) return null; const k = C.isWork(s) ? S.intensity : 1; return s.lo > 0 ? [Math.round(P.ftp * C.ftpPct(s.lo * k) / 100), Math.round(P.ftp * C.ftpPct(s.hi * k) / 100)] : [0, Math.round(P.ftp * C.ftpPct(s.hi) / 100)]; };
@@ -974,10 +1180,10 @@
   const replan = (next, why) => { S.plan = next; if (S.step >= S.plan.length) S.step = S.plan.length; save(); render(); if (why) { note.hidden = false; note.textContent = why; } };
   // ── the app decides, you ride: every change it makes on its own is said, shown, and can be undone for 30 s ──────
   let undo = null, undoTimer = 0;
-  const auto = (text, change) => {
+  const auto = (text, change, revert = null) => {
     const before = { plan: S.plan.map(x => ({ ...x })), intensity: S.intensity, step: S.step, stepStart: S.stepStart };
     change();
-    undo = before;
+    undo = revert ? { revert } : before;
     $("suggest-text").textContent = text; $("suggest").hidden = false;
     say(text, false); beep(700, 120, 2); buzz([120, 60, 120]);
     clearTimeout(undoTimer);
@@ -985,7 +1191,7 @@
     save(); render();
   };
   $("suggest-yes").addEventListener("click", () => {
-    if (undo) { Object.assign(S, undo); undo = null; say("Changed back.", false); save(); render(); }
+    if (undo) { if (undo.revert) undo.revert(); else Object.assign(S, undo); undo = null; say("Changed back.", false); save(); render(); }
     $("suggest").hidden = true;
   });
   $("suggest-no").addEventListener("click", () => { $("suggest").hidden = true; undo = null; });
@@ -1079,6 +1285,7 @@
   function tick() {
     const now = Date.now(), dt = last ? Math.min(5, (now - last) / 1000) : 1;
     last = now;
+    driveTrainer(now);
     if (S.running && !S.paused) {
       if (now - wx.at > WX_EVERY) refreshWx();   // fresh conditions every half hour on a long ride
       if (live.lastFix && now - (NAV.lastAt || 0) > 1500) onFix(live.lastFix);   // a quiet GPS (standing still, under trees): keep judging the last fix
@@ -1148,8 +1355,10 @@
       }
       if (Math.round(S.elapsed) % 5 === 0) save();
     }
-    render();
+    batteryCheck(now);
+    if (!saver.on || now - drawnAt >= 3000) render();
   }
+  let drawnAt = 0;
 
   /** The target gauge: the step's range as a band in its zone's color, heart rate as the marker, 20 bpm either side. */
   function paintGauge(s, hr = null, lo = 0, hi = 0) {
@@ -1193,6 +1402,7 @@
   // ── drawing ─────────────────────────────────────────────────────────────────────────────────────────────
   function render() {
     const now = Date.now();
+    drawnAt = now;
     const hrLive = live.hr && now - live.hrAt < 5000 ? live.hr : null;
     $("hr").textContent = hrLive ?? "—";
     $("hr").classList.toggle("idle", !hrLive);
@@ -1213,10 +1423,14 @@
       const [lo, hi] = tgt(s), pt = pwTgt(s), p10 = pw10();
       $("step-name").textContent = `${s.name}${list.length > 1 ? `  ·  ${S.step + 1}/${list.length}` : ""}`;
       $("step-time").textContent = S.held ? `+${clock(S.held)}` : clock(left);
-      $("step-target").innerHTML = `${lo > 0 ? `Target <b>${lo}–${hi}</b> bpm` : `Target <b>under ${hi}</b> bpm`}${pt ? ` · <b>${pt[0] ? `${pt[0]}–${pt[1]}` : `&lt;${pt[1]}`}</b> W` : ""}`;
+      const erg = trainerLine();
+      lineOf($("step-target"), ["Target ", lo > 0 ? `${lo}–${hi}` : `under ${hi}`, " bpm", ...(pt && !erg ? [" · ", pt[0] ? `${pt[0]}–${pt[1]}` : `<${pt[1]}`, " W"] : []),
+        ...(erg ? [` · ${erg[0]} `, erg[1], ` ${erg[2]}`] : [])]);
       $("step-bar").style.width = `${Math.min(100, elapsedInStep / (s.min * 60) * 100)}%`;
       const ns = NAV.st;
-      $("step-cue").textContent = S.held && ns && ns.toClimb != null ? `Holding for the climb: the effort starts at its foot, ${nearTxt(ns.toClimb)} ahead.` : nb(s.cue);
+      const lim = TR.mode === "erg" && now - TR.limitAt < 5000 ? TR.limit : null;
+      $("step-cue").textContent = lim === "slow" ? `Shift to a harder gear: the trainer can't hold ${TR.watts} W at this wheel speed.` : lim === "fast" ? `Shift to an easier gear for ${TR.watts} W.`
+        : S.held && ns && ns.toClimb != null ? `Holding for the climb: the effort starts at its foot, ${nearTxt(ns.toClimb)} ahead.` : nb(s.cue);
       paintGauge(s, hrLive, lo, hi);
       const n = list[S.step + 1];
       $("step-next").textContent = n ? `Next: ${n.name} · ${n.min >= 1 ? `${Math.round(n.min)} min` : `${Math.round(n.min * 60)} s`}` : "Last step";
@@ -1246,7 +1460,9 @@
       paintGauge(null);
       $("step-name").textContent = S.step >= list.length && list.length ? "Workout done" : planned ? planned.title : "Free ride";
       $("step-time").textContent = clock(S.elapsed);
-      $("step-target").textContent = list.length ? "Ride easy home" : NAV.route ? `${NAV.route.name}: follow the route` : "No steps — just ride";
+      const tl = trainerLine();
+      if (tl) lineOf($("step-target"), [`${NAV.route ? NAV.route.name : "Trainer"} · ${tl[0]} `, tl[1], tl[2]]);
+      else $("step-target").textContent = list.length ? "Ride easy home" : NAV.route ? `${NAV.route.name}: follow the route` : "No steps — just ride";
       $("step-cue").textContent = ""; $("step-next").textContent = ""; $("step-bar").style.width = "0";
     }
 
@@ -1266,6 +1482,7 @@
     $("sb-clock").textContent = hhmm(now);
     paintBrief();
     $("sb-batt").textContent = live.battery ? `${Math.round(live.battery.level * 100)}%` : "";
+    $("sb-batt").classList.toggle("low", !!(batt.fc && (rideLeftMin() ?? 0) > batt.fc.hours * 60));
     const page = curPage();
     if (page === "data") paintData(now, spd);
     if (page === "laps") { $("lap-no").textContent = String(S.laps.length + 1); $("lap-time").textContent = clock(S.elapsed - S.lapElapsed); $("lap-sub").textContent = `${distTxt(S.dist - S.lapDist)} ${unitD()}`; }
@@ -1280,6 +1497,7 @@
     /** @type {HTMLButtonElement} */ ($("btn-end")).disabled = !S.running;
     /** @type {HTMLButtonElement} */ ($("btn-lap")).disabled = !S.running;
     /** @type {HTMLSelectElement} */ (daySel).disabled = S.running;
+    if (TR.calibrate && !S.running && !note.dataset.cal) { note.dataset.cal = "1"; note.textContent = "The trainer asks for a calibration: run its spin-down in the Tacx Training app (tyre pumped, roller pressed the same as always), then connect it here again."; }
     note.hidden = S.running && !S.paused;   // setup help is for before the ride, not on the bars
     document.body.classList.toggle("riding", S.running && !S.paused);
   }
@@ -1308,6 +1526,8 @@
     const e = NAV.route && NAV.st && !NAV.st.offCourse && NAV.route.hasEle ? NAV.st.ele : live.alt;
     $("d-ele").innerHTML = e == null ? "—" : `${eleTxt(e)}<small>${unitE()}</small>`;
     $("d-batt").textContent = live.battery ? `${Math.round(live.battery.level * 100)}%${live.battery.charging ? " ⚡" : ""}` : "—";
+    const need = rideLeftMin();
+    $("d-batt-left").textContent = live.battery && live.battery.charging ? "charging" : batt.fc ? `lasts ${hm(batt.fc.hours)}${need != null ? (batt.fc.hours * 60 < need ? " · short of the ride" : " · enough") : ""}${saver.on ? " · saver" : ""}` : saver.on ? "saver on" : "";
   }
 
   // ── screens: tabs, and a swipe across the screen to change them ───────────────────────────────────────────
@@ -1358,6 +1578,8 @@
       if (st.length) { const s = st[0]; say(`${planned && planned.eased ? `${planned.eased}. ` : ""}${planned ? planned.title : "Workout"}. First, ${s.name}, ${Math.round(s.min)} minutes.`); }
       else if (NAV.route) say(`${NAV.route.name}. ${nearSay(NAV.route.total)}${NAV.route.hasEle ? `, ${eleTxt(NAV.route.gain)} ${P.km ? "metres" : "feet"} of climbing` : ""}.`);
       if (NAV.nav) NAV.nav.seek(0);
+      saver.declined = false; saver.auto = false; batt.log = []; batt.fc = null;
+      setSaver(P.saver === "on");
       beep(880, 200, 2);
       wake();
     } else {
@@ -1376,6 +1598,7 @@
     const now = Date.now();
     lap(0, now);
     S.running = false; S.paused = false; S.autoPaused = false;
+    releaseTrainer();
     if (lock) lock.release().catch(() => {});
     await flush(true);
     const ride = await saveRide(now);
@@ -1383,6 +1606,7 @@
     ls.set("fitness-ride-state", null);
     S.step = 0; S.stepStart = 0;
     showRide(ride, true);
+    if (ride.elapsed >= 120) queueRide(ride.id);
     render();
   });
   daySel.addEventListener("change", pickDay);
@@ -1412,7 +1636,7 @@
     const name = `${planned ? planned.title : NAV.route ? NAV.route.name : "Ride"} · ${new Date(S.wallStart || now).toLocaleDateString([], { month: "short", day: "numeric" })}`;
     const meta = { id: S.rideId || uid(), name, start: S.wallStart || now - S.elapsed * 1000, end: now, elapsed: S.elapsed, moving: S.moving, dist: S.dist, ascent: S.ascent, maxSpeed: S.maxSpeed,
       avgHr: S.hrSecs ? S.hrSum / S.hrSecs : null, maxHr: S.hrMax || null, avgCad: S.cadSecs ? S.cadSum / S.cadSecs : null, avgPower: S.pwSecs ? S.pwSum / S.pwSecs : null, tss, planned: planned && planned.load ? Math.round(+planned.load) : null,
-      zones: S.zones, laps: S.laps, pauses: S.pauses, route: NAV.route ? NAV.route.name : null, check, indoor: !samples.some(s => s[1] != null), note: rideNote(tss) };
+      zones: S.zones, laps: S.laps, pauses: S.pauses, route: NAV.route ? NAV.route.name : null, check, indoor: !samples.some(s => s[1] != null), trainer: TR.used, note: rideNote(tss) };
     try {
       await DB.put("tracks", { id: meta.id, samples });
       await DB.put("rides", meta);
@@ -1445,8 +1669,10 @@
       node("p", "note mt-2", zones.map((z, i) => `Z${i + 1} ${clock(z)}`).join(" · ")),
       laps.length > 1 ? node("p", "note", `${laps.length} laps · ${laps.slice(0, 12).map((l, i) => `${i + 1}: ${clock(n(l.time))}`).join(" · ")}${laps.length > 12 ? " …" : ""}`) : null,
       v ? node("p", "note", `Commute check: HR ${n(v.diff) >= 0 ? "+" : "−"}${Math.abs(Math.round(n(v.diff)))} bpm against your usual for the speed (${v.verdict}).`) : null,
-      node("p", "note", `${justNow ? "Saved on this phone. " : ""}FIT goes straight into Garmin Connect (Import data), Strava (Upload) or TrainingPeaks. The watch's own file is still the official record, so upload this one only for rides the watch didn't record.`)].filter(Boolean));
+      node("p", "note", `${justNow ? "Saved on this phone. " : ""}FIT goes straight into Garmin Connect (Import data), Strava (Upload) or TrainingPeaks. The watch's own file is still the official record, so upload this one only for rides the watch didn't record.`),
+      Object.assign(node("p", "note"), { id: "sum-sync" })].filter(Boolean));
     $("sum-exports").hidden = false;
+    paintSync();
     $("summary").showModal();
   }
   async function rideSamples(r) { return r._samples || ((await DB.get("tracks", r.id).catch(() => null)) || { samples: [] }).samples; }
@@ -1488,6 +1714,73 @@
   });
   $("btn-rides").addEventListener("click", () => { paintRides(); $("rides").showModal(); });
 
+  // ── to the training sync: a ride rides a "service" run of the sync's workflow (its one text input carries the ride,
+  //    deflated), and the sync's status.json lists the rides it has, so one lost in GitHub's queue is sent again ──
+  const cloud = () => { try { const x = JSON.parse(ls.get("fitness-cloud") || "null"); return x && x.repo && x.token ? x : null; } catch { return null; } };
+  const outbox = () => jget("fitness-ride-outbox", []).filter(x => x && typeof x.id === "string");
+  const setOutbox = list => ls.set("fitness-ride-outbox", list.length ? JSON.stringify(list.slice(-20)) : null);
+  let sending = false, syncWhy = "";
+  async function packRide(r, rows) {
+    for (const step of [5, 10, 20, 30, 60]) {
+      const z = new Uint8Array(await new Response(new Blob([JSON.stringify(C.rideDigest(r, rows, step))]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+      let s = "";
+      for (let i = 0; i < z.length; i += 0x8000) s += String.fromCharCode(...z.subarray(i, i + 0x8000));
+      const code = `ride:${btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
+      if (code.length < 60000) return code;   // GitHub takes 65,535 characters of inputs
+    }
+    return null;
+  }
+  const REPO = /^([A-Za-z0-9-]{1,39})\/([\w.-]{1,100})$/;   // owner/name, and nothing else reaches the URL
+  const ghApi = (x, path, init = {}) => {
+    const m = REPO.exec(String(x.repo || ""));
+    if (!m) return Promise.reject(new Error("not a repository name"));
+    return fetch(`https://api.github.com/repos/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}${path}`, { cache: "no-store", ...init,
+    headers: { Authorization: `Bearer ${x.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", ...(init.body ? { "Content-Type": "application/json" } : {}), ...(init.headers || {}) } });
+  };
+  function queueRide(id) { if (!outbox().some(x => x.id === id)) setOutbox([...outbox(), { id, sent: 0, tries: 0 }]); sendRides(); }
+  async function sendRides() {
+    const x = cloud();
+    if (!x || !P.upload || sending || !outbox().length) { paintSync(); return; }
+    if (!navigator.onLine) { syncWhy = "Waiting for a signal to send it to the training sync."; paintSync(); return; }
+    sending = true;
+    try {
+      // what the sync already has (status.json on its state branch)
+      const st = await ghApi(x, "/contents/status.json?ref=state", { headers: { Accept: "application/vnd.github.raw+json" } }).then(r => (r.ok ? r.json() : null)).catch(() => null);
+      const have = new Set(st && Array.isArray(st.rides) ? st.rides : []);
+      for (const item of outbox()) {
+        const r = await DB.get("rides", item.id).catch(() => null);
+        if (!r || have.has(item.id)) {
+          setOutbox(outbox().filter(o => o.id !== item.id));
+          if (r && !r.synced) { r.synced = Date.now(); await DB.put("rides", r).catch(() => {}); }
+          continue;
+        }
+        if (item.sent && Date.now() - item.sent < 40 * 60e3) continue;   // in GitHub's queue: give it time
+        if (item.tries >= 5) { setOutbox(outbox().filter(o => o.id !== item.id)); syncWhy = "The training sync never took this ride: export the FIT and upload it by hand."; continue; }
+        const code = await packRide(r, await rideSamples(r));
+        if (!code) { setOutbox(outbox().filter(o => o.id !== item.id)); continue; }
+        const res = await ghApi(x, "/actions/workflows/training.yml/dispatches", { method: "POST", body: JSON.stringify({ ref: x.branch || "main", inputs: { action: "service", code } }) });
+        if (!res.ok) { syncWhy = res.status === 401 ? "GitHub didn't accept the app's token: connect the sync again on the dashboard." : res.status === 403 ? "The app's token can't start the sync (it needs Actions: read and write)." : `GitHub answered ${res.status}; it will try again.`; break; }
+        setOutbox(outbox().map(o => (o.id === item.id ? { ...o, sent: Date.now(), tries: o.tries + 1 } : o)));
+        r.sent = Date.now(); await DB.put("rides", r).catch(() => {});
+        syncWhy = "";
+      }
+    } catch { syncWhy = "Couldn't reach GitHub: it will try again."; } finally { sending = false; }
+    paintSync();
+  }
+  /** The summary's line about the sync. */
+  function paintSync() {
+    const el = $("sum-sync");
+    if (!el || !shown) return;
+    const r = shown, queued = outbox().some(o => o.id === r.id);
+    el.textContent = !cloud() ? "Connect the training sync on the dashboard and rides go to it by themselves."
+      : !P.upload ? "Sending rides to the training sync is off (settings)."
+      : r.synced ? "In the training sync: it counts in the plan, and goes to Garmin Connect if the watch didn't record it."
+      : syncWhy && queued ? syncWhy
+      : queued || r.sent ? "Sent to the training sync: it counts in the plan from its next run." : "";
+  }
+  window.addEventListener("online", sendRides);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") sendRides(); });
+
   // ── settings ────────────────────────────────────────────────────────────────────────────────────────────
   const dlg = $("settings");
   const inp = id => /** @type {HTMLInputElement} */ ($(id));
@@ -1496,6 +1789,8 @@
     inp("s-ftp").value = P.ftp || 0; inp("s-autolap").value = P.autoLap || 0;
     inp("s-voice").checked = P.voice; inp("s-autopause").checked = P.autoPause; inp("s-steplap").checked = P.stepLap; inp("s-climbs").checked = P.climbs; inp("s-reroute").checked = P.reroute;
     /** @type {HTMLSelectElement} */ ($("s-profile")).value = P.profile;
+    /** @type {HTMLSelectElement} */ ($("s-trainer")).value = P.trainer; /** @type {HTMLSelectElement} */ ($("s-saver")).value = P.saver;
+    inp("s-weight").value = P.weight; inp("s-upload").checked = P.upload;
     paintUnits();
     dlg.showModal();
   });
@@ -1504,7 +1799,10 @@
     const num = (id, d) => { const v = parseFloat(inp(id).value); return Number.isFinite(v) ? v : d; };
     Object.assign(P, { lthr: num("s-lthr", P.lthr), max: num("s-max", P.max), rest: num("s-rest", P.rest), wheel: num("s-wheel", P.wheel), fuel: num("s-fuel", P.fuel),
       ftp: num("s-ftp", P.ftp), autoLap: num("s-autolap", P.autoLap), voice: inp("s-voice").checked, autoPause: inp("s-autopause").checked, stepLap: inp("s-steplap").checked,
-      climbs: inp("s-climbs").checked, reroute: inp("s-reroute").checked, profile: /** @type {HTMLSelectElement} */ ($("s-profile")).value });
+      climbs: inp("s-climbs").checked, reroute: inp("s-reroute").checked, profile: /** @type {HTMLSelectElement} */ ($("s-profile")).value,
+      trainer: /** @type {HTMLSelectElement} */ ($("s-trainer")).value, saver: /** @type {HTMLSelectElement} */ ($("s-saver")).value, weight: num("s-weight", P.weight), upload: inp("s-upload").checked });
+    if (TR.kind === "Tacx FE-C") send(C.fecUser(P.weight, 9, P.wheel));
+    setSaver(P.saver === "on" || (P.saver === "auto" && saver.auto));
     savePrefs();
     render();
   });
@@ -1523,6 +1821,17 @@
   themeBtns.forEach(b => b.addEventListener("click", () => { document.documentElement.dataset.theme = /** @type {HTMLElement} */ (b).dataset.themePick; ls.set("fitness-theme", /** @type {HTMLElement} */ (b).dataset.themePick); paintTheme(); drawCrumb(); renderAhead(true); restyleMap(); }));
   paintTheme();
 
+  // the screen's own height, measured: the footer's Start / Lap / Next / End must never sit under the system bars
+  const fitScreen = () => {
+    const h = Math.round(window.visualViewport ? Math.min(window.visualViewport.height, window.innerHeight) : window.innerHeight);
+    if (h > 200) document.body.style.setProperty("--app-h", `${h}px`);
+  };
+  fitScreen();
+  window.addEventListener("resize", fitScreen);
+  window.addEventListener("orientationchange", () => setTimeout(fitScreen, 300));
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", fitScreen);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(fitScreen, 100); });
+
   // installed-app offline: the same service worker as the dashboard (scope: this folder)
   if ("serviceWorker" in navigator && window.isSecureContext && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
 
@@ -1533,7 +1842,9 @@
   const lastRoute = ls.get("fitness-ride-route");
   if (lastRoute) await useRoute(lastRoute, false).catch(() => {});
   setInterval(tick, 1000);
+  setTimeout(sendRides, 3000);   // anything waiting from an earlier ride
   show(page);
   paintLaps();
-  /** @type {any} */ (window).__ride = { S, NAV, P, MAP, get rep() { return rep; }, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB };
+  /** @type {any} */ (window).__ride = { S, NAV, P, MAP, get rep() { return rep; }, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB,
+    TR, batt, saver, sendRides, outbox, reroute };
 })();
