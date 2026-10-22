@@ -43,9 +43,9 @@ function lockDown(page, policy = POLICY) {
 /** The two pages, filled in and locked down. */
 export function pages() {
   // function replacements: the sources contain `$` sequences String.replace would expand
-  const ride = lockDown(part("ride.html").replace("/*__STYLE__*/", () => part("style.css")).replace("/*__RIDE_STYLE__*/", () => part("ride.css"))
+  const ride = lockDown(part("ride.html").replace("/*__COMMON__*/", () => part("common.js")).replace("/*__STYLE__*/", () => part("style.css")).replace("/*__RIDE_STYLE__*/", () => part("ride.css"))
     .replace("/*__RIDE_CORE__*/", () => part("ride-core.js")).replace("/*__RIDE_APP__*/", () => part("ride.js")).replace("__RIDE_DATA__", ""));
-  const index = lockDown(part("index.html").replace("/*__STYLE__*/", () => part("style.css")).replace("/*__SHELL__*/", () => part("shell.js"))
+  const index = lockDown(part("index.html").replace("/*__COMMON__*/", () => part("common.js")).replace("/*__STYLE__*/", () => part("style.css")).replace("/*__SHELL__*/", () => part("shell.js"))
     .replace("/*__APP__*/", () => part("app.js")).replace("__DATA__", ""));
   return { ride, index };
 }

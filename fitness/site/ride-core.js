@@ -1118,7 +1118,10 @@ self.RideCore = (() => {
     const o = { mass, ...(SURFACE[surface] || SURFACE.gravel) }, air = v + head, th = Math.atan(grade);
     const now = (o.mass * GRAV * (o.crr * Math.cos(th) + Math.sin(th)) * v + 0.6 * o.cda * air * Math.abs(air) * v) / 0.97;
     const calm = powerFor(v, grade, o);
-    return { drag: (air * Math.abs(air)) / (v * v) - 1, watts: now - calm, vCalm: now > 5 ? speedFor(now, grade, o) : v };
+    // the calm-air speed for the same effort; none when the model's speed limits bind (a fast descent past the
+    // surface's cap, a crawl), where comparing against it would put the wind on the wrong side of the ledger
+    const vc = now > 5 ? speedFor(now, grade, o) : v, cap = grade < -0.02 ? o.maxV : 25;
+    return { drag: (air * Math.abs(air)) / (v * v) - 1, watts: now - calm, vCalm: v >= cap || vc >= cap - 0.01 || vc <= 0.81 ? null : vc };
   }
   /** The forecast's 10 m wind at a rider's height on open ground (a log wind profile, ~0.65 at 1.2 m). */
   const RIDER_WIND = 0.65;

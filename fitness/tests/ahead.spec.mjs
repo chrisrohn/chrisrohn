@@ -225,4 +225,65 @@ test.describe("beyond the route", () => {
     expect(calls.router[calls.router.length - 1]).toContain(`${start.lon.toFixed(6)},${start.lat.toFixed(6)}`);
     await ctx.close();
   });
+
+  test("the road ahead holds through a stray fix, finds you afresh on a rebuild, keeps its bends, and says each climb once", async ({ browser }) => {
+    const ctx = await browser.newContext({ geolocation: geo(0, 0), permissions: ["geolocation"] });
+    const page = await ctx.newPage();
+    const problems = watch(page);
+    await world(page);
+    await page.goto(link());
+    await roads(page);
+    await page.evaluate(() => { const w = /** @type {any} */ (window); w.__said = []; speechSynthesis.speak = u => w.__said.push(u.text); });
+    await page.locator("#btn-start").click();
+    for (const n of [0, 20, 40]) await ride(page, ctx, 0, n);
+    await expect.poll(() => page.evaluate(() => !!(/** @type {any} */ (window).__ride.FREE.route)), { timeout: 15000 }).toBe(true);
+    // the road's own shape, not 100 m chords across it: the bend at 1500 m north is in the line
+    const bend = await page.evaluate(p => { const C = /** @type {any} */ (window).RideCore, r = /** @type {any} */ (window).__ride.FREE.route; return Math.min(...r.pts.map(q => C.hav(q, p))); }, at(5, 1500));
+    expect(bend).toBeLessThan(2);
+    // one wild fix 120 m off (trees, a tall building) doesn't throw the road away; 8 s off it does
+    await ride(page, ctx, 120, 300);
+    expect(await page.evaluate(() => !!(/** @type {any} */ (window).__ride.FREE.route))).toBe(true);
+    for (const n of [320, 340]) await ride(page, ctx, 0, n);
+    expect(await page.evaluate(() => /** @type {any} */ (window).__ride.FREE.offSince)).toBe(0);
+    // a rebuild 1 km on: you're found at the start of the new road, not 1 km up it
+    for (const n of [900, 1000]) await ride(page, ctx, 0, n);
+    const before = await page.evaluate(() => /** @type {any} */ (window).__ride.FREE.route);
+    await page.evaluate(() => { const F = /** @type {any} */ (window).__ride.FREE; F.tried = 0; F.at = 0; });
+    await ride(page, ctx, 0, 1010);
+    await expect.poll(() => page.evaluate(b => /** @type {any} */ (window).__ride.FREE.route !== b, before), { timeout: 15000 }).toBe(true);
+    expect(await page.evaluate(() => /** @type {any} */ (window).__ride.FREE.st.along)).toBeLessThan(100);
+    // a full height cache is emptied before it's asked, not after: the rebuild still has its heights
+    await page.evaluate(() => { const w = /** @type {any} */ (window).__ride; for (let i = 0; i < 20001; i++) w.heights.set(`x${i}`, 0); w.FREE.tried = 0; w.FREE.at = 0; });
+    const prev = await page.evaluate(() => /** @type {any} */ (window).__ride.FREE.route);
+    await ride(page, ctx, 0, 1020);
+    await expect.poll(() => page.evaluate(b => /** @type {any} */ (window).__ride.FREE.route !== b, prev), { timeout: 15000 }).toBe(true);
+    expect(await page.evaluate(() => /** @type {any} */ (window).__ride.FREE.why)).toBe("");
+    // the climb is called out once, rebuilds and all
+    for (const n of [1200, 1260, 1320]) await ride(page, ctx, 0, n);
+    await expect.poll(() => page.evaluate(() => /** @type {any} */ (window).__said.filter(t => /^Climb in/.test(t)).length)).toBe(1);
+    await page.evaluate(() => { const F = /** @type {any} */ (window).__ride.FREE; F.tried = 0; F.at = 0; });
+    const third = await page.evaluate(() => /** @type {any} */ (window).__ride.FREE.route);
+    await ride(page, ctx, 0, 1330);
+    await expect.poll(() => page.evaluate(b => /** @type {any} */ (window).__ride.FREE.route !== b, third), { timeout: 15000 }).toBe(true);
+    for (const n of [1340, 1360, 1380]) await ride(page, ctx, 0, n);
+    expect(await page.evaluate(() => /** @type {any} */ (window).__said.filter(t => /^Climb in/.test(t)).length)).toBe(1);
+    // and a turn off it, held: the road ahead goes, for the new one to be found
+    await page.evaluate(() => { /** @type {any} */ (window).__ride.FREE.offSince = Date.now() - 9000; });
+    await ride(page, ctx, 300, 1380, 90);
+    expect(await page.evaluate(() => /** @type {any} */ (window).__ride.FREE.route)).toBeNull();
+    expect(quiet(problems)).toEqual([]);
+    await ctx.close();
+  });
+
+  test("the wind's ledger stays out of it where the model's speed limits bind", async ({ page }) => {
+    await page.goto("/ride.html");
+    const r = await page.evaluate(() => {
+      const C = /** @type {any} */ (window).RideCore;
+      return { fastDown: C.windCost(15, 3, -0.06, { surface: "gravel" }), flat: C.windCost(8, 3, 0, { surface: "gravel" }), tail: C.windCost(8, -3, 0, { surface: "gravel" }) };
+    });
+    expect(r.fastDown.vCalm).toBeNull();                                                         // past gravel's 13 m/s descent cap
+    expect(r.fastDown.watts).toBeGreaterThan(0);                                                 // the headwind still costs watts
+    expect(r.flat.vCalm).toBeGreaterThan(8);                                                     // into it: slower than calm air
+    expect(r.tail.vCalm).toBeLessThan(8);                                                        // with it: faster
+  });
 });
