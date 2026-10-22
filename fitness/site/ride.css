@@ -46,7 +46,13 @@ body.ride .num, .steptime, .hrval, .rtile .v, .mapfields b, .navbanner .nbtext b
 .sbclock { display: none; }
 .sbbatt { color: #aaa69e; font-size: var(--fs-small); }
 .sbbatt:empty { display: none; }
+.sbbatt.low { color: var(--on-band); background: #c42b1b; padding: 0 4px; }
+/* battery saver: nothing moves that doesn't have to */
+body.saver *, body.saver *::before, body.saver *::after { transition: none !important; animation: none !important; }
 body.riding .sbclock { display: inline; margin-right: auto; }
+/* on the ride the bar keeps one line: the trainer's chip only when there is a trainer, and GPS out of the way when it drives */
+body.riding #btn-trainer:not(.on):not(.wait):not(.off) { display: none; }
+body.riding .rbar:has(#btn-trainer.on) #gps-chip { display: none; }
 .rbar .chip, .rbar span.chip { color: var(--on-band); border: 1.5px solid var(--on-band); background: transparent; }
 .rbar button.chip:hover { background: var(--on-band); color: var(--band); }
 .rbar .chip { min-height: var(--tap); padding: 0 var(--sp-2); }

@@ -154,3 +154,4 @@ fuel_every_min = 20       # eat/drink reminder interval; 0 turns it off
 garmin_tokens = "~/.garminconnect"
 history_days = 400        # first Garmin sync reaches back this far
 resync_days = 3           # recent days fetched again every sync (sleep and body battery settle late)
+upload_phone_rides = true # a ride only ride mode recorded goes up to Garmin Connect (6 h after it ends, if the watch has no copy)

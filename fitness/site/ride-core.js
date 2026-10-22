@@ -5,7 +5,9 @@
 //   sun         sunrise and sunset for the place and day (light left on the ride)
 //   workouts    the session tailored mid-ride: intensity, time left, one more rep, cut the set, quick workouts
 //   files       the ride out as FIT (Garmin Connect, Strava, TrainingPeaks), GPX and TCX
-//   tiles       the map tiles along a route, for offline use at the trailhead
+//   tiles       the map tiles along a route, for offline use at the trailhead, and the roads in them for rerouting offline
+//   trainers    FTMS and Tacx FE-C over Bluetooth: ERG watts, heart-rate ERG, the route's grade
+//   battery     how long the phone lasts at this ride's drain;  sync  the ride packed for the training sync
 self.RideCore = (() => {
   const R = 6371008.8, rad = x => x * Math.PI / 180, deg = x => x * 180 / Math.PI;
   const hav = (a, b) => { const dl = rad(b.lat - a.lat), dn = rad(b.lon - a.lon); const h = Math.sin(dl / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.min(1, Math.sqrt(h))); };
@@ -734,11 +736,403 @@ self.RideCore = (() => {
     return out;
   }
 
+  // ── smart trainers: FTMS (the Bluetooth standard) and Tacx's FE-C over Bluetooth (Flow Smart, Vortex, Bushido, Neo) ──
+  // The Tacx bridge takes ANT+ FE-C pages wrapped in ANT messages on its write characteristic and sends the trainer's
+  // pages back the same way; FTMS has its own control point and an Indoor Bike Data stream.
+  const FTMS = { service: 0x1826, data: 0x2ad2, control: 0x2ad9, status: 0x2ada };
+  const TACX = { service: "6e40fec1-b5a3-f393-e0a9-e50e24dcca9e", rx: "6e40fec2-b5a3-f393-e0a9-e50e24dcca9e", tx: "6e40fec3-b5a3-f393-e0a9-e50e24dcca9e" };
+  /** One FE-C page as an ANT acknowledged-data message on channel 5 (sync, length, type, channel, 8 bytes, XOR). */
+  function fecMsg(page) {
+    const m = new Uint8Array(13);
+    m[0] = 0xA4; m[1] = 9; m[2] = 0x4F; m[3] = 5; m.set(page.slice(0, 8), 4);
+    let x = 0; for (let i = 0; i < 12; i++) x ^= m[i];
+    m[12] = x;
+    return m;
+  }
+  const u16 = v => [v & 0xFF, (v >> 8) & 0xFF];
+  /** Page 49, target power (ERG): 0.25 W units. */
+  const fecPower = w => fecMsg([0x31, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, ...u16(Math.round(clamp(w, 0, 4000) * 4))]);
+  /** Page 51, track resistance (the route's grade): 0.01 % from −200 %, rolling resistance in 5×10⁻⁵ units. */
+  const fecGrade = (pct, crr = 0.004) => fecMsg([0x33, 0xFF, 0xFF, 0xFF, 0xFF, ...u16(Math.round((clamp(pct, -200, 200) + 200) * 100)), Math.round(clamp(crr, 0, 0.0127) / 5e-5)]);
+  /** Page 48, basic resistance: 0.5 % units of the brake's range. */
+  const fecLevel = pct => fecMsg([0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, Math.round(clamp(pct, 0, 100) * 2)]);
+  /** Page 55, user configuration: rider and bike weight and wheel size, which simulation needs to feel right. */
+  function fecUser(riderKg = 75, bikeKg = 9, wheelM = 2.096) {
+    const w = Math.round(clamp(riderKg, 10, 650) * 100), b = Math.round(clamp(bikeKg, 1, 50) / 0.05), d = Math.round(wheelM / Math.PI * 100);
+    return fecMsg([0x37, w & 0xFF, w >> 8, 0xFF, 0x0F | ((b & 0x0F) << 4), b >> 4, d, 0x00]);
+  }
+  /** A message from the Tacx bridge → the trainer's figures. Page 16 (general: speed, distance, HR) and page 25
+   *  (trainer: power, cadence, and whether it can hold the ERG target at this wheel speed).
+   *  @param {DataView} dv @returns {any} */
+  function parseFec(dv) {
+    if (dv.byteLength < 12 || dv.getUint8(0) !== 0xA4) return null;
+    const p = i => dv.getUint8(4 + i), page = p(0);
+    if (page === 0x10) {
+      const sp = p(4) | (p(5) << 8), hr = p(6);
+      return { page, speed: sp === 0xFFFF ? null : sp / 1000, dist: p(3), hr: hr > 0 && hr < 0xFF ? hr : null, elapsed: p(2) / 4 };
+    }
+    if (page === 0x19) {
+      const cad = p(2), w = p(5) | ((p(6) & 0x0F) << 8), flags = p(7) & 0x03;
+      return { page, cadence: cad === 0xFF ? null : cad, power: w === 0xFFF ? null : w, calibrate: (p(6) >> 4) & 0x03,
+        limit: flags === 1 ? "slow" : flags === 2 ? "fast" : flags === 3 ? "max" : null };
+    }
+    return { page };
+  }
+  /** FTMS Indoor Bike Data → speed (m/s), cadence, power, heart rate; the flags say which fields follow.
+   *  @param {DataView} dv */
+  function parseBikeData(dv) {
+    const f = dv.getUint16(0, true), out = { speed: null, cadence: null, power: null, hr: null };
+    let i = 2;
+    if (!(f & 1)) { out.speed = dv.getUint16(i, true) / 360; i += 2; }   // 0.01 km/h
+    if (f & 2) i += 2;
+    if (f & 4) { out.cadence = Math.round(dv.getUint16(i, true) / 2); i += 2; }
+    if (f & 8) i += 2;
+    if (f & 16) i += 3;
+    if (f & 32) i += 2;
+    if (f & 64) { out.power = dv.getInt16(i, true); i += 2; }
+    if (f & 128) i += 2;
+    if (f & 256) i += 5;
+    if (f & 512) out.hr = dv.getUint8(i);
+    return out;
+  }
+  /** FTMS control point requests: take control, start, ERG watts, simulation grade (with wind 0, Crr, CdA), level. */
+  const ftms = {
+    control: () => Uint8Array.of(0x00), start: () => Uint8Array.of(0x07),
+    power: w => Uint8Array.of(0x05, ...u16(Math.round(clamp(w, 0, 4000)))),
+    grade: (pct, crr = 0.004, cw = 0.51) => { const g = Math.round(clamp(pct, -40, 40) * 100) & 0xFFFF; return Uint8Array.of(0x11, 0, 0, g & 0xFF, g >> 8, Math.round(crr / 0.0001), Math.round(cw / 0.01)); },
+  };
+  /** ERG watts for a step from FTP: the middle of its power range (or 85 % of its cap), with the session's intensity. */
+  const ergWatts = (s, ftp, k = 1) => {
+    if (!s || !(ftp > 0)) return null;
+    const kk = isWork(s) ? k : 1, mid = s.lo > 0 ? (ftpPct(s.lo * kk) + ftpPct(s.hi * kk)) / 2 : ftpPct(s.hi) * 0.85;
+    return Math.round(ftp * mid / 100);
+  };
+  /** Heart-rate ERG, for a rider with no FTP: the trainer's watts are nudged every 20 s toward the middle of the step's
+   *  heart-rate range. Heart rate lags a minute or two, so the steps are small, and over the top end cuts quicker. */
+  function hrErg(w, hr, lo, hi, since) {
+    if (hr == null || since < 20) return w;
+    const mid = lo > 0 ? (lo + hi) / 2 : hi - 6, err = mid - hr;
+    let d = Math.abs(err) <= 2 ? 0 : clamp(err * 0.8, -10, 8);
+    if (hr > hi + 3) d = Math.min(d, -12);
+    return clamp(Math.round(w + d), 40, 500);
+  }
+  /** A first guess at the watts for a heart-rate band before the controller has learned it (% of LTHR → W). */
+  const ergGuess = pct => Math.round(pct < 81 ? 95 : pct < 90 ? 135 : pct < 94 ? 175 : pct < 100 ? 205 : 240);
+
+  // ── offline rerouting: the road network from the map tiles already on the phone (OpenMapTiles vector tiles) ─────
+  /** A protobuf reader, just enough for Mapbox Vector Tiles. */
+  function pbf(buf) {
+    const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    let pos = 0;
+    const varint = () => { let v = 0, m = 1, x; do { x = b[pos++]; v += (x & 0x7F) * m; m *= 128; } while (x & 0x80 && pos < b.length); return v; };
+    return {
+      get pos() { return pos; }, set pos(p) { pos = p; }, len: b.length, varint,
+      svarint: () => { const v = varint(); return v % 2 ? -(v + 1) / 2 : v / 2; },
+      bytes: () => { const n = varint(), s = b.subarray(pos, pos + n); pos += n; return s; },
+      fixed: n => { const s = b.subarray(pos, pos + n); pos += n; return s; },
+      skip: wt => { if (wt === 0) varint(); else if (wt === 1) pos += 8; else if (wt === 2) pos += varint(); else if (wt === 5) pos += 4; else throw new Error("bad tile"); },
+    };
+  }
+  const utf8 = new TextDecoder();
+  function mvtValue(bytes) {
+    const r = pbf(bytes);
+    let v = null;
+    while (r.pos < r.len) {
+      const tag = r.varint(), f = tag >> 3, wt = tag & 7;
+      if (f === 1) v = utf8.decode(r.bytes());
+      else if (f === 2) { const s = r.fixed(4); v = new DataView(s.buffer, s.byteOffset, 4).getFloat32(0, true); }
+      else if (f === 3) { const s = r.fixed(8); v = new DataView(s.buffer, s.byteOffset, 8).getFloat64(0, true); }
+      else if (f === 4 || f === 5) v = r.varint();
+      else if (f === 6) v = r.svarint();
+      else if (f === 7) v = !!r.varint();
+      else r.skip(wt);
+    }
+    return v;
+  }
+  /** A vector tile → its line features in the given layers, as lon/lat with their properties. Points along a line
+   *  that sit outside the tile (the buffer, where clipping cut it) are flagged so the graph can join tiles there.
+   *  @returns {Record<string, {props: any, coords: number[][], clipped: boolean[]}[]>} */
+  function mvtLines(buf, z, x, y, want = ["transportation", "transportation_name"]) {
+    const out = {};
+    for (const w of want) out[w] = [];
+    const r = pbf(buf);
+    while (r.pos < r.len) {
+      const tag = r.varint();
+      if (tag >> 3 !== 3 || (tag & 7) !== 2) { r.skip(tag & 7); continue; }
+      const L = pbf(r.bytes());
+      let name = "", extent = 4096;
+      const keys = [], vals = [], feats = [];
+      while (L.pos < L.len) {
+        const t = L.varint(), f = t >> 3;
+        if (f === 1) name = utf8.decode(L.bytes());
+        else if (f === 2) feats.push(L.bytes());
+        else if (f === 3) keys.push(utf8.decode(L.bytes()));
+        else if (f === 4) vals.push(mvtValue(L.bytes()));
+        else if (f === 5) extent = L.varint();
+        else L.skip(t & 7);
+      }
+      if (!want.includes(name)) continue;
+      const n = 2 ** z, toLL = (px, py) => {
+        const lon = (x + px / extent) / n * 360 - 180, yy = Math.PI * (1 - 2 * (y + py / extent) / n);
+        return [lon, deg(Math.atan(Math.sinh(yy)))];
+      };
+      for (const fb of feats) {
+        const F = pbf(fb);
+        let type = 0, tags = [], geom = [];
+        while (F.pos < F.len) {
+          const t = F.varint(), f = t >> 3;
+          if (f === 2 || f === 4) { const p = pbf(F.bytes()), arr = []; while (p.pos < p.len) arr.push(p.varint()); if (f === 2) tags = arr; else geom = arr; }
+          else if (f === 3) type = F.varint();
+          else F.skip(t & 7);
+        }
+        if (type !== 2) continue;
+        const props = {};
+        for (let i = 0; i + 1 < tags.length; i += 2) props[keys[tags[i]]] = vals[tags[i + 1]];
+        let cx = 0, cy = 0, i = 0, line = null;
+        const zz = v => (v % 2 ? -(v + 1) / 2 : v / 2);
+        while (i < geom.length) {
+          const c = geom[i++], id = c & 7, cnt = c >> 3;
+          if (id === 1 || id === 2) {
+            for (let k = 0; k < cnt; k++) {
+              cx += zz(geom[i++]); cy += zz(geom[i++]);
+              if (id === 1) { if (line && line.coords.length > 1) out[name].push(line); line = { props, coords: [], clipped: [] }; }
+              line.coords.push(toLL(cx, cy)); line.clipped.push(cx <= 0 || cy <= 0 || cx >= extent || cy >= extent);
+            }
+          } else if (id === 7) { /* ClosePath: lines have none */ }
+        }
+        if (line && line.coords.length > 1) out[name].push(line);
+      }
+    }
+    return out;
+  }
+  // What a bike pays per metre on each kind of way (OpenMapTiles classes); motorways are left out altogether.
+  const WAY_COST = { trunk: 2.6, primary: 1.6, secondary: 1.3, tertiary: 1.1, minor: 1, service: 1.2, track: 1.35, path: 1.15, busway: 1.2, raceway: 3 };
+  const PATH_COST = { cycleway: 0.85, footway: 1.5, pedestrian: 1.5, steps: 6, bridleway: 1.6, platform: 5 };
+  /** The rideable road network from decoded tiles: nodes where lines share a point (to ~1 m), plus joins where a
+   *  line ends on another (a tile edge, or a junction the tile's simplification dropped). One-ways are kept one way.
+   *  @param {{props: any, coords: number[][], clipped?: boolean[]}[]} lines @param {{lat: number, lon: number, r: number}[]} avoid */
+  function roadGraph(lines, avoid = []) {
+    const nodes = [], adj = [], key = new Map();
+    const lat0 = lines.length ? lines[0].coords[0][1] : 0, kx = R * rad(1) * Math.cos(rad(lat0)), ky = R * rad(1);
+    const node = c => {
+      const k = `${Math.round(c[0] * kx)}:${Math.round(c[1] * ky)}`;   // ~1 m cells
+      let i = key.get(k);
+      if (i === undefined) { i = nodes.length; key.set(k, i); nodes.push({ lon: c[0], lat: c[1], x: c[0] * kx, y: c[1] * ky, deg: 0 }); adj.push([]); }
+      return i;
+    };
+    const blocked = (a, b) => avoid.some(g => { const m = { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 }; return hav(a, g) < g.r || hav(b, g) < g.r || hav(m, g) < g.r; });
+    const segs = [];
+    const link = (a, b, cost, oneway, name) => {
+      if (a === b) return;
+      const A = nodes[a], B = nodes[b], len = Math.hypot(A.x - B.x, A.y - B.y);
+      if (blocked(A, B)) return;
+      if (oneway !== -1) adj[a].push({ to: b, len, cost: len * cost, name });
+      if (oneway !== 1) adj[b].push({ to: a, len, cost: len * cost, name });
+      A.deg++; B.deg++;
+      segs.push({ a, b, cost, oneway, name });
+    };
+    const ends = [];
+    for (const l of lines) {
+      const p = l.props || {}, cls = String(p.class || "").replace(/_construction$/, "");
+      if (p.bicycle === "no" || p.access === "no" || /construction/.test(String(p.class || ""))) continue;
+      let cost = cls === "path" ? PATH_COST[p.subclass] ?? WAY_COST.path : WAY_COST[cls];
+      if (cost == null) continue;
+      if (p.bicycle === "designated" || p.bicycle === "yes") cost = Math.min(cost, 0.95);
+      const oneway = p.oneway === 1 || p.oneway === -1 ? p.oneway : 0, name = p.name || p["name:latin"] || p.ref || "";
+      const ids = l.coords.map(node);
+      for (let i = 1; i < ids.length; i++) link(ids[i - 1], ids[i], cost, oneway, name);
+      ends.push(ids[0], ids[ids.length - 1]);
+    }
+    // a line that ends on (not at a point of) another line: split that segment there and join them
+    const cell = 40, grid = new Map(), gk = (x, y) => `${Math.floor(x / cell)}:${Math.floor(y / cell)}`;
+    segs.forEach((s, i) => {
+      const A = nodes[s.a], B = nodes[s.b];
+      for (let gx = Math.floor(Math.min(A.x, B.x) / cell); gx <= Math.floor(Math.max(A.x, B.x) / cell); gx++)
+        for (let gy = Math.floor(Math.min(A.y, B.y) / cell); gy <= Math.floor(Math.max(A.y, B.y) / cell); gy++) { const k = `${gx}:${gy}`; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); }
+    });
+    for (const e of new Set(ends)) {
+      const E = nodes[e];
+      if (E.deg !== 1) continue;
+      let best = null;
+      const near = new Set();
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const i of grid.get(gk(E.x + dx * cell, E.y + dy * cell)) || []) near.add(i);
+      for (const i of near) {
+        const s = segs[i];
+        if (s.a === e || s.b === e) continue;
+        const A = nodes[s.a], B = nodes[s.b], dx = B.x - A.x, dy = B.y - A.y, L = dx * dx + dy * dy;
+        const t = L > 0 ? clamp(((E.x - A.x) * dx + (E.y - A.y) * dy) / L, 0, 1) : 0, d = Math.hypot(A.x + t * dx - E.x, A.y + t * dy - E.y);
+        if (d < 2.5 && (!best || d < best.d)) best = { d, s, t };
+      }
+      if (!best) continue;
+      const { s, t } = best;
+      if (t < 0.02 || t > 0.98) { link(e, t < 0.5 ? s.a : s.b, s.cost, 0, s.name); continue; }
+      link(e, s.a, s.cost, s.oneway === 1 ? -1 : s.oneway === -1 ? 1 : 0, s.name);   // E→A runs against A→B
+      link(e, s.b, s.cost, s.oneway, s.name);
+    }
+    return { nodes, adj, kx, ky };
+  }
+  /** Street names onto the road lines (OpenMapTiles keeps them in a separate layer, transportation_name): each line
+   *  takes the name of the named line that runs along its middle, within 8 m. */
+  function nameRoads(lines, named) {
+    if (!named.length) return lines;
+    const lat0 = named[0].coords[0][1], kx = R * rad(1) * Math.cos(rad(lat0)), ky = R * rad(1), cell = 60, grid = new Map();
+    named.forEach((l, li) => {
+      const nm = l.props && (l.props.name || l.props["name:latin"] || l.props.ref);
+      if (!nm) return;
+      for (let i = 0; i + 1 < l.coords.length; i++) {
+        const a = l.coords[i], b = l.coords[i + 1];
+        for (let gx = Math.floor(Math.min(a[0], b[0]) * kx / cell); gx <= Math.floor(Math.max(a[0], b[0]) * kx / cell); gx++)
+          for (let gy = Math.floor(Math.min(a[1], b[1]) * ky / cell); gy <= Math.floor(Math.max(a[1], b[1]) * ky / cell); gy++) {
+            const k = `${gx}:${gy}`; if (!grid.has(k)) grid.set(k, []); grid.get(k).push([li, i, nm]);
+          }
+      }
+    });
+    return lines.map(l => {
+      if (l.props && l.props.name) return l;
+      const k = Math.floor(l.coords.length / 2), m = l.coords.length % 2 ? l.coords[k] : [(l.coords[k - 1][0] + l.coords[k][0]) / 2, (l.coords[k - 1][1] + l.coords[k][1]) / 2];
+      const x = m[0] * kx, y = m[1] * ky;
+      let best = null;
+      for (const [li, i, nm] of grid.get(`${Math.floor(x / cell)}:${Math.floor(y / cell)}`) || []) {
+        const a = named[li].coords[i], b = named[li].coords[i + 1], ax = a[0] * kx, ay = a[1] * ky, dx = b[0] * kx - ax, dy = b[1] * ky - ay, L = dx * dx + dy * dy;
+        const t = L > 0 ? clamp(((x - ax) * dx + (y - ay) * dy) / L, 0, 1) : 0, d = Math.hypot(ax + t * dx - x, ay + t * dy - y);
+        if (d < 8 && (!best || d < best.d)) best = { d, nm };
+      }
+      return best ? { ...l, props: { ...l.props, name: best.nm } } : l;
+    });
+  }
+  /** A place joined to the graph at the nearest point of the nearest way (within `max` m): a new node there, linked
+   *  both ways the way itself runs. */
+  function attach(g, p, max = 80) {
+    const x = p.lon * g.kx, y = p.lat * g.ky;
+    let best = null;
+    g.adj.forEach((list, i) => {
+      const A = g.nodes[i];
+      if (Math.abs(A.x - x) > 3000 || Math.abs(A.y - y) > 3000) return;
+      for (const e of list) {
+        const B = g.nodes[e.to], dx = B.x - A.x, dy = B.y - A.y, L = dx * dx + dy * dy;
+        const t = L > 0 ? clamp(((x - A.x) * dx + (y - A.y) * dy) / L, 0, 1) : 0, d = Math.hypot(A.x + t * dx - x, A.y + t * dy - y);
+        if (d < max && (!best || d < best.d)) best = { d, a: i, e, t };
+      }
+    });
+    if (!best) return null;
+    const { a, e, t } = best, b = e.to, A = g.nodes[a], B = g.nodes[b];
+    const k = g.nodes.length;
+    g.nodes.push({ lon: (A.lon + (B.lon - A.lon) * t), lat: A.lat + (B.lat - A.lat) * t, x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t, deg: 2 });
+    g.adj.push([]);
+    const part = (from, to, f, edge) => g.adj[from].push({ to, len: edge.len * f, cost: edge.cost * f, name: edge.name });
+    part(a, k, t, e); part(k, b, 1 - t, e);
+    const back = g.adj[b].find(x => x.to === a);
+    if (back) { part(b, k, 1 - t, back); part(k, a, t, back); }
+    return { i: k, d: best.d };
+  }
+  /** Shortest (cheapest) ways from one place to several goals over the graph (Dijkstra with a binary heap).
+   *  @returns {({points: {lat: number, lon: number}[], names: {along: number, name: string}[], len: number, cost: number} | null)[]} */
+  function shortestWays(g, from, goals, maxCost = 20000) {
+    const s = attach(g, from), targets = goals.map(p => attach(g, p, 60));
+    if (!s) return goals.map(() => null);
+    const n = g.nodes.length, dist = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1), via = new Array(n);
+    const want = new Set(targets.filter(Boolean).map(t => t.i));
+    const heap = [];
+    const push = (d, i) => { heap.push([d, i]); let k = heap.length - 1; while (k) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+    dist[s.i] = s.d * 1.2; push(dist[s.i], s.i);
+    while (heap.length && want.size) {
+      const [d, i] = pop();
+      if (d > dist[i]) continue;
+      if (d > maxCost) break;
+      want.delete(i);
+      for (const e of g.adj[i]) { const nd = d + e.cost; if (nd < dist[e.to]) { dist[e.to] = nd; prev[e.to] = i; via[e.to] = e; push(nd, e.to); } }
+    }
+    return targets.map((t, k) => {
+      if (!t || !Number.isFinite(dist[t.i])) return null;
+      const path = [];
+      for (let i = t.i; i >= 0; i = prev[i]) path.push(i);
+      path.reverse();
+      const points = [{ lat: from.lat, lon: from.lon }], names = [];
+      let len = s.d;
+      for (let j = 0; j < path.length; j++) {
+        const nd = g.nodes[path[j]];
+        if (j) { const e = via[path[j]]; len += e.len; if (e.name && (!names.length || names[names.length - 1].name !== e.name)) names.push({ along: len - e.len, name: e.name }); }
+        points.push({ lat: nd.lat, lon: nd.lon });
+      }
+      points.push({ lat: goals[k].lat, lon: goals[k].lon });
+      return { points, names, len: len + t.d, cost: dist[t.i] + t.d };
+    });
+  }
+  /** A way found offline → a route ride mode can follow, turns named after the road they turn onto. */
+  function fromWay(way, name = "Back to the route") {
+    const r = analyze({ name, points: way.points.map(p => ({ ...p, ele: null })), marks: [] });
+    for (const t of r.turns) {
+      const on = way.names.filter(x => x.along <= t.along + 20).pop();
+      if (on && on.along >= t.along - 25) t.name = on.name;
+      t.src = "offline";
+    }
+    return r;
+  }
+  /** The z14 tiles covering a few places (and a margin around them, m). */
+  function tilesAround(points, margin = 400, z = 14) {
+    let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+    for (const p of points) { minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat); minLon = Math.min(minLon, p.lon); maxLon = Math.max(maxLon, p.lon); }
+    const dLat = margin / (R * rad(1)), dLon = margin / (R * rad(1) * Math.cos(rad((minLat + maxLat) / 2)));
+    const [x0, y0] = tileXY(maxLat + dLat, minLon - dLon, z), [x1, y1] = tileXY(minLat - dLat, maxLon + dLon, z), out = [];
+    for (let x = Math.floor(x0); x <= Math.floor(x1); x++) for (let y = Math.floor(y0); y <= Math.floor(y1); y++) out.push({ z, x, y });
+    return out.length > 36 ? out.slice(0, 36) : out;
+  }
+
+  // ── battery: how long the phone lasts at the rate it's draining on this ride ──────────────────────────────
+  /** From [time ms, level 0–1, charging] readings: the drain per hour since it last charged (a least-squares line
+   *  over the last 45 min, once 10 min and 2 % have passed) and when it reaches 5 %. */
+  function batteryForecast(log, now = Date.now()) {
+    let from = 0;
+    for (let i = 0; i < log.length; i++) if (log[i][2]) from = i + 1;
+    const xs = log.slice(from).filter(r => r[0] >= now - 45 * 60e3);
+    if (xs.length < 2) return null;
+    const span = (xs[xs.length - 1][0] - xs[0][0]) / 3600e3, drop = xs[0][1] - xs[xs.length - 1][1];
+    if (span < 1 / 6 || drop < 0.02) return null;
+    const mx = xs.reduce((a, r) => a + r[0], 0) / xs.length, my = xs.reduce((a, r) => a + r[1], 0) / xs.length;
+    let sxy = 0, sxx = 0;
+    for (const r of xs) { sxy += (r[0] - mx) * (r[1] - my); sxx += (r[0] - mx) ** 2; }
+    const perHour = -(sxy / sxx) * 3600e3, level = xs[xs.length - 1][1];
+    if (!(perHour > 0.002)) return null;
+    const hours = Math.max(0, (level - 0.05) / perHour);
+    return { perHour, hours, until: now + hours * 3600e3, level };
+  }
+
+  // ── the ride, packed for the sync: summary + samples every few seconds, as delta-coded columns ───────────────
+  /** A recorded ride → a small object for the sync (GitHub carries it as one workflow input, so it must stay well under
+   *  64 KB once deflated and base64'd): HR, power, cadence and speed averaged over `step` seconds, position, height
+   *  and distance at the end of each. */
+  function rideDigest(meta, samples, step = 5) {
+    const col = { t: [], hr: [], pw: [], cad: [], v: [], lat: [], lon: [], ele: [], d: [] };
+    const t0 = samples.length ? samples[0][0] : meta.start;
+    const avg = (xs, i) => { const v = xs.map(s => s[i]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    let k = 0;
+    while (k < samples.length) {
+      const b = [samples[k]];
+      while (k + b.length < samples.length && samples[k + b.length][0] - samples[k][0] < step * 1000) b.push(samples[k + b.length]);
+      const last = b[b.length - 1], fix = [...b].reverse().find(s => s[1] != null), ele = [...b].reverse().find(s => s[3] != null);
+      const r = x => (x == null ? null : Math.round(x));
+      col.t.push(Math.round((last[0] - t0) / 1000)); col.hr.push(r(avg(b, 4))); col.cad.push(r(avg(b, 5))); col.pw.push(r(avg(b, 6)));
+      const v = avg(b, 7); col.v.push(v == null ? null : Math.round(v * 10));
+      col.lat.push(fix ? Math.round(fix[1] * 1e5) : null); col.lon.push(fix ? Math.round(fix[2] * 1e5) : null);
+      col.ele.push(ele ? Math.round(ele[3] * 10) : null); col.d.push(r(last[8]));
+      k += b.length;
+    }
+    const delta = xs => { let p = 0; return xs.map(x => { if (x == null) return null; const d = x - p; p = x; return d; }); };
+    for (const c of ["t", "lat", "lon", "ele", "d"]) col[c] = delta(col[c]);
+    const n = x => (Number.isFinite(+x) && x != null ? Math.round(+x * 10) / 10 : null);
+    return { v: 1, id: String(meta.id), name: String(meta.name || "Ride").slice(0, 80), start: Math.round(meta.start), t0: Math.round(t0), end: Math.round(meta.end), step,
+      elapsed: n(meta.elapsed), moving: n(meta.moving), dist: n(meta.dist), ascent: n(meta.ascent), avgHr: n(meta.avgHr), maxHr: n(meta.maxHr), avgPower: n(meta.avgPower),
+      avgCad: n(meta.avgCad), tss: n(meta.tss), indoor: !!meta.indoor, trainer: !!meta.trainer, zones: (meta.zones || []).map(z => Math.round(z)), s: col };
+  }
+
   /** A route trimmed to what an IndexedDB row needs (the analysis is rebuilt on load). */
   const storable = (raw, extra = {}) => ({ name: raw.name, points: raw.points.map(p => [Math.round(p.lat * 1e6) / 1e6, Math.round(p.lon * 1e6) / 1e6, p.ele == null ? null : Math.round(p.ele * 10) / 10]), marks: raw.marks || [], ...extra });
   const unstore = row => ({ id: row.id, name: row.name, points: row.points.map(p => ({ lat: p[0], lon: p[1], ele: p[2] })), marks: row.marks || [] });
   const reversed = raw => ({ ...raw, name: `${raw.name} (reversed)`, points: [...raw.points].reverse(), marks: (raw.marks || []).filter(m => !m.cue) });
 
   return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, pickDetour, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
-    commuteCheck, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed };
+    commuteCheck, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed,
+    FTMS, TACX, fecMsg, fecPower, fecGrade, fecLevel, fecUser, parseFec, parseBikeData, ftms, ergWatts, hrErg, ergGuess,
+    pbf, mvtLines, nameRoads, roadGraph, attach, shortestWays, fromWay, tilesAround, batteryForecast, rideDigest };
 })();

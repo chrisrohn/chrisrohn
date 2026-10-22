@@ -96,7 +96,7 @@
     return valid(d) ? adopt(d) : null;
   }
   const timeout = (p, ms) => Promise.race([p, sleep(ms).then(() => { throw new Error("GitHub is slow to answer: showing this device's copy"); })]);
-  const problems = st => !st ? [] : [st.garmin && st.garmin.error && `Garmin: ${st.garmin.error}`, st.strava && st.strava.error && `Strava: ${st.strava.error}`, st.feel && st.feel.error && `Check-in: ${st.feel.error}`, st.error && `Build: ${st.error}`].filter(Boolean);
+  const problems = st => !st ? [] : [st.garmin && st.garmin.error && `Garmin: ${st.garmin.error}`, st.strava && st.strava.error && `Strava: ${st.strava.error}`, st.feel && st.feel.error && `Check-in: ${st.feel.error}`, st.ride && st.ride.error && `Ride: ${st.ride.error}`, st.error && `Build: ${st.error}`].filter(Boolean);
 
   /** The move from chrisrohn.com/fitness/ (fitness/build-app.mjs): what this phone kept there arrives as #move=, deflated.
    *  Only the app's own keys, and never over something this address already has. */

@@ -25,7 +25,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from fitness import bike, build, config, feel
+from fitness import bike, build, config, feel, rides
 from fitness.store import Store
 
 CODE_WAIT_S = 600          # how long a sign-in waits for the code Garmin emailed
@@ -294,11 +294,25 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
                 print(f"Feel: {feel.save(store, code, today or date.today())} saved")
             except Exception as e:
                 errors["feel"] = f"your check-in wasn't saved: {_why(e)}"
+        elif action == "service" and code.startswith(rides.PREFIX):   # a ride recorded in ride mode
+            try:
+                print(f"Ride: {rides.save(store, code)} saved")
+            except Exception as e:
+                errors["ride"] = f"the ride from the phone wasn't saved: {_why(e)}"
         elif action == "service" and code:
             try:
                 print(f"Bike: {bike.log(store, code, datetime.now(), (profile or {}).get('weight_kg'))} logged")
             except Exception as e:
                 errors["bike"] = f"that bike job wasn't logged: {_why(e)}"
+        try:   # the phone's rides: power onto the watch's copy, and up to Garmin Connect when the watch missed one
+            if rides.reconcile(store):
+                print("Ride: the phone's power added to the watch's record")
+            if cfg["sync"].get("upload_phone_rides", True) and "garmin" not in errors and (tokens / "garmin_tokens.json").exists():
+                for name in rides.upload_pending(store, datetime.now(), lambda path: garmin.upload(cfg, path)):
+                    print(f"Ride: {name} uploaded to Garmin Connect")
+        except Exception as e:   # never fails the sync
+            errors.setdefault("ride", f"the phone's rides: {_why(e)}")
+        ride_ids = rides.recent_ids(store)
         felt = feel.load(store, today or date.today())
         bike_state = bike.state(store, today or date.today())
         traces = store.prefixed("stream:")
@@ -342,6 +356,8 @@ def run(cfg: dict, action: str = "sync", code: str = "", out: Path = Path("."), 
         "push": {**(push or {}), "error": errors.get("push")},
         "bike": {"error": errors.get("bike")},
         "feel": {"error": errors.get("feel")},
+        "ride": {"error": errors.get("ride")},
+        "rides": ride_ids,
         "error": errors.get("build"),
     }
     (out / STATUS_FILE).write_text(json.dumps(status, indent=2))
