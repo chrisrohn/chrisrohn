@@ -427,11 +427,14 @@
   }
   /** Back to a light, flat road when the ride ends or pauses for good. */
   const releaseTrainer = () => { if (TR.write) send(TR.kind === "Tacx FE-C" ? C.fecGrade(0) : C.ftms.grade(0)); TR.sentW = -1; TR.sentG = null; TR.virtual = false; };
+  /** What the trainer is doing, as [label, value, unit] for the step card (null when it isn't steering). */
   const trainerLine = () => {
-    if (!TR.mode || TR.mode === "read") return "";
-    if (TR.mode === "erg") return `${TR.hrErg ? "HR-ERG" : "ERG"} <b>${TR.watts}</b> W`;
-    return `Trainer grade <b>${TR.sentG == null ? "—" : `${TR.sentG > 0 ? "+" : ""}${TR.sentG.toFixed(1)}`}</b>%`;
+    if (!TR.mode || TR.mode === "read") return null;
+    if (TR.mode === "erg") return [TR.hrErg ? "HR-ERG" : "ERG", String(Math.round(+TR.watts || 0)), "W"];
+    return ["Trainer grade", TR.sentG == null ? "—" : `${TR.sentG > 0 ? "+" : ""}${(+TR.sentG).toFixed(1)}`, "%"];
   };
+  /** A line of plain text with bold figures, built from text nodes: [text, bold, text, bold, …]. */
+  const lineOf = (el, parts) => el.replaceChildren(...parts.map((t, i) => { if (i % 2 === 0) return String(t); const b = document.createElement("b"); b.textContent = String(t); return b; }));
 
   // ── GPS ─────────────────────────────────────────────────────────────────────────────────────────────────
   const hav = C.hav, bearing = C.bearing;
@@ -1421,7 +1424,8 @@
       $("step-name").textContent = `${s.name}${list.length > 1 ? `  ·  ${S.step + 1}/${list.length}` : ""}`;
       $("step-time").textContent = S.held ? `+${clock(S.held)}` : clock(left);
       const erg = trainerLine();
-      $("step-target").innerHTML = `${lo > 0 ? `Target <b>${lo}–${hi}</b> bpm` : `Target <b>under ${hi}</b> bpm`}${pt && !erg ? ` · <b>${pt[0] ? `${pt[0]}–${pt[1]}` : `&lt;${pt[1]}`}</b> W` : ""}${erg ? ` · ${erg}` : ""}`;
+      lineOf($("step-target"), ["Target ", lo > 0 ? `${lo}–${hi}` : `under ${hi}`, " bpm", ...(pt && !erg ? [" · ", pt[0] ? `${pt[0]}–${pt[1]}` : `<${pt[1]}`, " W"] : []),
+        ...(erg ? [` · ${erg[0]} `, erg[1], ` ${erg[2]}`] : [])]);
       $("step-bar").style.width = `${Math.min(100, elapsedInStep / (s.min * 60) * 100)}%`;
       const ns = NAV.st;
       const lim = TR.mode === "erg" && now - TR.limitAt < 5000 ? TR.limit : null;
@@ -1457,7 +1461,7 @@
       $("step-name").textContent = S.step >= list.length && list.length ? "Workout done" : planned ? planned.title : "Free ride";
       $("step-time").textContent = clock(S.elapsed);
       const tl = trainerLine();
-      if (tl) $("step-target").innerHTML = `${esc(NAV.route ? NAV.route.name : "Trainer")} · ${tl}`;
+      if (tl) lineOf($("step-target"), [`${NAV.route ? NAV.route.name : "Trainer"} · ${tl[0]} `, tl[1], tl[2]]);
       else $("step-target").textContent = list.length ? "Ride easy home" : NAV.route ? `${NAV.route.name}: follow the route` : "No steps — just ride";
       $("step-cue").textContent = ""; $("step-next").textContent = ""; $("step-bar").style.width = "0";
     }
@@ -1726,8 +1730,13 @@
     }
     return null;
   }
-  const ghApi = (x, path, init = {}) => fetch(`https://api.github.com/repos/${x.repo}${path}`, { cache: "no-store", ...init,
+  const REPO = /^([A-Za-z0-9-]{1,39})\/([\w.-]{1,100})$/;   // owner/name, and nothing else reaches the URL
+  const ghApi = (x, path, init = {}) => {
+    const m = REPO.exec(String(x.repo || ""));
+    if (!m) return Promise.reject(new Error("not a repository name"));
+    return fetch(`https://api.github.com/repos/${encodeURIComponent(m[1])}/${encodeURIComponent(m[2])}${path}`, { cache: "no-store", ...init,
     headers: { Authorization: `Bearer ${x.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", ...(init.body ? { "Content-Type": "application/json" } : {}), ...(init.headers || {}) } });
+  };
   function queueRide(id) { if (!outbox().some(x => x.id === id)) setOutbox([...outbox(), { id, sent: 0, tries: 0 }]); sendRides(); }
   async function sendRides() {
     const x = cloud();
