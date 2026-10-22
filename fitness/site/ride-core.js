@@ -8,6 +8,9 @@
 //   tiles       the map tiles along a route, for offline use at the trailhead, and the roads in them for rerouting offline
 //   trainers    FTMS and Tacx FE-C over Bluetooth: ERG watts, heart-rate ERG, the route's grade
 //   battery     how long the phone lasts at this ride's drain;  sync  the ride packed for the training sync
+//   pacing      a plan for a target time over the route's sections;  stamina  the fuel tank and W′ balance
+//   ghosts      your own past rides on a route to race, and their climb times;  going anywhere: loops, nearby places
+//   weather     rain arriving, the wind turning and storms in the next hours
 self.RideCore = (() => {
   const R = 6371008.8, rad = x => x * Math.PI / 180, deg = x => x * 180 / Math.PI;
   const hav = (a, b) => { const dl = rad(b.lat - a.lat), dn = rad(b.lon - a.lon); const h = Math.sin(dl / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.min(1, Math.sqrt(h))); };
@@ -1126,6 +1129,234 @@ self.RideCore = (() => {
       avgCad: n(meta.avgCad), tss: n(meta.tss), indoor: !!meta.indoor, trainer: !!meta.trainer, zones: (meta.zones || []).map(z => Math.round(z)), s: col };
   }
 
+  // ── pacing: a plan for a target time over the route's sections (Garmin's Power Guide / PacePro) ─────────────
+  const GRAV = 9.80665;
+  /** Rolling resistance, frontal area and the fastest it's sensible to go down a hill, by surface. */
+  const SURFACE = { road: { crr: 0.005, cda: 0.36, maxV: 16 }, gravel: { crr: 0.008, cda: 0.40, maxV: 13 }, mtb: { crr: 0.014, cda: 0.45, maxV: 9 } };
+  /** The speed (m/s) a power holds on a grade, for a mass and a surface: the power balance solved by bisection. */
+  const powerFor = (v, grade, o) => { const th = Math.atan(grade); return (o.mass * GRAV * (o.crr * Math.cos(th) + Math.sin(th)) * v + 0.6 * o.cda * v ** 3) / 0.97; };
+  function speedFor(watts, grade, o) {
+    const need = v => powerFor(v, grade, o);
+    let lo = 0.8, hi = grade < -0.02 ? o.maxV : 25;   // only a descent is held to what's safe on the surface
+    if (need(hi) <= watts) return hi;
+    if (need(lo) >= watts) return lo;
+    for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (need(m) > watts) hi = m; else lo = m; }
+    return (lo + hi) / 2;
+  }
+  /** The route as sections of like grade: climbs (3 %+), descents (−3 % or steeper) and the rest, 400 m or longer. */
+  function sections(route) {
+    const total = route.total, out = [], chunk = 100;
+    for (let d = 0; d < total; d += chunk) {
+      const e = Math.min(total, d + chunk), a = eleAt(route, d), b = eleAt(route, e), g = a == null || b == null || e - d < 1 ? 0 : (b - a) / (e - d);
+      const kind = g >= 0.03 ? "climb" : g <= -0.03 ? "descent" : "flat", last = out[out.length - 1];
+      if (last && last.kind === kind) last.to = e; else out.push({ kind, from: d, to: e });
+    }
+    for (let i = 0; i < out.length; i++) {   // a short section joins the one before it (or the one after, at the start)
+      if (out.length > 1 && out[i].to - out[i].from < 400) {
+        if (i > 0) { out[i - 1].to = out[i].to; out.splice(i, 1); } else { out[1].from = out[0].from; out.splice(0, 1); }
+        i = Math.max(-1, i - 2);
+      }
+    }
+    for (let i = 1; i < out.length; i++) if (out[i].kind === out[i - 1].kind) { out[i - 1].to = out[i].to; out.splice(i, 1); i--; }
+    return out.map(s => {
+      const len = s.to - s.from, a = eleAt(route, s.from), b = eleAt(route, s.to), grade = a == null || b == null ? 0 : (b - a) / len;
+      return { ...s, len, grade, kind: grade >= 0.03 ? "climb" : grade <= -0.03 ? "descent" : "flat" };
+    });
+  }
+  /** How much harder than the base effort a grade is ridden: more up the climbs, less down (capped −45 % / +25 %). */
+  const lean = g => clamp(1 + 2.2 * g, 0.55, 1.25);
+  /** What fraction of FTP can be held for a ride this long (≈ 100 % for an hour, 90 % for two, 79 % for four). */
+  const sustainable = hours => clamp(1 - 0.15 * Math.log(Math.max(0.25, hours)), 0.6, 1.05);
+  /** A pacing plan: base watts found so the sections add up to the target time; each section's watts, speed, time,
+   *  and the clock at its end; normalised power and intensity against FTP, and what's sustainable that long.
+   *  @param {{target: number, ftp: number, mass: number, surface?: string}} opt  target in seconds */
+  function pacePlan(route, { target, ftp, mass, surface = "gravel" }) {
+    const o = { mass, ...(SURFACE[surface] || SURFACE.gravel) }, secs = sections(route);
+    const timeAt = p0 => secs.reduce((a, s) => a + s.len / speedFor(p0 * lean(s.grade), s.grade, o), 0);
+    let lo = 10, hi = 2000;
+    for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (timeAt(m) > target) lo = m; else hi = m; }
+    const p0 = hi;
+    let cum = 0, w4 = 0;
+    const out = secs.map(s => {
+      const v = speedFor(p0 * lean(s.grade), s.grade, o), watts = Math.max(0, Math.min(p0 * lean(s.grade), powerFor(v, s.grade, o))), t = s.len / v;   // a capped descent: only what it takes
+      cum += t; w4 += watts ** 4 * t;
+      return { ...s, watts: Math.round(watts), speed: v, secs: t, end: cum };
+    });
+    const np = cum > 0 ? (w4 / cum) ** 0.25 : 0;
+    return { sections: out, base: Math.round(p0), total: cum, target, np: Math.round(np), if: ftp > 0 ? np / ftp : null, sustain: sustainable(cum / 3600), surface, ftp, mass };
+  }
+  /** The fastest target a rider can hold: where the plan's intensity meets what's sustainable for its length. */
+  function paceSuggest(route, opt) {
+    let lo = 60, hi = 24 * 3600;
+    for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2, p = pacePlan(route, { ...opt, target: m }); if (p.if > p.sustain) lo = m; else hi = m; }
+    return Math.ceil(hi / 60) * 60;
+  }
+  /** Where a distance along the route falls in the plan: its section, and the clock the plan has there. */
+  function paceAt(plan, along) {
+    const S = plan.sections;
+    let i = 0;
+    while (i < S.length - 1 && along >= S[i].to) i++;
+    const s = S[i], start = s.end - s.secs, f = clamp((along - s.from) / Math.max(1, s.len), 0, 1);
+    return { i, section: s, next: S[i + 1] || null, planned: start + s.secs * f, left: s.to - along };
+  }
+  /** % of threshold HR for a % of FTP (the ftpPct table, the other way round). */
+  const hrPctFor = pct => { for (let i = 1; i < PCT.length; i++) if (pct <= PCT[i][1]) { const [a, pa] = PCT[i - 1], [b, pb] = PCT[i]; return a + (b - a) * (pct - pa) / Math.max(1e-9, pb - pa); } return 110; };
+
+  // ── stamina: the carbohydrate left in the tank, and W′ (the reserve above critical power) ───────────────────
+  /** The share of energy from carbohydrate at an intensity (% of FTP): about a third easy, nearly all at threshold
+   *  (Romijn 1993, van Loon 2001). */
+  const CARB = [[0, 0.25], [40, 0.3], [55, 0.4], [65, 0.5], [75, 0.62], [85, 0.78], [95, 0.92], [105, 1]];
+  const carbShare = pct => { for (let i = 1; i < CARB.length; i++) if (pct <= CARB[i][0]) { const [a, sa] = CARB[i - 1], [b, sb] = CARB[i]; return sa + (sb - sa) * (pct - a) / (b - a); } return 1; };
+  /** kcal a minute: from power (work at ~24 % efficiency, 1 kJ of work ≈ 1 kcal burned), else from heart rate
+   *  (Keytel 2005). */
+  function kcalMin(watts, hr, kg = 75, male = true, age = 40) {
+    if (watts != null && watts > 0) return watts * 60 / 1000 / 0.24 / 4.184;
+    if (hr == null) return 0;
+    const k = male ? (-55.0969 + 0.6309 * hr + 0.1988 * kg + 0.2017 * age) : (-20.4022 + 0.4472 * hr - 0.1263 * kg + 0.074 * age);
+    return Math.max(1.2, k / 4.184);
+  }
+  /** A fuel tank for the ride: the glycogen a fed rider starts with (~6.5 g/kg of usable carbohydrate), spent second
+   *  by second at the intensity's carbohydrate share, filled by what you eat. */
+  function tank(kg = 75) {
+    const full = Math.round(kg * 6.5);
+    return { full, left: full, burned: 0, eaten: 0, kcal: 0 };
+  }
+  /** One step of the tank: `pct` is the intensity in % of FTP (from power, else heart rate through the zone table). */
+  function burn(t, { watts = null, hr = null, pct = 60, secs = 1, kg = 75, male = true }) {
+    const kcal = kcalMin(watts, hr, kg, male) * secs / 60, g = kcal * carbShare(pct) / 4;
+    t.kcal += kcal; t.burned += g; t.left = Math.max(0, t.left - g);
+    return t;
+  }
+  const eat = (t, grams) => { t.eaten += grams; t.left = Math.min(t.full, t.left + grams); return t; };
+  /** W′ balance (Skiba's differential model): spent 1 J per J above CP, coming back exponentially below it. */
+  function wbal(bal, watts, cp, wPrime, secs = 1) {
+    if (!(cp > 0) || !(wPrime > 0) || watts == null) return bal;
+    if (watts > cp) return Math.max(0, bal - (watts - cp) * secs);
+    return wPrime - (wPrime - bal) * Math.exp(-(cp - watts) * secs / wPrime);
+  }
+
+  // ── your own past rides on a route: a ghost to race, and times on its climbs ──────────────────────────────
+  /** A recorded ride along a route → the ride clock (s, stops left out) at every 50 m of the route; null where it
+   *  wasn't on it. A ride that covers under 70 % of the route, or starts more than 300 m in, isn't a ghost. */
+  function ghostOf(route, samples, step = 50) {
+    const n = Math.floor(route.total / step) + 1, t = new Array(n).fill(null);
+    let near = null, clock = 0, prevT = null, lastK = -1, lastAlong = 0, lastClock = 0;
+    for (const s of samples) {
+      if (prevT != null) clock += clamp((s[0] - prevT) / 1000, 0, 5);
+      prevT = s[0];
+      if (s[1] == null) continue;
+      const pr = project(route, { lat: s[1], lon: s[2] }, near, 800, 200);
+      if (pr.off > 40) continue;
+      if (near == null) { if (pr.along > 300) continue; clock = 0; lastAlong = pr.along; }
+      else if (pr.along < near - 30 || pr.along > near + 600) continue;   // backwards, or a jump to another part
+      near = pr.along;
+      const k = Math.floor(pr.along / step);
+      for (let j = lastK + 1; j <= k && j < n; j++) {
+        const d = j * step, f = pr.along > lastAlong ? clamp((d - lastAlong) / (pr.along - lastAlong), 0, 1) : 1;
+        t[j] = lastClock + (clock - lastClock) * f;
+      }
+      if (k > lastK) lastK = Math.min(k, n - 1);
+      lastAlong = pr.along; lastClock = clock;
+    }
+    const covered = t.filter(x => x != null).length / n;
+    return covered >= 0.7 ? { t, step, covered, total: t[lastK] } : null;
+  }
+  /** The ghost's clock at a distance along the route (null where it has no time). */
+  const ghostAt = (g, along) => {
+    const f = along / g.step, i = Math.floor(f), a = g.t[i], b = g.t[i + 1];
+    return a == null ? null : b == null ? a : a + (b - a) * (f - i);
+  };
+  /** Times on the route's climbs, foot to top, from a ghost. */
+  const climbTimes = (route, g) => route.climbs.map(c => { const a = ghostAt(g, c.start), b = ghostAt(g, c.end); return a != null && b != null && b > a ? b - a : null; });
+  /** A recorded ride → a route to follow (the track thinned to a point every 10 m or so). */
+  function rideRoute(name, samples) {
+    const points = [];
+    for (const s of samples) {
+      if (s[1] == null) continue;
+      const p = { lat: s[1], lon: s[2], ele: s[3] };
+      if (!points.length || hav(points[points.length - 1], p) >= 10) points.push(p);
+    }
+    if (points.length < 2) throw new Error("That ride has no track to follow.");
+    return { name, points, marks: [] };
+  }
+
+  // ── going somewhere new: a round trip of a given length, and what's nearby from OpenStreetMap ─────────────────
+  /** Three turning points for a loop of about `dist` m from here, the first leg toward `bearing` (into the wind,
+   *  so the wind brings you home): a diamond whose sides, on real roads (~1.25× the straight line), add up. */
+  const dest = (p, brg, d) => {
+    const dl = d / R, b = rad(brg), la = rad(p.lat), lo = rad(p.lon);
+    const la2 = Math.asin(Math.sin(la) * Math.cos(dl) + Math.cos(la) * Math.sin(dl) * Math.cos(b));
+    return { lat: deg(la2), lon: deg(lo + Math.atan2(Math.sin(b) * Math.sin(dl) * Math.cos(la), Math.cos(dl) - Math.sin(la) * Math.sin(la2))) };
+  };
+  function loopPoints(from, dist, bearing = 0, scale = 1) {
+    const r = dist / (4 * Math.SQRT2 * 1.25) * scale, c = dest(from, bearing, r);
+    return [bearing - 90, bearing, bearing + 90].map(a => dest(c, ((a % 360) + 360) % 360, r));
+  }
+  /** BRouter through several points (a loop comes back to the first). */
+  const brouterVia = (pts, profile = "trekking", server = "https://brouter.de/brouter") =>
+    `${server}?lonlats=${pts.map(p => `${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join("|")}&profile=${encodeURIComponent(profile)}&alternativeidx=0&format=geojson&timode=3`;
+  /** What a rider stops for, from OpenStreetMap tags. */
+  const OSM_KINDS = [[t => t.amenity === "drinking_water" || t.amenity === "water_point" || t.man_made === "water_tap", "water"],
+    [t => ["cafe", "restaurant", "fast_food", "pub", "ice_cream"].includes(t.amenity) || ["convenience", "supermarket", "bakery"].includes(t.shop) || t.amenity === "fuel", "food"],
+    [t => t.amenity === "toilets", "toilet"], [t => t.shop === "bicycle" || t.amenity === "bicycle_repair_station", "bike"]];
+  /** An Overpass query for those within `r` m of a line of points (a route, thinned) or of one point. */
+  function overpassQuery(points, r = 150) {
+    const ll = points.map(p => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`).join(",");
+    const near = `(around:${Math.round(r)},${ll})`;
+    return `[out:json][timeout:25];(nwr["amenity"~"^(drinking_water|water_point|cafe|restaurant|fast_food|pub|ice_cream|toilets|bicycle_repair_station|fuel)$"]${near};`
+      + `nwr["shop"~"^(convenience|supermarket|bakery|bicycle)$"]${near};nwr["man_made"="water_tap"]${near};);out center tags 400;`;
+  }
+  /** Overpass's answer → places: where, what kind, its name, and when it's open (as OSM has it). */
+  function fromOverpass(j) {
+    const out = [], seen = new Set();
+    for (const e of (j && j.elements) || []) {
+      const t = e.tags || {}, lat = e.lat ?? (e.center && e.center.lat), lon = e.lon ?? (e.center && e.center.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const kind = (OSM_KINDS.find(([f]) => f(t)) || [])[1];
+      if (!kind) continue;
+      const name = String(t.name || ({ water: "Drinking water", food: "Food", toilet: "Restroom", bike: t.shop === "bicycle" ? "Bike shop" : "Bike repair stand" })[kind]).slice(0, 80);
+      const key = `${kind}:${lat.toFixed(4)}:${lon.toFixed(4)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ lat, lon, kind, name, hours: t.opening_hours ? String(t.opening_hours).slice(0, 80) : "", src: "osm" });
+    }
+    return out;
+  }
+  /** A route thinned to a point every `every` m (an Overpass "around" line, or a short URL). */
+  const thin = (route, every = 400) => { const out = []; for (let d = 0; d < route.total; d += every) out.push(pointAt(route, d)); out.push(pointAt(route, route.total)); return out; };
+
+  // ── weather on the ride: rain arriving, the wind turning, storms ────────────────────────────────────────────
+  /** From Open-Meteo's 15-minute forecast (unix times) and hourly weather codes: what's coming in the next 2 hours
+   *  (3 for storms) that's worth saying out loud. Each alert has a key, so it's said once per change. */
+  function wxAlerts(j, now = Date.now()) {
+    const out = [], m = j && j.minutely_15, h = j && j.hourly;
+    if (m && Array.isArray(m.time)) {
+      const rows = m.time.map((t, i) => ({ t: t * 1000, p: (m.precipitation || [])[i] ?? 0, w: (m.wind_speed_10m || [])[i], d: (m.wind_direction_10m || [])[i] }))
+        .filter(r => r.t + 15 * 60e3 > now && r.t < now + 2 * 3600e3);
+      const cur = rows[0];
+      if (cur) {
+        const wet = rows.find(r => r.p >= 0.2);
+        if (cur.p < 0.1 && wet) { const min = Math.max(5, Math.round((wet.t - now) / 60e3 / 5) * 5); out.push({ kind: "rain", at: wet.t, key: `rain:${Math.round(wet.t / 1800e3)}`, text: `Rain in about ${min} minutes${rows.some(r => r.t >= wet.t && r.p >= 1) ? ", heavy" : ""}.` }); }
+        else if (cur.p >= 0.2) { const dry = rows.find(r => r.p < 0.1); if (dry) out.push({ kind: "dry", at: dry.t, key: `dry:${Math.round(dry.t / 1800e3)}`, text: `Rain easing in about ${Math.max(5, Math.round((dry.t - now) / 60e3 / 5) * 5)} minutes.` }); }
+        if (cur.w != null && cur.d != null) {
+          const big = r => r.w != null && r.d != null && (Math.abs(r.w - cur.w) >= 12 || (Math.max(r.w, cur.w) >= 15 && Math.abs(turnAngle(cur.d, r.d)) >= 60));
+          const first = rows.find(big);
+          if (first) {   // when it starts, and where it ends up (the biggest change in the window)
+            const score = r => Math.abs(r.w - cur.w) + Math.abs(turnAngle(cur.d, r.d)) / 5, to = rows.filter(big).reduce((a, r) => (score(r) > score(a) ? r : a), first);
+            const names = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"], from = names[Math.round(to.d / 45) % 8];
+            const how = to.w > cur.w + 6 ? "picking up" : to.w < cur.w - 6 ? "dropping" : "turning";
+            out.push({ kind: "wind", at: first.t, key: `wind:${from}:${Math.round(to.w / 10)}`, text: `Wind ${how} in about ${Math.max(15, Math.round((first.t - now) / 60e3 / 15) * 15)} minutes: from the ${from} at ${Math.round(to.w)} km/h.`, dir: to.d, speed: to.w });
+          }
+        }
+      }
+    }
+    if (h && Array.isArray(h.time)) {
+      const i = h.time.findIndex((t, k) => t * 1000 + 3600e3 > now && t * 1000 < now + 3 * 3600e3 && ((h.weather_code || [])[k] ?? 0) >= 95);
+      if (i >= 0) out.push({ kind: "storm", at: h.time[i] * 1000, key: `storm:${h.time[i]}`, text: `Thunderstorms likely ${h.time[i] * 1000 <= now ? "now" : `around ${new Date(h.time[i] * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}: find shelter if you hear thunder.` });
+    }
+    return out;
+  }
+
   /** A route trimmed to what an IndexedDB row needs (the analysis is rebuilt on load). */
   const storable = (raw, extra = {}) => ({ name: raw.name, points: raw.points.map(p => [Math.round(p.lat * 1e6) / 1e6, Math.round(p.lon * 1e6) / 1e6, p.ele == null ? null : Math.round(p.ele * 10) / 10]), marks: raw.marks || [], ...extra });
   const unstore = row => ({ id: row.id, name: row.name, points: row.points.map(p => ({ lat: p[0], lon: p[1], ele: p[2] })), marks: row.marks || [] });
@@ -1134,5 +1365,7 @@ self.RideCore = (() => {
   return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, pickDetour, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
     commuteCheck, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed,
     FTMS, TACX, fecMsg, fecPower, fecGrade, fecLevel, fecUser, parseFec, parseBikeData, ftms, ergWatts, hrErg, ergGuess,
-    pbf, mvtLines, nameRoads, roadGraph, attach, shortestWays, fromWay, tilesAround, batteryForecast, rideDigest };
+    pbf, mvtLines, nameRoads, roadGraph, attach, shortestWays, fromWay, tilesAround, batteryForecast, rideDigest,
+    SURFACE, speedFor, sections, pacePlan, paceSuggest, paceAt, hrPctFor, sustainable, carbShare, kcalMin, tank, burn, eat, wbal,
+    ghostOf, ghostAt, climbTimes, rideRoute, loopPoints, brouterVia, overpassQuery, fromOverpass, thin, wxAlerts };
 })();

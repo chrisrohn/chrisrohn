@@ -124,7 +124,8 @@
   // ── ride state (saved every few seconds so a reload mid-ride picks up where it was) ───────────────────────
   const fresh = () => ({ running: false, paused: false, elapsed: 0, moving: 0, dist: 0, step: 0, stepStart: 0, hrSum: 0, hrSecs: 0, hrMax: 0, zones: [0, 0, 0, 0, 0],
     trimp: 0, cadSum: 0, cadSecs: 0, pwSum: 0, pwSecs: 0, fuelAt: 0, fuelDue: false, ended: false, plan: [], intensity: 1, quick: null, rideId: "", wallStart: 0, chunk: 0,
-    laps: [], lapStart: 0, lapElapsed: 0, lapDist: 0, pauses: [], autoPaused: false, still: 0, ascent: 0, maxSpeed: 0, held: 0, missed: 0, hot: 0, loadOffered: false, navAlong: 0, battSaid: false, tgtSecs: 0, tgtOn: 0, workSecs: 0, workOn: 0 });
+    laps: [], lapStart: 0, lapElapsed: 0, lapDist: 0, pauses: [], autoPaused: false, still: 0, ascent: 0, maxSpeed: 0, held: 0, missed: 0, hot: 0, loadOffered: false, navAlong: 0, battSaid: false, tgtSecs: 0, tgtOn: 0, workSecs: 0, workOn: 0,
+    tank: null, fuelSaid: 0, wbal: null, wbalLow: false, routeT0: null, mine: [], ghostSaid: 0, paceSaid: -1, paceHot: 0, wxSaid: [] });
   const S = fresh();
   const live = { heading: null, anchor: null, hr: null, hrAt: 0, cad: null, cadAt: 0, power: null, powerAt: 0, pw: [], wheelSpeed: null, wheelAt: 0, gpsSpeed: null, gpsAt: 0, lastFix: null, alt: null, battery: null };
   let samples = [];
@@ -468,8 +469,8 @@
 
   // ── weather: conditions where you are, fetched from Open-Meteo when Start is tapped and every 30 minutes on the
   //    ride (only a ~1 km-rounded position leaves the phone); the last sync's hourly forecast when there's no signal
-  const WX_EVERY = 30 * 60e3;
-  const wx = { cur: null, src: "", at: 0, busy: false };
+  const WX_EVERY = 15 * 60e3;   // often enough to say rain is coming before it's here
+  const wx = { cur: null, src: "", at: 0, busy: false, alerts: [] };
   const tempTxt = c => P.km ? `${Math.round(c)}°C` : `${Math.round(c * 9 / 5 + 32)}°F`;
   const windTxt = kmh => String(Math.round(P.km ? kmh : kmh / 1.609344));
   const windU = () => (P.km ? "km/h" : "mph");
@@ -491,8 +492,9 @@
     try {
       const p = await here();
       if (!p) throw new Error("no position");
-      const q = new URLSearchParams({ latitude: p.lat.toFixed(2), longitude: p.lon.toFixed(2), timezone: "auto", wind_speed_unit: "kmh", forecast_hours: "3",
-        current: "temperature_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,wind_gusts_10m", hourly: "precipitation_probability" });
+      const q = new URLSearchParams({ latitude: p.lat.toFixed(2), longitude: p.lon.toFixed(2), timezone: "auto", wind_speed_unit: "kmh", forecast_hours: "3", timeformat: "unixtime",
+        current: "temperature_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,wind_gusts_10m", hourly: "precipitation_probability,weather_code",
+        minutely_15: "precipitation,wind_speed_10m,wind_direction_10m", forecast_minutely_15: "10" });
       const r = await timed(`https://api.open-meteo.com/v1/forecast?${q}`, 8000, { cache: "no-store" });
       if (!r.ok) throw new Error(`weather ${r.status}`);
       const j = await r.json(), c = j.current || {};
@@ -500,6 +502,8 @@
       wx.cur = { temp: c.temperature_2m, feels: c.apparent_temperature ?? c.temperature_2m, wind: c.wind_speed_10m ?? 0, dir: c.wind_direction_10m ?? 0,
         gust: c.wind_gusts_10m ?? 0, pop: Math.max(0, ...((j.hourly && j.hourly.precipitation_probability) || []).filter(x => x != null)) };
       wx.src = "Live";
+      wx.alerts = C.wxAlerts(j, Date.now());
+      if (S.running) for (const a of wx.alerts) if (!S.wxSaid.includes(a.key)) { S.wxSaid = [...S.wxSaid, a.key].slice(-20); notice(a.text, a.kind === "storm"); }
     } catch {
       const s = fromSync();
       if (s) { wx.cur = s; wx.src = "Forecast"; }
@@ -523,7 +527,8 @@
     $("wx-arrow").style.transform = `rotate(${(W.dir + 180 - (moving ? live.heading : 0) + 360) % 360}deg)`;
     if (moving && W.wind >= 3) $("wx-rel").textContent = windOn(W, live.heading);
     else $("wx-rel").textContent = W.wind < 3 ? "Calm" : "—";
-    $("wx-src").textContent = wx.src === "Live" ? `Live · ${hhmm(wx.at)}` : "Forecast from the sync";
+    const next = wx.alerts.find(a => a.at > now - 15 * 60e3);
+    $("wx-src").textContent = next ? next.text.replace(/[.:].*$/, "").replace(/^Rain in about (\d+) minutes/, "Rain in ~$1 min") : wx.src === "Live" ? `Live · ${hhmm(wx.at)}` : "Forecast from the sync";
   }
   const windOn = (W, course) => {
     const along = W.wind * Math.cos((W.dir - course) * Math.PI / 180);
@@ -532,7 +537,7 @@
   };
 
   // ── routes: GPX / TCX in, kept on this phone, one chosen for the ride ─────────────────────────────────────
-  const NAV = { route: null, nav: null, st: null, detour: null, routing: false, lastReroute: 0, lastAt: 0, names: new Map(), offSaid: false, lastWrong: 0, avoid: [] };
+  const NAV = { route: null, nav: null, st: null, detour: null, pace: null, ghosts: null, routing: false, lastReroute: 0, lastAt: 0, names: new Map(), offSaid: false, lastWrong: 0, avoid: [] };
   const routeMsg = $("route-msg");
   async function importFile(file) {
     const text = await file.text();
@@ -582,11 +587,13 @@
   }
   async function useRoute(id, keepProgress = false) {
     const row = id ? await DB.get("routes", id).catch(() => null) : null;
-    if (!row) { NAV.route = NAV.nav = NAV.st = NAV.detour = null; ls.set("fitness-ride-route", null); paintRouteBits(); return; }
+    if (!row) { NAV.route = NAV.nav = NAV.st = NAV.detour = NAV.pace = NAV.ghosts = null; ls.set("fitness-ride-route", null); paintRouteBits(); return; }
     const route = C.analyze(C.unstore(row));
     const along = keepProgress && NAV.nav ? NAV.nav.state.along : S.running ? S.navAlong : 0;
     NAV.route = route; NAV.nav = C.navigator(route, { startAlong: along }); NAV.st = NAV.nav.status(); NAV.detour = null; NAV.avoid = []; NAV.names.clear();
     ls.set("fitness-ride-route", id);
+    addPlaces(route, row); loadPace(row); findGhosts(route).catch(() => {}); placesAlong(route, row);
+    if (!keepProgress) { S.paceSaid = -1; S.ghostSaid = 0; if (!S.running || S.navAlong < 300) { S.routeT0 = null; S.mine = []; } }
     paintRouteBits();
     mapRoute();
     if (navigator.onLine) downloadMap(route, true);
@@ -685,9 +692,257 @@
     } catch { if (!quiet) routeMsg.textContent = "Couldn't save the map (no signal?). It still works online."; }
   }
 
+  // ── your own past rides on this route: a ghost to race (your best and your last), and your times on its climbs ──
+  const signed = s => `${Math.floor(Math.abs(s) / 60)}:${String(Math.round(Math.abs(s) % 60)).padStart(2, "0")}`;
+  const aheadSay = s => { const a = Math.abs(Math.round(s)), m = Math.floor(a / 60), x = a % 60; return `${m ? `${m} minute${m === 1 ? "" : "s"}${x ? ` ${x}` : ""}` : `${x} second${x === 1 ? "" : "s"}`}`; };
+  async function findGhosts(route) {
+    NAV.ghosts = null;
+    const rides = (await DB.all("rides").catch(() => [])).filter(r => !r.indoor).sort((a, b) => b.start - a.start).slice(0, 40), out = [];
+    for (const r of rides) {
+      if (r.startLL && hav({ lat: r.startLL[0], lon: r.startLL[1] }, route.pts[0]) > 1500) continue;   // started elsewhere: not this route
+      const g = C.ghostOf(route, await rideSamples(r));
+      if (g) out.push({ id: r.id, name: r.name, start: r.start, g, full: g.covered >= 0.95, climbs: C.climbTimes(route, g) });
+      if (NAV.route !== route) return;   // another route was chosen meanwhile
+    }
+    if (!out.length) { renderAhead(true); return; }
+    const full = out.filter(x => x.full).sort((a, b) => a.g.total - b.g.total);
+    NAV.ghosts = { best: full[0] || null, last: out.slice().sort((a, b) => b.start - a.start)[0], n: out.length,
+      climbBest: route.climbs.map((_, i) => { const ts = out.map(x => x.climbs[i]).filter(t => t != null); return ts.length ? Math.min(...ts) : null; }) };
+    renderAhead(true);
+  }
+  /** Your ride clock on this route (from where you joined it near its start), and the clock at each 50 m passed. */
+  function trackMine() {
+    const st = NAV.st;
+    if (!S.running || !NAV.route || !st || st.offCourse || NAV.detour) return;
+    if (S.routeT0 == null) { if (st.along > 300) return; S.routeT0 = S.elapsed; S.mine = []; }
+    const k = Math.floor(st.along / 50);
+    while (S.mine.length <= k && S.mine.length < 20000) S.mine.push(Math.round(S.elapsed - S.routeT0));
+  }
+  const myClock = () => (S.routeT0 == null ? null : S.elapsed - S.routeT0);
+  /** Your clock against a ghost's at the same place: + behind, − ahead. */
+  const vsGhost = gh => { const me = myClock(), st = NAV.st; if (me == null || !gh || !st) return null; const t = C.ghostAt(gh.g, st.along); return t == null ? null : me - t; };
+  const mineAt = along => { const i = Math.floor(along / 50); return i < S.mine.length ? S.mine[i] : null; };
+  function climbDone(climb) {
+    const i = NAV.route ? NAV.route.climbs.indexOf(climb) : -1, a = mineAt(climb.start), me = myClock();
+    if (i < 0 || a == null || me == null) { say("Top of the climb.", false); return; }
+    const t = me - a, best = NAV.ghosts && NAV.ghosts.climbBest[i];
+    say(`Top. ${aheadSay(t)}${best ? (t < best - 1 ? `, ${aheadSay(best - t)} faster than your best: a new record` : `, ${aheadSay(t - best)} off your best`) : ""}.`, false);
+    if (best && t < best - 1) { NAV.ghosts.climbBest[i] = t; beep(1320, 120, 3); }
+  }
+  /** Every quarter of the route: how you stand against your best. */
+  function ghostCallout() {
+    const G = NAV.ghosts, st = NAV.st;
+    if (!G || !G.best || !st || !S.running) return;
+    const q = Math.floor(st.frac * 4);
+    if (q <= S.ghostSaid || q >= 4) return;
+    S.ghostSaid = q;
+    const d = vsGhost(G.best);
+    if (d != null) say(`${q * 25} percent: ${aheadSay(d)} ${d <= 0 ? "ahead of" : "behind"} your best.`, false);
+  }
+
+  // ── the race plan: watts and heart rate for each section of the route, for a finish time (Power Guide) ─────────
+  const parseHM = s => { const m = String(s || "").trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/); return m ? (+m[1] * 60 + +(m[2] || 0)) * 60 : null; };
+  const fmtHM = sec => { const m = Math.round(sec / 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
+  const paceOpts = surface => ({ ftp: ftpNow(), mass: P.weight + 10, surface });
+  const hrBand = watts => { const pct = C.hrPctFor(watts / ftpNow() * 100); return [Math.round(P.lthr * pct / 100) - 4, Math.round(P.lthr * pct / 100) + 4]; };
+  const KIND_NAME = { climb: "Climb", flat: "Flat", descent: "Descent" };
+  async function loadPace(row) {
+    NAV.pace = null;
+    if (!row || !row.pace || !NAV.route || !NAV.route.hasEle) return;
+    NAV.pace = C.pacePlan(NAV.route, { ...paceOpts(row.pace.surface), target: row.pace.target });
+  }
+  function paintPlan(plan) {
+    const list = $("pc-list"), sum = $("pc-sum");
+    if (!plan) { list.replaceChildren(); return; }
+    const over = plan.if != null && plan.if > plan.sustain + 0.02;
+    sum.textContent = `${fmtHM(plan.total)} at ${plan.base} W on the flat (normalised ${plan.np} W, ${Math.round((plan.if || 0) * 100)}% of ${ftpNow()} W FTP${P.ftp ? "" : " (estimated)"}). `
+      + (over ? `That's more than you can hold for ${fmtHM(plan.total)} (about ${Math.round(plan.sustain * 100)}%): pick a slower time.` : `Holdable for that long (up to about ${Math.round(plan.sustain * 100)}%).`);
+    sum.classList.toggle("warn", over);
+    list.replaceChildren(...plan.sections.map((s, i) => {
+      const li = document.createElement("li"), n = document.createElement("b"), what = document.createElement("span"), t = document.createElement("span");
+      n.textContent = String(i + 1);
+      const [lo, hi] = hrBand(s.watts);
+      what.textContent = `${KIND_NAME[s.kind]} ${distTxt(s.len)} ${unitD()}${s.kind !== "flat" ? ` at ${(s.grade * 100).toFixed(1)}%` : ""} · ${s.watts > 20 ? `${s.watts} W · ${lo}–${hi} bpm` : "coast, eat, drink"} · ${speedTxt(s.speed)} ${unitS()}`;
+      t.className = "t"; t.textContent = fmtHM(s.end);
+      li.append(n, what, t);
+      return li;
+    }));
+  }
+  let draftPlan = null;
+  const planFromDialog = () => {
+    const target = parseHM(/** @type {HTMLInputElement} */ ($("pc-time")).value);
+    if (!target || !NAV.route) return null;
+    return C.pacePlan(NAV.route, { ...paceOpts(/** @type {HTMLSelectElement} */ ($("pc-surface")).value), target });
+  };
+  $("btn-pace").addEventListener("click", async () => {
+    if (!NAV.route) return;
+    if (!NAV.route.hasEle) { $("pc-sum").textContent = "This route has no heights yet (they're on their way from Open-Meteo): a plan needs them."; }
+    const row = await DB.get("routes", NAV.route.id).catch(() => null);
+    /** @type {HTMLSelectElement} */ ($("pc-surface")).value = row && row.pace ? row.pace.surface : /iceman|mtb|single|trail/i.test(NAV.route.name) ? "mtb" : /barry|roubaix|gravel/i.test(NAV.route.name) ? "gravel" : "road";
+    /** @type {HTMLInputElement} */ ($("pc-time")).value = row && row.pace ? fmtHM(row.pace.target) : "";
+    draftPlan = NAV.route.hasEle && row && row.pace ? planFromDialog() : null;
+    if (NAV.route.hasEle) { $("pc-sum").textContent = draftPlan ? "" : "Type a finish time, or ask for the fastest you can hold."; paintPlan(draftPlan); }
+    $("pace").showModal();
+  });
+  $("pc-suggest").addEventListener("click", () => {
+    if (!NAV.route || !NAV.route.hasEle) return;
+    const t = C.paceSuggest(NAV.route, paceOpts(/** @type {HTMLSelectElement} */ ($("pc-surface")).value));
+    /** @type {HTMLInputElement} */ ($("pc-time")).value = fmtHM(t);
+    draftPlan = planFromDialog(); paintPlan(draftPlan);
+  });
+  for (const id of ["pc-show", "pc-surface"]) $(id).addEventListener(id === "pc-show" ? "click" : "change", () => { if (NAV.route && NAV.route.hasEle) { draftPlan = planFromDialog(); if (draftPlan) paintPlan(draftPlan); else $("pc-sum").textContent = "A finish time like 4:30, please."; } });
+  $("pc-save").addEventListener("click", async () => {
+    draftPlan = planFromDialog();
+    if (!draftPlan || !NAV.route) { $("pc-sum").textContent = "A finish time like 4:30, please."; return; }
+    const row = await DB.get("routes", NAV.route.id);
+    row.pace = { target: draftPlan.target, surface: draftPlan.surface };
+    await DB.put("routes", row);
+    NAV.pace = draftPlan; S.paceSaid = -1;
+    $("pace").close(); renderAhead(true); render();
+  });
+  $("pc-clear").addEventListener("click", async () => {
+    if (NAV.route) { const row = await DB.get("routes", NAV.route.id); if (row) { delete row.pace; await DB.put("routes", row); } }
+    NAV.pace = null; $("pace").close(); renderAhead(true); render();
+  });
+  /** Where you are in the plan: the section, its targets, and your clock against the plan's (+ behind). */
+  function paceNow() {
+    const plan = NAV.pace, st = NAV.st, me = myClock();
+    if (!plan || !st) return null;
+    const at = C.paceAt(plan, st.along);
+    return { ...at, delta: me == null || me < 30 ? null : me - at.planned, hr: hrBand(at.section.watts) };
+  }
+  /** On the ride: a word at each new section, and a warning when the first half is ridden too hot. */
+  function paceCoach(now) {
+    const p = paceNow();
+    if (!p || !S.running || S.paused) return;
+    const s = p.section;
+    if (p.i !== S.paceSaid) {
+      S.paceSaid = p.i; S.paceHot = 0;
+      say(s.watts > 20 ? `${KIND_NAME[s.kind]}, ${nearSay(s.len)}: ${P.ftp && live.powerAt ? `${s.watts} watts` : `heart rate ${p.hr[0]} to ${p.hr[1]}`}${p.delta != null ? `. ${aheadSay(p.delta)} ${p.delta <= 0 ? "ahead of" : "behind"} the plan` : ""}.`
+        : `${KIND_NAME[s.kind]}, ${nearSay(s.len)}: coast, eat and drink.`, false);
+    }
+    const w = now - live.powerAt < 4000 ? pw10() : null, hr = live.hr && now - live.hrAt < 5000 ? live.hr : null;
+    const hot = (w != null && w > s.watts * 1.12 + 10) || (w == null && hr != null && hr > p.hr[1] + 5);
+    S.paceHot = hot && !rolling() ? S.paceHot + 1 : 0;
+    if (S.paceHot === 90 && NAV.st.frac < 0.6) say("Over the plan here: that's spent from the finish. Ease to the target.", false);
+  }
+
+  // ── going somewhere: home, a loop of a given length, a point on the map, and what's nearby ───────────────────
+  const goMsg = $("go-msg");
+  /** A new route from here through some points (BRouter; offline from the saved map when there's no signal), kept and ridden. */
+  async function routeTo(points, name) {
+    const fix = live.lastFix;
+    if (!fix) { goMsg.textContent = "Waiting for a GPS fix: start the ride or step outside."; return null; }
+    goMsg.textContent = "Finding the way…";
+    let raw = null;
+    try {
+      const res = await timed(C.brouterVia([fix, ...points], P.profile), 20000);
+      if (res.ok) { const j = await res.json(); raw = C.parseRoute(JSON.stringify(j), `${name}.geojson`); }
+    } catch { /* no signal: try the saved map */ }
+    if (!raw && points.length === 1) {
+      const got = await offlineWays(fix, [{ ...points[0], along: 0 }], [], name);
+      if (got[0] && got[0].detour) raw = { name, points: got[0].detour.pts.map(p => ({ lat: p.lat, lon: p.lon, ele: null })), marks: [] };
+    }
+    if (!raw) { goMsg.textContent = "No way found: no signal, and no saved map between here and there."; return null; }
+    raw.name = name;
+    const id = uid(), route = C.analyze({ ...raw, id });
+    const row = C.storable(raw, { id, added: Date.now(), dist: route.total, gain: route.gain, climbs: route.climbs.length, turns: route.turns.length, made: true });
+    await DB.put("routes", row);
+    if (!route.hasEle) fillElevation(row).catch(() => {});
+    await useRoute(id);
+    goMsg.textContent = `${name}: ${distTxt(route.total)} ${unitD()}.`;
+    say(`${name}. ${nearSay(route.total)}.`, false);
+    return route;
+  }
+  const home = () => jget("fitness-ride-home", null);
+  $("go-sethome").addEventListener("click", () => {
+    const f = live.lastFix;
+    if (!f) { goMsg.textContent = "No GPS fix yet: try again outside."; startGps(); return; }
+    ls.set("fitness-ride-home", JSON.stringify({ lat: Math.round(f.lat * 1e5) / 1e5, lon: Math.round(f.lon * 1e5) / 1e5 }));
+    goMsg.textContent = "Home saved on this phone.";
+  });
+  $("go-home").addEventListener("click", async () => {
+    const h = home();
+    if (!h) { goMsg.textContent = "Set home first: tap “Set home here” when you're there."; return; }
+    if (await routeTo([h], "Home")) $("goto").close();
+  });
+  let loopTry = 0;
+  async function makeLoop(again) {
+    const f = live.lastFix;
+    if (!f) { goMsg.textContent = "Waiting for a GPS fix."; startGps(); return; }
+    const want = (+(/** @type {HTMLInputElement} */ ($("go-loop-n")).value) || 20) * (P.km ? 1000 : 1609.344);
+    loopTry = again ? loopTry + 1 : 0;
+    if (!wx.cur) await refreshWx();   // the wind decides which way round
+    const into = wx.cur ? wx.cur.dir : 0, bearing = (into + [0, 40, -40, 80, -80][loopTry % 5] + 360) % 360;
+    let scale = 1, route = null;
+    for (let i = 0; i < 2; i++) {
+      route = await routeTo([...C.loopPoints(f, want, bearing, scale), f], `Loop ${Math.round(want / (P.km ? 1000 : 1609.344))} ${unitD()}`);
+      if (!route || Math.abs(route.total - want) / want < 0.2) break;
+      scale *= want / route.total;   // roads went the long way round (or the short): once more, resized
+    }
+    if (route) $("goto").close();
+  }
+  $("go-loop").addEventListener("click", () => makeLoop(false));
+  $("go-loop-again").addEventListener("click", () => makeLoop(true));
+  const OVERPASS = "https://overpass-api.de/api/interpreter";
+  const overpass = async (q, ms = 25000) => { const r = await timed(OVERPASS, ms, { method: "POST", body: new URLSearchParams({ data: q }) }); if (!r.ok) throw new Error(`places ${r.status}`); return C.fromOverpass(await r.json()); };
+  document.querySelectorAll("[data-near]").forEach(b => b.addEventListener("click", async () => {
+    const kind = /** @type {HTMLElement} */ (b).dataset.near, f = live.lastFix, list = $("near-list");
+    if (!f) { goMsg.textContent = "Waiting for a GPS fix."; startGps(); return; }
+    goMsg.textContent = "Looking nearby…"; list.replaceChildren();
+    let all;
+    try { all = await overpass(C.overpassQuery([f], 3000)); } catch { goMsg.textContent = "Couldn't look (no signal?). Places along a route are saved with it."; return; }
+    const found = all.filter(p => p.kind === kind).map(p => ({ ...p, d: hav(f, p) })).sort((a, b) => a.d - b.d).slice(0, 12);
+    goMsg.textContent = found.length ? "" : "Nothing within 3 km in OpenStreetMap.";
+    list.replaceChildren(...found.map(p => {
+      const li = document.createElement("li"), main = document.createElement("div"), nm = document.createElement("b"), sub = document.createElement("span"), go = document.createElement("button");
+      main.className = "rl-main"; nm.textContent = p.name; sub.textContent = `${nearTxt(p.d)} ${compass(bearing(f, p))}${p.hours ? ` · ${p.hours}` : ""}`;
+      main.append(nm, sub);
+      go.type = "button"; go.className = "chip primary"; go.textContent = "Go";
+      go.addEventListener("click", async () => { if (await routeTo([{ lat: p.lat, lon: p.lon }], p.name)) $("goto").close(); });
+      const btns = document.createElement("div"); btns.className = "rl-btns"; btns.append(go);
+      li.append(main, btns);
+      return li;
+    }));
+  }));
+  $("btn-goto").addEventListener("click", () => { goMsg.textContent = ""; $("go-loop-l").firstChild.nodeValue = `A loop of (${unitD()}) `; $("near-list").replaceChildren(); startGps(); $("goto").showModal(); });
+  // a long press on the map: ride there
+  let goPoint = null;
+  function offerGo(lng, lat) {
+    goPoint = { lat, lon: lng };
+    const f = live.lastFix;
+    $("mapgo-text").textContent = f ? `${nearTxt(hav(f, goPoint))} ${compass(bearing(f, goPoint))} as the crow flies` : "Ride here?";
+    $("mapgo").hidden = false;
+  }
+  $("mapgo-no").addEventListener("click", () => { $("mapgo").hidden = true; goPoint = null; });
+  $("mapgo-yes").addEventListener("click", async () => { if (!goPoint) return; $("mapgo").hidden = true; const r = await routeTo([goPoint], "To the pin"); if (!r) mapNote(goMsg.textContent); });
+  /** Water, food, restrooms and bike shops within 150 m of the route, from OpenStreetMap: fetched once with a signal,
+   *  kept with the route, and listed with its own stops on Ahead. */
+  async function placesAlong(route, row) {
+    if (!row || row.osmAt || !navigator.onLine || route.total > 400000) return;
+    try {
+      const found = await overpass(C.overpassQuery(C.thin(route, 300), 150), 40000);
+      row.osm = found.map(p => [Math.round(p.lat * 1e5) / 1e5, Math.round(p.lon * 1e5) / 1e5, p.kind, p.name, p.hours]);
+      row.osmAt = Date.now();
+      await DB.put("routes", row);
+      if (NAV.route === route) addPlaces(route, row);
+    } catch { /* next time it's loaded with a signal */ }
+  }
+  function addPlaces(route, row) {
+    if (!row || !Array.isArray(row.osm)) return;
+    const have = new Set(route.pois.map(q => `${q.kind}:${Math.round(q.along / 50)}`));
+    for (const [lat, lon, kind, name, hours] of row.osm) {
+      const pr = C.project(route, { lat, lon });
+      if (pr.off > 150 || have.has(`${kind}:${Math.round(pr.along / 50)}`)) continue;
+      route.pois.push({ along: pr.along, off: pr.off, lat, lon, name: String(name || ""), desc: hours ? String(hours) : "", kind, src: "osm" });
+    }
+    route.pois.sort((a, b) => a.along - b.along);
+    renderAhead(true); mapRoute();
+  }
+
   // ── navigation: position on the route, turns, off course and detours ──────────────────────────────────────
-  const KIND_WORD = { water: "Water", food: "Food", aid: "Aid station", summit: "Summit", danger: "Caution", toilet: "Restroom", sprint: "Sprint", valley: "Valley", finish: "Finish", generic: "" };
-  const KIND_ICON = { water: "💧", food: "🍴", aid: "✚", summit: "▲", danger: "⚠", toilet: "WC", sprint: "⚡", valley: "▼", finish: "⚑", generic: "•" };
+  const KIND_WORD = { bike: "Bike shop", water: "Water", food: "Food", aid: "Aid station", summit: "Summit", danger: "Caution", toilet: "Restroom", sprint: "Sprint", valley: "Valley", finish: "Finish", generic: "" };
+  const KIND_ICON = { bike: "🔧", water: "💧", food: "🍴", aid: "✚", summit: "▲", danger: "⚠", toilet: "WC", sprint: "⚡", valley: "▼", finish: "⚑", generic: "•" };
   const active = () => NAV.detour ? NAV.detour : NAV.route ? { route: NAV.route, nav: NAV.nav } : null;
   const turnText = t => {
     if (!t) return "";
@@ -717,7 +972,7 @@
         if (c.kind === "turn-soon") say(`In ${nearSay(c.dist)}, ${turnText(c.turn).replace(" · ", ", ")}.`, false);
         else if (c.kind === "turn-now") { say(`${C.TURN_WORDS[c.turn.kind] || "Turn"} now.`); beep(1100, 140, 2); buzz([150, 80, 150]); }
         else if (c.kind === "climb") say(`Climb in ${nearSay(c.dist)}: ${nearSay(c.climb.len).replace(/^a /, "")} at ${(c.climb.grade * 100).toFixed(0)} percent, ${eleTxt(c.climb.gain)} ${P.km ? "metres" : "feet"} up.`, false);
-        else if (c.kind === "top") say("Top of the climb.", false);
+        else if (c.kind === "top") climbDone(c.climb);
         else if (c.kind === "poi") say(`${KIND_WORD[c.poi.kind] || "Waypoint"} in ${nearSay(c.dist)}${c.poi.name && c.poi.name !== KIND_WORD[c.poi.kind] ? `: ${c.poi.name}` : ""}.`, false);
         else if (c.kind === "arrive" && !NAV.detour) { say("You've reached the end of the route."); beep(660, 300, 2); }
       }
@@ -878,6 +1133,7 @@
         mapRoute(); mapDetour(); paintMap(live.lastFix, true);
       });
       map.on("dragstart", () => { MAP.follow = false; $("m-center").classList.add("primary"); });
+      map.on("contextmenu", e => offerGo(e.lngLat.lng, e.lngLat.lat));   // a long press: ride there
       map.on("idle", () => nameTurns());
     } catch { giveUp("The map couldn't start here; showing the route and your track."); }
   }
@@ -1070,6 +1326,28 @@
     $("poi-wrap").hidden = !r.pois.length;
     $("poi-list").innerHTML = pois.map(q => `<li><span class="ta" aria-hidden="true">${KIND_ICON[q.kind] || "•"}</span><b class="num">${nearTxt(Math.max(0, q.along - at))}</b><span>${esc(q.name)}${q.desc && q.desc !== q.name ? ` · ${esc(q.desc)}` : ""}</span></li>`).join("") || `<li class="none">None left.</li>`;
     $("wind-ahead").textContent = windAhead(r, at);
+    paintRace();
+  }
+  /** Ahead's race tiles: the plan (ahead / behind, this section's target) and your best ride here. */
+  function paintRace() {
+    const p = paceNow(), G = NAV.ghosts, gh = G && (G.best || G.last);
+    $("race-tiles").hidden = !p && !gh;
+    $("btn-pace").textContent = NAV.pace ? `Race plan · ${fmtHM(NAV.pace.target)}` : "Race plan";
+    $("pace-tile").hidden = !p;
+    const tone = (el, d) => { el.classList.toggle("ahead", d != null && d <= 0); el.classList.toggle("behind", d != null && d > 0); };
+    if (p) {
+      $("pace-delta").textContent = p.delta == null ? fmtHM(NAV.pace.target) : `${p.delta <= 0 ? "−" : "+"}${signed(p.delta)}`;
+      tone($("pace-delta"), p.delta);
+      $("pace-sec").textContent = p.section.watts > 20 ? `${KIND_NAME[p.section.kind]}: ${p.hr[0]}–${p.hr[1]} bpm · ${p.section.watts} W` : `${KIND_NAME[p.section.kind]}: coast, eat`;
+    }
+    $("ghost-tile").hidden = !gh;
+    if (gh) {
+      const d = vsGhost(gh), when = new Date(gh.start).toLocaleDateString([], { month: "short", day: "numeric" });
+      $("ghost-k").textContent = gh === G.best ? "Your best" : "Your last";
+      $("ghost-delta").textContent = d == null ? fmtHM(gh.g.total) : `${d <= 0 ? "−" : "+"}${signed(d)}`;
+      tone($("ghost-delta"), d);
+      $("ghost-sub").textContent = `${when} · ${fmtHM(gh.g.total)}${G.n > 1 ? ` · ${G.n} rides here` : ""}`;
+    }
   }
   /** How the wind sits on the next stretch of the route: headwind, tailwind or cross, as shares of the distance. */
   function windAhead(r, at) {
@@ -1170,6 +1448,33 @@
       () => setSaver(true), () => { setSaver(false); saver.auto = false; saver.declined = true; });
   }
 
+  // ── stamina: the fuel tank (carbohydrate burned at the intensity, filled by what you eat) and W′ (the reserve
+  //    above critical power, from the power curve the sync learned) ──────────────────────────────────────────────
+  const ftpNow = () => P.ftp || cfg.eftp || Math.round(2.8 * P.weight);
+  const fuelGrams = () => { const long = (planned && planned.minutes >= 150) || S.elapsed > 2.5 * 3600; return cfg.drink && cfg.drink.carbs ? Math.round(cfg.drink.carbs / 3) + (long ? 25 : 0) : long ? 30 : 20; };
+  function stamina(now, dt) {
+    if (!S.tank) S.tank = C.tank(P.weight);
+    const w = now - live.powerAt < 4000 && live.power != null ? live.power : null, hr = live.hr && now - live.hrAt < 5000 ? live.hr : null;
+    if (w == null && hr == null) return;
+    const pct = w != null ? w / ftpNow() * 100 : C.ftpPct(hr / P.lthr * 100);
+    const before = S.tank.burned;
+    C.burn(S.tank, { watts: w, hr, pct, secs: dt, kg: P.weight, male: cfg.sex !== "female" });
+    const perMin = (S.tank.burned - before) / Math.max(1e-6, dt) * 60;
+    S.tank.rate = S.tank.rate == null ? perMin : S.tank.rate + (perMin - S.tank.rate) * Math.min(1, dt / 300);   // ~5 min average
+    const left = S.tank.left / S.tank.full;
+    if (left <= 0.25 && S.fuelSaid < 2) { S.fuelSaid = 2; notice("Fuel tank at 25 percent: eat now, before the legs go."); }
+    else if (left <= 0.4 && S.fuelSaid < 1) { S.fuelSaid = 1; notice("Fuel tank at 40 percent: eat something in the next 15 minutes."); }
+    const cp = cfg.cp, wp = cfg.w_prime_kj ? cfg.w_prime_kj * 1000 : 0;
+    if (cp && wp && w != null) {
+      if (S.wbal == null) S.wbal = wp;
+      S.wbal = C.wbal(S.wbal, w, cp, wp, dt);
+      if (S.wbal / wp < 0.2 && !S.wbalLow) { S.wbalLow = true; say("W prime nearly gone: ease off below critical power and it comes back.", false); }
+      else if (S.wbal / wp > 0.6) S.wbalLow = false;
+    }
+  }
+  /** Minutes until the tank is down to its last tenth at the recent rate, without eating. */
+  const emptyIn = () => S.tank && S.tank.rate > 0.05 ? Math.max(0, (S.tank.left - S.tank.full * 0.1) / S.tank.rate) : null;
+
   // ── tailoring the workout as you ride ─────────────────────────────────────────────────────────────────────
   const tgt = s => { const k = C.isWork(s) ? S.intensity : 1; return s.lo > 0 ? [bpm(s.lo * k), bpm(s.hi * k)] : [0, bpm(s.hi)]; };
   const pwTgt = s => { if (!(P.ftp > 0)) return null; const k = C.isWork(s) ? S.intensity : 1; return s.lo > 0 ? [Math.round(P.ftp * C.ftpPct(s.lo * k) / 100), Math.round(P.ftp * C.ftpPct(s.hi * k) / 100)] : [0, Math.round(P.ftp * C.ftpPct(s.hi) / 100)]; };
@@ -1184,17 +1489,25 @@
     const before = { plan: S.plan.map(x => ({ ...x })), intensity: S.intensity, step: S.step, stepStart: S.stepStart };
     change();
     undo = revert ? { revert } : before;
-    $("suggest-text").textContent = text; $("suggest").hidden = false;
+    $("suggest-text").textContent = text; $("suggest-yes").hidden = false; $("suggest").hidden = false;
     say(text, false); beep(700, 120, 2); buzz([120, 60, 120]);
     clearTimeout(undoTimer);
     undoTimer = setTimeout(() => { $("suggest").hidden = true; undo = null; }, 30000);
     save(); render();
   };
+  /** Something worth knowing (the weather, the fuel tank): said, shown and buzzed, with nothing to undo. */
+  const notice = (text, urgent = false) => {
+    undo = null;
+    $("suggest-text").textContent = text; $("suggest-yes").hidden = true; $("suggest").hidden = false;
+    say(text, urgent); beep(600, 140, 2); buzz([200, 80, 200]);
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => { $("suggest").hidden = true; $("suggest-yes").hidden = false; }, 30000);
+  };
   $("suggest-yes").addEventListener("click", () => {
     if (undo) { if (undo.revert) undo.revert(); else Object.assign(S, undo); undo = null; say("Changed back.", false); save(); render(); }
     $("suggest").hidden = true;
   });
-  $("suggest-no").addEventListener("click", () => { $("suggest").hidden = true; undo = null; });
+  $("suggest-no").addEventListener("click", () => { $("suggest").hidden = true; $("suggest-yes").hidden = false; undo = null; });
   const setIntensity = k => { S.intensity = Math.max(0.8, Math.min(1.15, Math.round(k * 100) / 100)); };
   const easyHomeNow = () => {   // the rest of the session as easy endurance, same time
     const st = steps(), rest = Math.max(0, st[S.step] ? st[S.step].min - doneIn() : 0) + st.slice(S.step + 1).reduce((a, s) => a + s.min, 0);
@@ -1289,6 +1602,7 @@
     if (S.running && !S.paused) {
       if (now - wx.at > WX_EVERY) refreshWx();   // fresh conditions every half hour on a long ride
       if (live.lastFix && now - (NAV.lastAt || 0) > 1500) onFix(live.lastFix);   // a quiet GPS (standing still, under trees): keep judging the last fix
+      if (!S.autoPaused) { trackMine(); ghostCallout(); paceCoach(now); }
       const spd = speedNow(now), gpsQuiet = watch != null && live.gpsAt && now - live.gpsAt > 8000 && now - live.gpsAt < 60000 && (live.gpsSpeed ?? 0) < 1.5;
       const v = spd ?? (gpsQuiet ? 0 : null);
       // auto-pause: stopped 4 s (a speed source says so) pauses the timer and the recording; moving again resumes
@@ -1305,6 +1619,7 @@
         }
         if (live.cad && now - live.cadAt < 4000 && live.cad > 0) { S.cadSum += live.cad * dt; S.cadSecs += dt; }
         if (now - live.powerAt < 4000 && live.power != null) { S.pwSum += live.power * dt; S.pwSecs += dt; }
+        stamina(now, dt);
         // stops and starts: a stop is under 1.5 m/s after moving; rolling again opens a 45 s grace for the coaching
         if (spd != null) {
           if (moving && spd < 1.5) { moving = false; stops.push(S.elapsed); }
@@ -1456,7 +1771,20 @@
       $("step-next").textContent = "";
       $("step-bar").style.width = "0";
       paintGauge(null);
+    } else if (S.running && (!list.length || S.step >= list.length) && paceNow()) {   // racing to the plan: its section is the step
+      const p = paceNow(), sec = p.section, hrNow = hrLive;
+      $("step-name").textContent = `Race plan · ${KIND_NAME[sec.kind]} ${p.i + 1}/${NAV.pace.sections.length}`;
+      $("step-time").textContent = p.delta == null ? clock(S.elapsed) : `${p.delta <= 0 ? "−" : "+"}${signed(p.delta)}`;
+      $("step-time").classList.toggle("ahead", p.delta != null && p.delta <= 0); $("step-time").classList.toggle("behind", p.delta != null && p.delta > 0);
+      if (sec.watts > 20) lineOf($("step-target"), ["Target ", `${p.hr[0]}–${p.hr[1]}`, " bpm · ", `${sec.watts}`, " W · ", speedTxt(sec.speed), ` ${unitS()}`]);
+      else lineOf($("step-target"), ["Descent: ", "coast", ", eat and drink"]);
+      $("step-bar").style.width = `${Math.min(100, (1 - p.left / Math.max(1, sec.len)) * 100)}%`;
+      $("step-cue").textContent = `${p.delta == null ? "" : `${signed(p.delta)} ${p.delta <= 0 ? "ahead of" : "behind"} the plan · `}${nearTxt(p.left)} left in this section`;
+      $("step-next").textContent = p.next ? `Next: ${KIND_NAME[p.next.kind]} ${distTxt(p.next.len)} ${unitD()}${p.next.kind !== "flat" ? ` at ${(p.next.grade * 100).toFixed(1)}%` : ""}` : "Last section: to the finish";
+      paintGauge(sec.watts > 20 ? { lo: p.hr[0] / P.lthr * 100, hi: p.hr[1] / P.lthr * 100 } : null, hrNow, p.hr[0], p.hr[1]);
+      if (hrNow && sec.watts > 20) { st.classList.add(hrNow > p.hr[1] + 2 ? "down" : hrNow < p.hr[0] - 2 ? "up" : "good"); st.textContent = hrNow > p.hr[1] + 2 ? "▼ Over the plan" : hrNow < p.hr[0] - 2 ? "▲ Under the plan" : "On the plan"; }
     } else {
+      $("step-time").classList.remove("ahead", "behind");
       paintGauge(null);
       $("step-name").textContent = S.step >= list.length && list.length ? "Workout done" : planned ? planned.title : "Free ride";
       $("step-time").textContent = clock(S.elapsed);
@@ -1525,6 +1853,14 @@
     }
     const e = NAV.route && NAV.st && !NAV.st.offCourse && NAV.route.hasEle ? NAV.st.ele : live.alt;
     $("d-ele").innerHTML = e == null ? "—" : `${eleTxt(e)}<small>${unitE()}</small>`;
+    if (S.tank) {
+      const e = emptyIn();
+      $("d-fuel").innerHTML = `${Math.round(S.tank.left / S.tank.full * 100)}<small>%</small>`;
+      $("d-fuel-s").textContent = `${Math.round(S.tank.burned)} g used · ${Math.round(S.tank.eaten)} g eaten${e != null ? ` · low in ${hm(e / 60)}` : ""}`;
+    } else { $("d-fuel").textContent = "—"; $("d-fuel-s").textContent = "fills in as you ride"; }
+    const wp = cfg.w_prime_kj ? cfg.w_prime_kj * 1000 : 0;
+    $("d-wbal-t").hidden = !(cfg.cp && wp);
+    if (cfg.cp && wp) { $("d-wbal").innerHTML = S.wbal == null ? "—" : `${Math.round(S.wbal / wp * 100)}<small>%</small>`; $("d-wbal-s").textContent = `${((S.wbal ?? wp) / 1000).toFixed(1)} of ${(wp / 1000).toFixed(1)} kJ above ${cfg.cp} W`; }
     $("d-batt").textContent = live.battery ? `${Math.round(live.battery.level * 100)}%${live.battery.charging ? " ⚡" : ""}` : "—";
     const need = rideLeftMin();
     $("d-batt-left").textContent = live.battery && live.battery.charging ? "charging" : batt.fc ? `lasts ${hm(batt.fc.hours)}${need != null ? (batt.fc.hours * 60 < need ? " · short of the ride" : " · enough") : ""}${saver.on ? " · saver" : ""}` : saver.on ? "saver on" : "";
@@ -1592,7 +1928,11 @@
   });
   $("btn-skip").addEventListener("click", () => { advance(true); beep(990, 120); render(); });
   $("btn-lap").addEventListener("click", () => { lap(0); beep(990, 120); say(`Lap ${S.laps.length}. ${clock(S.laps[S.laps.length - 1]?.time || 0)}.`, false); render(); });
-  $("fuel-ok").addEventListener("click", () => { S.fuelDue = false; render(); });
+  $("fuel-ok").addEventListener("click", () => {   // eaten: into the tank
+    S.fuelDue = false;
+    if (S.running) { if (!S.tank) S.tank = C.tank(P.weight); C.eat(S.tank, fuelGrams()); if (S.tank.left / S.tank.full > 0.5) S.fuelSaid = 0; }
+    render();
+  });
   $("btn-end").addEventListener("click", async () => {
     if (!confirm("End the ride?")) return;
     const now = Date.now();
@@ -1627,6 +1967,7 @@
       const T = B.target, raceName = cfg.race && cfg.race.name ? cfg.race.name.replace(/^Bell's\s+/, "") : "the race";
       if (T && T.days != null) out.push(T.ctl - ctl > 1 ? `${raceName} in ${T.days} days asks for fitness ${T.ctl}: ${(T.ctl - ctl).toFixed(1)} to go, and the plan's coming weeks are built for it.` : `${raceName} in ${T.days} days: fitness is at its target ${T.ctl}, so the job now is arriving fresh.`);
     } else out.push(`Load ${tss}${planned && planned.load ? ` of ${Math.round(+planned.load)} planned` : ""}.`);
+    if (S.tank && S.tank.burned > 30) out.push(`Fuel: about ${Math.round(S.tank.burned)} g of carbohydrate burned, ${Math.round(S.tank.eaten)} g eaten; the tank ended near ${Math.round(S.tank.left / S.tank.full * 100)}%${S.tank.left / S.tank.full < 0.3 ? ": eat more, earlier, on rides this long" : ""}.`);
     if (checkSaid === "hot") out.push("The commute check ran hot on steady riding: worth an easy day and an early night.");
     else if (checkSaid === "fresh") out.push("The commute check ran fresh: lower heart rate than usual for the speed.");
     return out;
@@ -1636,7 +1977,8 @@
     const name = `${planned ? planned.title : NAV.route ? NAV.route.name : "Ride"} · ${new Date(S.wallStart || now).toLocaleDateString([], { month: "short", day: "numeric" })}`;
     const meta = { id: S.rideId || uid(), name, start: S.wallStart || now - S.elapsed * 1000, end: now, elapsed: S.elapsed, moving: S.moving, dist: S.dist, ascent: S.ascent, maxSpeed: S.maxSpeed,
       avgHr: S.hrSecs ? S.hrSum / S.hrSecs : null, maxHr: S.hrMax || null, avgCad: S.cadSecs ? S.cadSum / S.cadSecs : null, avgPower: S.pwSecs ? S.pwSum / S.pwSecs : null, tss, planned: planned && planned.load ? Math.round(+planned.load) : null,
-      zones: S.zones, laps: S.laps, pauses: S.pauses, route: NAV.route ? NAV.route.name : null, check, indoor: !samples.some(s => s[1] != null), trainer: TR.used, note: rideNote(tss) };
+      zones: S.zones, laps: S.laps, pauses: S.pauses, route: NAV.route ? NAV.route.name : null, routeId: NAV.route ? NAV.route.id : null,
+      startLL: (s => (s ? [s[1], s[2]] : null))(samples.find(x => x[1] != null)), check, indoor: !samples.some(s => s[1] != null), trainer: TR.used, note: rideNote(tss) };
     try {
       await DB.put("tracks", { id: meta.id, samples });
       await DB.put("rides", meta);
@@ -1692,6 +2034,14 @@
     }
     const full = { ...r, samples: await rideSamples(r) }, base = slug(`${new Date(r.start).toISOString().slice(0, 10)}-${r.name.split(" · ")[0]}`);
     const fit = () => new File([C.toFIT(full)], `${base}.fit`, { type: "application/vnd.ant.fit" });
+    if (kind === "route") {
+      try {
+        const raw = C.rideRoute(r.name.split(" · ")[0], full.samples), id = uid(), route = C.analyze({ ...raw, id });
+        await DB.put("routes", C.storable(raw, { id, added: Date.now(), dist: route.total, gain: route.gain, climbs: route.climbs.length, turns: route.turns.length, fromRide: r.id }));
+        $("sum-sync").textContent = `Saved as a route: ${route.name}, ${distTxt(route.total)} ${unitD()}. Ride it again from Map → Routes, against this ride.`;
+      } catch (err) { $("sum-sync").textContent = String((err && err.message) || err); }
+      return;
+    }
     if (kind === "fit") download(fit(), `${base}.fit`);
     else if (kind === "gpx") download(new Blob([C.toGPX(full)], { type: "application/gpx+xml" }), `${base}.gpx`);
     else if (kind === "tcx") download(new Blob([C.toTCX(full)], { type: "application/vnd.garmin.tcx+xml" }), `${base}.tcx`);
@@ -1846,5 +2196,5 @@
   show(page);
   paintLaps();
   /** @type {any} */ (window).__ride = { S, NAV, P, MAP, get rep() { return rep; }, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB,
-    TR, batt, saver, sendRides, outbox, reroute };
+    TR, batt, saver, sendRides, outbox, reroute, paceNow, wx, offerGo, routeTo, findGhosts };
 })();

@@ -195,6 +195,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
     trend = _weight_trend((profile or {}).get("weigh_ins") or [], today)
     weight = cfg["athlete"].get("weight_kg") or (trend or {}).get("kg") or (profile or {}).get("weight_kg")
     upkeep = bike.upkeep(acts, bike_state or {}, cfg, today, wx, weight, plan["races"] if plan else [])
+    pwr = power.profile(acts, {k: json.loads(v) for k, v in (traces or {}).items()}, today, weight, th.get("ftp"))
     venue = {name: {k: wxm.Wx(raw) if raw else None for k, raw in pts.items()} for name, pts in (race_weather or {}).items()}
     races_soon = raceday.pages(plan, cfg, wx, th, weight, upkeep, today, editions=editions, venue=venue)
 
@@ -226,7 +227,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
         "coverage": coverage,
         "ride": {**ride_config(cfg, th, plan, wx, now, rec), "brief": _brief(t, rec, ready_today, form_now, plan, commute, th),
-                 "weight_kg": round(weight, 1) if weight else None},
+                 "weight_kg": round(weight, 1) if weight else None, **_ride_power(pwr)},
         "commute": {**commute, "today": commute_today} if commute else None,
         "fuel": _fuel(cfg, plan, rec, commute_today, today, {**(profile or {}), **({"weight_kg": trend["kg"]} if trend else {})}, wx),
         "weight": trend,
@@ -234,7 +235,7 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "rides": _inside_rides(acts, traces, th, adjust, today),
         "recap": _recap(acts, by_day, adjust, plan, today),
         "strength": _strength_log(acts, plan, lifted, today),
-        "power": power.profile(acts, {k: json.loads(v) for k, v in (traces or {}).items()}, today, weight, th.get("ftp")),
+        "power": pwr,
         "checkins": felt["checkins"], "rpe": {a["id"]: felt["rpe"][a["id"]] for a in acts[-60:] if a["id"] in felt["rpe"]},
         "race_day": races_soon,
         "counts": {"days": len(days), "activities": len(acts), "first": _iso(first)},
@@ -630,6 +631,13 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
             "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models,
             "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")},
             "wx": _ride_wx(wx, now or datetime.now()) if wx else None}
+
+
+def _ride_power(pwr: dict | None) -> dict:
+    """What ride mode's stamina needs from the power curve: critical power and W′ (the reserve above it), and eFTP
+    for pacing when no FTP is set."""
+    cp = (pwr or {}).get("cp") or {}
+    return {"cp": cp.get("cp"), "w_prime_kj": cp.get("w_prime_kj"), "eftp": (pwr or {}).get("eftp")}
 
 
 def _brief(today: str, rec: dict, ready: dict | None, form: dict, plan: dict | None = None, commute: dict | None = None, th: dict | None = None) -> dict:

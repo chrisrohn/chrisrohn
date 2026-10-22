@@ -111,9 +111,11 @@
           <button type="button" class="chip" id="m-zout" aria-label="Zoom out">−</button>
         </div>
         <p class="mapnote" id="mapnote" hidden></p>
+        <div class="mapgo" id="mapgo" hidden role="status"><span id="mapgo-text"></span><button type="button" class="chip primary" id="mapgo-yes">Go here</button><button type="button" class="chip" id="mapgo-no" aria-label="Cancel">✕</button></div>
       </div>
       <div class="routebar">
         <span class="rname" id="route-name">No route loaded</span>
+        <button type="button" class="chip" id="btn-goto">Go</button>
         <button type="button" class="chip primary" id="btn-routes">Routes</button>
       </div>
     </section>
@@ -129,6 +131,11 @@
           <div class="rtile"><span class="k">To go</span><span class="v num" id="a-left">—</span><span class="s" id="a-gain"></span></div>
           <div class="rtile"><span class="k">Arrive</span><span class="v num" id="a-eta">—</span><span class="s" id="a-sun"></span></div>
         </section>
+        <section class="rtiles two" id="race-tiles" hidden aria-label="Race plan and your past rides">
+          <div class="rtile" id="pace-tile" hidden><span class="k">Race plan</span><span class="v num" id="pace-delta">—</span><span class="s" id="pace-sec"></span></div>
+          <div class="rtile" id="ghost-tile" hidden><span class="k" id="ghost-k">Your best</span><span class="v num" id="ghost-delta">—</span><span class="s" id="ghost-sub"></span></div>
+        </section>
+        <div class="actions left abtns"><button type="button" class="chip" id="btn-pace">Race plan</button></div>
         <figure class="prof">
           <figcaption class="k">Whole route</figcaption>
           <canvas id="prof-all" height="96" role="img" aria-label="Elevation profile of the whole route"></canvas>
@@ -165,6 +172,8 @@
         <div class="rtile"><span class="k">Time of day</span><span class="v num" id="d-clock">—</span></div>
         <div class="rtile"><span class="k">Light left</span><span class="v num" id="d-sunset">—</span><span class="s" id="d-sunset-at"></span></div>
         <div class="rtile"><span class="k">Elevation</span><span class="v num" id="d-ele">—</span></div>
+        <div class="rtile"><span class="k">Fuel tank</span><span class="v num" id="d-fuel">—</span><span class="s" id="d-fuel-s"></span></div>
+        <div class="rtile" id="d-wbal-t" hidden><span class="k">W′ left</span><span class="v num" id="d-wbal">—</span><span class="s" id="d-wbal-s"></span></div>
         <div class="rtile"><span class="k">Battery</span><span class="v num" id="d-batt">—</span><span class="s" id="d-batt-left"></span></div>
       </section>
     </section>
@@ -269,6 +278,40 @@
     </form>
   </dialog>
 
+  <dialog id="pace" aria-labelledby="pace-h">
+    <form method="dialog" class="sform">
+      <h2 id="pace-h">Race plan</h2>
+      <p class="note">Pick a finish time. The plan rides the climbs harder and the descents easier, so the effort evens out over the course, like Garmin's Power Guide. On the ride: the section's target and how far ahead or behind the plan you are.</p>
+      <label>Finish time (h:mm) <input id="pc-time" type="text" inputmode="numeric" autocomplete="off" placeholder="4:30"></label>
+      <label>Surface
+        <select id="pc-surface">
+          <option value="road">Road</option>
+          <option value="gravel" selected>Gravel (Barry-Roubaix)</option>
+          <option value="mtb">Mountain bike (Iceman)</option>
+        </select>
+      </label>
+      <div class="actions left"><button type="button" class="chip" id="pc-suggest">Fastest I can hold</button><button type="button" class="chip" id="pc-show">Show the plan</button></div>
+      <p class="note" id="pc-sum" role="status"></p>
+      <ol class="pclist" id="pc-list"></ol>
+      <div class="actions"><button type="button" class="chip" id="pc-clear">No plan</button><button type="submit" class="chip" value="close">Close</button><button type="button" class="chip primary" id="pc-save">Use this plan</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="goto" aria-labelledby="goto-h">
+    <form method="dialog" class="sform">
+      <h2 id="goto-h">Go somewhere</h2>
+      <div class="actions left"><button type="button" class="chip primary" id="go-home">Home</button><button type="button" class="chip" id="go-sethome">Set home here</button></div>
+      <label id="go-loop-l">A loop of (mi) <input id="go-loop-n" type="number" inputmode="decimal" min="2" max="200" step="1" value="20"></label>
+      <div class="actions left"><button type="button" class="chip primary" id="go-loop">Make a loop</button><button type="button" class="chip" id="go-loop-again">Another way round</button></div>
+      <p class="note">A loop goes into the wind first, so the wind brings you home. To ride to any point, long-press it on the map.</p>
+      <h3 class="k">Nearby</h3>
+      <div class="actions left" role="group" aria-label="Find nearby"><button type="button" class="chip" data-near="water">Water</button><button type="button" class="chip" data-near="food">Food &amp; coffee</button><button type="button" class="chip" data-near="bike">Bike shop</button><button type="button" class="chip" data-near="toilet">Restroom</button></div>
+      <p class="note" id="go-msg" role="status"></p>
+      <ul class="rlist" id="near-list"></ul>
+      <div class="actions"><button type="submit" class="chip" value="close">Close</button></div>
+    </form>
+  </dialog>
+
   <dialog id="rides" aria-labelledby="rides-h">
     <form method="dialog" class="sform">
       <h2 id="rides-h">Saved rides</h2>
@@ -286,6 +329,7 @@
         <button type="button" class="chip" data-export="gpx">GPX</button>
         <button type="button" class="chip" data-export="tcx">TCX</button>
         <button type="button" class="chip" data-export="share">Share…</button>
+        <button type="button" class="chip" data-export="route">Save as route</button>
         <button type="button" class="chip" data-export="delete">Delete</button>
       </div>
       <div class="actions"><button type="submit" class="chip primary" value="close">Close</button></div>
