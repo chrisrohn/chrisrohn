@@ -1072,6 +1072,57 @@ self.RideCore = (() => {
     }
     return r;
   }
+  // ── climbs ahead without a route (Wahoo's Summit Freeride, Garmin's ClimbPro without a course) ─────────────────
+  /** The road you're most likely riding next: from where you are, along the way you're heading, over the map's road
+   *  graph, taking at each junction the way that runs straightest on (the same road's name wins a near tie) and never
+   *  turning back, until `want` m or a dead end. @returns {{points: {lat: number, lon: number}[], names: {along: number, name: string}[], len: number} | null} */
+  function roadAhead(g, from, heading, want = 6000) {
+    if (heading == null) return null;
+    const s = attach(g, from, 40);
+    if (!s) return null;
+    const seen = new Set([s.i]), points = [{ lat: from.lat, lon: from.lon }], names = [];
+    let at = s.i, course = heading, len = 0, name = "";
+    while (len < want) {
+      const A = g.nodes[at];
+      let best = null;
+      for (const e of g.adj[at]) {
+        if (seen.has(e.to) || e.len < 0.01) continue;
+        const B = g.nodes[e.to], b = bearing(A, B), turn = Math.abs(turnAngle(course, b));
+        if (turn > (len < 30 ? 70 : 110)) continue;                         // never back the way you came
+        const score = turn + (name && e.name && e.name !== name ? 20 : 0);
+        if (!best || score < best.score) best = { e, b, score };
+      }
+      if (!best) break;
+      const { e, b } = best;
+      seen.add(e.to);
+      if (e.name && e.name !== name) { names.push({ along: len, name: e.name }); name = e.name; }
+      len += e.len; at = e.to;
+      // the course carries over short wiggles: follow the road's own direction, smoothed over the last few metres
+      course = e.len >= 8 ? b : (course + turnAngle(course, b) * Math.min(1, e.len / 8) + 360) % 360;
+      const B = g.nodes[at];
+      points.push({ lat: B.lat, lon: B.lon });
+    }
+    return points.length > 1 && len > 200 ? { points, names, len } : null;
+  }
+  /** The climbs worth calling out, by the setting: every climb, or only those of a category and up. */
+  const CAT_MIN = { all: 0, cat4: 8000, cat3: 16000, cat2: 32000 };
+  const climbsWorth = (climbs, level = "all") => climbs.filter(c => c.score >= (CAT_MIN[level] ?? 0));
+
+  // ── the wind's cost (Wahoo's AirDrag / AirBoost, estimated): the forecast wind, turned to your direction of travel ──
+  /** What the wind does to you right now. `head` is the headwind at rider height (m/s, + against you); `v` your
+   *  speed (m/s). The aero force goes with the square of the air speed, so: the drag against calm air (%), the watts
+   *  it adds (or saves) at this speed, and the speed the same effort would hold in still air.
+   *  @returns {{drag: number, watts: number, vCalm: number} | null} */
+  function windCost(v, head, grade = 0, { mass = 85, surface = "gravel" } = {}) {
+    if (!(v > 2) || !Number.isFinite(head)) return null;
+    const o = { mass, ...(SURFACE[surface] || SURFACE.gravel) }, air = v + head, th = Math.atan(grade);
+    const now = (o.mass * GRAV * (o.crr * Math.cos(th) + Math.sin(th)) * v + 0.6 * o.cda * air * Math.abs(air) * v) / 0.97;
+    const calm = powerFor(v, grade, o);
+    return { drag: (air * Math.abs(air)) / (v * v) - 1, watts: now - calm, vCalm: now > 5 ? speedFor(now, grade, o) : v };
+  }
+  /** The forecast's 10 m wind at a rider's height on open ground (a log wind profile, ~0.65 at 1.2 m). */
+  const RIDER_WIND = 0.65;
+
   /** The z14 tiles covering a few places (and a margin around them, m). */
   function tilesAround(points, margin = 400, z = 14) {
     let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
@@ -1363,7 +1414,7 @@ self.RideCore = (() => {
   const reversed = raw => ({ ...raw, name: `${raw.name} (reversed)`, points: [...raw.points].reverse(), marks: (raw.marks || []).filter(m => !m.cue) });
 
   return { hav, bearing, turnAngle, parseRoute, analyze, eleAt, gradeAt, pointAt, project, navigator, fromBRouter, brouterUrl, pickDetour, sunTimes, kindFromAngle, TURN_WORDS, TURN_ARROWS,
-    commuteCheck, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed,
+    commuteCheck, roadAhead, climbsWorth, windCost, RIDER_WIND, nightStyle, nightColor, ZONES, QUICK, quick, isWork, isEasy, setOf, addRep, cutSet, extend, fitTime, ftpPct, toFIT, toGPX, toTCX, routeGPX, stats, fitCrc, corridorTiles, tileXY, storable, unstore, reversed,
     FTMS, TACX, fecMsg, fecPower, fecGrade, fecLevel, fecUser, parseFec, parseBikeData, ftms, ergWatts, hrErg, ergGuess,
     pbf, mvtLines, nameRoads, roadGraph, attach, shortestWays, fromWay, tilesAround, batteryForecast, rideDigest,
     SURFACE, speedFor, sections, pacePlan, paceSuggest, paceAt, hrPctFor, sustainable, carbShare, kcalMin, tank, burn, eat, wbal,

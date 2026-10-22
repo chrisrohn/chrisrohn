@@ -78,11 +78,11 @@
     ftp: prefs.ftp ?? cfg.ftp ?? 0, autoPause: prefs.autoPause ?? true, stepLap: prefs.stepLap ?? true, autoLap: prefs.autoLap ?? 0,
     climbs: prefs.climbs ?? true, reroute: prefs.reroute ?? true, profile: prefs.profile || "trekking", headingUp: prefs.headingUp ?? true,
     trainer: prefs.trainer || "auto", weight: prefs.weight || cfg.weight_kg || 75, upload: prefs.upload ?? true, saver: prefs.saver || "auto",
-    autoLock: prefs.autoLock ?? false,
+    autoLock: prefs.autoLock ?? false, freeride: prefs.freeride || "all",
   };
   const savePrefs = () => ls.set("fitness-ride-prefs", JSON.stringify({ lthr: P.lthr, max: P.max, rest: P.rest, wheel: P.wheel, fuel: P.fuel, voice: P.voice, ftp: P.ftp,
     autoPause: P.autoPause, stepLap: P.stepLap, autoLap: P.autoLap, climbs: P.climbs, reroute: P.reroute, profile: P.profile, headingUp: P.headingUp,
-    trainer: P.trainer, weight: P.weight, upload: P.upload, saver: P.saver, autoLock: P.autoLock }));
+    trainer: P.trainer, weight: P.weight, upload: P.upload, saver: P.saver, autoLock: P.autoLock, freeride: P.freeride }));
 
   // ── formatting ──────────────────────────────────────────────────────────────────────────────────────────
   const clock = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
@@ -156,7 +156,7 @@
   const fresh = () => ({ running: false, paused: false, elapsed: 0, moving: 0, dist: 0, step: 0, stepStart: 0, hrSum: 0, hrSecs: 0, hrMax: 0, zones: [0, 0, 0, 0, 0],
     trimp: 0, cadSum: 0, cadSecs: 0, pwSum: 0, pwSecs: 0, fuelAt: 0, fuelDue: false, ended: false, plan: [], intensity: 1, quick: null, rideId: "", wallStart: 0, chunk: 0,
     laps: [], lapStart: 0, lapElapsed: 0, lapDist: 0, pauses: [], autoPaused: false, still: 0, ascent: 0, maxSpeed: 0, held: 0, missed: 0, hot: 0, loadOffered: false, navAlong: 0, battSaid: false, tgtSecs: 0, tgtOn: 0, workSecs: 0, workOn: 0,
-    tank: null, fuelSaid: 0, wbal: null, wbalLow: false, routeT0: null, mine: [], ghostSaid: 0, paceSaid: -1, paceHot: 0, wxSaid: [] });
+    tank: null, fuelSaid: 0, wbal: null, wbalLow: false, routeT0: null, mine: [], ghostSaid: 0, paceSaid: -1, paceHot: 0, wxSaid: [], windSec: 0, windSecs: 0, windHead: 0, windTail: 0 });
   const S = fresh();
   const live = { heading: null, anchor: null, hr: null, hrAt: 0, cad: null, cadAt: 0, power: null, powerAt: 0, pw: [], wheelSpeed: null, wheelAt: 0, gpsSpeed: null, gpsAt: 0, lastFix: null, alt: null, battery: null };
   let samples = [];
@@ -269,7 +269,7 @@
     if (kind === "trainer") return hookTrainer(server, hook);
     const a = await hook("cycling_speed_and_cadence", "csc_measurement", onCsc);
     const b = await hook("cycling_power", "cycling_power_measurement", onPower);
-    if (b) $("t-cad-k").textContent = "Power";
+    if (b) live.powerMeter = true;
     return a || b;
   }
   // one live sensor per kind; a connection that fails says why (and what to try) instead of just turning red
@@ -558,6 +558,8 @@
     $("wx-arrow").style.transform = `rotate(${(W.dir + 180 - (moving ? live.heading : 0) + 360) % 360}deg)`;
     if (moving && W.wind >= 3) $("wx-rel").textContent = windOn(W, live.heading);
     else $("wx-rel").textContent = W.wind < 3 ? "Calm" : "—";
+    const wc = W.wind >= 3 ? windNow(now) : null;
+    $("wx-cost").textContent = wc && Math.abs(wc.drag) >= 0.05 ? `${dragTxt(wc)} drag · ${wc.watts >= 0 ? "" : "saves "}≈${Math.abs(Math.round(wc.watts))} W` : "";
     const next = wx.alerts.find(a => a.at > now - 15 * 60e3);
     $("wx-src").textContent = next ? next.text.replace(/[.:].*$/, "").replace(/^Rain in about (\d+) minutes/, "Rain in ~$1 min") : wx.src === "Live" ? `Live · ${hhmm(wx.at)}` : "Forecast from the sync";
   }
@@ -566,9 +568,26 @@
     const side = Math.sin((W.dir - course) * Math.PI / 180) > 0 ? "right" : "left";
     return Math.abs(along) < 0.35 * W.wind ? `Crosswind from the ${side}` : along > 0 ? `Headwind ${windTxt(along)} ${windU()}` : `Tailwind ${windTxt(-along)} ${windU()}`;
   };
+  // ── the wind's cost, like Wahoo's AirDrag / AirBoost but estimated: the ACE measures the air with a sensor; the phone
+  //    takes the forecast wind (10 m up, cut to rider height), turns it onto your direction of travel and works out
+  //    the extra (or missing) drag, the watts it costs at your speed, and what it's done to your time so far.
+  const surfaceOf = () => (P.profile === "fastbike" ? "road" : P.profile === "mtb" ? "mtb" : "gravel");
+  /** @returns {{drag: number, watts: number, vCalm: number, head: number} | null} */
+  function windNow(now = Date.now(), spd = speedNow(now)) {
+    const W = wx.cur;
+    if (!W || TR.virtual || trainerLive(now) || spd == null || spd < 2 || live.heading == null || now - live.gpsAt > 8000) return null;
+    const head = W.wind / 3.6 * C.RIDER_WIND * Math.cos((W.dir - live.heading) * Math.PI / 180), gr = gradeNow();
+    const c = C.windCost(spd, head, (gr ?? 0) / 100, { mass: P.weight + 11, surface: surfaceOf() });
+    return c && { ...c, head };
+  }
+  const dragTxt = c => `${c.drag >= 0 ? "+" : "−"}${Math.abs(Math.round(c.drag * 100))}%`;
+  const windSoFar = () => !S.windSecs ? "" : Math.abs(S.windSec) < 5 ? "even so far" : `${clock(Math.abs(S.windSec))} ${S.windSec > 0 ? "lost" : "gained"} so far`;
 
   // ── routes: GPX / TCX in, kept on this phone, one chosen for the ride ─────────────────────────────────────
   const NAV = { route: null, nav: null, st: null, detour: null, pace: null, ghosts: null, routing: false, lastReroute: 0, lastAt: 0, names: new Map(), offSaid: false, lastWrong: 0, avoid: [] };
+  /** The road ahead when no route is loaded (Summit Freeride): the way you're most likely riding, from the map, with its
+   *  heights and climbs; rebuilt as you go. */
+  const FREE = { route: null, st: null, names: [], at: 0, tried: 0, busy: false, why: "", said: new Set() };
   const routeMsg = $("route-msg");
   async function importFile(file) {
     const text = await file.text();
@@ -618,7 +637,7 @@
   }
   async function useRoute(id, keepProgress = false) {
     const row = id ? await DB.get("routes", id).catch(() => null) : null;
-    if (!row) { NAV.route = NAV.nav = NAV.st = NAV.detour = NAV.pace = NAV.ghosts = null; ls.set("fitness-ride-route", null); paintRouteBits(); return; }
+    if (!row) { NAV.route = NAV.nav = NAV.st = NAV.detour = NAV.pace = NAV.ghosts = null; ls.set("fitness-ride-route", null); paintRouteBits(); mapRoute(); return; }
     const route = C.analyze(C.unstore(row));
     const along = keepProgress && NAV.nav ? NAV.nav.state.along : S.running ? S.navAlong : 0;
     NAV.route = route; NAV.nav = C.navigator(route, { startAlong: along }); NAV.st = NAV.nav.status(); NAV.detour = null; NAV.avoid = []; NAV.names.clear();
@@ -875,11 +894,16 @@
       if (got[0] && got[0].detour) raw = { name, points: got[0].detour.pts.map(p => ({ lat: p.lat, lon: p.lon, ele: null })), marks: [] };
     }
     if (!raw) { goMsg.textContent = "No way found: no signal, and no saved map between here and there."; return null; }
+    return adoptMade(raw, name);
+  }
+  /** A route made on the bars: kept on the phone and ridden from here (its start is where you are). */
+  async function adoptMade(raw, name) {
     raw.name = name;
     const id = uid(), route = C.analyze({ ...raw, id });
     const row = C.storable(raw, { id, added: Date.now(), dist: route.total, gain: route.gain, climbs: route.climbs.length, turns: route.turns.length, made: true });
     await DB.put("routes", row);
     if (!route.hasEle) fillElevation(row).catch(() => {});
+    S.navAlong = 0;   // a new route starts here, whatever the last one had reached
     await useRoute(id);
     goMsg.textContent = `${name}: ${distTxt(route.total)} ${unitD()}.`;
     say(`${name}. ${nearSay(route.total)}.`, false);
@@ -913,6 +937,18 @@
     }
     if (route) $("goto").close();
   }
+  // back to the start: the way you came, turn by turn (your own track, reversed: the climbs and all), or the quickest way
+  $("go-retrace").addEventListener("click", async () => {
+    if (samples.filter(x => x[1] != null).length < 20) { goMsg.textContent = "Nothing to retrace yet: your track starts when the ride does."; return; }
+    let raw;
+    try { raw = C.reversed(C.rideRoute("Retrace", samples)); } catch (e) { goMsg.textContent = (e && e.message) || String(e); return; }
+    if (await adoptMade({ ...raw, marks: [] }, "Retrace to the start")) $("goto").close();
+  });
+  $("go-start").addEventListener("click", async () => {
+    const first = samples.find(x => x[1] != null);
+    if (!first) { goMsg.textContent = "No start yet: your track begins when the ride does."; return; }
+    if (await routeTo([{ lat: first[1], lon: first[2] }], "Back to the start")) $("goto").close();
+  });
   $("go-loop").addEventListener("click", () => makeLoop(false));
   $("go-loop-again").addEventListener("click", () => makeLoop(true));
   const OVERPASS = "https://overpass-api.de/api/interpreter";
@@ -982,7 +1018,7 @@
   };
   function onFix(fix) {
     NAV.lastAt = Date.now();
-    if (!NAV.route) { paintMap(fix); return; }
+    if (!NAV.route) { freeOnFix(fix); paintMap(fix); return; }
     const v = speedNow() ?? 0, now = Date.now();
     NAV.st = NAV.nav.update(fix, live.heading, v, now);
     if (S.running) S.navAlong = NAV.st.along;
@@ -1187,6 +1223,7 @@
     set("marks", { type: "FeatureCollection", features: r ? [...r.turns.map(t => { const p = C.pointAt(r, t.along); return { type: "Feature", properties: { t: "turn" }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } }; }),
       ...r.pois.map(p => ({ type: "Feature", properties: { t: p.kind, label: (p.name || KIND_WORD[p.kind] || "").slice(0, 40) }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } }))] : [] });
     if (r && !live.lastFix) MAP.map.fitBounds(r.bounds, { padding: 40, duration: 0 });
+    if (!r) mapFree();
   }
   function mapDetour() { set("detour", NAV.detour ? line(NAV.detour.route.pts) : { type: "FeatureCollection", features: [] }); drawCrumb(); }
   function paintMap(fix, force = false) {
@@ -1320,8 +1357,10 @@
   }
   function renderAhead(force = false) {
     const r = NAV.route;
-    if (!r || (!force && (curPage() !== "ahead" || Date.now() - aheadAt < (saver.on ? 10000 : 2000)))) return;
+    if (!force && (curPage() !== "ahead" || Date.now() - aheadAt < (saver.on ? 10000 : 2000))) return;
     aheadAt = Date.now();
+    $("free").hidden = $("free-note").hidden = !!r;
+    if (!r) { renderFree(); return; }
     const st = NAV.st || NAV.nav.status(), at = st.along, v = avgSpeed();
     $("a-done").innerHTML = `${distTxt(at)}<small>${unitD()}</small>`; $("a-pct").textContent = `${Math.round(st.frac * 100)}% of ${distTxt(r.total)} ${unitD()}`;
     $("a-left").innerHTML = `${distTxt(st.left)}<small>${unitD()}</small>`;
@@ -1339,17 +1378,7 @@
     $("prof-next-k").textContent = `Next ${P.km ? "8 km" : "5 mi"}`;
     if (r.hasEle && curPage() === "ahead") { drawProfile(cvA, r, 0, r.total, at); drawProfile(cvN, r, at, Math.min(r.total, at + span), at); }
     // the climb: ClimbPro's two states, before it and on it
-    const c = st.onClimb || st.climb, box = $("climb");
-    box.hidden = !c;
-    if (c) {
-      const on = !!st.onClimb, done = on ? at - c.start : 0, n = r.climbs.indexOf(c) + 1;
-      $("climb-k").textContent = on ? `Climbing · ${n} of ${r.climbs.length}` : `Next climb · ${n} of ${r.climbs.length}${c.cat ? ` · ${c.cat}` : ""}`;
-      $("climb-main").textContent = on ? `${nearTxt(c.end - at)} to the top` : `in ${nearTxt(c.start - at)}`;
-      const grade = st.grade != null && on ? ` · now ${st.grade.toFixed(0)}%` : "";
-      $("climb-sub").textContent = on ? `${eleTxt(c.top - (C.eleAt(r, at) ?? c.top))} ${unitE()} up to go${grade} · avg ${(c.grade * 100).toFixed(1)}%` : `${nearTxt(c.len)} at ${(c.grade * 100).toFixed(1)}% (max ${(c.maxGrade * 100).toFixed(0)}%) · ${eleTxt(c.gain)} ${unitE()} up`;
-      $("climb-bar").style.width = `${on ? Math.min(100, done / c.len * 100) : 0}%`;
-      box.classList.toggle("on", on);
-    }
+    paintClimbBox("climb", st.onClimb || st.climb, !!st.onClimb, at, r, st.grade, r.climbs);
     const A = active(), ast = NAV.detour ? NAV.detour.st || NAV.detour.nav.status() : st;
     const turns = A.route.turns.filter(t => t.along > ast.along).slice(0, 8);
     $("turn-list").innerHTML = turns.length ? turns.map(t => `<li><span class="ta" aria-hidden="true">${C.TURN_ARROWS[t.kind] || "↑"}</span><b class="num">${nearTxt(t.along - ast.along)}</b><span>${esc(turnText(t))}</span></li>`).join("") : `<li class="none">${A.route.turns.length ? "No more turns: straight to the finish." : "No turns in this file."}</li>`;
@@ -1380,6 +1409,167 @@
       $("ghost-sub").textContent = `${when} · ${fmtHM(gh.g.total)}${G.n > 1 ? ` · ${G.n} rides here` : ""}`;
     }
   }
+  // ── climbs ahead with no route (like Wahoo's Summit Freeride): the road you're on, followed through the map tiles
+  //    (the same ones the offline rerouting reads) the way you're heading, its heights from Open-Meteo every 100 m,
+  //    and the climbs on it called out like a route's; rebuilt every few kilometres, or when you turn off it ───────────
+  const tileLines = new Map();   // decoded tiles, newest last (a few dozen kept)
+  let tileUrl = "";
+  async function tilePattern() {
+    if (tileUrl) return tileUrl;
+    tileUrl = (await tileTemplate().catch(() => null)) || "";
+    if (!tileUrl && navigator.onLine) {
+      try {
+        const style = await (await timed(STYLE_URL, 8000)).json(), src = Object.values(style.sources || {}).find(x => /** @type {any} */ (x).type === "vector" && /** @type {any} */ (x).url);
+        const tj = src ? await (await timed(/** @type {any} */ (src).url, 8000)).json() : null;
+        tileUrl = (tj && tj.tiles && tj.tiles[0]) || "";
+      } catch { tileUrl = ""; }
+    }
+    return tileUrl;
+  }
+  async function linesAround(points, tmpl) {
+    const cache = "caches" in window ? await caches.open(TILES) : null, road = [], named = [];
+    for (const t of C.tilesAround(points, 1200)) {
+      const url = tmpl.replace("{z}", t.z).replace("{x}", t.x).replace("{y}", t.y);
+      let got = tileLines.get(url);
+      if (!got) {
+        let res = cache ? await cache.match(url) : null;
+        if (!res && navigator.onLine) res = await timed(url, 8000).catch(() => null);
+        if (!res || !res.ok) continue;
+        let buf = new Uint8Array(await res.arrayBuffer());
+        if (buf[0] === 0x1f && buf[1] === 0x8b) buf = new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+        got = C.mvtLines(buf, t.z, t.x, t.y);
+        tileLines.set(url, got);
+        if (tileLines.size > 48) tileLines.delete(tileLines.keys().next().value);
+      }
+      road.push(...got.transportation); named.push(...got.transportation_name);
+    }
+    return { road, named };
+  }
+  const heights = new Map();   // "lat,lon" (4 decimals, ~10 m) → metres
+  /** Ground heights for points, from Open-Meteo's elevation API (100 a call); null when they can't all be had. */
+  async function heightsOf(pts) {
+    const key = p => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`, need = [...new Set(pts.map(key).filter(k => !heights.has(k)))];
+    for (let i = 0; i < need.length; i += 100) {
+      const part = need.slice(i, i + 100), q = new URLSearchParams({ latitude: part.map(k => k.split(",")[0]).join(","), longitude: part.map(k => k.split(",")[1]).join(",") });
+      try {
+        const r = await timed(`https://api.open-meteo.com/v1/elevation?${q}`, 10000);
+        if (!r.ok) return null;
+        const j = await r.json();
+        part.forEach((k, n) => { if (j.elevation && Number.isFinite(j.elevation[n])) heights.set(k, j.elevation[n]); });
+      } catch { return null; }
+    }
+    if (heights.size > 20000) heights.clear();
+    const out = pts.map(p => heights.get(key(p)));
+    return out.every(Number.isFinite) ? out : null;
+  }
+  const offset = (p, brg, d) => ({ lat: p.lat + d * Math.cos(brg * Math.PI / 180) / 111320, lon: p.lon + d * Math.sin(brg * Math.PI / 180) / (111320 * Math.cos(p.lat * Math.PI / 180)) });
+  async function freeBuild(fix) {
+    const now = Date.now(), v = speedNow(now) ?? 0;
+    if (FREE.busy || P.freeride === "off" || NAV.route || TR.virtual || live.heading == null || v < 2 || now - FREE.tried < 20000) return;
+    FREE.busy = true; FREE.tried = now;
+    try {
+      const tmpl = await tilePattern();
+      if (!tmpl) { FREE.why = "map"; return; }
+      const heading = live.heading, { road, named } = await linesAround([fix, offset(fix, heading, 5000)], tmpl);
+      if (!road.length) { FREE.why = "map"; return; }
+      const way = C.roadAhead(C.roadGraph(C.nameRoads(road, named)), fix, heading, 6000);
+      if (!way) { FREE.why = "road"; FREE.route = null; FREE.st = null; return; }
+      const flat = C.analyze({ name: "Road ahead", points: way.points.map(p => ({ ...p, ele: null })) }), pts = [];
+      for (let d = 0; d < flat.total; d += 100) pts.push(C.pointAt(flat, d));
+      pts.push(C.pointAt(flat, flat.total));
+      const h = await heightsOf(pts);
+      if (!h) { FREE.why = "heights"; return; }
+      FREE.route = C.analyze({ name: (way.names[0] && way.names[0].name) || "Road ahead", points: pts.map((p, i) => ({ lat: p.lat, lon: p.lon, ele: h[i] })) });
+      FREE.names = way.names; FREE.at = now; FREE.why = "";
+      freeOnFix(live.lastFix || fix, false);
+      mapFree(); renderAhead(true);
+    } catch { FREE.why = "map"; } finally { FREE.busy = false; }
+  }
+  /** Where you are on the road ahead, its next climb, the callouts, and whether it's time to look further. */
+  function freeOnFix(fix, build = true) {
+    const r = FREE.route;
+    if (r) {
+      const pr = C.project(r, fix, FREE.st ? FREE.st.along : 0, 1500, 200), list = C.climbsWorth(r.climbs, P.freeride);
+      const climb = list.find(c => c.end > pr.along) || null, on = climb && climb.start <= pr.along ? climb : null;
+      FREE.st = { along: pr.along, off: pr.off, climb, onClimb: on, toClimb: climb && !on ? climb.start - pr.along : null, grade: C.gradeAt(r, pr.along) };
+      if (pr.off > 60) { FREE.st = null; FREE.route = null; mapFree(); }   // turned off it: find the new road
+      else if (S.running && !S.paused && climb) {
+        const top = C.pointAt(r, climb.end), key = `${top.lat.toFixed(3)},${top.lon.toFixed(3)}`;   // the same climb across rebuilds
+        if (!on && FREE.st.toClimb <= 300 && !FREE.said.has(`c${key}`)) { FREE.said.add(`c${key}`); say(`Climb in ${nearSay(FREE.st.toClimb)}: ${nearSay(climb.len).replace(/^a /, "")} at ${(climb.grade * 100).toFixed(0)} percent, ${eleTxt(climb.gain)} ${P.km ? "metres" : "feet"} up.`, false); }
+        if (on && climb.end - pr.along < 40 && !FREE.said.has(`t${key}`)) { FREE.said.add(`t${key}`); say("Top of the climb.", false); beep(990, 120); }
+      }
+    }
+    const st = FREE.st;
+    if (build && (!FREE.route || (st && (st.along > FREE.route.total - 2500 || Date.now() - FREE.at > 180e3)))) freeBuild(fix);
+  }
+  /** The Ahead screen with no route: the next 5 miles' profile, the climb, and the climbs further on. */
+  function renderFree() {
+    const r = FREE.route, st = FREE.st;
+    $("free").hidden = !r || !st;
+    $("free-note").hidden = !!(r && st);
+    if (!r || !st) {
+      $("free-note").textContent = P.freeride === "off" ? "Climbs ahead without a route are off (Settings)."
+        : FREE.why === "heights" ? "The road ahead is found, but its heights need signal: the climbs come back when there's some."
+        : FREE.why === "map" ? "The road ahead needs the map: open the Map screen once with signal, or ride where you've loaded a route before."
+        : "No route? Ride, and the climbs on the road ahead appear here: the app follows the road you're on in the map and looks up its heights (heights need signal).";
+      return;
+    }
+    const at = st.along, span = P.km ? 8000 : 8046.7, on = FREE.names.filter(n => n.along <= at + 50).pop();
+    $("free-k").textContent = `Road ahead${on ? ` · ${on.name}` : ""}`;
+    $("free-prof-k").textContent = `Next ${distTxt(Math.min(span, r.total - at))} ${unitD()}`;
+    if (curPage() === "ahead") drawProfile(/** @type {HTMLCanvasElement} */ ($("prof-free")), r, at, Math.min(r.total, at + span), at);
+    paintClimbBox("free-climb", st.onClimb || st.climb, !!st.onClimb, at, r, st.grade, C.climbsWorth(r.climbs, P.freeride));
+    const ahead = C.climbsWorth(r.climbs, P.freeride).filter(c => c.end > at).slice(0, 5);
+    $("free-list").innerHTML = ahead.length ? ahead.map(c => `<li><span class="ta">${picto("summit")}<span class="sr">Climb:</span></span><b class="num">${esc(nearTxt(Math.max(0, c.start - at)))}</b><span>${esc(nearTxt(c.len))} at ${(c.grade * 100).toFixed(1)}% · ${eleTxt(c.gain)} ${unitE()} up${c.cat ? ` · ${c.cat}` : ""}</span></li>`).join("")
+      : `<li class="none">No climbs on the next ${distTxt(r.total - at)} ${unitD()} of this road.</li>`;
+  }
+  /** A ClimbPro box: before the climb (how far, how long, how steep) and on it (to the top, height to go, grade now). */
+  function paintClimbBox(id, c, on, at, r, grade, list) {
+    const box = $(id);
+    box.hidden = !c;
+    if (!c) return;
+    const done = on ? at - c.start : 0, n = list.indexOf(c) + 1;
+    $(`${id}-k`).textContent = on ? `Climbing · ${n} of ${list.length}` : `Next climb · ${n} of ${list.length}${c.cat ? ` · ${c.cat}` : ""}`;
+    $(`${id}-main`).textContent = on ? `${nearTxt(c.end - at)} to the top` : `in ${nearTxt(c.start - at)}`;
+    $(`${id}-sub`).textContent = on ? `${eleTxt(c.top - (C.eleAt(r, at) ?? c.top))} ${unitE()} up to go${grade != null ? ` · now ${grade.toFixed(0)}%` : ""} · avg ${(c.grade * 100).toFixed(1)}%` : `${nearTxt(c.len)} at ${(c.grade * 100).toFixed(1)}% (max ${(c.maxGrade * 100).toFixed(0)}%) · ${eleTxt(c.gain)} ${unitE()} up`;
+    $(`${id}-bar`).style.width = `${on ? Math.min(100, done / c.len * 100) : 0}%`;
+    box.classList.toggle("on", on);
+  }
+  /** The climb ahead or underway, route or not: the route's own on a route, else the road ahead's. */
+  function climbNow() {
+    if (NAV.route) {
+      const st = NAV.st;
+      if (!st || st.offCourse || NAV.detour) return null;
+      const c = st.onClimb || st.climb;
+      return c ? { c, on: !!st.onClimb, at: st.along, r: NAV.route, grade: st.grade, list: NAV.route.climbs } : null;
+    }
+    const st = FREE.st, c = st && (st.onClimb || st.climb);
+    return c ? { c, on: !!st.onClimb, at: st.along, r: FREE.route, grade: st.grade, list: C.climbsWorth(FREE.route.climbs, P.freeride) } : null;
+  }
+  /** The grade under you: the route's, else the road ahead's. */
+  function gradeNow() {
+    if (NAV.route) return NAV.st && !NAV.st.offCourse ? NAV.st.grade : null;
+    return FREE.st ? FREE.st.grade : null;
+  }
+  /** On the Workout screen, the climb within 2 km or underway, in a strip under the step (the weather steps aside). */
+  function paintClimbStrip() {
+    const c = climbNow(), show = !!c && S.running && (c.on || c.c.start - c.at <= 2000);
+    $("climbstrip").hidden = !show;
+    document.body.classList.toggle("climbing", show);
+    if (!show) return;
+    const { c: cl, on, at, r, grade } = c;
+    $("cs-k").textContent = `${on ? "Climbing" : "Climb ahead"}${cl.cat ? ` · ${cl.cat}` : ""}`;
+    $("cs-main").textContent = on ? `${nearTxt(cl.end - at)} to the top` : `in ${nearTxt(cl.start - at)}`;
+    $("cs-sub").textContent = on ? `${eleTxt(Math.max(0, cl.top - (C.eleAt(r, at) ?? cl.top)))} ${unitE()} up${grade != null ? ` · now ${grade.toFixed(0)}%` : ""}` : `${nearTxt(cl.len)} at ${(cl.grade * 100).toFixed(1)}% · ${eleTxt(cl.gain)} ${unitE()} up`;
+    $("cs-bar").style.width = `${on ? Math.min(100, (at - cl.start) / cl.len * 100) : 0}%`;
+  }
+  /** The road ahead's climbs on the map, in their grade colours, when no route is loaded. */
+  function mapFree() {
+    if (NAV.route || !MAP.ready) return;
+    const r = FREE.route, list = r ? C.climbsWorth(r.climbs, P.freeride) : [];
+    set("climbs", { type: "FeatureCollection", features: list.map(c => { const pts = []; for (let d = c.start; d <= c.end; d += 25) pts.push(C.pointAt(r, d)); return { ...line(pts), properties: { g: c.grade * 100 } }; }) });
+  }
+
   /** How the wind sits on the next stretch of the route: headwind, tailwind or cross, as shares of the distance. */
   function windAhead(r, at) {
     const W = wx.cur;
@@ -1664,6 +1854,11 @@
           if (hrSpeed.length > 900) hrSpeed.shift();
         }
         record(now);
+        const wc = windNow(now, spd);
+        if (wc && wc.vCalm > 0) {                                     // what the wind did to the clock: your speed against the calm-air speed for the same effort
+          S.windSecs += dt; S.windSec += dt * (1 - spd / wc.vCalm);
+          if (wc.drag > 0.15) S.windHead += dt; else if (wc.drag < -0.15) S.windTail += dt;
+        }
         // a hot verdict must hold 2 minutes of steady riding before the app acts on it; stop-and-go gets no verdict
         check = C.commuteCheck(hrSpeed, commuteModel(), stops, S.elapsed);
         if (check && check.verdict === "hot") { if (!hotFrom) hotFrom = S.elapsed; } else hotFrom = 0;
@@ -1825,15 +2020,9 @@
       $("step-cue").textContent = ""; $("step-next").textContent = ""; $("step-bar").style.width = "0";
     }
 
-    $("t-time").textContent = clock(S.elapsed);
-    $("t-dist").innerHTML = `${distTxt(S.dist)}<small>${unitD()}</small>`;
-    const spd = speedNow(now);
-    $("t-speed").innerHTML = spd == null ? "—" : `${speedTxt(spd)}<small>${unitS()}</small>`;
-    const showPower = now - live.powerAt < 4000;
-    $("t-cad").innerHTML = showPower ? `${live.power}<small>W</small>` : live.cad != null && now - live.cadAt < 4000 ? `${live.cad}<small>rpm</small>` : "—";
-    $("t-avg").textContent = S.hrSecs ? Math.round(S.hrSum / S.hrSecs) : "—";
-    const tss = tssNow();
-    $("t-load").innerHTML = `${Math.round(tss)}${planned && planned.load ? `<small>/${Math.round(+planned.load)}</small>` : ""}`;
+    const spd = speedNow(now), page = curPage();
+    paintFields(now, spd, page === "data");
+    paintClimbStrip();
     paintWx(now);
     $("fuel").hidden = !S.fuelDue;
     if (S.fuelDue) $("fuel-text").textContent = fuelText();
@@ -1842,8 +2031,6 @@
     paintBrief();
     $("sb-batt").textContent = live.battery ? `${Math.round(live.battery.level * 100)}%` : "";
     $("sb-batt").classList.toggle("low", !!(batt.fc && (rideLeftMin() ?? 0) > batt.fc.hours * 60));
-    const page = curPage();
-    if (page === "data") paintData(now, spd);
     if (page === "laps") { $("lap-no").textContent = String(S.laps.length + 1); $("lap-time").textContent = clock(S.elapsed - S.lapElapsed); $("lap-sub").textContent = `${distTxt(S.dist - S.lapDist)} ${unitD()}`; }
     if (page === "map") { $("m-speed").textContent = spd == null ? "—" : `${speedTxt(spd)}`; const A = active(); const ast = A ? (NAV.detour ? NAV.detour.st : NAV.st) : null; $("m-left").textContent = ast ? `${distTxt(ast.left)}` : "—"; const v = avgSpeed(); $("m-eta").textContent = ast && v > 1 ? hhmm(now + ast.left / v * 1000) : "—"; }
     renderAhead();
@@ -1860,42 +2047,122 @@
     note.hidden = S.running && !S.paused;   // setup help is for before the ride, not on the bars
     document.body.classList.toggle("riding", S.running && !S.paused);
   }
-  function paintData(now, spd) {
-    $("d-time").textContent = clock(S.elapsed); $("d-moving").textContent = clock(S.moving);
-    $("d-dist").innerHTML = `${distTxt(S.dist)}<small>${unitD()}</small>`;
-    $("d-speed").innerHTML = spd == null ? "—" : `${speedTxt(spd)}<small>${unitS()}</small>`;
-    $("d-avgspd").innerHTML = S.moving > 30 ? `${speedTxt(S.dist / S.moving)}<small>${unitS()}</small>` : "—";
-    $("d-maxspd").innerHTML = S.maxSpeed ? `${speedTxt(S.maxSpeed)}<small>${unitS()}</small>` : "—";
-    $("d-asc").innerHTML = `${eleTxt(S.ascent)}<small>${unitE()}</small>`;
-    const gr = NAV.route && NAV.st && !NAV.st.offCourse ? NAV.st.grade : null;
-    $("d-grade").textContent = gr == null ? "—" : `${gr.toFixed(1)}%`;
-    $("d-hr").textContent = live.hr && now - live.hrAt < 5000 ? String(live.hr) : "—";
-    $("d-maxhr").textContent = S.hrMax ? String(S.hrMax) : "—";
-    const p10 = pw10();
-    $("d-pw").innerHTML = p10 != null ? `${p10}<small>W 10s</small>` : S.pwSecs ? `${Math.round(S.pwSum / S.pwSecs)}<small>W avg</small>` : "—";
-    $("d-cad").innerHTML = live.cad != null && now - live.cadAt < 4000 ? `${live.cad}<small>rpm</small>` : "—";
-    const ampm = t => { const x = hhmm(t), m = x.match(/^(.*?)\s*([AaPp]\.?[Mm]\.?)$/); return m ? `${esc(m[1])}<small>${esc(m[2])}</small>` : esc(x); };
-    $("d-clock").innerHTML = ampm(now);
-    const p = live.lastFix || (NAV.route && NAV.route.pts[0]);
-    if (p) {
-      const sun = C.sunTimes(new Date(), p.lat, p.lon), left = (sun.sunset - now) / 60000;
-      $("d-sunset").innerHTML = left > 0 ? (left >= 60 ? `${Math.floor(left / 60)}<small>h</small> ${Math.round(left % 60)}<small>m</small>` : `${Math.round(left)}<small>min</small>`) : "Dark";
-      $("d-sunset-at").textContent = `sunset ${hhmm(sun.sunset)}`;
-    }
-    const e = NAV.route && NAV.st && !NAV.st.offCourse && NAV.route.hasEle ? NAV.st.ele : live.alt;
-    $("d-ele").innerHTML = e == null ? "—" : `${eleTxt(e)}<small>${unitE()}</small>`;
-    if (S.tank) {
-      const e = emptyIn();
-      $("d-fuel").innerHTML = `${Math.round(S.tank.left / S.tank.full * 100)}<small>%</small>`;
-      $("d-fuel-s").textContent = `${Math.round(S.tank.burned)} g used · ${Math.round(S.tank.eaten)} g eaten${e != null ? ` · low in ${hm(e / 60)}` : ""}`;
-    } else { $("d-fuel").textContent = "—"; $("d-fuel-s").textContent = "fills in as you ride"; }
-    const wp = cfg.w_prime_kj ? cfg.w_prime_kj * 1000 : 0;
-    $("d-wbal-t").hidden = !(cfg.cp && wp);
-    if (cfg.cp && wp) { $("d-wbal").innerHTML = S.wbal == null ? "—" : `${Math.round(S.wbal / wp * 100)}<small>%</small>`; $("d-wbal-s").textContent = `${((S.wbal ?? wp) / 1000).toFixed(1)} of ${(wp / 1000).toFixed(1)} kJ above ${cfg.cp} W`; }
-    $("d-batt").textContent = live.battery ? `${Math.round(live.battery.level * 100)}%${live.battery.charging ? " ⚡" : ""}` : "—";
-    const need = rideLeftMin();
-    $("d-batt-left").textContent = live.battery && live.battery.charging ? "charging" : batt.fc ? `lasts ${hm(batt.fc.hours)}${need != null ? (batt.fc.hours * 60 < need ? " · short of the ride" : " · enough") : ""}${saver.on ? " · saver" : ""}` : saver.on ? "saver on" : "";
+  // ── the fields: every reading ride mode has, and the ones you've chosen for the Workout row (six) and the Data
+  //    screen (any number, 2–4 a row: fewer and bigger on rough ground, like a head unit's zoom) ────────────────────────
+  const u = (v, unit) => `${v}<small>${esc(unit)}</small>`;
+  const ampm = t => { const x = hhmm(t), m = x.match(/^(.*?)\s*([AaPp]\.?[Mm]\.?)$/); return m ? `${esc(m[1])}<small>${esc(m[2])}</small>` : esc(x); };
+  const sunNow = now => { const p = live.lastFix || (NAV.route && NAV.route.pts[0]); return p ? C.sunTimes(new Date(now), p.lat, p.lon) : null; };
+  const wpJ = () => (cfg.w_prime_kj ? cfg.w_prime_kj * 1000 : 0);
+  /** @type {{id: string, k: string | (() => string), ks?: string, v: (now: number, spd: number | null) => string, s?: (now: number, spd: number | null) => string, flip?: boolean, hide?: () => boolean}[]} */
+  const FIELDS = [
+    { id: "time", k: "Ride time", ks: "Time", v: () => clock(S.elapsed) },
+    { id: "moving", k: "Moving", v: () => clock(S.moving) },
+    { id: "dist", k: "Distance", v: () => u(distTxt(S.dist), unitD()), flip: true },
+    { id: "speed", k: "Speed", v: (now, spd) => (spd == null ? "—" : u(speedTxt(spd), unitS())), flip: true },
+    { id: "avgspd", k: "Avg speed", v: () => (S.moving > 30 ? u(speedTxt(S.dist / S.moving), unitS()) : "—") },
+    { id: "maxspd", k: "Max speed", v: () => (S.maxSpeed ? u(speedTxt(S.maxSpeed), unitS()) : "—") },
+    { id: "asc", k: "Climbed", v: () => u(eleTxt(S.ascent), unitE()) },
+    { id: "grade", k: "Grade", v: () => { const g = gradeNow(); return g == null ? "—" : `${g.toFixed(1)}%`; } },
+    { id: "climb", k: "Climb", v: () => { const c = climbNow(); return !c ? "—" : esc(c.on ? nearTxt(c.c.end - c.at) : nearTxt(c.c.start - c.at)); },
+      s: () => { const c = climbNow(); return !c ? "none close" : c.on ? `to the top · ${eleTxt(Math.max(0, c.c.top - (C.eleAt(c.r, c.at) ?? c.c.top)))} ${unitE()} up` : `to a ${(c.c.grade * 100).toFixed(1)}% climb${c.c.cat ? ` · ${c.c.cat}` : ""}`; } },
+    { id: "hr", k: "Heart rate", v: now => (live.hr && now - live.hrAt < 5000 ? String(live.hr) : "—") },
+    { id: "avghr", k: "Avg HR", v: () => (S.hrSecs ? String(Math.round(S.hrSum / S.hrSecs)) : "—") },
+    { id: "maxhr", k: "Max HR", v: () => (S.hrMax ? String(S.hrMax) : "—") },
+    { id: "pw", k: "Power", v: () => { const p10 = pw10(); return p10 != null ? u(p10, "W 10s") : S.pwSecs ? u(Math.round(S.pwSum / S.pwSecs), "W avg") : "—"; } },
+    { id: "cad", k: "Cadence", v: now => (live.cad != null && now - live.cadAt < 4000 ? u(live.cad, "rpm") : "—") },
+    { id: "cadpw", k: () => (live.powerMeter ? "Power" : "Cadence"), v: now => (now - live.powerAt < 4000 ? u(live.power, "W") : live.cad != null && now - live.cadAt < 4000 ? u(live.cad, "rpm") : "—") },
+    { id: "load", k: "Load", v: () => `${Math.round(tssNow())}${planned && planned.load ? `<small>/${Math.round(+planned.load)}</small>` : ""}` },
+    { id: "lap", k: "Lap", v: () => clock(S.elapsed - S.lapElapsed), s: () => `lap ${S.laps.length + 1} · ${distTxt(S.dist - S.lapDist)} ${unitD()}` },
+    { id: "clock", k: "Time of day", v: now => ampm(now) },
+    { id: "sunset", k: "Light left", v: now => { const sun = sunNow(now); if (!sun) return "—"; const left = (sun.sunset - now) / 60000; return left > 0 ? (left >= 60 ? `${Math.floor(left / 60)}<small>h</small> ${Math.round(left % 60)}<small>m</small>` : u(Math.round(left), "min")) : "Dark"; },
+      s: now => { const sun = sunNow(now); return sun ? `sunset ${hhmm(sun.sunset)}` : ""; } },
+    { id: "ele", k: "Elevation", v: () => { const e = NAV.route && NAV.st && !NAV.st.offCourse && NAV.route.hasEle ? NAV.st.ele : live.alt; return e == null ? "—" : u(eleTxt(e), unitE()); } },
+    { id: "wind", k: "Wind", v: now => { const c = windNow(now); return c ? esc(dragTxt(c)) : wx.cur && wx.cur.wind < 3 ? "Calm" : "—"; },
+      s: now => { const c = windNow(now), so = windSoFar(); return c ? `drag · ${c.watts >= 0 ? "" : "saves "}≈${Math.abs(Math.round(c.watts))} W${so ? ` · ${so}` : ""}` : so || "est. from the forecast as you ride"; } },
+    { id: "fuel", k: "Fuel tank", v: () => (S.tank ? u(Math.round(S.tank.left / S.tank.full * 100), "%") : "—"),
+      s: () => { if (!S.tank) return "fills in as you ride"; const e = emptyIn(); return `${Math.round(S.tank.burned)} g used · ${Math.round(S.tank.eaten)} g eaten${e != null ? ` · low in ${hm(e / 60)}` : ""}`; } },
+    { id: "wbal", k: "W′ left", v: () => (S.wbal == null ? "—" : u(Math.round(S.wbal / wpJ() * 100), "%")), s: () => `${((S.wbal ?? wpJ()) / 1000).toFixed(1)} of ${(wpJ() / 1000).toFixed(1)} kJ above ${cfg.cp} W`, hide: () => !(cfg.cp && wpJ()) },
+    { id: "batt", k: "Battery", v: () => (live.battery ? `${Math.round(live.battery.level * 100)}%` : "—"),
+      s: () => { const need = rideLeftMin(); return live.battery && live.battery.charging ? "charging" : batt.fc ? `lasts ${hm(batt.fc.hours)}${need != null ? (batt.fc.hours * 60 < need ? " · short of the ride" : " · enough") : ""}${saver.on ? " · saver" : ""}` : saver.on ? "saver on" : ""; } },
+  ];
+  const FIELD = Object.fromEntries(FIELDS.map(f => [f.id, f]));
+  const T_ID = { time: "t-time", dist: "t-dist", speed: "t-speed", cadpw: "t-cad", avghr: "t-avg", load: "t-load" };   // the Workout row's old ids, kept
+  const S_ID = { sunset: "d-sunset-at", batt: "d-batt-left" };
+  const FIELDS_DEF = { workout: ["time", "dist", "speed", "cadpw", "avghr", "load"],
+    data: ["time", "moving", "dist", "speed", "avgspd", "maxspd", "asc", "grade", "hr", "maxhr", "pw", "cad", "clock", "sunset", "ele", "fuel", "wbal", "wind", "batt"], cols: 2 };
+  const known = id => !!FIELD[id];
+  let FL = (() => {
+    const f = jget("fitness-ride-fields", null);
+    if (!f || !Array.isArray(f.workout) || !Array.isArray(f.data)) return structuredClone(FIELDS_DEF);
+    const w = f.workout.filter(known).slice(0, 6);
+    while (w.length < 6) w.push(FIELDS_DEF.workout[w.length]);
+    return { workout: w, data: [...new Set(f.data.filter(known))], cols: [2, 3, 4].includes(f.cols) ? f.cols : 2 };
+  })();
+  const saveFields = () => ls.set("fitness-ride-fields", JSON.stringify(FL));
+  const label = (f, short = false) => (typeof f.k === "function" ? f.k() : short && f.ks ? f.ks : f.k);
+  /** The Workout row and the Data screen, built from the choices (ids kept stable so nothing else needs to know). */
+  function buildFields() {
+    const used = new Set(), tile = (f, id, sid, cls = "") => {
+      const el = document.createElement(f.flip && cls === "w" ? "button" : "div");
+      el.className = `rtile${f.flip && cls === "w" ? " unit-flip" : ""}`;
+      el.dataset.f = f.id;
+      if (el instanceof HTMLButtonElement) { el.type = "button"; el.setAttribute("aria-label", `${label(f)}; tap to switch imperial / metric`); }
+      const k = document.createElement("span"), v = document.createElement("span");
+      k.className = "k"; v.className = "v num"; v.textContent = "—";
+      if (!used.has(id)) { v.id = id; used.add(id); }
+      el.append(k, v);
+      if (f.s) { const sub = document.createElement("span"); sub.className = "s"; if (!used.has(sid)) { sub.id = sid; used.add(sid); } el.append(sub); }
+      return el;
+    };
+    $("w-tiles").replaceChildren(...FL.workout.map(id => tile(FIELD[id], T_ID[id] || `t-${id}`, `t-${id}-s`, "w")));
+    $("data-grid").replaceChildren(...FL.data.map(id => { const el = tile(FIELD[id], `d-${id}`, S_ID[id] || `d-${id}-s`); el.id = `d-${id}-t`; return el; }));
+    $("data-grid").dataset.cols = String(FL.cols);
+    document.querySelectorAll("button[data-cols]").forEach(b => b.setAttribute("aria-pressed", String(+(/** @type {HTMLElement} */ (b).dataset.cols) === FL.cols)));
   }
+  function paintFields(now, spd, data) {
+    const paint = el => {
+      const f = FIELD[el.dataset.f];
+      if (f.hide && (el.hidden = f.hide())) return;
+      el.querySelector(".k").textContent = label(f, el.parentElement.id === "w-tiles");
+      el.querySelector(".v").innerHTML = f.v(now, spd);
+      if (f.s) el.querySelector(".s").textContent = f.s(now, spd);
+    };
+    for (const el of $("w-tiles").children) paint(/** @type {HTMLElement} */ (el));
+    if (data) for (const el of $("data-grid").children) paint(/** @type {HTMLElement} */ (el));
+  }
+  $("w-tiles").addEventListener("click", e => { if (/** @type {HTMLElement} */ (e.target).closest(".unit-flip")) { setUnits(!P.km); beep(990, 60); } });
+  document.querySelectorAll("button[data-cols]").forEach(b => b.addEventListener("click", () => { FL.cols = +(/** @type {HTMLElement} */ (b).dataset.cols); saveFields(); buildFields(); render(); }));
+  // the fields sheet: six selects for the Workout row; the Data screen's list, ticked and ordered with ▲ ▼
+  function paintFieldSheet(focus = "") {
+    const opts = id => FIELDS.map(f => `<option value="${f.id}"${f.id === id ? " selected" : ""}>${esc(label(f))}</option>`).join("");
+    $("fl-workout").innerHTML = FL.workout.map((id, i) => `<label>Field ${i + 1}<select data-slot="${i}">${opts(id)}</select></label>`).join("");
+    const order = [...FL.data, ...FIELDS.map(f => f.id).filter(id => !FL.data.includes(id))];
+    $("fl-data").innerHTML = order.map(id => {
+      const on = FL.data.includes(id), i = FL.data.indexOf(id), name = esc(label(FIELD[id]));
+      return `<li${on ? "" : ' class="off"'}><label class="row"><input type="checkbox" data-show="${id}"${on ? " checked" : ""}> ${name}</label>
+        <span class="ud"><button type="button" class="chip" data-move="${id}" data-by="-1" aria-label="Move ${name} up"${on && i > 0 ? "" : " disabled"}>▲</button><button type="button" class="chip" data-move="${id}" data-by="1" aria-label="Move ${name} down"${on && i < FL.data.length - 1 ? "" : " disabled"}>▼</button></span></li>`;
+    }).join("");
+    const again = focus && /** @type {HTMLElement | null} */ (document.querySelector(focus));
+    if (again && !(/** @type {HTMLButtonElement} */ (again).disabled)) again.focus();
+  }
+  const fieldsChanged = (focus = "") => { saveFields(); buildFields(); paintFieldSheet(focus); render(); };
+  $("btn-fields").addEventListener("click", () => { paintFieldSheet(); $("fields").showModal(); });
+  $("fields").addEventListener("change", e => {
+    const t = /** @type {HTMLInputElement} */ (e.target);
+    if (t.dataset.slot != null) { FL.workout[+t.dataset.slot] = t.value; fieldsChanged(`[data-slot="${t.dataset.slot}"]`); }
+    else if (t.dataset.show) { FL.data = t.checked ? [...FL.data, t.dataset.show] : FL.data.filter(x => x !== t.dataset.show); fieldsChanged(`[data-show="${t.dataset.show}"]`); }
+  });
+  $("fields").addEventListener("click", e => {
+    const b = /** @type {HTMLElement} */ (e.target).closest("[data-move]");
+    if (b) {
+      const id = /** @type {HTMLElement} */ (b).dataset.move, by = +(/** @type {HTMLElement} */ (b).dataset.by), i = FL.data.indexOf(id), j = i + by;
+      if (i < 0 || j < 0 || j >= FL.data.length) return;
+      [FL.data[i], FL.data[j]] = [FL.data[j], FL.data[i]];
+      fieldsChanged(`[data-move="${id}"][data-by="${by}"]`);
+    }
+    if (/** @type {HTMLElement} */ (e.target).id === "fl-reset") { FL = structuredClone(FIELDS_DEF); fieldsChanged("#fl-reset"); }
+  });
+  buildFields();
 
   // ── screens: tabs, and a swipe across the screen to change them ───────────────────────────────────────────
   const TABS = ["workout", "map", "ahead", "data", "laps"];
@@ -2039,6 +2306,10 @@
       if (T && T.days != null) out.push(T.ctl - ctl > 1 ? `${raceName} in ${T.days} days asks for fitness ${T.ctl}: ${(T.ctl - ctl).toFixed(1)} to go, and the plan's coming weeks are built for it.` : `${raceName} in ${T.days} days: fitness is at its target ${T.ctl}, so the job now is arriving fresh.`);
     } else out.push(`Load ${tss}${planned && planned.load ? ` of ${Math.round(+planned.load)} planned` : ""}.`);
     if (S.tank && S.tank.burned > 30) out.push(`Fuel: about ${Math.round(S.tank.burned)} g of carbohydrate burned, ${Math.round(S.tank.eaten)} g eaten; the tank ended near ${Math.round(S.tank.left / S.tank.full * 100)}%${S.tank.left / S.tank.full < 0.3 ? ": eat more, earlier, on rides this long" : ""}.`);
+    if (S.windSecs >= 600 && Math.abs(S.windSec) >= 60) {
+      const pc = x => Math.round(x / S.windSecs * 100);
+      out.push(`Wind (estimated from the forecast): it ${S.windSec > 0 ? "cost you" : "gave you"} about ${Math.round(Math.abs(S.windSec) / 60)} min; headwind ${pc(S.windHead)}% of the time, tailwind ${pc(S.windTail)}%.`);
+    }
     if (checkSaid === "hot") out.push("The commute check ran hot on steady riding: worth an easy day and an early night.");
     else if (checkSaid === "fresh") out.push("The commute check ran fresh: lower heart rate than usual for the speed.");
     return out;
@@ -2211,6 +2482,7 @@
     inp("s-voice").checked = P.voice; inp("s-autopause").checked = P.autoPause; inp("s-autolock").checked = P.autoLock; inp("s-steplap").checked = P.stepLap; inp("s-climbs").checked = P.climbs; inp("s-reroute").checked = P.reroute;
     /** @type {HTMLSelectElement} */ ($("s-profile")).value = P.profile;
     /** @type {HTMLSelectElement} */ ($("s-trainer")).value = P.trainer; /** @type {HTMLSelectElement} */ ($("s-saver")).value = P.saver;
+    /** @type {HTMLSelectElement} */ ($("s-freeride")).value = P.freeride;
     inp("s-weight").value = P.weight; inp("s-upload").checked = P.upload;
     paintUnits();
     dlg.showModal();
@@ -2221,7 +2493,9 @@
     Object.assign(P, { lthr: num("s-lthr", P.lthr), max: num("s-max", P.max), rest: num("s-rest", P.rest), wheel: num("s-wheel", P.wheel), fuel: num("s-fuel", P.fuel),
       ftp: num("s-ftp", P.ftp), autoLap: num("s-autolap", P.autoLap), voice: inp("s-voice").checked, autoPause: inp("s-autopause").checked, autoLock: inp("s-autolock").checked, stepLap: inp("s-steplap").checked,
       climbs: inp("s-climbs").checked, reroute: inp("s-reroute").checked, profile: /** @type {HTMLSelectElement} */ ($("s-profile")).value,
-      trainer: /** @type {HTMLSelectElement} */ ($("s-trainer")).value, saver: /** @type {HTMLSelectElement} */ ($("s-saver")).value, weight: num("s-weight", P.weight), upload: inp("s-upload").checked });
+      trainer: /** @type {HTMLSelectElement} */ ($("s-trainer")).value, saver: /** @type {HTMLSelectElement} */ ($("s-saver")).value, weight: num("s-weight", P.weight), upload: inp("s-upload").checked,
+      freeride: /** @type {HTMLSelectElement} */ ($("s-freeride")).value });
+    if (P.freeride === "off") { FREE.route = null; FREE.st = null; mapFree(); }
     if (TR.kind === "Tacx FE-C") send(C.fecUser(P.weight, 9, P.wheel));
     setSaver(P.saver === "on" || (P.saver === "auto" && saver.auto));
     savePrefs();
@@ -2233,7 +2507,6 @@
   const paintUnits = () => unitBtns.forEach(b => b.setAttribute("aria-pressed", String((/** @type {HTMLElement} */ (b).dataset.units === "km") === P.km)));
   const setUnits = km => { P.km = km; ls.set("fitness-units", km ? "km" : "mi"); paintUnits(); paintRouteBits(); paintLaps(); render(); };
   unitBtns.forEach(b => b.addEventListener("click", () => setUnits(/** @type {HTMLElement} */ (b).dataset.units === "km")));
-  document.querySelectorAll(".unit-flip").forEach(t => t.addEventListener("click", () => { setUnits(!P.km); beep(990, 60); }));
   paintUnits();
 
   // light / auto / dark: dark unless chosen otherwise; shared with the dashboard. Applies the moment it's tapped, and in
@@ -2276,5 +2549,5 @@
   show(page);
   paintLaps();
   /** @type {any} */ (window).__ride = { S, NAV, P, MAP, get rep() { return rep; }, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB,
-    TR, batt, saver, sendRides, outbox, reroute, paceNow, wx, offerGo, routeTo, findGhosts };
+    TR, batt, saver, sendRides, outbox, reroute, paceNow, wx, offerGo, routeTo, findGhosts, FREE, windNow };
 })();

@@ -240,10 +240,30 @@ html[data-theme="dark"] .maplibregl-ctrl-attrib-button { filter: invert(1); }
 .list li.none, .rlist li.none { display: block; color: var(--ink-2); }
 
 /* ── data ──────────────────────────────────────────────────────────────────────────────────────────────────── */
-.rtiles.big { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.rtiles.big { grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }
 .rtiles.big .rtile { padding: var(--sp-2) 0 var(--sp-3); }
 .rtiles.big .v { font-size: clamp(1.9rem, min(12vw, 6.2dvh), 3.5rem); }
-@media (min-width: 640px) { .rtiles.big { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* fields per row, chosen on the bars: 2 big (the default), 3, or 4 small — a head unit's zoom */
+#data-grid[data-cols="3"] { --cols: 3; }
+#data-grid[data-cols="3"] .v { font-size: clamp(1.45rem, min(8.4vw, 5dvh), 2.75rem); }
+#data-grid[data-cols="4"] { --cols: 4; }
+#data-grid[data-cols="4"] .v { font-size: clamp(1.15rem, min(6.2vw, 4dvh), 2.25rem); }
+#data-grid[data-cols="4"] .k { letter-spacing: .04em; }
+@media (min-width: 640px) { #data-grid[data-cols="2"] { --cols: 4; } #data-grid[data-cols="3"] { --cols: 6; } #data-grid[data-cols="4"] { --cols: 8; } }
+.datatools { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
+.datatools .k { font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: var(--track-label); color: var(--ink-2); }
+.datatools .seg .chip { min-width: var(--tap); font-variant-numeric: tabular-nums; }
+.datatools #btn-fields { margin-left: auto; min-height: var(--tap); padding: 0 var(--sp-4); }
+
+/* the fields sheet: six selects for the Workout row, the Data screen's list ticked and ordered */
+.slotgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-3); }
+.flist { list-style: none; margin: 0; padding: 0; border-top: var(--rule-minor) solid var(--ink); }
+.flist li { display: flex; align-items: center; gap: var(--sp-2); border-bottom: 1px solid var(--line); min-height: var(--tap); }
+.flist li label.row { flex: 1 1 auto; }
+.flist li.off label.row { color: var(--ink-2); }
+.flist .ud { display: flex; gap: 1px; }
+.flist .ud .chip { min-width: var(--tap); min-height: var(--tap); padding: 0; }
+.flist .ud .chip:disabled { opacity: .3; cursor: default; }
 
 /* ── laps ──────────────────────────────────────────────────────────────────────────────────────────────────── */
 .lapnow { display: flex; align-items: baseline; gap: var(--sp-3); border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); }
@@ -375,3 +395,18 @@ body.nav .rmain { gap: var(--sp-2); }
 .pclist li .t { text-align: right; font-variant-numeric: tabular-nums; }
 .steptime.ahead { color: var(--good); }
 .steptime.behind { color: var(--crit); }
+
+/* the climb within 2 km or underway, on the Workout screen: a ClimbPro strip in the climb's orange; the weather steps aside */
+.climbstrip { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px var(--sp-3); border-top: var(--rule-major) solid var(--zc4); padding-top: var(--sp-2); }
+.climbstrip .k { grid-column: 1 / -1; font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: var(--track-label); color: var(--ink-2); }
+.climbstrip b { font-size: var(--fs-ride-figure); line-height: 1; white-space: nowrap; }
+.climbstrip .cs-sub { font-size: var(--fs-body); color: var(--ink-2); min-width: 0; }
+.climbstrip .climbbar { grid-column: 1 / -1; display: block; }
+body.climbing .wxbar { display: none; }
+/* the road ahead on Ahead, with no route */
+.free { display: grid; gap: var(--sp-4); border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); }
+.free > h2.k { margin: 0; font-size: var(--fs-label); font-weight: 700; line-height: var(--lh-snug); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--ink); }
+.free .climb { border-top-width: var(--rule-minor); }
+/* the wind's cost under "On your line" */
+#wx-cost { font-weight: 700; color: var(--ink); }
+#wx-cost:empty { display: none; }
