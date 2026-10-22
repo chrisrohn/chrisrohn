@@ -11,13 +11,16 @@ body.ride {
   --num: var(--font);
   --fs-ride-hr: clamp(4.25rem, min(40vw, 17dvh), 11rem); --fs-ride-clock: clamp(2.5rem, min(19vw, 10dvh), 6rem);
   --fs-ride-figure: clamp(1.5rem, min(9vw, 5dvh), 2.9rem);
-  height: 100dvh; display: flex; flex-direction: column; background: var(--page); color: var(--ink); overflow: hidden;
+  /* pinned to the visible window (not 100dvh, which on Android can include the strip under the navigation bar and
+     push the controls off screen); --app-h is the window's measured height, kept current by ride.js */
+  position: fixed; inset: 0 0 auto 0; height: var(--app-h, 100dvh); display: flex; flex-direction: column; background: var(--page); color: var(--ink); overflow: hidden;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   -webkit-tap-highlight-color: transparent;
   /* light: the paper of the dashboard, zone colors one step darker so they hold on white */
   --zc1: #6b7079; --zc2: #1f63d6; --zc3: #138a46; --zc4: #c77700; --zc5: #d6301f;
   --field: #fbf9f4; --line: #d9d5cb;
 }
+html[data-theme="dark"]:has(body.ride) { background: #000000; }
 html[data-theme="dark"] body.ride {
   --page: #000000; --surface: #000000; --raised: #121212; --band: #000000; --on-band: #f5f3ee; --sheet-shadow: #000000;
   --ink: #f5f3ee; --ink-2: #aaa69e; --muted: #77746e; --hair: #2a2a2a; --grid: #1b1b1b;

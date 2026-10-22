@@ -1523,6 +1523,17 @@
   themeBtns.forEach(b => b.addEventListener("click", () => { document.documentElement.dataset.theme = /** @type {HTMLElement} */ (b).dataset.themePick; ls.set("fitness-theme", /** @type {HTMLElement} */ (b).dataset.themePick); paintTheme(); drawCrumb(); renderAhead(true); restyleMap(); }));
   paintTheme();
 
+  // the screen's own height, measured: the footer's Start / Lap / Next / End must never sit under the system bars
+  const fitScreen = () => {
+    const h = Math.round(window.visualViewport ? Math.min(window.visualViewport.height, window.innerHeight) : window.innerHeight);
+    if (h > 200) document.body.style.setProperty("--app-h", `${h}px`);
+  };
+  fitScreen();
+  window.addEventListener("resize", fitScreen);
+  window.addEventListener("orientationchange", () => setTimeout(fitScreen, 300));
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", fitScreen);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(fitScreen, 100); });
+
   // installed-app offline: the same service worker as the dashboard (scope: this folder)
   if ("serviceWorker" in navigator && window.isSecureContext && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
 
