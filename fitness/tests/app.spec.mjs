@@ -366,6 +366,24 @@ test.describe("the dashboard, by hand and by eye", () => {
     expect(problems).toEqual([]);
   });
 
+  test("a link's data never becomes markup: tags in it show as text, escaped or not", async ({ page }) => {
+    const problems = watch(page);
+    const bad = '<img src=x onerror="window.__pwned=1"><b id="inj">x</b>';
+    const plan = { ...DATA.plan, days: DATA.plan.days.map((d, i) => i === 0 ? { ...d, title: bad, session: bad } : d) };
+    await page.goto(phoneLink({ ...DATA, plan, ytd: { ...DATA.ytd, rides: bad } }));                // ytd.rides is set unescaped
+    await page.locator("#tab-ride").click();
+    await expect(page.locator("#training .head .sub")).toContainText("＜img src=x");                 // shown, as text
+    await expect(page.locator("#inj")).toHaveCount(0);
+    await expect(page.locator("#app img")).toHaveCount(0);
+    const esc = JSON.stringify({ ...DATA, ytd: { ...DATA.ytd, rides: "x" } }).replace('"rides":"x"', '"rides":"\\u003cb id=\\"inj2\\"\\u003ey\\u003c/b\\u003e"');
+    await page.goto("/#d=" + deflateRawSync(Buffer.from(esc)).toString("base64url"));               // the same, written as \u003c escapes
+    await page.locator("#tab-ride").click();
+    await expect(page.locator("#training .head .sub")).toContainText("＜b id=");
+    await expect(page.locator("#inj2")).toHaveCount(0);
+    expect(await page.evaluate(() => /** @type {any} */ (window).__pwned)).toBeUndefined();
+    expect(problems).toEqual([]);
+  });
+
   test("the level reads by shape as well as colour, and the week says it in words", async ({ page }) => {
     await page.goto(phoneLink(DATA));
     await page.locator("#tab-plan").click();

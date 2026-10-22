@@ -65,13 +65,19 @@
     if (!ls.set("fitness-dashboard", JSON.stringify(d))) throw new Error("This browser won't store data (private mode?)");
     if (d.ride) ls.set("fitness-ride-config", JSON.stringify(d.ride));
   }
+  // Data from outside this page (a phone link, a pasted or imported file, the sync repository, this device's saved copy
+  // of those) never carries markup: every < and > in it becomes its full-width twin, which reads the same and is never a
+  // tag. The reviver catches one written as a \u003c escape. The build's own inlined data goes the same way: its one
+  // picture, the QR code, is a data URI (fitness/build.py ride_qr), not markup.
+  const noTags = s => String(s).replace(/</g, "\uFF1C").replace(/>/g, "\uFF1E");
+  const readData = t => JSON.parse(noTags(t), (k, v) => (typeof v === "string" ? noTags(v) : v));
   /** Text from a pasted link, a pasted blob, or a data file → dashboard data. */
   async function parse(text) {
     const t = String(text || "").trim();
-    if (t.startsWith("{")) return JSON.parse(t);
+    if (t.startsWith("{")) return readData(t);
     const m = t.match(/[#&?]d=([A-Za-z0-9_-]+)/) || t.match(/^([A-Za-z0-9_-]{200,})$/);
     if (!m) throw new Error("That isn't a phone link or a data file from the dashboard");
-    return JSON.parse(await inflate(m[1]));
+    return readData(await inflate(m[1]));
   }
 
   // ── GitHub sync: your private repository's `state` branch, and its "Training sync" workflow ─────────────────
@@ -100,7 +106,7 @@
     if (!res.ok) throw new Error(ghWhy(res.status, what));
     return res.status === 204 ? null : accept === RAW ? res.text() : res.json();
   }
-  const stateFile = async (c, name) => { const t = await gh(c, `/contents/${name}?ref=state`, { accept: RAW, allow404: true }); return t ? JSON.parse(t) : null; };
+  const stateFile = async (c, name) => { const t = await gh(c, `/contents/${name}?ref=state`, { accept: RAW, allow404: true }); return t ? readData(t) : null; };
   /** The sync's latest status and data. */
   async function pull(c) {
     const [st, d] = await Promise.all([stateFile(c, "status.json"), stateFile(c, "fitness-data.json")]);
@@ -126,7 +132,7 @@
   async function load() {
     await moveIn();
     const raw = ($("data") || { textContent: "" }).textContent.trim();
-    if (raw.startsWith("{")) return { D: JSON.parse(raw), source: "build" };
+    if (raw.startsWith("{")) return { D: readData(raw), source: "build" };
     const frag = new URLSearchParams(location.hash.slice(1)).get("d");
     if (frag) {
       history.replaceState(null, "", location.pathname + location.search);
@@ -136,7 +142,7 @@
       } catch (e) { cloudProblem = `That link couldn't be read: ${e.message}`; }
     }
     let saved = null;
-    try { saved = JSON.parse(ls.get("fitness-dashboard") || "null"); } catch { /* none */ }
+    try { saved = readData(ls.get("fitness-dashboard") || "null"); } catch { /* none */ }
     const c = cloud();
     if (c) {
       try {

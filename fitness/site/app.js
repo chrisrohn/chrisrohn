@@ -896,7 +896,7 @@ window.startDashboard = D => {
           <div class="phone-in">
             ${D.phone_href ? `<p>The whole dashboard, in the app on your phone: <button type="button" class="chip" data-copy="phone">Copy phone link</button> <button type="button" class="chip" data-save="1">Save data file</button></p>
             <p class="sub">Send the link to yourself (AirDrop, Messages, email) and paste it under <b>Import data</b> in the app, or put the file in iCloud Drive / Google Drive and pick it there. It carries this build's numbers after the <b>#</b>, which never reaches the server; the app keeps them on the phone, offline.</p>` : ""}
-            ${D.ride_qr ? `<div class="qr"><div class="qrimg" role="img" aria-label="QR code that opens ride mode with this week's sessions">${D.ride_qr}</div>
+            ${D.ride_qr ? `<div class="qr"><div class="qrimg"><img src="${esc(D.ride_qr)}" alt="QR code that opens ride mode with this week's sessions"></div>
             <p class="sub"><b>Just ride mode:</b> scan this with the phone on your bars, or <button type="button" class="chip" data-copy="ride">copy the ride link</button>. It opens ride mode with your HR zones and the next 7 days of sessions.</p></div>` : ""}
           </div></details>` : ""}</section>` : "";
 
