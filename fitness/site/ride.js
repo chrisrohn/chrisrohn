@@ -37,16 +37,9 @@
   };
   /** A yes/no question in ride mode's own sheet: two full-width buttons a gloved thumb can hit on a moving bike, Cancel
    *  focused, so a bump or a stray Enter never ends a ride or deletes one. @returns {Promise<boolean>} */
-  function ask(title, text, yes) {
-    const d = /** @type {HTMLDialogElement | null} */ ($("ask"));
-    if (!d || typeof d.showModal !== "function") return Promise.resolve(confirm(`${title} ${text}`.trim()));
-    $("ask-h").textContent = title; $("ask-p").textContent = text; $("ask-p").hidden = !text; $("ask-yes").textContent = yes;
-    d.returnValue = "";
-    return new Promise(res => { d.addEventListener("close", () => res(d.returnValue === "yes"), { once: true }); d.showModal(); $("ask-no").focus(); });
-  }
-  const deviceDark = matchMedia("(prefers-color-scheme: dark)");
-  /** The light or dark to show: the chosen one, or in "auto" the phone's. */
-  const themeNow = () => { const t = ls.get("fitness-theme") || "dark"; return t === "auto" ? (deviceDark.matches ? "dark" : "light") : t; };
+  const UI = /** @type {any} */ (self).FitnessUI;   // common.js: the theme rule and the confirm sheet, shared with the dashboard
+  /** A yes/no question in the app's own sheet; Cancel has the focus. @returns {Promise<boolean>} */
+  const ask = (title, text, yes, opt = {}) => UI.ask(title, text, yes, opt);
   const jget = (k, d) => { try { return JSON.parse(ls.get(k) || "null") ?? d; } catch { return d; } };
 
   // ── config: a link from the dashboard (#z= deflate-raw, or #c= plain; base64url JSON) > inlined by the build >
@@ -587,7 +580,8 @@
   const NAV = { route: null, nav: null, st: null, detour: null, pace: null, ghosts: null, routing: false, lastReroute: 0, lastAt: 0, names: new Map(), offSaid: false, lastWrong: 0, avoid: [] };
   /** The road ahead when no route is loaded (Summit Freeride): the way you're most likely riding, from the map, with its
    *  heights and climbs; rebuilt as you go. */
-  const FREE = { route: null, st: null, names: [], at: 0, tried: 0, busy: false, why: "", said: new Set() };
+  const FREE = { route: null, st: null, names: [], at: 0, tried: 0, busy: false, why: "", said: /** @type {[string, any][]} */ ([]), offSince: 0 };
+  const saidNear = (kind, p) => FREE.said.some(([k, q]) => k === kind && hav(q, p) < 250);
   const routeMsg = $("route-msg");
   async function importFile(file) {
     const text = await file.text();
@@ -1219,7 +1213,7 @@
     if (!MAP.ready) return;
     const r = NAV.route;
     set("route", r ? line(r.pts) : { type: "FeatureCollection", features: [] });
-    set("climbs", { type: "FeatureCollection", features: r ? r.climbs.map(c => { const pts = []; for (let d = c.start; d <= c.end; d += 25) pts.push(C.pointAt(r, d)); return { ...line(pts), properties: { g: c.grade * 100 } }; }) : [] });
+    set("climbs", climbFeatures(r, r ? r.climbs : []));
     set("marks", { type: "FeatureCollection", features: r ? [...r.turns.map(t => { const p = C.pointAt(r, t.along); return { type: "Feature", properties: { t: "turn" }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } }; }),
       ...r.pois.map(p => ({ type: "Feature", properties: { t: p.kind, label: (p.name || KIND_WORD[p.kind] || "").slice(0, 40) }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } }))] : [] });
     if (r && !live.lastFix) MAP.map.fitBounds(r.bounds, { padding: 40, duration: 0 });
@@ -1426,28 +1420,37 @@
     }
     return tileUrl;
   }
+  /** The road lines in the tiles around some places: from the phone's cache or the network, fetched all at once
+   *  (a slow signal costs one wait, not one per tile), decoded once and kept. `key` names the set of tiles. */
   async function linesAround(points, tmpl) {
-    const cache = "caches" in window ? await caches.open(TILES) : null, road = [], named = [];
-    for (const t of C.tilesAround(points, 1200)) {
-      const url = tmpl.replace("{z}", t.z).replace("{x}", t.x).replace("{y}", t.y);
-      let got = tileLines.get(url);
-      if (!got) {
+    const cache = "caches" in window ? await caches.open(TILES) : null, urls = C.tilesAround(points, 1200).map(t => ({ t, url: tmpl.replace("{z}", t.z).replace("{x}", t.x).replace("{y}", t.y) }));
+    const got = await Promise.all(urls.map(async ({ t, url }) => {
+      const have = tileLines.get(url);
+      if (have) return have;
+      try {
         let res = cache ? await cache.match(url) : null;
         if (!res && navigator.onLine) res = await timed(url, 8000).catch(() => null);
-        if (!res || !res.ok) continue;
+        if (!res || !res.ok) return null;
         let buf = new Uint8Array(await res.arrayBuffer());
         if (buf[0] === 0x1f && buf[1] === 0x8b) buf = new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
-        got = C.mvtLines(buf, t.z, t.x, t.y);
-        tileLines.set(url, got);
+        const lines = C.mvtLines(buf, t.z, t.x, t.y);
+        tileLines.set(url, lines);
         if (tileLines.size > 48) tileLines.delete(tileLines.keys().next().value);
-      }
-      road.push(...got.transportation); named.push(...got.transportation_name);
-    }
-    return { road, named };
+        return lines;
+      } catch { return null; }
+    }));
+    const road = [], named = [], key = [];
+    got.forEach((g, k) => { if (g) { road.push(...g.transportation); named.push(...g.transportation_name); key.push(urls[k].url); } });
+    return { road, named, key: key.join("|") };
   }
+  /** The road graph of the last set of tiles, kept so a rebuild on the same tiles skips building it again. Each use
+   *  gets a copy: placing you on it adds a node. */
+  const graphMemo = { key: "", g: null };
+  const copyGraph = g => ({ ...g, nodes: g.nodes.slice(), adj: g.adj.map(l => l.slice()) });
   const heights = new Map();   // "lat,lon" (4 decimals, ~10 m) → metres
   /** Ground heights for points, from Open-Meteo's elevation API (100 a call); null when they can't all be had. */
   async function heightsOf(pts) {
+    if (heights.size > 20000) heights.clear();   // before asking, so this call's answers are all still here to read
     const key = p => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`, need = [...new Set(pts.map(key).filter(k => !heights.has(k)))];
     for (let i = 0; i < need.length; i += 100) {
       const part = need.slice(i, i + 100), q = new URLSearchParams({ latitude: part.map(k => k.split(",")[0]).join(","), longitude: part.map(k => k.split(",")[1]).join(",") });
@@ -1458,7 +1461,6 @@
         part.forEach((k, n) => { if (j.elevation && Number.isFinite(j.elevation[n])) heights.set(k, j.elevation[n]); });
       } catch { return null; }
     }
-    if (heights.size > 20000) heights.clear();
     const out = pts.map(p => heights.get(key(p)));
     return out.every(Number.isFinite) ? out : null;
   }
@@ -1470,17 +1472,20 @@
     try {
       const tmpl = await tilePattern();
       if (!tmpl) { FREE.why = "map"; return; }
-      const heading = live.heading, { road, named } = await linesAround([fix, offset(fix, heading, 5000)], tmpl);
+      const heading = live.heading, { road, named, key } = await linesAround([fix, offset(fix, heading, 5000)], tmpl);
       if (!road.length) { FREE.why = "map"; return; }
-      const way = C.roadAhead(C.roadGraph(C.nameRoads(road, named)), fix, heading, 6000);
+      if (graphMemo.key !== key) { graphMemo.key = key; graphMemo.g = C.roadGraph(C.nameRoads(road, named)); }
+      const way = C.roadAhead(copyGraph(graphMemo.g), fix, heading, 6000);
       if (!way) { FREE.why = "road"; FREE.route = null; FREE.st = null; return; }
+      // heights every 100 m (one Open-Meteo call per 10 km), laid onto the road's own shape, so a hairpin stays a hairpin
       const flat = C.analyze({ name: "Road ahead", points: way.points.map(p => ({ ...p, ele: null })) }), pts = [];
       for (let d = 0; d < flat.total; d += 100) pts.push(C.pointAt(flat, d));
       pts.push(C.pointAt(flat, flat.total));
       const h = await heightsOf(pts);
       if (!h) { FREE.why = "heights"; return; }
-      FREE.route = C.analyze({ name: (way.names[0] && way.names[0].name) || "Road ahead", points: pts.map((p, i) => ({ lat: p.lat, lon: p.lon, ele: h[i] })) });
-      FREE.names = way.names; FREE.at = now; FREE.why = "";
+      const eleAt = d => { const f = Math.min(h.length - 1, d / 100), i = Math.floor(f); return i >= h.length - 1 ? h[h.length - 1] : h[i] + (h[i + 1] - h[i]) * (f - i); };
+      FREE.route = C.analyze({ name: (way.names[0] && way.names[0].name) || "Road ahead", points: flat.pts.map((p, i) => ({ lat: p.lat, lon: p.lon, ele: eleAt(flat.cum[i]) })) });
+      FREE.names = way.names; FREE.at = now; FREE.why = ""; FREE.st = null; FREE.offSince = 0;   // a new road: find yourself on it from scratch
       freeOnFix(live.lastFix || fix, false);
       mapFree(); renderAhead(true);
     } catch { FREE.why = "map"; } finally { FREE.busy = false; }
@@ -1489,14 +1494,16 @@
   function freeOnFix(fix, build = true) {
     const r = FREE.route;
     if (r) {
-      const pr = C.project(r, fix, FREE.st ? FREE.st.along : 0, 1500, 200), list = C.climbsWorth(r.climbs, P.freeride);
+      const pr = C.project(r, fix, FREE.st ? FREE.st.along : null, 1500, 200), list = C.climbsWorth(r.climbs, P.freeride);
       const climb = list.find(c => c.end > pr.along) || null, on = climb && climb.start <= pr.along ? climb : null;
       FREE.st = { along: pr.along, off: pr.off, climb, onClimb: on, toClimb: climb && !on ? climb.start - pr.along : null, grade: C.gradeAt(r, pr.along) };
-      if (pr.off > 60) { FREE.st = null; FREE.route = null; mapFree(); }   // turned off it: find the new road
-      else if (S.running && !S.paused && climb) {
-        const top = C.pointAt(r, climb.end), key = `${top.lat.toFixed(3)},${top.lon.toFixed(3)}`;   // the same climb across rebuilds
-        if (!on && FREE.st.toClimb <= 300 && !FREE.said.has(`c${key}`)) { FREE.said.add(`c${key}`); say(`Climb in ${nearSay(FREE.st.toClimb)}: ${nearSay(climb.len).replace(/^a /, "")} at ${(climb.grade * 100).toFixed(0)} percent, ${eleTxt(climb.gain)} ${P.km ? "metres" : "feet"} up.`, false); }
-        if (on && climb.end - pr.along < 40 && !FREE.said.has(`t${key}`)) { FREE.said.add(`t${key}`); say("Top of the climb.", false); beep(990, 120); }
+      // off it for 8 s (a turn onto another road, not one wild fix under trees): find the new road
+      if (pr.off > 60) { FREE.offSince = FREE.offSince || Date.now(); if (Date.now() - FREE.offSince >= 8000) { FREE.st = null; FREE.route = null; FREE.offSince = 0; mapFree(); } }
+      else FREE.offSince = 0;
+      if (FREE.st && pr.off <= 60 && S.running && !S.paused && climb) {
+        const top = C.pointAt(r, climb.end);   // the same climb across rebuilds: its top within 250 m of one already said
+        if (!on && FREE.st.toClimb <= 300 && !saidNear("c", top)) { FREE.said.push(["c", top]); say(`Climb in ${nearSay(FREE.st.toClimb)}: ${nearSay(climb.len).replace(/^a /, "")} at ${(climb.grade * 100).toFixed(0)} percent, ${eleTxt(climb.gain)} ${P.km ? "metres" : "feet"} up.`, false); }
+        if (on && climb.end - pr.along < 40 && !saidNear("t", top)) { FREE.said.push(["t", top]); say("Top of the climb.", false); beep(990, 120); }
       }
     }
     const st = FREE.st;
@@ -1523,16 +1530,29 @@
     $("free-list").innerHTML = ahead.length ? ahead.map(c => `<li><span class="ta">${picto("summit")}<span class="sr">Climb:</span></span><b class="num">${esc(nearTxt(Math.max(0, c.start - at)))}</b><span>${esc(nearTxt(c.len))} at ${(c.grade * 100).toFixed(1)}% · ${eleTxt(c.gain)} ${unitE()} up${c.cat ? ` · ${c.cat}` : ""}</span></li>`).join("")
       : `<li class="none">No climbs on the next ${distTxt(r.total - at)} ${unitD()} of this road.</li>`;
   }
+  /** A climb in words, the one way every screen says it: before it (how far, how long, how steep) and on it (to the
+   *  top, height to go, grade now). `long` adds the average and the steepest bit, for the boxes with room. */
+  function climbText(c, on, at, r, grade, long = false) {
+    const left = Math.max(0, on ? c.end - at : c.start - at), upToGo = Math.max(0, c.top - (C.eleAt(r, at) ?? c.top)), avg = `${(c.grade * 100).toFixed(1)}%`;
+    return {
+      left, main: on ? `${nearTxt(left)} to the top` : `in ${nearTxt(left)}`, pct: on ? Math.min(100, (at - c.start) / c.len * 100) : 0,
+      sub: on ? `${eleTxt(upToGo)} ${unitE()} up to go${grade != null ? ` · now ${grade.toFixed(0)}%` : ""}${long ? ` · avg ${avg}` : ""}`
+        : `${nearTxt(c.len)} at ${avg}${long ? ` (max ${(c.maxGrade * 100).toFixed(0)}%)` : ""} · ${eleTxt(c.gain)} ${unitE()} up`,
+      field: on ? `to the top · ${eleTxt(upToGo)} ${unitE()} up` : `to a ${avg} climb${c.cat ? ` · ${c.cat}` : ""}`,
+    };
+  }
+  /** Climbs as map lines, coloured by their grade. */
+  const climbFeatures = (r, list) => ({ type: "FeatureCollection", features: r ? list.map(c => { const pts = []; for (let d = c.start; d <= c.end; d += 25) pts.push(C.pointAt(r, d)); return { ...line(pts), properties: { g: c.grade * 100 } }; }) : [] });
   /** A ClimbPro box: before the climb (how far, how long, how steep) and on it (to the top, height to go, grade now). */
   function paintClimbBox(id, c, on, at, r, grade, list) {
     const box = $(id);
     box.hidden = !c;
     if (!c) return;
-    const done = on ? at - c.start : 0, n = list.indexOf(c) + 1;
+    const n = list.indexOf(c) + 1, t = climbText(c, on, at, r, grade, true);
     $(`${id}-k`).textContent = on ? `Climbing · ${n} of ${list.length}` : `Next climb · ${n} of ${list.length}${c.cat ? ` · ${c.cat}` : ""}`;
-    $(`${id}-main`).textContent = on ? `${nearTxt(c.end - at)} to the top` : `in ${nearTxt(c.start - at)}`;
-    $(`${id}-sub`).textContent = on ? `${eleTxt(c.top - (C.eleAt(r, at) ?? c.top))} ${unitE()} up to go${grade != null ? ` · now ${grade.toFixed(0)}%` : ""} · avg ${(c.grade * 100).toFixed(1)}%` : `${nearTxt(c.len)} at ${(c.grade * 100).toFixed(1)}% (max ${(c.maxGrade * 100).toFixed(0)}%) · ${eleTxt(c.gain)} ${unitE()} up`;
-    $(`${id}-bar`).style.width = `${on ? Math.min(100, done / c.len * 100) : 0}%`;
+    $(`${id}-main`).textContent = t.main;
+    $(`${id}-sub`).textContent = t.sub;
+    $(`${id}-bar`).style.width = `${t.pct}%`;
     box.classList.toggle("on", on);
   }
   /** The climb ahead or underway, route or not: the route's own on a route, else the road ahead's. */
@@ -1559,15 +1579,16 @@
     if (!show) return;
     const { c: cl, on, at, r, grade } = c;
     $("cs-k").textContent = `${on ? "Climbing" : "Climb ahead"}${cl.cat ? ` · ${cl.cat}` : ""}`;
-    $("cs-main").textContent = on ? `${nearTxt(cl.end - at)} to the top` : `in ${nearTxt(cl.start - at)}`;
-    $("cs-sub").textContent = on ? `${eleTxt(Math.max(0, cl.top - (C.eleAt(r, at) ?? cl.top)))} ${unitE()} up${grade != null ? ` · now ${grade.toFixed(0)}%` : ""}` : `${nearTxt(cl.len)} at ${(cl.grade * 100).toFixed(1)}% · ${eleTxt(cl.gain)} ${unitE()} up`;
-    $("cs-bar").style.width = `${on ? Math.min(100, (at - cl.start) / cl.len * 100) : 0}%`;
+    const t = climbText(cl, on, at, r, grade);
+    $("cs-main").textContent = t.main;
+    $("cs-sub").textContent = t.sub;
+    $("cs-bar").style.width = `${t.pct}%`;
   }
   /** The road ahead's climbs on the map, in their grade colours, when no route is loaded. */
   function mapFree() {
     if (NAV.route || !MAP.ready) return;
-    const r = FREE.route, list = r ? C.climbsWorth(r.climbs, P.freeride) : [];
-    set("climbs", { type: "FeatureCollection", features: list.map(c => { const pts = []; for (let d = c.start; d <= c.end; d += 25) pts.push(C.pointAt(r, d)); return { ...line(pts), properties: { g: c.grade * 100 } }; }) });
+    const r = FREE.route;
+    set("climbs", climbFeatures(r, r ? C.climbsWorth(r.climbs, P.freeride) : []));
   }
 
   /** How the wind sits on the next stretch of the route: headwind, tailwind or cross, as shares of the distance. */
@@ -1640,7 +1661,7 @@
     saver.on = on;
     document.body.classList.toggle("saver", on);
     const was = document.documentElement.dataset.theme;
-    document.documentElement.dataset.theme = on ? "dark" : themeNow();
+    UI.apply(on);
     if (was !== document.documentElement.dataset.theme) { restyleMap(); drawCrumb(); }
   }
   /** Minutes of riding left: the route at your average speed, else the session's steps; null for a free ride. */
@@ -1856,7 +1877,7 @@
         record(now);
         const wc = windNow(now, spd);
         if (wc && wc.vCalm > 0) {                                     // what the wind did to the clock: your speed against the calm-air speed for the same effort
-          S.windSecs += dt; S.windSec += dt * (1 - spd / wc.vCalm);
+          S.windSecs += dt; S.windSec += dt * Math.max(-1, Math.min(1, 1 - spd / wc.vCalm));
           if (wc.drag > 0.15) S.windHead += dt; else if (wc.drag < -0.15) S.windTail += dt;
         }
         // a hot verdict must hold 2 minutes of steady riding before the app acts on it; stop-and-go gets no verdict
@@ -2063,8 +2084,8 @@
     { id: "maxspd", k: "Max speed", v: () => (S.maxSpeed ? u(speedTxt(S.maxSpeed), unitS()) : "—") },
     { id: "asc", k: "Climbed", v: () => u(eleTxt(S.ascent), unitE()) },
     { id: "grade", k: "Grade", v: () => { const g = gradeNow(); return g == null ? "—" : `${g.toFixed(1)}%`; } },
-    { id: "climb", k: "Climb", v: () => { const c = climbNow(); return !c ? "—" : esc(c.on ? nearTxt(c.c.end - c.at) : nearTxt(c.c.start - c.at)); },
-      s: () => { const c = climbNow(); return !c ? "none close" : c.on ? `to the top · ${eleTxt(Math.max(0, c.c.top - (C.eleAt(c.r, c.at) ?? c.c.top)))} ${unitE()} up` : `to a ${(c.c.grade * 100).toFixed(1)}% climb${c.c.cat ? ` · ${c.c.cat}` : ""}`; } },
+    { id: "climb", k: "Climb", v: () => { const c = climbNow(); return !c ? "—" : esc(nearTxt(climbText(c.c, c.on, c.at, c.r, c.grade).left)); },
+      s: () => { const c = climbNow(); return !c ? "none close" : climbText(c.c, c.on, c.at, c.r, c.grade).field; } },
     { id: "hr", k: "Heart rate", v: now => (live.hr && now - live.hrAt < 5000 ? String(live.hr) : "—") },
     { id: "avghr", k: "Avg HR", v: () => (S.hrSecs ? String(Math.round(S.hrSum / S.hrSecs)) : "—") },
     { id: "maxhr", k: "Max HR", v: () => (S.hrMax ? String(S.hrMax) : "—") },
@@ -2206,6 +2227,7 @@
     const now = Date.now();
     if (!S.running) {
       const plan = S.plan, quick = S.quick, intensity = S.intensity;
+      FREE.said = []; FREE.offSince = 0;   // a new ride: every climb gets its callouts again
       Object.assign(S, fresh(), { running: true, plan, quick, intensity, rideId: uid(), wallStart: now, lapStart: now });
       samples = []; hrSpeed.length = 0; stops.length = 0; check = null; checkSaid = ""; hotFrom = 0; rollAt = 0; moving = false; rep = { under: 0, high: 0, n: 0 };
       const st = steps();
@@ -2512,15 +2534,15 @@
   // light / auto / dark: dark unless chosen otherwise; shared with the dashboard. Applies the moment it's tapped, and in
   // auto follows the phone as it switches (battery saver keeps true black either way)
   const themeBtns = [...document.querySelectorAll("[data-theme-pick]")];
-  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.themePick === (ls.get("fitness-theme") || "dark"))));
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(/** @type {HTMLElement} */ (b).dataset.themePick === UI.pref())));
   const applyTheme = () => {
     const was = document.documentElement.dataset.theme;
-    document.documentElement.dataset.theme = saver.on ? "dark" : themeNow();
+    UI.apply(saver.on);
     paintTheme();
     if (was !== document.documentElement.dataset.theme) { drawCrumb(); renderAhead(true); restyleMap(); }
   };
   themeBtns.forEach(b => b.addEventListener("click", () => { ls.set("fitness-theme", /** @type {HTMLElement} */ (b).dataset.themePick); applyTheme(); }));
-  deviceDark.addEventListener("change", applyTheme);
+  UI.deviceDark.addEventListener("change", applyTheme);
   paintTheme();
 
   // the screen's own height, measured: the footer's Start / Lap / Next / End must never sit under the system bars
@@ -2549,5 +2571,5 @@
   show(page);
   paintLaps();
   /** @type {any} */ (window).__ride = { S, NAV, P, MAP, get rep() { return rep; }, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB,
-    TR, batt, saver, sendRides, outbox, reroute, paceNow, wx, offerGo, routeTo, findGhosts, FREE, windNow };
+    TR, batt, saver, sendRides, outbox, reroute, paceNow, wx, offerGo, routeTo, findGhosts, FREE, windNow, heights, graphMemo };
 })();

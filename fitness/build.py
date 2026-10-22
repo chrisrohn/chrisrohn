@@ -756,7 +756,8 @@ def _inline(text: str, data: dict, token: str) -> str:
 
 def ride_page(ride: dict | None = None) -> str:
     page = (SITE_DIR / "ride.html").read_text()
-    page = (page.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
+    page = (page.replace("/*__COMMON__*/", (SITE_DIR / "common.js").read_text())
+                .replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
                 .replace("/*__RIDE_STYLE__*/", (SITE_DIR / "ride.css").read_text())
                 .replace("/*__RIDE_CORE__*/", (SITE_DIR / "ride-core.js").read_text())
                 .replace("/*__RIDE_APP__*/", (SITE_DIR / "ride.js").read_text()))
@@ -805,7 +806,8 @@ def render(data: dict, out: Path | None = None, cfg: dict | None = None) -> Path
             (target / "fitness-data.json").write_text(blob)
     html = (SITE_DIR / "index.html").read_text()
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
-    html = (html.replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
+    html = (html.replace("/*__COMMON__*/", (SITE_DIR / "common.js").read_text())
+                .replace("/*__STYLE__*/", (SITE_DIR / "style.css").read_text())
                 .replace("/*__SHELL__*/", (SITE_DIR / "shell.js").read_text())
                 .replace("/*__APP__*/", (SITE_DIR / "app.js").read_text())
                 .replace("__DATA__", payload))

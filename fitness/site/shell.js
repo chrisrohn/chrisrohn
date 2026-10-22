@@ -16,16 +16,10 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const standalone = () => matchMedia("(display-mode: standalone)").matches || /** @type {any} */ (navigator).standalone === true;
   const sleep = ms => new Promise(res => setTimeout(res, ms));
+  const UI = /** @type {any} */ (self).FitnessUI;   // common.js: the theme rule and the confirm sheet, shared with ride mode
   /** A yes/no question in the app's own sheet (the browser's confirm() box is grey, small and off-theme). Cancel has
    *  the focus, so a stray Enter never deletes anything. @returns {Promise<boolean>} */
-  function ask(title, text, yes, { danger = false } = {}) {
-    const d = /** @type {HTMLDialogElement | null} */ ($("ask"));
-    if (!d || typeof d.showModal !== "function") return Promise.resolve(confirm(`${title} ${text}`.trim()));
-    $("ask-h").textContent = title; $("ask-p").textContent = text; $("ask-p").hidden = !text;
-    const y = $("ask-yes"); y.textContent = yes; y.classList.toggle("danger", danger); y.classList.toggle("primary", !danger);
-    d.returnValue = "";
-    return new Promise(res => { d.addEventListener("close", () => res(d.returnValue === "yes"), { once: true }); d.showModal(); $("ask-no").focus(); });
-  }
+  const ask = (title, text, yes, opt = {}) => UI.ask(title, text, yes, opt);
   const when = iso => new Date(iso).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
   // ── offline ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -47,12 +41,10 @@
 
   // ── theme: dark unless light or auto (the phone's own setting) is chosen; the choice sticks and is shared with ride
   //    mode. The page always carries the light or dark it shows (<html data-theme>); "auto" is only the preference.
-  const themeBtns = [...document.querySelectorAll("[data-theme-pick]")], deviceDark = matchMedia("(prefers-color-scheme: dark)");
-  const pref = () => ls.get("fitness-theme") || "dark";
-  const applyTheme = () => { const t = pref(); document.documentElement.dataset.theme = t === "auto" ? (deviceDark.matches ? "dark" : "light") : t; };
-  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === pref())));
-  for (const b of themeBtns) b.addEventListener("click", () => { ls.set("fitness-theme", b.dataset.themePick); applyTheme(); paintTheme(); });
-  deviceDark.addEventListener("change", () => { applyTheme(); paintTheme(); });
+  const themeBtns = [...document.querySelectorAll("[data-theme-pick]")];
+  const paintTheme = () => themeBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themePick === UI.pref())));
+  for (const b of themeBtns) b.addEventListener("click", () => { ls.set("fitness-theme", b.dataset.themePick); UI.apply(); paintTheme(); });
+  UI.deviceDark.addEventListener("change", () => { UI.apply(); paintTheme(); });
   paintTheme();
 
   // ── data ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -320,7 +312,7 @@
       e.preventDefault();
       if (dlg) dlg.close();
       ask("Remove from this device?", "The dashboard data, check-ins and ride ratings on this phone are deleted. Anything already sent to your sync stays there.", "Remove", { danger: true })
-        .then(ok => { if (ok) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin", "fitness-rpe", "fitness-feel-sent", "fitness-feel-pending"]) ls.set(k, null); location.reload(); } else openSheet(); });
+        .then(ok => { if (ok) { for (const k of ["fitness-dashboard", "fitness-ride-config", "fitness-checkin", "fitness-rpe", "fitness-feel-sent", "fitness-feel-pending"]) ls.set(k, null); location.reload(); } else if (dlg) dlg.showModal(); });   // back as it was left, typing and all
     }
   });
   // the morning check-in and ride ratings (app.js): a quiet "service" run takes them to the sync, so the next build's

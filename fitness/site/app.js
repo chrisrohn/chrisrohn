@@ -385,7 +385,8 @@ window.startDashboard = D => {
     if (sum) { feelOpen = !(/** @type {HTMLDetailsElement} */ (sum.parentElement).open); return; }
     if (t && t.closest("[data-feel-all]")) {                         // the usual morning: everything normal, not sick
       feelOpen = false;
-      saveAnswers({ ...Object.fromEntries(FEEL.map(([k]) => [k, 3])), sick: "none" });
+      const now = checkin() || {};   // only what's not answered yet: a "very sore" already tapped stays very sore
+      saveAnswers({ ...Object.fromEntries(FEEL.map(([k]) => [k, 3])), sick: "none", ...Object.fromEntries(Object.entries(now).filter(([, v]) => v != null && v !== "")) });
       const y = window.scrollY;
       render("today");
       window.scrollTo(0, y);

@@ -384,6 +384,30 @@ test.describe("the dashboard, by hand and by eye", () => {
     expect(problems).toEqual([]);
   });
 
+  test("All normal fills in only what's unanswered: sore legs already tapped stay sore", async ({ page }) => {
+    const now = { ...DATA.now, readiness: { ...DATA.now.readiness, score: 82, illness: false } };
+    await page.goto(phoneLink({ ...DATA, now, checkins: {} }));
+    const call = page.locator("#today .call");
+    await call.locator('[data-feel="legs"][data-v="1"]').click();
+    await call.locator("[data-feel-all]").click();
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("fitness-checkin") || "{}"));
+    expect(Object.values(saved)[0]).toEqual({ legs: 1, energy: 3, stress: 3, mood: 3, sick: "none" });
+    await expect(call.locator(".checkin summary")).toContainText("Legs very sore");
+  });
+
+  test("Remove, then Cancel: the settings sheet comes back as it was left", async ({ page }) => {
+    await page.goto(phoneLink(DATA));
+    await page.locator("#databar [data-action=settings]").click();
+    await page.locator("#import-text").fill("half-typed link");
+    await page.locator("#cloud-repo").fill("me/training-data");
+    await page.locator("#import [data-action=forget]").click();
+    await page.locator("#ask-no").click();
+    await expect(page.locator("#import")).toBeVisible();
+    await expect(page.locator("#import-text")).toHaveValue("half-typed link");
+    await expect(page.locator("#cloud-repo")).toHaveValue("me/training-data");
+    expect(await page.evaluate(() => !!localStorage.getItem("fitness-dashboard"))).toBe(true);   // nothing removed
+  });
+
   test("the level reads by shape as well as colour, and the week says it in words", async ({ page }) => {
     await page.goto(phoneLink(DATA));
     await page.locator("#tab-plan").click();
