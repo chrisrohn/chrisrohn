@@ -89,36 +89,90 @@ test.describe("installable app", () => {
     expect(await axe(page)).toEqual([]);
   });
 
-  test("chrisrohn.com/fitness/ forwards to the app's own address, bringing this phone's settings along", async ({ browser }) => {
+  // the old addresses (playwright.config.mjs): chrisrohn.github.io on :8767, chrisrohn.com/fitness/ on :8765
+  const OLD = "http://127.0.0.1:8767", APP = new URL(APP_URL).origin;
+  const ROUTE = { id: "r1", name: "Loop", points: [[42.3, -83.0, 180], [42.31, -83.01, 182]], marks: [], added: 1, dist: 1500, gain: 2, climbs: 0, turns: 0 };
+  /** ride mode's database, as ride.js makes it, with a route, a ride, its track and a ride still being recorded */
+  const seed = (track) => new Promise((res, rej) => {
+    const r = indexedDB.open("fitness-ride", 1);
+    r.onupgradeneeded = () => { const d = r.result; d.createObjectStore("routes", { keyPath: "id" }); d.createObjectStore("rides", { keyPath: "id" }); d.createObjectStore("tracks", { keyPath: "id" }); d.createObjectStore("chunks"); };
+    r.onsuccess = () => {
+      const d = r.result, t = d.transaction(["routes", "rides", "tracks", "chunks"], "readwrite");
+      t.objectStore("routes").put(track.route);
+      t.objectStore("rides").put({ id: "ride1", start: 1, dist: 30000 });
+      t.objectStore("tracks").put({ id: "ride1", samples: track.samples });
+      t.objectStore("chunks").put([[1, 2, 3]], "live:000000");
+      t.oncomplete = () => { d.close(); res(undefined); }; t.onerror = () => rej(t.error);
+    };
+    r.onerror = () => rej(r.error);
+  });
+  const rows = () => new Promise(res => {
+    const r = indexedDB.open("fitness-ride");
+    r.onsuccess = () => {
+      const d = r.result, out = {};
+      if (!d.objectStoreNames.length) { d.close(); res(out); return; }
+      const t = d.transaction([...d.objectStoreNames]);
+      for (const n of d.objectStoreNames) { const q = t.objectStore(n).getAllKeys(); q.onsuccess = () => { out[n] = q.result; }; }
+      t.oncomplete = () => { d.close(); res(out); };
+    };
+  });
+
+  test("the old address carries this phone's settings, routes and rides to the new one, in parts, then forwards", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
-    const home = new URL(APP_URL);
-    await page.route(`${home.origin}/**`, route => route.fulfill({ status: 200, contentType: "text/html", body: "<title>new home</title>" }));
-    await page.goto("http://127.0.0.1:8765/privacy.html");
+    const visits = [];
+    page.on("framenavigated", f => { if (f === page.mainFrame()) visits.push(new URL(f.url())); });
+    await page.goto(`${APP}/robots.txt`);
+    await page.evaluate(() => localStorage.setItem("fitness-units", "mi"));   // this address's own choice stays
+    await page.goto(`${OLD}/robots.txt`);
     await page.evaluate(() => { localStorage.setItem("fitness-cloud", JSON.stringify({ repo: "me/training-data", token: "github_pat_x" })); localStorage.setItem("fitness-units", "km"); localStorage.setItem("newmusic-x", "1"); });
-    await page.goto("http://127.0.0.1:8765/fitness/ride.html#z=abc");
-    await page.waitForURL(u => u.origin === home.origin);
-    const to = new URL(page.url()), hash = new URLSearchParams(to.hash.slice(1));
-    expect(to.pathname).toBe("/ride.html");
-    expect(hash.get("z")).toBe("abc");                                              // an old QR link still opens its plan
-    const moved = await page.evaluate(async b64 => {
-      const bin = Uint8Array.from(atob(b64.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
-      return JSON.parse(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text());
-    }, hash.get("move"));
-    expect(moved).toEqual({ "fitness-cloud": JSON.stringify({ repo: "me/training-data", token: "github_pat_x" }), "fitness-units": "km" });   // only the app's own keys
+    // a long ride's track that hardly compresses, so the move takes several parts
+    const samples = Array.from({ length: 100000 }, (_, i) => [i, Math.random().toString(36).slice(2), Math.random()]);
+    await page.evaluate(seed, { route: ROUTE, samples });
+    await page.goto(`${OLD}/ride.html#z=abc`);
+    await page.waitForURL(u => u.origin === APP && u.pathname === "/ride.html", { timeout: 20_000 });
+    expect(new URLSearchParams(new URL(page.url()).hash.slice(1)).get("z")).toBe("abc");   // an old QR link still opens its plan
+    expect(visits.filter(u => u.origin === APP && u.pathname === "/move.html").length).toBeGreaterThan(1);
+    expect(await page.evaluate(() => localStorage.getItem("fitness-cloud"))).toBe(JSON.stringify({ repo: "me/training-data", token: "github_pat_x" }));
+    expect(await page.evaluate(() => localStorage.getItem("fitness-units"))).toBe("mi");
+    expect(await page.evaluate(() => localStorage.getItem("newmusic-x"))).toBeNull();   // only the app's own keys
+    expect(JSON.parse(await page.evaluate(() => localStorage.getItem("fitness-moved")))).toMatchObject({ from: "127.0.0.1:8767" });
+    expect(await page.evaluate(rows)).toEqual({ routes: ["r1"], rides: ["ride1"], tracks: ["ride1"], chunks: ["live:000000"] });
+    const track = await page.evaluate(() => new Promise(res => { const r = indexedDB.open("fitness-ride"); r.onsuccess = () => { const q = r.result.transaction("tracks").objectStore("tracks").get("ride1"); q.onsuccess = () => res(q.result.samples.length); }; }));
+    expect(track).toBe(samples.length);
+    // landed: the next visit to the old address forwards at once
+    visits.length = 0;
+    await page.goto(`${OLD}/#today`);
+    await page.waitForURL(u => u.origin === APP && u.pathname === "/", { timeout: 10_000 });
+    expect(new URL(page.url()).hash).toBe("#today");
+    expect(visits.some(u => u.pathname === "/move.html")).toBe(false);
     await ctx.close();
   });
 
-  test("the app takes what the old address carried, without overwriting what it already has", async ({ page }) => {
-    const keep = { "fitness-cloud": JSON.stringify({ repo: "me/training-data", token: "github_pat_good", branch: "main" }), "fitness-units": "km", "not-ours": "x" };
-    const move = deflateRawSync(Buffer.from(JSON.stringify(keep))).toString("base64url");
-    await page.goto("/robots.txt");
-    await page.evaluate(() => localStorage.setItem("fitness-units", "mi"));
-    await page.goto(`/#move=${move}`);
-    await expect.poll(() => page.evaluate(() => localStorage.getItem("fitness-cloud"))).toBe(keep["fitness-cloud"]);
-    expect(await page.evaluate(() => localStorage.getItem("fitness-units"))).toBe("mi");
-    expect(await page.evaluate(() => localStorage.getItem("not-ours"))).toBeNull();
-    expect(new URL(page.url()).hash).not.toContain("move");
+  test("chrisrohn.com/fitness/ forwards to the app too, and the app says once that it moved", async ({ browser }) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto("http://127.0.0.1:8765/privacy.html");
+    await page.evaluate(() => { localStorage.setItem("fitness-units", "km"); localStorage.setItem("newmusic-x", "1"); });
+    await page.goto("http://127.0.0.1:8765/fitness/");
+    await page.waitForURL(u => u.origin === APP && u.pathname === "/", { timeout: 10_000 });
+    expect(await page.evaluate(() => localStorage.getItem("fitness-units"))).toBe("km");
+    expect(await page.evaluate(() => localStorage.getItem("newmusic-x"))).toBeNull();
+    await page.goto(phoneLink(DATA).replace(/^\//, `${APP}/`));
+    await expect(page.locator("#databar")).toContainText("lives at");
+    expect(await axe(page)).toEqual([]);
+    await page.locator("[data-action=moved-ok]").click();
+    await expect(page.locator("#databar")).not.toContainText("lives at");
+    expect(await page.evaluate(() => localStorage.getItem("fitness-moved"))).toBeNull();
+    await ctx.close();
+  });
+
+  test("the new address takes a move only from the app's old addresses, and lands only on its own pages", async ({ page }) => {
+    const p = deflateRawSync(Buffer.from(JSON.stringify({ v: 1, ls: { "fitness-cloud": "{\"repo\":\"evil/x\",\"token\":\"t\"}" }, db: {} }))).toString("base64url");
+    const q = new URLSearchParams({ id: "0123456789abcdef", i: "0", n: "1", from: "https://evil.example/", go: "", then: "", p });
+    await page.goto(`/move.html#${q}`);
+    await page.waitForURL(u => u.origin === APP && u.pathname === "/");
+    expect(await page.evaluate(() => localStorage.getItem("fitness-cloud"))).toBeNull();
   });
 
   test("says what the plan did about a session that didn't happen", async ({ page }) => {

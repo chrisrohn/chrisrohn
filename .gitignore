@@ -21,3 +21,4 @@ dist/
 .lighthouseci/
 lighthouse-report/
 dist-app/
+dist-old/

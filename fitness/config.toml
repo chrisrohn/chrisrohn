@@ -141,7 +141,8 @@ enabled = true
 # installs one app per scope, and the music app's is the whole site), built data-free by fitness/build-app.mjs. The dashboard's
 # "Phone app" panel hands your data to it in a link's #fragment, which never reaches the server, or as a data file.
 [app]
-url = "https://chrisrohn.github.io/"   # its Pages site (see README → The app on your phone); "" = local-only: no phone link, ride mode from dist/
+url = "https://chris.bike/"   # its Pages site, chrisrohn/chris.bike (see README → The app on your phone); "" = local-only: no phone link, ride mode from dist/
+moved_from = ["https://chrisrohn.github.io/", "https://chrisrohn.com/fitness/", "https://www.chrisrohn.com/fitness/"]   # earlier addresses, which forward here with the phone's data
 export_dir = ""           # also write fitness-data.json here on every build, e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/Fitness"
                           # (iCloud Drive) or a Google Drive folder, so the phone app can Import it from Files
 

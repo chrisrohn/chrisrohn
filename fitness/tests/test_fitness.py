@@ -290,7 +290,7 @@ def test_ride_page_and_link(tmp_path, cfg):
     assert "__RIDE_DATA__" not in page and "/*__RIDE_APP__*/" not in page and '"lthr"' not in page   # the plan rides in the link
     assert 'ride.html' in (tmp_path / "index.html").read_text()
     link = build.ride_link(cfg, ride, "ride.html")
-    assert link.startswith("https://chrisrohn.github.io/ride.html#z=")
+    assert link.startswith("https://chris.bike/ride.html#z=")
     blob = link.split("#z=")[1]
     assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == ride
     assert len(link) < 2400   # small enough for a QR code a phone camera reads off a laptop screen
@@ -323,7 +323,7 @@ def test_installable_app_and_phone_link(tmp_path, cfg):
     assert saved["today"] == "2026-10-08" and "ride_qr" not in saved and "phone_href" not in saved
     assert (export / "fitness-data.json").read_text() == (tmp_path / "fitness-data.json").read_text()
     link = build.phone_link(cfg, data)
-    assert link.startswith("https://chrisrohn.github.io/#d=")
+    assert link.startswith("https://chris.bike/#d=")
     blob = link.split("#d=")[1]
     assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == saved
     assert build.phone_link({**cfg, "app": {"url": ""}}, data) is None
