@@ -108,21 +108,7 @@
   const timeout = (p, ms) => Promise.race([p, sleep(ms).then(() => { throw new Error("GitHub is slow to answer: showing this device's copy"); })]);
   const problems = st => !st ? [] : [st.garmin && st.garmin.error && `Garmin: ${st.garmin.error}`, st.strava && st.strava.error && `Strava: ${st.strava.error}`, st.feel && st.feel.error && `Check-in: ${st.feel.error}`, st.ride && st.ride.error && `Ride: ${st.ride.error}`, st.error && `Build: ${st.error}`].filter(Boolean);
 
-  /** The move from chrisrohn.com/fitness/ (fitness/build-app.mjs): what this phone kept there arrives as #move=, deflated.
-   *  Only the app's own keys, and never over something this address already has. */
-  async function moveIn() {
-    const h = new URLSearchParams(location.hash.slice(1)), mv = h.get("move");
-    if (!mv) return;
-    try {
-      const got = JSON.parse(await inflate(mv));
-      for (const [k, v] of Object.entries(got || {})) if (/^fitness-[\w:-]+$/.test(k) && typeof v === "string" && ls.get(k) == null) ls.set(k, v);
-    } catch { /* a damaged link: start fresh here */ }
-    h.delete("move");
-    history.replaceState(null, "", location.pathname + location.search + (h.toString() ? `#${h}` : ""));
-  }
-
   async function load() {
-    await moveIn();
     const raw = ($("data") || { textContent: "" }).textContent.trim();
     if (raw.startsWith("{")) return { D: readData(raw), source: "build" };
     const frag = new URLSearchParams(location.hash.slice(1)).get("d");
@@ -308,6 +294,8 @@
         .then(ok => { if (ok) job("service", `Logging: ${label.toLowerCase()}`, { code }); });
     }
     if (act === "reload") location.reload();
+    if (act === "notify-on") { ls.set("fitness-moved", null); turnOnNotify(); }
+    if (act === "moved-ok") { ls.set("fitness-moved", null); if (barArgs) databar(...barArgs); else { const b = bar(); if (b) b.hidden = true; } }
     if (act === "forget") {
       e.preventDefault();
       if (dlg) dlg.close();
@@ -432,6 +420,18 @@
     } catch { /* offline: keep what's showing */ }
   });
 
+  /** Just moved here from an old address (move-in.js left a note): say so once, and offer the morning notification
+   *  back, since a subscription belongs to the address it was made at. */
+  function movedIn() {
+    let m = null;
+    try { m = JSON.parse(ls.get("fitness-moved") || "null"); } catch { /* none */ }
+    if (!m || typeof m.from !== "string") return;
+    const push = m.push && canPush() && status && status.push && status.push.key && Notification.permission !== "denied";
+    barHTML(`<span role="status">Training lives at <b>${esc(location.host)}</b> now. Everything this phone kept at ${esc(m.from)} came along${standalone() ? "" : ": install it from here, then remove the old icon"}.</span>`
+      + (push ? `<button type="button" class="chip" data-action="notify-on">Turn the morning notification back on</button>` : "")
+      + `<button type="button" class="chip" data-action="moved-ok">OK</button>`);
+  }
+
   window.addEventListener("DOMContentLoaded", async () => {
     const strava = stravaReturn();
     const got = await load();
@@ -443,6 +443,7 @@
       databar(got.D, got.source);
       /** @type {any} */ (window).startDashboard(got.D, got.source);
     }
+    if (!strava) movedIn();
     if (typeof strava === "string") barHTML(`<span class="bad" role="alert">${esc(strava)}</span>`);
     else if (strava) job("connect-strava", "Connecting Strava", { code: strava.code });
     else if (got && got.source === "cloud" && !cloudProblem) autoSync(status);

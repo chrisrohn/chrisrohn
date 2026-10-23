@@ -48,11 +48,6 @@
   const inflate = async s => new Response(new Blob([bytes(s)]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
   let cfg = null;
   const frag = new URLSearchParams(location.hash.slice(1));
-  if (frag.has("move")) {   // the move from chrisrohn.com/fitness/: this phone's settings from there (never over newer ones here)
-    try { const got = JSON.parse(await inflate(frag.get("move"))); for (const [key, v] of Object.entries(got || {})) if (/^fitness-[\w:-]+$/.test(key) && typeof v === "string" && ls.get(key) == null) ls.set(key, v); } catch { /* start fresh */ }
-    frag.delete("move");
-    history.replaceState(null, "", location.pathname + location.search + (frag.toString() ? `#${frag}` : ""));
-  }
   if (frag.has("z") || frag.has("c")) {
     try {
       cfg = JSON.parse(frag.has("z") ? await inflate(frag.get("z")) : new TextDecoder().decode(bytes(frag.get("c"))));

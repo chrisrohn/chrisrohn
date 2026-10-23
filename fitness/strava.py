@@ -1,6 +1,6 @@
 """Strava: the official API (OAuth, your own app, read-only) for ongoing sync, and the bulk-export zip for full history.
 
-Create an app at https://www.strava.com/settings/api with Authorization Callback Domain `chrisrohn.github.io` (the app's address)
+Create an app at https://www.strava.com/settings/api with Authorization Callback Domain `chris.bike` (the app's address)
 (Strava always allows localhost too), then
 `STRAVA_CLIENT_ID=... STRAVA_CLIENT_SECRET=... python -m fitness login strava`.
 """
