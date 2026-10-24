@@ -353,6 +353,24 @@ def find_duplicates(where: dict[str, list[dict]] | list[dict]) -> list[dict]:
     return out
 
 
+def playlist_items(tracks: list[dict], year: str = "") -> list[dict]:
+    """The rows of a playlist reading, each playlist item once. YouTube Music's continuations can hand a large
+    playlist's row back twice; the repeat carries the same setVideoId (the item's own id), whereas a song really
+    added twice has two. Counting the repeats as copies filled the Cleanup tab with extra copies YouTube does not hold."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for t in tracks:
+        sid = t.get("setVideoId")
+        if sid and sid in seen:
+            continue
+        if sid:
+            seen.add(sid)
+        out.append(t)
+    if len(out) < len(tracks):
+        log.warning("playlist %s: %d repeated rows in the reading dropped (same playlist item read twice)", year, len(tracks) - len(out))
+    return out
+
+
 def kinds_of(entries: list[dict]) -> list[str]:
     """The problems a song's rows add up to, in KIND_ORDER (see find_duplicates). The site recomputes this as rows
     are cleaned, with the same rules in site/src/editions.js."""
@@ -397,7 +415,7 @@ def youtube_playlist_seeds(cfg: dict) -> tuple[dict[str, float], dict[str, dict]
         except Exception as exc:  # noqa: BLE001
             log.warning("could not read playlist %s (%s): %s", year, pid, exc)
             continue
-        tracks = pl.get("tracks") or []
+        tracks = playlist_items(pl.get("tracks") or [], year)
         weight = 1.0 + 0.25 * max(0, int(year) - 2023) if str(year).isdigit() else 1.0
         for pos, t in enumerate(tracks):
             title = t.get("title") or ""
