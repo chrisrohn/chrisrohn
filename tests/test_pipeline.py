@@ -507,6 +507,14 @@ def test_discover_playlists_tolerant_titles_and_channel_from_author():
     assert years["1999"] == "PLTW5JZnPjE_rgIDfV4vL5g4EZ3SCc-R_d"             # pinned ids are never overridden by title matches
 
 
+def test_playlist_items_drops_a_row_read_twice_but_keeps_a_song_added_twice():
+    from discovery.profile import playlist_items
+
+    rows = [{"videoId": "a", "setVideoId": "S1"}, {"videoId": "b", "setVideoId": "S2"}, {"videoId": "a", "setVideoId": "S1"},   # the same item, read twice
+            {"videoId": "b", "setVideoId": "S3"}, {"videoId": "c"}, {"videoId": "c"}]                                           # added twice; no id: kept as read
+    assert [(r["videoId"], r.get("setVideoId")) for r in playlist_items(rows, "2013")] == [("a", "S1"), ("b", "S2"), ("b", "S3"), ("c", None), ("c", None)]
+
+
 def test_edition_of_tells_the_editions_of_a_song_apart():
     from discovery.editions import YEAR_FREE, edition_of, song_key
 

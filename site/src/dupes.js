@@ -354,12 +354,32 @@ const who = (d, r) => `${d.artist} - ${r.title || d.title}`;
  * row knows its item ids; a report row asks YouTube first (1 unit) so a copy removed elsewhere is never removed twice.
  * @param {Dupe} d @param {Row} r @param {boolean} keepFirst @param {string} why */
 async function removeRow(d, r, keepFirst, why) {
-  const ids = r.itemIds && r.itemIds.length ? r.itemIds : await playlistItemsFor(r.pid, r.videoId, { why: "Cleanup: verify which playlist items hold this copy before removing any", detail: who(d, r) });
+  const live = !!(r.itemIds && r.itemIds.length);
+  let ids = live ? /** @type {string[]} */ (r.itemIds) : await playlistItemsFor(r.pid, r.videoId, { why: "Cleanup: verify which playlist items hold this copy before removing any", detail: who(d, r) });
+  // fewer than the report counted: confirm against the whole playlist before calling it fixed, so a real copy is never hidden
+  if (!live && ids.length < r.copies) ids = (await readingOf(r.pid, r.year)).get(r.videoId) || [];
   const victims = keepFirst ? ids.slice(1) : ids;
   for (const i of victims) await removePlaylistItem(i, { why, detail: who(d, r) });
+  const read = readings.get(r.pid); if (read) read.byVideo.set(r.videoId, ids.filter(i => !victims.includes(i)));
   if (d.live) { d.entries = d.entries.filter(e => !(e.playlistId === r.pid && e.videoId === r.videoId) || (keepFirst && e.itemIds && e.itemIds[0] === ids[0])); if (keepFirst) for (const e of d.entries) if (e.itemIds) e.itemIds = e.itemIds.filter(i => !victims.includes(i)); }
-  else mark(`${d.key}|${r.pid}|${r.videoId}|${keepFirst ? "one" : "gone"}`);
+  else mark(`${d.key}|${r.pid}|${r.videoId}|${keepFirst && ids.length ? "one" : "gone"}`);   // what YouTube holds now, even when nothing had to go
   return victims.length;
+}
+/** @type {Map<string, { at: number, byVideo: Map<string, string[]> }>} */
+const readings = new Map();
+const READING_MS = 10 * 60e3;
+/** Every item of a playlist by video (1 unit per 50 tracks), reused for ten minutes so a run of fixes in one year reads it once.
+ * @param {string} pid @param {string} year @returns {Promise<Map<string, string[]>>} */
+async function readingOf(pid, year) {
+  const hit = readings.get(pid); if (hit && Date.now() - hit.at < READING_MS) return hit.byVideo;
+  /** @type {Map<string, string[]>} */ const byVideo = new Map(); /** @type {string | undefined} */ let pageToken; let pages = 0;
+  do {
+    const j = await yt("GET", "/playlistItems", { params: { part: "snippet", playlistId: pid, maxResults: 50, pageToken }, why: `Cleanup: read “${titleFor(year)}” in full to confirm how many copies it holds before removing any`, detail: pages ? `page ${pages + 1}` : undefined });
+    for (const it of j.items || []) { const v = it.snippet?.resourceId?.videoId; if (v) byVideo.set(v, [...(byVideo.get(v) || []), it.id]); }
+    pageToken = j.nextPageToken;
+  } while (pageToken && ++pages < 100);
+  readings.set(pid, { at: Date.now(), byVideo });
+  return byVideo;
 }
 /** Add this copy to another year (unless that playlist already holds the video), then take it out of this one.
  * @param {Dupe} d @param {Row} r @param {string} year */
@@ -404,7 +424,7 @@ async function onClick(e) {
     if (!confirm(extra ? `Remove the extra ${r.copies - 1 === 1 ? "copy" : `${r.copies - 1} copies`} of “${who(d, r)}” in ${titleFor(r.year)}? One stays. (${units} quota units)` : `Remove “${who(d, r)}” from ${titleFor(r.year)}?${r.copies > 1 ? ` All ${r.copies} copies go.` : ""} (${units} quota units)`)) return;
     await busy(btn, async () => {
       const n = await removeRow(d, r, extra, extra ? `Cleanup: remove the extra copy of a song added twice to “${titleFor(r.year)}” (one copy stays)` : `Cleanup: remove this copy of the song from “${titleFor(r.year)}”`);
-      toast(n ? `Removed ${n} · ${who(d, r)}` : "Nothing to remove — already cleaned up");
+      toast(n ? `Removed ${n} · ${who(d, r)}` : `YouTube holds ${extra ? "just one copy" : "no copy"} of “${who(d, r)}” in ${titleFor(r.year)} — nothing removed, cleared from the list`);
       refreshItem(d);
     });
     return;
@@ -597,6 +617,9 @@ export async function scanYear(year) {
     }
     pageToken = j.nextPageToken;
   } while (pageToken && ++pages < 100);
+  /** @type {Map<string, string[]>} */ const byVideo = new Map();
+  for (const r of rows) byVideo.set(r.videoId, [...(byVideo.get(r.videoId) || []), ...(r.itemIds || [])]);
+  readings.set(pid, { at: Date.now(), byVideo });   // the report's fixes in this year reuse this reading
   /** @type {Map<string, Dupe>} */ const songs = new Map();
   for (const r of rows) {
     const k = "live:" + songKey(r.artist || "", r.title || "");

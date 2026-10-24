@@ -760,6 +760,54 @@ test("Cleanup: a song's copies can be looked up, played in place, kept, removed 
   await ctx.close();
 });
 
+test("Cleanup: an extra copy YouTube does not hold is confirmed against the whole playlist, then cleared; one the quick lookup missed is still removed", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const y = Object.keys(feed.youtube.playlists).sort().reverse()[1]; const pid = feed.youtube.playlists[y];   // not this year's: the Feed reads that one by itself
+  const e = (vid, position) => ({ year: y, playlistId: pid, videoId: vid, position, title: vid, edition: "original", label: "", videoType: "MUSIC_VIDEO_TYPE_ATV" });
+  // ghost: the build read one playlist item twice; hidden: really added twice, but the videoId lookup answers with one
+  const report = { version: 2, checked_at: new Date().toISOString(), count: 2, kinds: { "same-video": 2 }, duplicates: [
+    { key: "ghost", artist: "The Swiss", title: "ghostC", kind: "same-video", kinds: ["same-video"], years: [y], count: 2, uploads: 1, editions: ["original"], entries: [e("ghostC", 104), e("ghostC", 835)] },
+    { key: "hidden", artist: "STRFKR", title: "hiddenD", kind: "same-video", kinds: ["same-video"], years: [y], count: 2, uploads: 1, editions: ["original"], entries: [e("hiddenD", 518), e("hiddenD", 951)] }] };
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  page.on("dialog", d => d.accept());
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 2, duplicates_kinds: report.kinds, unavailable_count: 0, video_count: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/duplicates.json", r => r.fulfill({ json: report }));
+  const calls = [];
+  let items = [["PLI-c1", "ghostC"], ["PLI-d1", "hiddenD"], ["PLI-d2", "hiddenD"]];
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); const params = Object.fromEntries(u.searchParams);
+    calls.push({ method: req.method(), path: u.pathname, params });
+    if (u.pathname.startsWith("/drive/") || u.pathname.startsWith("/upload/")) return route.fulfill({ json: { files: [], id: "drive-1" } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET" && params.videoId) return route.fulfill({ json: { items: items.filter(([, v]) => v === params.videoId).slice(0, 1).map(([id]) => ({ id })) } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: items.map(([id, v]) => ({ id, snippet: { resourceId: { videoId: v } } })) } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") { items = items.filter(([id]) => id !== params.id); return route.fulfill({ status: 204, body: "" }); }
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html?view=cleanup");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  const ghost = page.locator('#cl-dupes .dupe[data-key="ghost"]'), hidden = page.locator('#cl-dupes .dupe[data-key="hidden"]');
+  await expect(ghost).toBeVisible(); await expect(hidden).toBeVisible();
+  await ghost.locator("button[data-fix=extra]").click();
+  await expect(page.locator(".toast")).toContainText("YouTube holds just one copy");
+  await expect(ghost).toHaveCount(0);                                                  // cleared, nothing deleted
+  expect(calls.filter(c => c.method === "DELETE")).toHaveLength(0);
+  expect(calls.filter(c => c.method === "GET" && c.path === "/youtube/v3/playlistItems" && c.params.playlistId === pid && !c.params.videoId)).toHaveLength(1);   // the whole playlist, read once
+  await hidden.locator("button[data-fix=extra]").click();
+  await expect(hidden).toHaveCount(0);
+  expect(calls.filter(c => c.method === "DELETE").map(c => c.params.id)).toEqual(["PLI-d2"]);   // the second copy goes, the first stays
+  expect(calls.filter(c => c.method === "GET" && c.path === "/youtube/v3/playlistItems" && c.params.playlistId === pid && !c.params.videoId)).toHaveLength(1);   // the reading was reused
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
 test("Cleanup: the playability audit finds deleted and blocked tracks, offers a replacement search, and removes a dead row by its item id", async ({ browser }) => {
   const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
   const y = Object.keys(feed.youtube.playlists).sort().reverse()[0]; const pid = feed.youtube.playlists[y];
