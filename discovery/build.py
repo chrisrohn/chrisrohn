@@ -48,6 +48,7 @@ from .years import annotate_duplicate_years, verify_years
 
 FEED_PATH = SITE_DATA_DIR / "feed.json"
 STATE_PATH = DATA_DIR / "state.json"
+DAILY_QUOTA = 60000   # YouTube Data API units a day granted to the project (config youtube.daily_quota overrides)
 
 
 def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
@@ -203,6 +204,7 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
             "playlists": {**((profile.get("youtube") or {}).get("years") or {}), **{str(y): p for y, p in (ycfg.get("playlists") or {}).items()}},
             "skipped_playlist_id": (profile.get("youtube") or {}).get("skipped") or ycfg.get("skipped_playlist_id") or "",
             "skips_in_youtube": bool(ycfg.get("skips_in_youtube", False)),
+            "daily_quota": max(0, int(ycfg.get("daily_quota") or DAILY_QUOTA)),   # the project's YouTube API units a day: the site paces itself against it
             "channel_id": (profile.get("youtube") or {}).get("channel") or ycfg.get("channel_id") or "",
             "region": str(ycfg.get("region") or "US"),   # where availability is judged: the build's scan, the site's audit and its replacement search agree on it
             # songs that appear more than once across the year playlists: counts here, the full list in data/duplicates.json

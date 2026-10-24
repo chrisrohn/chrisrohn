@@ -32,7 +32,8 @@ playlist. The daily GitHub Actions build reads the public year playlists by id w
 
 Why the quota: a curator filing a year's worth of catalogue (the **Catalog** tab, 48 year playlists from 1979) and
 cleaning duplicates and dead uploads (the **Cleanup** tab) spends 50 units per add or removal, so the default 10,000
-units cap a day at about 200 playlist edits. The site already paces itself: it shows the running meter in ⚙, refuses
+units capped a day at about 200 playlist edits. **Granted: 60,000 units/day** (about 1,200 edits), set as
+`youtube.daily_quota` in `discovery/config.yaml`. The site already paces itself: it shows the running meter in ⚙, refuses
 bulk actions the day's quota cannot cover, and reuses one playlist reading for every Keep in the following half hour.
 
 ## Branding

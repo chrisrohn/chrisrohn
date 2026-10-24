@@ -253,7 +253,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert payload["google"]["guests"] is False and "{year}" in payload["google"]["guest_playlist_title_pattern"]
     pls = payload["youtube"]["playlists"]
     assert pls["2026"] == "PLTW5JZnPjE_q3bQltmawTeCJNF2VfH_dN" and len(pls) == 48   # config ids win over the profile's title matches
-    assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP"
+    assert payload["youtube"]["skipped_playlist_id"] == "PLSKIP" and payload["youtube"]["daily_quota"] == 60000
     assert payload["youtube"]["audio"] == {"audio": len(payload["items"]), "video": 0, "unknown": 0} and payload["youtube"]["video_count"] == 0
     assert payload["picks"][0]["artist"] == "Jungle"
     assert payload["rotation"]["enabled"] is True and payload["rotation"]["waiting"] == 0   # nobody rated lately: every act is due

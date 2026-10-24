@@ -107,14 +107,17 @@ export const badVideo = vid => !!(vid && state.badVideos[vid] && Date.now() - st
 export function markBadVideo(vid) { for (const [k, at] of Object.entries(state.badVideos)) if (Date.now() - at > BAD_VIDEO_MS) delete state.badVideos[k]; state.badVideos[vid] = Date.now(); state.badVersion++; persist(); }
 export const skipsInYouTube = () => state.settings.skipsInYouTube != null ? !!state.settings.skipsInYouTube : !!(state.feed && state.feed.youtube && state.feed.youtube.skips_in_youtube);
 
-// YouTube quota: 10,000 units/day, reset at midnight Pacific. Reads cost 1, writes cost 50. The count is per account
-// (it travels in the Drive sync file), so it cannot see what guests spend on the same project.
+// YouTube quota: the project's daily grant (config youtube.daily_quota, 60,000 units), reset at midnight Pacific. Reads
+// cost 1, writes cost 50. The count is per account (it travels in the Drive sync file), so it cannot see what guests
+// spend on the same project.
+export const DAILY_QUOTA = 60000;
+export const quotaLimit = () => { const q = Number(state.feed?.youtube?.daily_quota); return Number.isFinite(q) && q > 0 ? q : DAILY_QUOTA; };
 export const ptDay = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 /** @param {number} units */
 export function spend(units) { if (state.quota.day !== ptDay()) state.quota = { day: ptDay(), units: 0 }; state.quota.units += units; persist(); }
 export const quotaUsed = () => (state.quota.day === ptDay() ? state.quota.units : 0);
-export const quotaLeft = () => 10000 - quotaUsed();
-export const quotaText = () => `~${quotaUsed().toLocaleString()} of 10,000 YouTube API units used today by your devices (${Math.floor(quotaLeft() / 50)} more saves) · resets midnight Pacific`;
+export const quotaLeft = () => Math.max(0, quotaLimit() - quotaUsed());
+export const quotaText = () => `~${quotaUsed().toLocaleString()} of ${quotaLimit().toLocaleString()} YouTube API units used today by your devices (${Math.floor(quotaLeft() / 50).toLocaleString()} more saves) · resets midnight Pacific`;
 
 // Local bookkeeping that has outlived its purpose: ratings the daily build now hides via the playlists, local skips
 // and wrong-video flags after a year, undo tombstones after 30 days, and optimistic entries whose request never came back.

@@ -72,9 +72,13 @@ youtube_music:
     "1979": PLTW5JZnPjE_r_8aNRMTx9NT75iYguNwae
   # 👎 are free: by default they're remembered in the browser only (no YouTube quota). Set skips_in_youtube: true
   # (or flip the switch in ⚙ on the site) to also file them into an unlisted "Skipped" playlist so every device and
-  # the daily build see them. Each YouTube write costs 50 of the 10,000 daily quota units.
+  # the daily build see them. Each YouTube write costs 50 of the daily quota units (daily_quota below).
   skips_in_youtube: false
   skipped_playlist_title: "Indie Discotheque – Skipped"
+  # The Cloud project's daily YouTube Data API quota (units, reset midnight Pacific): Google's default is 10,000; this
+  # project was granted 60,000 (≈ 1,200 writes a day). The site's meter, its "saves left" counts and every bulk action
+  # in Cleanup and Video are paced against it, so change it here when Google changes the grant.
+  daily_quota: 60000
   skipped_playlist_id: ""
   picks_count: 40                 # newest saves shown on the public "Picks" tab
   # The one music-video playlist: every video approved on the site's Video tab is added here, and nowhere else.
@@ -89,7 +93,7 @@ google:
     - chrisrohn@gmail.com
   # Guest rating (off by default): other Google accounts may sign in and rate; their 👍 go into THEIR OWN YouTube
   # library under the name below, never into the Indie Discotheque playlists. Every signed-in user shares the
-  # project's daily YouTube API quota (10,000 units ≈ 200 saves in total), so leave this off unless you want it.
+  # project's daily YouTube API quota (youtube.daily_quota: 60,000 units ≈ 1,200 saves in total), so leave this off unless you want it.
   guests: false
   guest_playlist_title_pattern: "{year} Picks from chrisrohn.com"
 
