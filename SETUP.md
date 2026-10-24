@@ -85,8 +85,9 @@ that is a normal "Sign in with Google" button on the site.
 On the site, click **Sign in with Google**, pick that account, allow "manage your YouTube account". The thumbs
 appear. Sessions last an hour; the button re-prompts (usually a silent popup) when needed.
 
-**Quota:** YouTube's free API quota is 10,000 units/day (reset midnight Pacific); each write costs 50. Only Keep
-spends quota, so you get ~200 *saves* a day, and ⚙ shows a running meter. Skip is free: skips are remembered in the
+**Quota:** the project's YouTube API quota is 60,000 units/day (Google's default is 10,000; this project's extension
+was granted), reset midnight Pacific; each write costs 50. Set it as `youtube.daily_quota` in `discovery/config.yaml`.
+Only Keep spends quota, so you get ~1,200 *saves* a day, and ⚙ shows a running meter. Skip is free: skips are remembered in the
 browser and expire with the feed. Listening, filtering and playback cost nothing.
 
 **Optional – skips on YouTube too:** switch on **⚙ → Also file skips into the Skipped playlist** if you rate from
@@ -209,7 +210,7 @@ cached). A **swap** adds the counterpart and removes the dead copy (100 units, 1
 in a year* does it in bulk within the day's quota, **find a replacement now** does the search from the tab for 101
 units (the audio track first, anything blocked here left out, each result playable in place before you use it), and
 a track with no other upload can be removed or searched by hand. The report is `site/data/unavailable.json`.
-If you ever need more than 200 writes a day, Google grants quota increases for personal projects through the
+If you ever need more than the grant allows (1,200 writes a day at 60,000 units), Google grants further increases for personal projects through the
 YouTube API quota extension form in the Cloud console (free). The reviewers ask for a screencast of the client
 verifying playlist contents and adding or removing tracks: **⚙ → API activity** lists every YouTube Data API request
 the browser makes as it happens (endpoint, result, quota cost, and what it was for), with Copy / Download for the

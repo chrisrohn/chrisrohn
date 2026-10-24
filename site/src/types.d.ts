@@ -37,7 +37,7 @@ export interface LearnedSummary { outcomes: number; kept: number; skipped: numbe
 export interface Feed {
   generated_at: string; station: string; site_name?: string; count: number; new_today: number; years?: number[];
   google?: { client_id?: string; curator_hashes?: string[]; curators?: string[]; guests?: boolean; guest_playlist_title_pattern?: string };
-  youtube?: { playlist_title_pattern?: string; skipped_playlist_title?: string; playlists?: Record<string, string>; skipped_playlist_id?: string; skips_in_youtube?: boolean;
+  youtube?: { playlist_title_pattern?: string; skipped_playlist_title?: string; playlists?: Record<string, string>; skipped_playlist_id?: string; skips_in_youtube?: boolean; daily_quota?: number;
     duplicates_count?: number; duplicates_kinds?: Record<string, number>; duplicates_checked_at?: string | null;
     unavailable_count?: number; unavailable_with_alt?: number; unavailable_pending?: number; region?: string;
     video_count?: number; video_with_audio?: number; video_pending?: number;   // playlist rows that are the video, not the audio track
