@@ -3,6 +3,7 @@ notification, the bike's upkeep and the race-day page. Nothing here touches the 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -147,7 +148,18 @@ def test_the_build_puts_the_weather_on_today_and_the_week(cfg):
     data = build.assemble(cfg, days, acts, today, weather=forecast(today - timedelta(days=31), days=47), now=datetime(2026, 10, 8, 6))
     assert data["now"]["weather"]["summary"].endswith("mph") and all(d["wx"] for d in data["plan"]["days"][:7])
     phone = json.dumps(build.phone_data(data))
-    assert "42.3" not in phone and "-85.6" not in phone                                    # where you live never reaches the phone
+    def pairs(o):   # every [lat, lon, …] in the data (the race course's line is public; home and work must not be there)
+        if isinstance(o, dict):
+            for v in o.values():
+                yield from pairs(v)
+        elif isinstance(o, list):
+            if len(o) >= 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in o[:2]):
+                yield o
+            for v in o:
+                yield from pairs(v)
+    near = lambda p, q: abs(p[0] - q[0]) < 0.05 and abs(p[1] - q[1]) < 0.05   # noqa: E731
+    assert not any(near(p, HOME) or near(p, WORK) for p in pairs(build.phone_data(data)))
+    assert not re.search(r"(?<![\d.])42\.3\d*[^\d\]]{1,4}-85\.[62]", phone)               # where you live never reaches the phone
 
 
 # ── the morning notification ─────────────────────────────────────────────────────────────────────────────
@@ -259,9 +271,9 @@ def test_race_day_page(cfg):
     iceman = pages[0]
     assert iceman["name"].startswith("Bell's Iceman") and len(pages) == 1                    # Barry is months away
     assert iceman["timeline"][0]["at"] == "5:54 AM" and iceman["timeline"][-2]["at"] == "9:24 AM" and iceman["start_set"]
-    assert iceman["start"] == "9:24 AM" and iceman["wave"] == 14 and iceman["finish"] == "11:39 AM"   # no past editions: config's 2:15
+    assert iceman["start"] == "9:24 AM" and iceman["wave"] == 14 and iceman["finish"] == "11:33 AM"   # no past editions: config's 2:09
     assert "wave 14’s corral" in iceman["timeline"][-3]["what"] and iceman["timeline"][-2]["what"].startswith("Wave 14 goes.")
-    assert iceman["timeline"][-1]["what"].startswith("Finish, about 2:15") and iceman["conditions"]["where"] == "home"
+    assert iceman["timeline"][-1]["what"].startswith("Finish, about 2:09") and iceman["conditions"]["where"] == "home"
     assert "catching riders from the waves ahead" in iceman["strategy"]
     assert "Not the Nutty Pudding" in iceman["timeline"][1]["what"] and "210 g" in iceman["timeline"][1]["what"]
     assert "147–155 bpm" in iceman["strategy"] and iceman["fuel"]["rate"] >= 60

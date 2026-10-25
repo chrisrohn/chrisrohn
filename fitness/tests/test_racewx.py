@@ -54,7 +54,7 @@ def test_race_time_comes_from_past_editions_not_the_ride_back():
     eds = [{"date": "2023-11-04", "moving_s": 8561, "elapsed_s": 8799}, {"date": "2024-11-02", "moving_s": 8516, "elapsed_s": 8516}]
     took = racewx.expected(eds, 2.25)
     assert took["minutes"] == 144 and took["history"] and "2:22 in 2024" in took["from"] and "2:27 in 2023" in took["from"]
-    assert racewx.expected([], 2.25) == {"minutes": 135, "from": "your estimate in config.toml", "history": False}
+    assert racewx.expected([], 2.25) == {"minutes": 135, "from": "your estimate in config.toml", "history": False, "scaled": False}
 
 
 def test_editions_keep_the_race_and_drop_the_same_day_ride_back(cfg):
@@ -154,7 +154,7 @@ def test_race_forecasts_only_inside_the_forecast_reach(cfg, tmp_path):
         assert build.race_forecasts(store, cfg, date(2026, 10, 20), datetime(2026, 10, 20, 8), get) == {}   # 18 days out
         got = build.race_forecasts(store, cfg, date(2026, 10, 23), datetime(2026, 10, 23, 8), get)
         assert set(got["Bell's Iceman Cometh Challenge"]) == {"start", "finish"} and len(calls) == 2
-        assert "latitude=44.73" in calls[0] and "longitude=-85.52" in calls[1]
+        assert "latitude=44.73" in calls[0] and "longitude=-85.49" in calls[1]   # Kalkaska to Timber Ridge, from the course
         build.race_forecasts(store, cfg, date(2026, 10, 23), datetime(2026, 10, 23, 8, 30), get)
         assert len(calls) == 2                                                                             # cached per point
 

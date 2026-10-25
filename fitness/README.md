@@ -163,6 +163,17 @@ which picks the session library), the race-morning form band, and words that fin
 `every = "3rd Sat Apr"` rolls a race to next year's date once it's past. Each race has one or more distance
 `options`, each with its own expected race time, target fitness (CTL), longest training ride and taper range.
 
+**The course.** When the organizer publishes the route, drop its GPX in [`courses/`](courses/) and name it in the
+race's block (`course = "courses/iceman-2026.gpx"`). Like `start` and `wave`, it belongs to that `date`'s edition.
+[`course.py`](course.py) reads it once per build: its length and climbing, the hills, where along it the climbing
+sits, the wind along its own line, and the start and finish for the venue forecast (unless `start_ll` / `finish_ll`
+say otherwise). Two counts of climbing, because they answer different questions: what a GPS or barometric recorder
+reports (every rise of a metre or more, so it compares with your past editions), and ride mode's smoothed count with
+its ClimbPro climbs. The race card and the phone use the same smoothed count, and a test runs `ride-core.js` on the
+file to keep them in step. The 2026 Iceman (Ride with GPS 57666523) is **27.4 mi / 44.1 km with ~1,610 ft**. That's
+shorter than the editions before it. The climbing comes as 29 short rises and only 3 real climbs, 43% of it is in
+the last third, and the line finishes on a ~200 yd wall at ~10% with pitches to 16%.
+
 Barry-Roubaix is set up with two options. Its "100k" is the **Killer, 62 mi / ~4,000 ft**, and the closest thing
 to a "50k" is the **Thriller, 36 mi / ~2,200 ft**. The organizer also runs the 18-mi Chiller and the 100-mi Psycho
 Killer. `distance = "100k"` is the option today's call follows. The page has a button for each option and
@@ -296,7 +307,11 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
 - **Routes.** Load a **GPX or TCX** (Ride with GPS, Komoot, Strava, Garmin Connect, a race site) under **Map → Routes**,
   or on Android **share** the file to Training from any app (Files, Gmail, Komoot…); desktop Chrome opens .gpx files
   with it. Routes stay on the phone, with **Reverse**, **GPX** out and **Delete**. A file with no heights gets them
-  from Open-Meteo's elevation API.
+  from Open-Meteo's elevation API. **The next race's course arrives by itself**: within six weeks of a race with a
+  `course`, the sync sends ride mode the line (thinned to within 1.5 m across and 0.5 m in height, so it keeps its length
+  within 0.3% and its climbs), and ride mode keeps it as a route under its own id, saves its map for offline and
+  picks it on race morning (once: choose another route and it stays chosen). It comes with the dashboard's data, not
+  in the QR code, and every point is checked before it's kept.
 - **Turn by turn.** The file's own cues when it has them (Ride with GPS cue sheets, Garmin and TCX course points),
   otherwise turns read off the line itself. A banner and voice: *"In 500 feet, turn left onto Fox Rd"*, then *"Turn
   left now"* with a beep and a buzz, timed to your speed. Street names come from the map's own data.
@@ -607,11 +622,18 @@ The **Race** section covers each race in the next six weeks (the next one always
 - how to ride the start and the heart rate to settle at;
 - the bottles and gels for your expected time;
 - the race's length from your own past editions (the median of the last three, by elapsed time; one edition per
-  day, so a ride to or from the venue that shares the name doesn't count), else the option's `hours`;
+  day, so a ride to or from the venue that shares the name doesn't count), else the option's `hours`. When this
+  year's course is more than 3% longer or shorter than an edition, that edition counts at its own pace over this
+  year's distance, so the bottles, gels, finish forecast and timeline fit the race you'll actually ride;
+- with a `course`: its profile with the hills shaded; what it asks of you (rolling or climbing, front- or back-loaded,
+  the finale and its last hill); the clock at each third (distance plus 1 km for every 100 m up, scaled to your
+  expected time); and every hill with its length, height, grade, steepest pitch, time at race speed and how to ride
+  it (a drag, a surge or a threshold effort);
 - from 16 days out, the forecast **at the course** (`start_ll` / `finish_ll` in the race's block; the home forecast
   until then) for the warm-up, the race from your gun to your expected finish, and the finish, plus the trail the
   48 hours before leave behind (dry and loose, damp and packed, soaked, snow, frozen) and the head- or tailwind along
-  the start→finish line;
+  the course itself (each stretch weighted by its length, and the share of it ridden into the wind), or along the
+  start→finish line when there's no course;
 - what that forecast asks of you, the bike and the bottles (`fitness/racewx.py`): kit for racing effort (about 10 °F
   warmer than the feels-like), the corral and the finish; the race's Silca pressures moved for the case, with the
   cold correction for pumping indoors (Gay-Lussac); and the bike, riding and fueling lines for the Cube's tubeless
@@ -960,10 +982,11 @@ legs actually felt on the bike.
 | `build.py` | assembles the numbers and inlines them into `dist/index.html` and `dist/ride.html` |
 | `build-app.mjs` | writes the public, data-free app for its own site (`node fitness/build-app.mjs <dir>`: the dashboard shell, ride mode, MapLibre, manifest, icons, the offline service worker) and, during the chrisrohn.com build, the forwarding page at `/fitness/` |
 | `render-icons.mjs` | renders the PNG icons from `site/icons/*.svg` (the heartbeat as the bike's top tube) |
-| `raceday.py`, `racewx.py` | race day: the morning timeline from your wave's gun, pacing, bottles, and the course forecast turned into kit, tire pressures, bike prep and riding for every weather case |
+| `raceday.py`, `racewx.py` | race day: the morning timeline from your wave's gun, pacing, bottles, the course's hills and clock, and the course forecast turned into kit, tire pressures, bike prep and riding for every weather case |
+| `course.py`, `courses/` | a race's course from the organizer's GPX: length, climbing (recorder-style and ride mode's), hills, thirds and finale, the profile, the wind along it, and the thinned line for ride mode |
 | `workouts.py` | structured steps (HR targets from threshold HR) for ride mode |
 | `site/` | the dashboard (`shell.js`: data, install, offline; `app.js`: the page), ride mode (`ride-core.js`: routes, navigation, climbs, the sun, workout tailoring, FIT / GPX / TCX, smart-trainer protocols, offline routing from vector tiles, the battery forecast, the ride packed for the sync; `ride.js`: the screens, sensors and trainer, map, recording and sending), styles, SVG charts, `csp.txt`, `manifest.webmanifest`, `sw.js` (offline, map tiles, the share target) and `icons/` |
 | `demo.py` | the synthetic athlete |
 | `fonts/` | Nimbus Sans L (URW, GPL v2): the source OTFs, the license, and `subset.sh`, which writes the app's `site/fonts/*.woff2` |
 
-Tests: `python -m pytest fitness/tests` (models, planner, parsers, build) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target). CI runs both. This is a personal analysis tool, not medical advice.
+Tests: `python -m pytest fitness/tests` (models, planner, parsers, build, race courses checked against ride mode's own analysis) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target, the race course on the card and kept as a route). CI runs both. This is a personal analysis tool, not medical advice.
