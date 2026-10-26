@@ -292,7 +292,9 @@ def test_ride_page_and_link(tmp_path, cfg):
     link = build.ride_link(cfg, ride, "ride.html")
     assert link.startswith("https://chris.bike/ride.html#z=")
     blob = link.split("#z=")[1]
-    assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == ride
+    assert ride["race"]["course"]["points"]                                         # the race's course rides with the dashboard's data…
+    lean = {**ride, "race": {k: v for k, v in ride["race"].items() if k != "course"}}
+    assert json.loads(zlib.decompress(base64.urlsafe_b64decode(blob + "=" * (-len(blob) % 4)), -15)) == lean   # …not in the QR code
     assert len(link) < 2400   # small enough for a QR code a phone camera reads off a laptop screen
     assert build.ride_link({**cfg, "app": {**cfg["app"], "url": ""}}, ride, "ride.html") == f"ride.html#z={blob}"   # the local copy, same fragment
     page = build.ride_page(None)

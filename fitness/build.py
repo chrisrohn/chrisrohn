@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fitness import bike, feel, fuel, power, raceday, streams
+from fitness import course as coursem
 from fitness import metrics as m
 from fitness import weather as wxm
 from fitness import workouts as wo
@@ -626,8 +627,12 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
     prof = cfg["commute"].get("profile")
     models = {leg: {"model": v["model"], "speed": v["speed"], "hr": v["hr"]} for leg, v in prof["legs"].items()} if prof else None
     nxt = (plan or {}).get("races", [{}])[0] if plan else {}
+    race = {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None
+    conf = next((r for r in cfg["races"] if r["name"] == nxt.get("name")), None) if nxt else None
+    if race and conf and nxt.get("days_out", raceday.WINDOW_DAYS + 1) <= raceday.WINDOW_DAYS and (crs := raceday.edition_course(conf, nxt["date"])):
+        race["course"] = coursem.share(crs, nxt["name"], int(nxt["date"][:4]))   # ride mode keeps it as a route, ready for race day
     return {"lthr": th["lthr"], "max_hr": th["max_hr"], "rest_hr": round(th["rest_hr"]), "sex": th["sex"], "ftp": round(th["ftp"]) if th.get("ftp") else 0, "days": days,
-            "race": {"name": nxt.get("name"), "date": nxt.get("date")} if nxt else None,
+            "race": race,
             "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models,
             "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")},
             "wx": _ride_wx(wx, now or datetime.now()) if wx else None}
@@ -715,6 +720,8 @@ def ride_link(cfg: dict, ride: dict, local: str) -> str:
     """The ride page with the config deflated into the #fragment (never sent to a server; short enough for a QR code):
     the hosted page, or the local copy when no hosted page is configured. Either way the page itself holds no data."""
     base = app_url(cfg) or local
+    if (ride.get("race") or {}).get("course"):   # the race's course comes with the dashboard's data, not in a QR code
+        ride = {**ride, "race": {k: v for k, v in ride["race"].items() if k != "course"}}
     return f"{base}{'ride.html' if base.endswith('/') else ''}#z={_pack(ride)}"
 
 

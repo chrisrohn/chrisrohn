@@ -2,8 +2,11 @@
 what to wear from the forecast, and the key sessions still between you and the start line.
 
 Built for each race in the next six weeks (the next one always). Start time is `start` in the race's config
-block (your wave's, with `wave` its number), "10:00" until you set it; both apply only to the configured edition. Fueling uses fuel.py's bottles and the race-day carb rate; pacing
-uses your threshold heart rate. The race lasts what your past editions took (racewx.expected); within 16 days the
+block (your wave's, with `wave` its number), "10:00" until you set it; both apply only to the configured edition, as
+does `course`, the organizer's GPX (fitness/course.py): its hills, where the climbing sits, the finale, checkpoint times
+and the wind along it, with the line handed to ride mode as a route. Fueling uses fuel.py's bottles and the race-day
+carb rate; pacing uses your threshold heart rate. The race lasts what your past editions took, at their pace over this
+year's course when its length has changed (racewx.expected); within 16 days the
 forecast is the venue's own (build.race_forecasts), and racewx turns it into what to wear, how to set up the bike, how
 to ride and how to fuel, with every other case listed too.
 """
@@ -12,6 +15,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from fitness import bike, fuel, racewx
+from fitness import course as coursem
 from fitness import weather as wxm
 
 WINDOW_DAYS = 42
@@ -28,6 +32,79 @@ START = {
 
 def _clock(t: datetime) -> str:
     return t.strftime("%-I:%M %p")
+
+
+def _hm(minutes: float) -> str:
+    return f"{int(minutes // 60)}:{round(minutes % 60):02d}"
+
+
+def edition_course(conf: dict, race_date: str) -> dict | None:
+    """The race's course GPX, analyzed, when it belongs to this edition (not a year the race rolled forward to)."""
+    if not conf.get("course") or conf.get("date") is None or conf["date"].isoformat() != race_date:
+        return None
+    return coursem.load(str(conf["course"]))
+
+
+def course_plan(c: dict, *, units: str, settle: str, minutes: float, gun: datetime, on_phone: bool) -> dict:
+    """What the course itself asks: its hills with the effort and time each takes, where the climbing sits, the finale,
+    the clock at each third, and how to have it on the phone. `minutes` is the expected race time."""
+    imp = units == "imperial"
+    far = lambda m: f"{m / coursem.MI:.1f} mi" if imp else f"{m / 1000:.1f} km"   # noqa: E731
+    at = lambda m: f"mi {m / coursem.MI:.1f}" if imp else f"km {m / 1000:.1f}"   # noqa: E731
+    up = lambda m: f"{round(m * 3.28084):,} ft" if imp else f"{round(m):,} m"   # noqa: E731
+    long = lambda m: ((f"{round(m * 1.0936 / 10) * 10:,} yd" if m < 320 else f"{m / coursem.MI:.2f} mi") if imp   # noqa: E731
+                      else f"{round(m / 10) * 10:,} m" if m < 1000 else f"{m / 1000:.1f} km")
+    total = c["km"] * 1000
+    kph = c["km"] / (minutes / 60) if minutes else 20.0
+    hills = []
+    for h in c["hills"]:
+        mins = h["len_m"] / 1000 / (kph * max(0.4, 1 - 0.09 * h["grade"])) * 60   # slower the steeper: about 30% off at 3%
+        how = ("a drag, not a climb: race effort, on a wheel, one gear easier than you'd like" if h["grade"] < 2
+               else "a surge: seated, smooth, over the top before you shift up" if mins <= 2
+               else f"threshold ({settle.split('–')[-1] if '–' in settle else settle} at most): pace the first minute by feel, the heart rate lags")
+        hills.append({"at": at(h["start_m"]), "to_go": far(max(0, total - h["start_m"] - h["len_m"])), "len": long(h["len_m"]), "gain": up(h["gain_m"]),
+                      "grade": h["grade"], "max_grade": h["max_grade"], "minutes": round(mins, 1), "how": how, "start_km": round(h["start_m"] / 1000, 2),
+                      "end_km": round((h["start_m"] + h["len_m"]) / 1000, 2)})
+    notes = []
+    k = c.get("kicks")
+    if k:
+        notes.append(f"Rolling, not climbing: {up(c['gain_m'])} over {far(total)} comes as {k['n']} short rises (half of them under "
+                     f"{long(k['median_len_m'])} and {up(k['median_gain_m'])}), {k['over_6pct']} with pitches over 6%, and only "
+                     f"{len(c['climbs'])} that ride mode counts as climbs (it smooths out the shortest rises, so the phone shows about "
+                     f"{up(c['ride_gain_m'])} up). Each is a one-to-three-minute effort: ride them in the saddle at "
+                     f"the top of {settle}, carry speed in from the dip, and keep pedaling over the crest, where the field slows.")
+    thirds = c.get("thirds") or []
+    if thirds and c["gain_m"]:
+        shares = [t["gain_m"] / max(1, sum(x["gain_m"] for x in thirds)) for t in thirds]
+        i = max(range(3), key=lambda j: shares[j])
+        span = f"{at(thirds[i]['from_km'] * 1000)}–{thirds[i]['to_km'] * 1000 / (coursem.MI if imp else 1000):.1f}"
+        if shares[i] >= 0.4 and i == 2:
+            notes.append(f"The climbing is back-loaded: the last third ({span}) holds {round(shares[i] * 100)}% of it and "
+                         f"{thirds[i]['hills']} of the {len(c['hills'])} hills. Hold {settle} through the first third even while the wave "
+                         "around you goes faster, and eat and drink on schedule while it's flatter: in the last third you won't want to.")
+        elif shares[i] >= 0.4 and i == 0:
+            notes.append(f"The climbing is front-loaded: the first third ({span}) holds {round(shares[i] * 100)}% of it. Don't let the wave "
+                         f"start and the hills stack up: settle to {settle} on the first climb, not after it.")
+        else:
+            notes.append(f"The climbing is spread through the race ({', '.join(f'{round(x * 100)}%' for x in shares)} by thirds): an even effort pays.")
+    fin = c.get("finale")
+    if fin and fin["gain_m"]:
+        last = fin.get("last")
+        notes.append(f"The last {far(fin['km'] * 1000)} climb {up(fin['gain_m'])} over {fin['hills']} hill{'s' if fin['hills'] != 1 else ''}"
+                     + (f"; the last one, {long(last['len_m'])} at {last['grade']:g}% with pitches to {last['max_grade']:g}%, tops out "
+                        f"{far(max(0, total - last['start_m'] - last['len_m']))} from the line. Shift down before it, not on it, and keep one match for it."
+                        if last else ". Keep something for them."))
+    if on_phone:
+        notes.append(f"It's on your phone: ride mode → Map → Routes → “{c['name']}”, with its map saved for offline once ride mode has opened "
+                     "online. On Ahead, Race plan with your finish time gives each hill its target, and the ride calls each one out before you reach it.")
+    checkpoints, done, eq_total = [], 0.0, sum(t["to_km"] - t["from_km"] + t["gain_m"] / 100 for t in thirds) or c["km"]
+    for t in thirds:   # the clock at each third: distance plus 1 km for every 100 m of climbing
+        done += t["to_km"] - t["from_km"] + t["gain_m"] / 100
+        m = minutes * done / eq_total
+        checkpoints.append({"at": far(t["to_km"] * 1000), "clock": _clock(gun + timedelta(minutes=m)), "elapsed": _hm(m)})
+    return {"name": c["name"], "distance": far(total), "climbing": up(c["gain_m"]), "km": c["km"], "gain_m": c["gain_m"],
+            "climbs": len(c["climbs"]), "kicks": (k or {}).get("n", 0), "hills": hills, "notes": notes, "checkpoints": checkpoints,
+            "profile": c["profile"], "on_phone": on_phone}
 
 
 def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: float | None, up: dict | None, today: date,
@@ -48,7 +125,8 @@ def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: 
         hh, mm = (int(x) for x in (start or "10:00").split(":"))
         race_day = date.fromisoformat(r["date"])
         gun = datetime.combine(race_day, datetime.min.time()).replace(hour=hh, minute=mm)
-        took = racewx.expected((editions or {}).get(r["name"]), r["hours"])
+        crs = edition_course(conf, r["date"])
+        took = racewx.expected((editions or {}).get(r["name"]), r["hours"], km=crs["km"] if crs else r.get("km") or 0, units=units)
         minutes = took["minutes"]
         rate = fuel.on_bike_rate(minutes, race=True) or 60
         here = (venue or {}).get(r["name"]) or {}
@@ -58,10 +136,11 @@ def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: 
         start_wx = start_wx or (wx if wx and race_day.isoformat() in wx.days else None)
         ll0, ll1 = conf.get("start_ll"), conf.get("finish_ll")
         heading = wxm.bearing(tuple(ll0), tuple(ll1)) if ll0 and ll1 and ll0 != ll1 else None
+        facing = crs["facing"] if crs and not crs["loop"] else None
         w = start_wx.window(gun, minutes, heading) if start_wx else None
         silca = (up or {}).get("pressure", {}).get(bike._race_key(r["name"])) if up else None
         cond = racewx.advise(start_wx=start_wx, finish_wx=finish_wx, gun=gun, minutes=minutes, heading=heading, silca=silca,
-                             units=units, kind=r["kind"], where=where) if start_wx else None
+                             units=units, kind=r["kind"], where=where, facing=facing) if start_wx else None
         b = fuel.bottles(minutes, rate, drink, n.get("bottle_cages", 2), n.get("bladder_l", 0), w["temp_max"] if w else None, units)
         lthr = th.get("lthr")
         settle = f"{round(lthr * 0.92)}–{round(lthr * 0.97)} bpm" if lthr else "just under threshold"
@@ -109,6 +188,7 @@ def pages(plan: dict | None, cfg: dict, wx: wxm.Wx | None, th: dict, weight_kg: 
             "bike": bike.prerace(up, r) if up else [],
             "pack": pack,
             "sessions_left": [{"date": d["date"], "title": d["title"]} for d in before],
+            "course": course_plan(crs, units=units, settle=settle, minutes=minutes, gun=gun, on_phone=bool(crs["points"])) if crs else None,
             "taper": {"days": r["taper_days"], "race_tsb": r["race_tsb"], "in_band": r["in_band"], "target_tsb": r["target_tsb"]},
         })
     return out

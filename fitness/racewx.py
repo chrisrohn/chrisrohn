@@ -14,6 +14,7 @@ from __future__ import annotations
 import statistics
 from datetime import datetime, timedelta
 
+from fitness import course
 from fitness import weather as wxm
 
 ATM_PSI = 14.7
@@ -159,14 +160,26 @@ PLAYBOOK: dict[str, dict] = {
 ORDER = ["storm", "ice", "snow", "cold_wet", "mud", "rain", "frozen", "freezing", "sand", "tacky", "wind", "warm"]
 
 
-def expected(editions: list[dict] | None, hours: float) -> dict:
-    """How long you'll race: the median elapsed time of your last three editions, else the config's estimate."""
+def expected(editions: list[dict] | None, hours: float, km: float = 0, units: str = "imperial") -> dict:
+    """How long you'll race: the median elapsed time of your last three editions, else the config's estimate. When this
+    year's course (`km`) is a different length from an edition (more than 3% and less than 30% off: a recording, not a
+    ride to the start), that edition counts at its own pace over this year's distance."""
     eds = sorted(editions or [], key=lambda e: e["date"])[-3:]
     if not eds:
-        return {"minutes": round(hours * 60), "from": "your estimate in config.toml", "history": False}
-    times = [(e.get("elapsed_s") or e["moving_s"]) / 60 for e in eds]
-    said = ", ".join(f"{int(t // 60)}:{round(t % 60):02d} in {e['date'][:4]}" for t, e in zip(times, eds, strict=True))
-    return {"minutes": round(statistics.median(times)), "from": f"your {said}", "history": True}
+        return {"minutes": round(hours * 60), "from": "your estimate in config.toml", "history": False, "scaled": False}
+    times, scaled = [], False
+    for e in eds:
+        t = (e.get("elapsed_s") or e["moving_s"]) / 60
+        ratio = km * 1000 / e["distance_m"] if km and e.get("distance_m") else 1.0
+        if 0.7 <= ratio <= 1.3 and abs(ratio - 1) > 0.03:
+            t, scaled = t * ratio, True
+        times.append(t)
+    clock = lambda t: f"{int(t // 60)}:{round(t % 60):02d}"   # noqa: E731
+    raw = [(e.get("elapsed_s") or e["moving_s"]) / 60 for e in eds]
+    said = ", ".join(f"{clock(t)} in {e['date'][:4]}" for t, e in zip(raw, eds, strict=True))
+    length = f"{km / 1.609344:.1f} mi" if units == "imperial" else f"{km:.1f} km"
+    return {"minutes": round(statistics.median(times)), "from": f"your {said}" + (f", at your pace over this year's {length}" if scaled else ""),
+            "history": True, "scaled": scaled}
 
 
 def trail(wx: wxm.Wx, gun: datetime) -> dict:
@@ -251,28 +264,34 @@ def race_kit(pre_w: dict | None, race_w: dict, finish_w: dict | None, units: str
 
 
 def heading_line(heading: float | None, w: dict, units: str, kind: str) -> str:
-    """The wind along a point-to-point course."""
+    """The wind along a point-to-point course: along the course's own line when there is one (w["into_pct"]: the share
+    of it ridden into the wind), else the straight line from start to finish."""
     if heading is None or w.get("head") is None:
         return ""
     head, cross = w["head"], abs(w["wind"] ** 2 - w["head"] ** 2) ** 0.5
     way = wxm.compass(heading)
+    on = (f"along the course ({w['into_pct']}% of it into the wind; overall it heads {way})" if w.get("into_pct") is not None
+          else f"on a course that heads {way}")
     if head >= 10:
-        return (f"A headwind of about {wxm.speed(head, units)} on a course that heads {way}: sit in on the open two-track and keep "
+        return (f"A headwind of about {wxm.speed(head, units)} {on}: sit in on the open two-track and keep "
                 "your turns on the front short; the woods are where you can push")
     if head <= -10:
-        return (f"A tailwind of about {wxm.speed(-head, units)} on a course that heads {way}: the open two-track goes fast, so push "
+        return (f"A tailwind of about {wxm.speed(-head, units)} {on}: the open two-track goes fast, so push "
                 "there and recover in the woods")
     if cross >= 15:
-        return f"A crosswind on a course that heads {way}: ride on the sheltered side of the wheel ahead on open two-track"
+        return f"A crosswind {on}: ride on the sheltered side of the wheel ahead on open two-track"
     return ""
 
 
 def advise(*, start_wx: wxm.Wx, finish_wx: wxm.Wx | None, gun: datetime, minutes: float, heading: float | None, silca: dict | None,
-           units: str, kind: str, where: str) -> dict | None:
-    """Everything the forecast asks for on race morning, or None while it's beyond the forecast's reach."""
+           units: str, kind: str, where: str, facing: list[float] | None = None) -> dict | None:
+    """Everything the forecast asks for on race morning, or None while it's beyond the forecast's reach. `facing` (the
+    course's distance by compass bearing, fitness/course.py) turns the wind along the course itself."""
     race_w = start_wx.window(gun, minutes, heading)
     if not race_w:
         return None
+    if facing and (a := course.along(race_w["wind"], race_w.get("wind_dir"), facing)):
+        race_w = {**race_w, **a}
     pre_w = start_wx.window(gun - timedelta(minutes=45), 45)
     finish_w = (finish_wx or start_wx).window(gun + timedelta(minutes=minutes), 60)
     tr = trail(start_wx, gun)
@@ -294,7 +313,7 @@ def advise(*, start_wx: wxm.Wx, finish_wx: wxm.Wx | None, gun: datetime, minutes
         "where": where, "picked": picked, "trail": {**tr, "line": trail_line},
         "windows": {"pre": wxm.describe(pre_w, units) if pre_w else None, "race": wxm.describe(race_w, units),
                     "finish": wxm.describe(finish_w, units) if finish_w else None},
-        "race_w": {k: race_w[k] for k in ("temp_min", "temp_max", "feels", "rain_mm", "pop", "wind", "gust", "verdict")},
+        "race_w": {k: race_w.get(k) for k in ("temp_min", "temp_max", "feels", "rain_mm", "pop", "wind", "gust", "verdict", "head", "into_pct")},
         "tires": tires, **merged, "sig": sig,
     }
 

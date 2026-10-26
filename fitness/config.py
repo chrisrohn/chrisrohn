@@ -28,7 +28,7 @@ DEFAULTS: dict = {
     "commute": {"enabled": False, "km_each_way": 0, "climb_m": [0, 0], "days": ["tue", "thu", "wed", "mon", "fri"], "per_week": [1, 3], "winter": False, "holidays": "us-federal"},
 }
 OPTION_DEFAULTS = {"label": "", "km": 0, "climbing_ft": 0, "hours": 2.0, "target_ctl": 55, "long_ride_h": 3.0, "taper_days": [6, 14]}
-RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}, "start": "", "wave": 0, "start_ll": [], "finish_ll": []}
+RACE_DEFAULTS = {"name": "Race", "date": None, "every": "", "kind": "gravel", "distance": "", "target_tsb": [10, 20], "match": [], "options": {}, "start": "", "wave": 0, "start_ll": [], "finish_ll": [], "course": ""}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 MONTHS = [m.lower() for m in calendar.month_abbr]
 
@@ -73,6 +73,11 @@ def _race(raw: dict) -> dict:
             raise ValueError(f'{race["name"]}: start needs "HH:MM" (24-hour), got {race["start"]!r}')
         race["start"] = f"{int(hh):02d}:{mm}"
     race["wave"] = int(race["wave"] or 0)
+    if race["course"]:   # the organizer's GPX: where it starts and finishes, unless start_ll / finish_ll say otherwise
+        from fitness import course
+        c = course.load(str(race["course"]))
+        race["start_ll"] = race["start_ll"] or c["start_ll"]
+        race["finish_ll"] = race["finish_ll"] or ([] if c["loop"] else c["finish_ll"])
     for k in ("start_ll", "finish_ll"):
         ll = race[k] or []
         if ll and not (len(ll) == 2 and -90 <= ll[0] <= 90 and -180 <= ll[1] <= 180):

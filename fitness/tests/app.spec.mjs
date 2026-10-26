@@ -131,7 +131,8 @@ test.describe("installable app", () => {
     await page.evaluate(seed, { route: ROUTE, samples });
     await page.goto(`${OLD}/ride.html#z=abc`);
     await page.waitForURL(u => u.origin === APP && u.pathname === "/ride.html", { timeout: 20_000 });
-    expect(new URLSearchParams(new URL(page.url()).hash.slice(1)).get("z")).toBe("abc");   // an old QR link still opens its plan
+    // an old QR link still opens its plan: the phone lands with it (ride mode then reads it and clears the address bar)
+    expect(visits.some(u => u.origin === APP && u.pathname === "/ride.html" && new URLSearchParams(u.hash.slice(1)).get("z") === "abc")).toBe(true);
     expect(visits.filter(u => u.origin === APP && u.pathname === "/move.html").length).toBeGreaterThan(1);
     expect(await page.evaluate(() => localStorage.getItem("fitness-cloud"))).toBe(JSON.stringify({ repo: "me/training-data", token: "github_pat_x" }));
     expect(await page.evaluate(() => localStorage.getItem("fitness-units"))).toBe("mi");

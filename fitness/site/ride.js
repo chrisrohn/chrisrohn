@@ -597,6 +597,29 @@
     await paintRoutes();
     return last;
   }
+  /** The next race's course from the sync (build.ride_config → race.course, the organizer's GPX thinned to 1.5 m): kept as a
+   *  route under its own id, so it's loaded once and its map saved for offline, and chosen on race morning (once: pick
+   *  another route after that and it stays picked). The config can come from a link, so every point is checked. */
+  async function raceCourse() {
+    const race = cfg.race, c = race && race.course;
+    if (!c || typeof c.id !== "string" || !/^course-[a-z0-9-]{1,80}$/.test(c.id) || !Array.isArray(c.points)) return;
+    let row = await DB.get("routes", c.id).catch(() => null);
+    if (!row) {
+      const points = c.points.filter(p => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180)
+        .map(p => ({ lat: p[0], lon: p[1], ele: Number.isFinite(p[2]) ? p[2] : null }));
+      if (points.length < 2) return;
+      const raw = { name: String(c.name || race.name || "Race course").slice(0, 80), points, marks: [] }, route = C.analyze({ ...raw, id: c.id });
+      row = C.storable(raw, { id: c.id, added: Date.now(), dist: route.total, gain: route.gain, climbs: route.climbs.length, turns: route.turns.length, race: race.date });
+      await DB.put("routes", row);
+      if (navigator.onLine) downloadMap(route, true);
+    } else if (!row.offline && navigator.onLine) downloadMap(C.analyze(C.unstore(row)), true);
+    const key = "fitness-race-course-chosen";
+    if (race.date === iso(today) && ls.get(key) !== race.date && !S.running && (!NAV.route || NAV.route.id !== c.id)) {
+      await useRoute(c.id);
+      ls.set(key, race.date);
+      routeMsg.textContent = `Race morning: “${row.name}” is loaded.`;
+    }
+  }
   /** Heights for a route that came without them: Open-Meteo's elevation API, 100 points a call, every ~100 m. */
   async function fillElevation(row) {
     const pts = row.points, every = Math.max(1, Math.floor(pts.length / Math.max(2, Math.min(pts.length, Math.ceil((row.dist || 0) / 100)))));
@@ -2560,11 +2583,12 @@
   if (S.running) { note.textContent = "Ride restored after a reload — tap Resume."; startGps(); await restoreSamples(); }
   const lastRoute = ls.get("fitness-ride-route");
   if (lastRoute) await useRoute(lastRoute, false).catch(() => {});
+  await raceCourse().catch(() => {});
   setInterval(tick, 1000);
   if (document.fonts) document.fonts.ready.then(() => { if (NAV.route) renderAhead(true); }).catch(() => {});   // the profiles' figures, redrawn in Helvetica once it's in
   setTimeout(sendRides, 3000);   // anything waiting from an earlier ride
   show(page);
   paintLaps();
   /** @type {any} */ (window).__ride = { S, NAV, P, MAP, get rep() { return rep; }, onFix: f => { live.lastFix = f; onFix(f); }, importFiles, useRoute, live, samples: () => samples, DB,
-    TR, batt, saver, sendRides, outbox, reroute, paceNow, wx, offerGo, routeTo, findGhosts, FREE, windNow, heights, graphMemo };
+    TR, batt, saver, sendRides, outbox, reroute, paceNow, wx, offerGo, routeTo, findGhosts, FREE, windNow, heights, graphMemo, raceCourse };
 })();

@@ -760,7 +760,7 @@ window.startDashboard = D => {
   function raceHTML() {
     const R = D.race_day || [];
     if (!R.length) return "";
-    const one = r => `<article class="race-day">
+    const one = (r, i) => `<article class="race-day">
       <div class="head"><h3>${esc(r.name)} · ${esc(r.label)}</h3><span class="sub">${fmtDow(r.date)}${r.start_set ? ` · ${r.wave ? `wave ${r.wave}, ` : ""}${esc(r.start)}` : ""} · ${r.days_out === 0 ? "today" : `${r.days_out} day${r.days_out === 1 ? "" : "s"} to go`}</span></div>
       <div class="grid">
         <div><h4>Race morning</h4><dl class="timeline">${r.timeline.map(t => `<dt class="num">${esc(t.at)}</dt><dd>${esc(t.what)}</dd>`).join("")}</dl>
@@ -774,8 +774,23 @@ window.startDashboard = D => {
           <h4>Pack</h4><ul class="checks">${r.pack.map(x => `<li><span>${esc(x)}</span></li>`).join("")}</ul>
           <h4>Between now and the start</h4>${r.sessions_left.length ? `<ul class="plain">${r.sessions_left.map(x => `<li><b>${fmtDow(x.date)}</b> ${esc(x.title)}</li>`).join("")}</ul>` : `<p class="sub">No hard sessions left: it's all freshening up now.</p>`}
           <p class="sub">Taper: ${r.taper.days} days, arriving at form ${signed(r.taper.race_tsb)} (target ${r.taper.target_tsb[0]} to ${r.taper.target_tsb[1]}).</p></div>
-      </div>${conditionsHTML(r)}</article>`;
+      </div>${courseHTML(r, i)}${conditionsHTML(r)}</article>`;
     return `<section id="race" class="card"><div class="head"><h2>Race day</h2><span class="sub">${R.length === 1 ? esc(R[0].name) : `${R.length} races in the next six weeks`}</span></div>${R.map(one).join("")}</section>`;
+  }
+
+  // the course from the organizer's GPX: its profile with the hills shaded, what it asks, the clock at each third, and
+  // every hill with the effort it takes (fitness/course.py, raceday.course_plan); the profile is drawn in charts()
+  function courseHTML(r, i) {
+    const c = r.course;
+    if (!c) return "";
+    return `<section class="course" aria-label="${esc(r.name)} course">
+      <h3 class="mt-6">The course: ${esc(c.distance)} · ${esc(c.climbing)} up · ${c.kicks} rise${c.kicks === 1 ? "" : "s"}, ${c.climbs} climb${c.climbs === 1 ? "" : "s"}</h3>
+      ${c.profile.length ? `<div id="c-course-${i}"></div>` : ""}
+      <ul class="checks">${c.notes.map(n => `<li><span>${esc(n)}</span></li>`).join("")}</ul>
+      ${c.checkpoints.length ? `<h4>On the clock</h4><dl class="timeline">${c.checkpoints.map(k => `<dt class="num">${esc(k.at)}</dt><dd>${esc(k.clock)} <span class="sub">(${esc(k.elapsed)} in)</span></dd>`).join("")}</dl>` : ""}
+      ${c.hills.length ? `<details class="table hills"><summary>The ${c.hills.length} hills, and how to ride each</summary><div class="scroll" tabindex="0" role="region" aria-label="${esc(r.name)} hills"><table class="tbl"><thead><tr><th>Where</th><th class="r">Long</th><th class="r">Up</th><th class="r">Grade</th><th class="r">Time</th><th>How</th></tr></thead><tbody>
+        ${c.hills.map(h => `<tr><td class="nowrap">${esc(h.at)}<br><span class="sub">${esc(h.to_go)} to go</span></td><td class="r">${esc(h.len)}</td><td class="r">${esc(h.gain)}</td><td class="r">${h.grade}%<br><span class="sub">max ${h.max_grade}%</span></td><td class="r">~${dur(h.minutes * 60)}</td><td class="sub">${esc(h.how)}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+    </section>`;
   }
 
   // the race's weather where you'll ride it, what it asks of you and the bike, and every other case (fitness/racewx.py)
@@ -1039,6 +1054,22 @@ window.startDashboard = D => {
       });
     }
 
+
+    // each race's course profile, the hills shaded (fitness/course.py)
+    (D.race_day || []).forEach((r, i) => {
+      const c = r.course, P = c && c.profile;
+      if (!P || P.length < 2) return;
+      const mi = units === "mi", along = km => (mi ? km / 1.609344 : km), up = m => Math.round(mi ? m * 3.28084 : m);
+      const near = km => P.reduce((b, p, j) => (Math.abs(p[0] - km) < Math.abs(P[b][0] - km) ? j : b), 0);
+      const hillAt = j => c.hills.find(h => P[j][0] >= h.start_km && P[j][0] <= h.end_km);
+      chart(document.getElementById(`c-course-${i}`), {
+        label: `${r.name}: the course's profile, ${c.distance} with ${c.climbing} of climbing`, x: P.map(p => p[0]), height: 180, xName: mi ? "Mile" : "Km",
+        xFmt: km => `${Math.round(along(km))} ${units}`, tipFmt: km => `${units} ${along(km).toFixed(1)}`, yFmt: v => `${v.toLocaleString()} ${mi ? "ft" : "m"}`,
+        xbands: c.hills.map(h => ({ from: near(h.start_km), to: Math.max(near(h.start_km), near(h.end_km) - 1), label: "", color: "var(--s2)" })),
+        extra: j => { const h = hillAt(j); return h ? [["Hill", `${h.gain} at ${h.grade}%, max ${h.max_grade}%`], ["Ride it", h.how.split(":")[0]]] : []; },
+        series: [{ name: mi ? "Height (ft)" : "Height (m)", type: "line", color: "var(--s1)", values: P.map(p => up(p[1])), fmt: v => `${v.toLocaleString()} ${mi ? "ft" : "m"}` }],
+      });
+    });
 
     // sleep
     const S = D.sleep, sx = S.map(s => s.date);

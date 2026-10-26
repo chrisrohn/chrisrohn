@@ -59,20 +59,22 @@ name = "Bell's Iceman Cometh Challenge"
 date = 2026-11-07
 every = "1st Sat Nov"
 kind = "mtb"
-distance = "30mi"
+distance = "27mi"
 target_tsb = [10, 20]     # the form band to arrive in on race morning
 match = ["iceman"]        # activity-name words that mark earlier editions
 start = "09:24"           # your wave's start time, "HH:MM": the race-day timeline counts back from it (10:00 until set)
-wave = 14                 # your wave number (0 = not assigned yet). `start` and `wave` belong to this `date`'s edition:
-                          # once the race rolls to next year they're set aside until you update them
-start_ll = [44.73, -85.18]   # the start (Kalkaska) and the finish (Timber Ridge, Traverse City): race-week weather is
-finish_ll = [44.72, -85.52]  # fetched here, not at home, and the line between them gives the head- or tailwind
+wave = 14                 # your wave number (0 = not assigned yet). `start`, `wave` and `course` belong to this `date`'s
+                          # edition: once the race rolls to next year they're set aside until you update them
+course = "courses/iceman-2026.gpx"   # the organizer's route (Ride with GPS 57666523, published 2026-10-23): the race card's
+                          # profile and hills, race time scaled to its length, the wind along it, and the route in ride mode
+start_ll = [44.72617, -85.21165]   # the start (Kalkaska) and the finish (Timber Ridge, Traverse City), from the course: race-week
+finish_ll = [44.71389, -85.49165]  # weather is fetched here, not at home
 
-[races.options.30mi]
-label = "30 mi"
-km = 48
-climbing_ft = 1900
-hours = 2.25              # your expected finish time, for race-day load
+[races.options.27mi]
+label = "27 mi"
+km = 44                   # the 2026 course: 44.1 km
+climbing_ft = 1600        # as a GPS or barometric recorder counts it (fitness/course.py gain_m: 491 m), so it compares with past editions
+hours = 2.15              # expected finish, for race-day load; race day itself scales your past editions to the course's length
 target_ctl = 55           # fitness to arrive with; the plan gets as close as the ramp limits allow
 long_ride_h = 3.0
 taper_days = [6, 14]
