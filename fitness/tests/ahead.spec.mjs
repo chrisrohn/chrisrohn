@@ -49,9 +49,12 @@ async function roads(page) {
     for (const t of ts) await c.put(t.url, new Response(new Uint8Array(t.body)));
   }, tiles);
 }
-/** A fix at (east, north) m, riding at 6 m/s on a heading. */
+/** A fix at (east, north) m, riding at 6 m/s on a heading. The browser's own fix for the new place lands first (it
+ *  carries no speed or heading, so landing after these would read as standing still), then the riding is set. */
 async function ride(page, ctx, e, n, heading = 0) {
   await ctx.setGeolocation(geo(e, n));
+  await page.waitForFunction(p => { const f = /** @type {any} */ (window).__ride.live.lastFix; return !f || (Math.abs(f.lat - p.lat) < 1e-9 && Math.abs(f.lon - p.lon) < 1e-9); },
+    at(e, n), { timeout: 1000, polling: 20 }).catch(() => {});   // no GPS watch running (before Start): nothing to wait for
   await page.evaluate(({ p, heading }) => {
     const w = /** @type {any} */ (window).__ride;
     Object.assign(w.live, { gpsSpeed: 6, gpsAt: Date.now(), heading });
