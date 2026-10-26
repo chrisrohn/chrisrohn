@@ -17,8 +17,7 @@ import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
 
-from fitness.config import PKG
-
+PKG = Path(__file__).resolve().parent   # fitness/: course paths are relative to it (config.PKG, kept here so config can load courses)
 STEP = 20.0                # m between profile samples (ride-core.js STEP)
 R = 6371000.0
 MI = 1609.344
