@@ -626,6 +626,19 @@ body.deck-videos.filters-open .filters.videos { display: none; }   /* the deck's
 .dupe-filters { flex-wrap: wrap; gap: 8px; align-items: center; }
 .dupe-filters input[type=search] { flex: 1 1 160px; min-width: 120px; }
 .cl-help { margin: 2px 0 4px; }
+.cl-auto { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; padding: 12px 14px; border: 1px solid var(--rule); background: var(--card); }
+.cl-auto h3 { margin: 0; }
+.cl-auto-opts { display: grid; gap: 4px; }
+.cl-auto-opts label { display: block; padding-left: 26px; text-indent: -26px; }
+.cl-auto-opts input { margin: 0 8px 0 0; vertical-align: -2px; }
+.cl-auto-run { flex-wrap: wrap; gap: 8px; align-items: center; }
+.cl-auto progress { width: 100%; height: 6px; accent-color: var(--accent); }
+.cl-auto-plan { max-height: 420px; overflow: auto; }
+.cl-auto-tally { margin: 0 0 6px; padding-left: 18px; }
+.cl-auto-list { margin: 0; padding-left: 22px; font-size: .9em; }
+.cl-auto-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.cl-auto-list li.later { opacity: .55; }
+.cl-auto-list .flag { margin-right: 4px; }
 .cl-help p { margin-top: 6px; }
 .cl-audit .feeds span { margin-right: 6px; } .cl-audit .feeds span.dead { text-decoration: none; }
 .cl-audit .feeds span i { font-style: normal; color: var(--muted); margin-left: 4px; }

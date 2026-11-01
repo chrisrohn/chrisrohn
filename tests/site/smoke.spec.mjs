@@ -680,6 +680,7 @@ test("Cleanup: a song's copies can be looked up, played in place, kept, removed 
       { year: y0, playlistId: P[y0], videoId: "audioA", position: 3, title: "Lovers", edition: "original", label: "" }] }] };
   const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
   await ctx.addInitScript(([hash]) => {
+    if (window !== window.top) return;   // the in-place player's frame: no storage of its own to set
     localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
     localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false }));
     sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
@@ -804,6 +805,80 @@ test("Cleanup: an extra copy YouTube does not hold is confirmed against the whol
   await expect(hidden).toHaveCount(0);
   expect(calls.filter(c => c.method === "DELETE").map(c => c.params.id)).toEqual(["PLI-d2"]);   // the second copy goes, the first stays
   expect(calls.filter(c => c.method === "GET" && c.path === "/youtube/v3/playlistItems" && c.params.playlistId === pid && !c.params.videoId)).toHaveLength(1);   // the reading was reused
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test("Cleanup: auto-clean spends what the Feed leaves of the day's quota — free fixes first, best copy kept, recommended swaps taken — and leaves the rest for another day", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const ys = Object.keys(feed.youtube.playlists).sort().reverse(); const ya = ys[1], yb = ys[2];
+  test.skip(!yb, "the committed feed pins fewer than three year playlists");
+  const P = feed.youtube.playlists;
+  const e = (year, videoId, position, title, extra = {}) => ({ year, playlistId: P[year], videoId, position, title, edition: "original", label: "", videoType: "MUSIC_VIDEO_TYPE_ATV", ...extra });
+  const report = { version: 2, checked_at: new Date().toISOString(), count: 4, kinds: { "same-video": 1, "cross-year": 1, versions: 1, "same-song": 1 }, duplicates: [
+    { key: "songX", artist: "Jungle", title: "Busy Earnin'", kind: "same-video", kinds: ["same-video"], years: [ya], count: 2, uploads: 1, editions: ["original"], entries: [e(ya, "vidE", 5, "Busy Earnin'"), e(ya, "vidE", 9, "Busy Earnin'")] },
+    { key: "songZ", artist: "Röyksopp", title: "Running to the Sea", kind: "versions", kinds: ["versions"], years: [ya, yb], count: 2, uploads: 2, editions: ["original", "remix"], entries: [e(ya, "vidO", 3, "Running to the Sea"), e(yb, "vidR", 7, "Running to the Sea (Seth Troxler Remix)", { edition: "remix", label: "Seth Troxler Remix" })] },
+    { key: "songY", artist: "Phoenix", title: "Lisztomania", kind: "cross-year", kinds: ["cross-year"], years: [ya, yb], count: 2, uploads: 1, editions: ["original"], verified_year: Number(yb), verified_source: "MusicBrainz recording", entries: [e(ya, "vidC", 11, "Lisztomania"), e(yb, "vidC", 2, "Lisztomania")] },
+    { key: "songW", artist: "Roosevelt", title: "Lovers", kind: "same-song", kinds: ["same-song"], years: [ya], count: 2, uploads: 2, editions: ["original"], entries: [e(ya, "vidA", 20, "Lovers"), e(ya, "vidV", 21, "Lovers (Official Video)", { label: "Official Video", videoType: "MUSIC_VIDEO_TYPE_OMV" })] }] };
+  const unavailable = { rows: [
+    { year: yb, playlistId: P[yb], videoId: "vidQ", position: 4, artist: "Caribou", title: "Home", why: "video", pending: false, alt: { videoId: "audQ", title: "Home", videoType: "MUSIC_VIDEO_TYPE_ATV" } },
+    { year: ya, playlistId: P[ya], videoId: "vidD", position: 8, artist: "Tame Impala", title: "Borderline", why: "blocked", pending: false, alt: { videoId: "altD", title: "Borderline", videoType: "MUSIC_VIDEO_TYPE_ATV" } },
+    { year: ya, playlistId: P[ya], videoId: "vidN", position: 30, artist: "Nobody", title: "Nothing", why: "blocked", pending: false, alt: null }] };
+  const limit = Number(feed.youtube.daily_quota) || 60000;
+  // what is left after the reserve: the lookup (1), the trim (51), the video swap (102), two removals (51 each) and 71 spare — not the dead-track swap (102)
+  const used = limit - (500 + 1 + 51 + 102 + 102 + 51 + 20);
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash, used]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false }));
+    localStorage.setItem("id:quota", JSON.stringify({ day: new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" }), units: used }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0], used]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  page.on("dialog", d => d.accept());
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 4, duplicates_kinds: report.kinds, unavailable_count: 2, video_count: 1 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/duplicates.json", r => r.fulfill({ json: report }));
+  await page.route("**/data/unavailable.json", r => r.fulfill({ json: unavailable }));
+  const calls = [];
+  const held = { [`${P[ya]}|vidE`]: ["PLI-e1", "PLI-e2"], [`${P[ya]}|vidC`]: ["PLI-c1"], [`${P[yb]}|vidC`]: ["PLI-c0"], [`${P[ya]}|vidA`]: ["PLI-a"], [`${P[ya]}|vidV`]: ["PLI-v"], [`${P[yb]}|vidQ`]: ["PLI-q"], [`${P[ya]}|vidD`]: ["PLI-d"] };
+  const parse = t => { try { return JSON.parse(t || ""); } catch { return t; } };
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); const params = Object.fromEntries(u.searchParams);
+    const body = parse(req.postData()); calls.push({ method: req.method(), path: u.pathname, params, body });
+    if (u.pathname.startsWith("/drive/") || u.pathname.startsWith("/upload/")) return route.fulfill({ json: { files: [], id: "drive-1" } });
+    if (u.pathname === "/youtube/v3/videos") return route.fulfill({ json: { items: params.id.split(",").map(id => ({ id, snippet: { title: id, channelTitle: id === "vidV" ? "Roosevelt" : "Artist - Topic" }, contentDetails: { duration: "PT4M" }, statistics: { viewCount: "10" }, status: { embeddable: true, uploadStatus: "processed" } })) } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: params.videoId ? (held[`${params.playlistId}|${params.videoId}`] || []).map(id => ({ id })) : [] } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "POST") { const k = `${body.snippet.playlistId}|${body.snippet.resourceId.videoId}`; (held[k] = held[k] || []).push("PLI-new-" + body.snippet.resourceId.videoId); return route.fulfill({ json: { id: "PLI-new-" + body.snippet.resourceId.videoId } }); }
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") { for (const k of Object.keys(held)) held[k] = held[k].filter(id => id !== params.id); return route.fulfill({ status: 204, body: "" }); }
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html?view=cleanup");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("#cl-auto")).toBeVisible();
+  // the safe fixes are on, the destructive ones off; the plan is costed against what is left after the Feed's reserve
+  await expect(page.locator('#cl-auto input[data-opt="dupes"]')).toBeChecked();
+  await expect(page.locator('#cl-auto input[data-opt="dead"]')).not.toBeChecked();
+  await expect(page.locator("#cl-auto-est")).toContainText("6 fixes");
+  await expect(page.locator("#cl-auto-go")).toHaveText("Use what's left today: 5 of 6 fixes");
+  await page.click("#cl-auto-preview");
+  await expect(page.locator("#cl-auto-plan")).toContainText("1 marked fine");
+  await expect(page.locator("#cl-auto-plan li.later")).toContainText("Tame Impala - Borderline");
+  await page.click("#cl-auto-go");
+  await expect(page.locator("#cl-auto-status")).toContainText("left for another day", { timeout: 15_000 });
+  await expect(page.locator("#cl-auto-status")).toContainText("1 marked fine (only editions left) · 1 extra copies trimmed · 1 videos swapped for the audio track · 2 songs cut to one copy");
+  // the second copy of vidE, the copy of vidC outside its verified year, the video beside the audio track and the swapped video go; nothing else
+  expect(calls.filter(c => c.method === "DELETE").map(c => c.params.id).sort()).toEqual(["PLI-c1", "PLI-e2", "PLI-q", "PLI-v"]);
+  expect(calls.filter(c => c.method === "POST").map(c => `${c.body.snippet.playlistId}|${c.body.snippet.resourceId.videoId}`).sort()).toEqual([`${P[yb]}|audQ`]);
+  expect(calls.filter(c => c.path === "/youtube/v3/videos")).toHaveLength(1);   // every copy looked up in one request
+  const done = JSON.parse(await page.evaluate(() => localStorage.getItem("id:settings") || "{}"));
+  expect(done.dupesDone).toEqual(expect.arrayContaining(["songZ|ok", `songX|${P[ya]}|vidE|one`, `songY|${P[ya]}|vidC|gone`, `unav:${P[yb]}:vidQ`, `songW|${P[ya]}|vidV|gone`]));
+  expect(done.dupesDone).not.toContain(`unav:${P[ya]}:vidD`);
+  expect(done.autoClean.last).toMatchObject({ done: 5, failed: 0, left: 1, stopped: "quota" });
+  // what is left is the one swap tomorrow's quota pays for
+  await expect(page.locator("#cl-auto-go")).toHaveText("Use what's left today: 0 of 1 fixes");
+  await expect(page.locator("#cl-auto-go")).toBeDisabled();
   expect(errors).toEqual([]);
   await ctx.close();
 });

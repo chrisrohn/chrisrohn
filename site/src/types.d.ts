@@ -99,7 +99,15 @@ export interface Dupe {
 /** What the tab knows about a video from a videos.list lookup (1 unit for up to 50 ids). */
 export interface VideoInfo { title: string; channel: string; topic: boolean; seconds: number | null; views: number | null; published: string | null; blocked: boolean; embeddable: boolean; rejected?: boolean; missing?: boolean }
 
+/** What auto-clean fixes (the Cleanup tab's Auto-clean panel). */
+export interface AutoCleanOpts { lookup: boolean; extra: boolean; dupes: boolean; audio: boolean; streamable: boolean; versionsOk: boolean; moves: boolean; versions: boolean; dead: boolean }
+/** Auto-clean's settings on this device: the fixes, the quota kept back for the Feed, the evening run and the last run. */
+export interface AutoClean {
+  opts: AutoCleanOpts; reserve: number; evening: boolean; at: string; lastDay?: string; promptDay?: string;
+  last?: { at: number; done: number; failed: number; units: number; left: number; stopped?: string };
+}
 export interface Settings {
+  autoClean?: AutoClean;
   audition: boolean; auditionSeconds: number; auditionStart: number; deck: boolean | null; skipsInYouTube: boolean | null; dupesNoticed?: string; dupesDone: string[]; installDismissedAt?: number; shortlistSize: number;
   autoplay: boolean; shuffle: boolean; introDismissed?: boolean;
   background: boolean;   // keep playing when the screen goes off or another app comes in front (phones pause the embed by themselves; the player asks for it back)

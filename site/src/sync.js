@@ -2,7 +2,7 @@
 /* Cross-device memory: ratings (and the quota count) mirrored to a hidden per-app file in the signed-in account's
  * Google Drive (appDataFolder). Newest record per track wins; "undone" tombstones travel too. The same debounce also
  * pushes data/ratings.json to the site's repository when a GitHub token is set (github.js), so the build learns. */
-import { state, persist, reconcileRated, ptDay, DRIVE, DRIVE_UPLOAD, SYNC_FILE } from "./state.js";
+import { state, persist, reconcileRated, ptDay, DRIVE, DRIVE_UPLOAD, SYNC_FILE, MARKS_CAP } from "./state.js";
 import { toast, toastBusy } from "./dom.js";
 import { withAuth, isCurator, tokenValid } from "./auth.js";
 import { render } from "./render.js";
@@ -67,7 +67,7 @@ export function mergeRemote(remote) {
   }
   // duplicates cleaned on another device stay cleaned here
   const done = (remote && remote.dupesDone) || [];
-  if (done.length) { const mine = new Set(state.settings.dupesDone || []); const add = done.filter(k => !mine.has(k)); if (add.length) { state.settings.dupesDone = [...(state.settings.dupesDone || []), ...add].slice(-3000); changed = true; } }
+  if (done.length) { const mine = new Set(state.settings.dupesDone || []); const add = done.filter(k => !mine.has(k)); if (add.length) { state.settings.dupesDone = [...(state.settings.dupesDone || []), ...add].slice(-MARKS_CAP); changed = true; } }
   // the quota is per account, not per device: the highest count any device saw today is the truth
   const q = remote && remote.quota;
   if (q && q.day === ptDay() && (state.quota.day !== q.day || q.units > state.quota.units)) { state.quota = { day: q.day, units: q.units }; changed = true; }

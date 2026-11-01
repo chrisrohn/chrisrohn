@@ -21,6 +21,7 @@ import { wirePwa } from "./pwa.js";
 import { applyLaunchParams, wireLayers } from "./url.js";
 import { wireGhPush } from "./github.js";
 import { wireCleanup } from "./dupes.js";
+import { wireAutoClean } from "./autoclean.js";
 import { loadConcerts, wireConcerts } from "./concerts.js";
 import { loadVideos, wireVideos, refreshHeld } from "./videos.js";
 
@@ -94,6 +95,7 @@ function wire() {
   wireLayers();
   wireSettings();
   wireCleanup();   // the Cleanup tab: its filters, the actions on every song and copy, the live scan and the audit
+  wireAutoClean(); // the Cleanup tab's Auto-clean: the whole list fixed with what the Feed leaves of the day's quota, by hand or every evening
   wireConcerts();  // the Concerts tab: when, how far, and in what order
   wireVideos();    // the Video tab: the library's videos, played in place, approved into the music-video playlist or passed
   wireKeys();
