@@ -111,8 +111,11 @@ export const skipsInYouTube = () => state.settings.skipsInYouTube != null ? !!st
 // cost 1, writes cost 50. The count is per account (it travels in the Drive sync file), so it cannot see what guests
 // spend on the same project.
 export const DAILY_QUOTA = 60000;
+/** How many Cleanup marks (settings.dupesDone) a device keeps and syncs: enough for several days of auto-clean. */
+export const MARKS_CAP = 15000;
 export const quotaLimit = () => { const q = Number(state.feed?.youtube?.daily_quota); return Number.isFinite(q) && q > 0 ? q : DAILY_QUOTA; };
-export const ptDay = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+/** The quota day (Pacific) a moment falls in. @param {Date} [at] */
+export const ptDay = (at = new Date()) => at.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 /** @param {number} units */
 export function spend(units) { if (state.quota.day !== ptDay()) state.quota = { day: ptDay(), units: 0 }; state.quota.units += units; persist(); }
 export const quotaUsed = () => (state.quota.day === ptDay() ? state.quota.units : 0);

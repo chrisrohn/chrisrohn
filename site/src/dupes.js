@@ -8,7 +8,7 @@
  * "<key>|<playlist>|<video>|gone" says that copy was removed, "…|one" that its extra copies were trimmed,
  * "…|in|<year>" that a move put it there. A song stays listed while the copies left still add up to a problem
  * (editions.js kindsOf), so removing one copy of three never hides the other two. */
-import { state, persist, quotaLeft, quotaText } from "./state.js";
+import { state, persist, quotaLeft, quotaText, MARKS_CAP } from "./state.js";
 import { $, $$, esc, relTime, toast, toastBusy } from "./dom.js";
 import { schedulePush } from "./sync.js";
 import { isOwner } from "./auth.js";
@@ -26,8 +26,10 @@ import { auditRows, auditYear, auditAll, auditDrop, auditCost, renderAudit, find
 /** @typedef {{ rows: Row[], kinds: string[], dismissed: boolean, open: boolean }} View */
 
 const PAGE = 60;
-const READ = 1, WRITE = 50;
+export const READ = 1, WRITE = 50;
 const RESERVE = 500;   // quota kept back for the day's keeps
+/** Lets the auto-clean panel (autoclean.js) redraw its estimate whenever the tab does. */
+export const cleanupHooks = { onRender: () => {} };
 
 // ------------------------------------------------------------------ the reports
 const dupCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.duplicates_count) || 0;
@@ -35,14 +37,14 @@ const unavCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.
 /** Playlist rows that are the video rather than the audio track (the build's scan; data/unavailable.json lists them with why "video"). */
 const videoCount = () => (isOwner() && state.feed?.youtube && state.feed.youtube.video_count) || 0;
 /** @param {Unavailable} u */
-const isVideoRow = u => u.why === "video";
-async function loadUnavailable() {
+export const isVideoRow = u => u.why === "video";
+export async function loadUnavailable() {
   if (state.unavailable) return state.unavailable;
   try { const r = await fetch("/data/unavailable.json", { cache: "no-cache" }); state.unavailable = r.ok ? (await r.json()).rows || [] : []; }
   catch { state.unavailable = []; }
   return /** @type {Unavailable[]} */ (state.unavailable);
 }
-async function loadDupes() {
+export async function loadDupes() {
   if (state.dupes) return state.dupes;
   try { const r = await fetch("/data/duplicates.json", { cache: "no-cache" }); state.dupes = r.ok ? normalizeReport(await r.json()) : []; }
   catch { state.dupes = []; }
@@ -55,6 +57,8 @@ function normalizeReport(j) {
   return list.map(d => { const ed = editionOf(d.title); return { ...d, kinds: d.kinds || [d.kind], uploads: 1, editions: [ed.edition], entries: d.entries.map(e => ({ ...e, title: e.title || d.title, edition: e.edition || ed.edition, label: e.label || ed.label })) }; });
 }
 export const dupesLoaded = () => state.dupes != null;
+/** Both reports, read only when the feed says there is something in them. */
+export async function loadReports() { if (dupCount()) await loadDupes(); else state.dupes = state.dupes || []; if (unavCount() || videoCount()) await loadUnavailable(); }
 
 // ------------------------------------------------------------------ what has been done (synced marks)
 const marks = () => state.settings.dupesDone || [];
@@ -69,13 +73,23 @@ function index() {
 /** @param {string} m */
 const has = m => index().set.has(m);
 /** @param {string[]} ms */
-function mark(...ms) { const cur = marks(); const add = ms.filter(m => !cur.includes(m)); if (!add.length) return; state.settings.dupesDone = [...cur, ...add].slice(-4000); persist(); schedulePush(); }
+export function mark(...ms) { const cur = marks(); const have = new Set(cur); const add = ms.filter(m => !have.has(m)); if (!add.length) return; state.settings.dupesDone = capMarks([...cur, ...add]); persist(); schedulePush(); }
+/** Keep the marks under the cap without forgetting a song still on the list: marks for songs and rows the current
+ * reports no longer hold go first (the build has already dropped them), then the oldest. @param {string[]} list */
+export function capMarks(list) {
+  if (list.length <= MARKS_CAP) return list;
+  if (state.dupes) {
+    const live = new Set([...(state.dupes || []).map(d => d.key), ...unavailableRows().map(unavKey)]);
+    list = list.filter(m => live.has(m.startsWith("unav:") ? m : m.split("|")[0]));
+  }
+  return list.slice(-MARKS_CAP);
+}
 /** @param {string} m */
 function unmark(m) { state.settings.dupesDone = marks().filter(x => x !== m); persist(); schedulePush(); }
 /** @param {{ playlistId: string, videoId: string }} u */
-const unavKey = u => `unav:${u.playlistId}:${u.videoId}`;
+export const unavKey = u => `unav:${u.playlistId}:${u.videoId}`;
 /** @param {{ playlistId: string, videoId: string }} u */
-const unavOpen = u => !has(unavKey(u));
+export const unavOpen = u => !has(unavKey(u));
 /** Everything that will not play here: the build's greyed-out rows and the audit's findings, one row per playlist copy;
  * the build's row wins when both name the same copy (it may carry the counterpart), the audit's reason is kept. @returns {Unavailable[]} */
 export function unavailableRows() {
@@ -96,9 +110,9 @@ export const openAuditRows = () => auditRows().filter(unavOpen);
 
 // ------------------------------------------------------------------ a song's copies, as they stand now
 /** @type {Record<string, number>} */
-const EDITION_RANK = { original: 0, radio: 1, extended: 2, remix: 3, live: 4, acoustic: 5, instrumental: 6, demo: 7 };
+export const EDITION_RANK = { original: 0, radio: 1, extended: 2, remix: 3, live: 4, acoustic: 5, instrumental: 6, demo: 7 };
 /** @param {Dupe} d @returns {Row[]} */
-function rowsOf(d) {
+export function rowsOf(d) {
   /** @type {Map<string, Row>} */ const m = new Map();
   for (const e of d.entries) {
     const k = `${e.playlistId}|${e.videoId}`;
@@ -125,9 +139,9 @@ function rowsOf(d) {
   return rows;
 }
 /** @param {Dupe} d @returns {View} */
-function viewOf(d) { const rows = rowsOf(d); const kinds = kindsOf(rows); const dismissed = !d.live && has(`${d.key}|ok`); return { rows, kinds, dismissed, open: !dismissed && kinds.length > 0 }; }
+export function viewOf(d) { const rows = rowsOf(d); const kinds = kindsOf(rows); const dismissed = !d.live && has(`${d.key}|ok`); return { rows, kinds, dismissed, open: !dismissed && kinds.length > 0 }; }
 /** A copy filed in a year the catalogues say is not the song's — remixes, live takes and the like have their own year. @param {Dupe} d @param {Row} r */
-const wrongYear = (d, r) => !!d.verified_year && !YEAR_FREE.has(r.edition) && r.year !== String(d.verified_year);
+export const wrongYear = (d, r) => !!d.verified_year && !YEAR_FREE.has(r.edition) && r.year !== String(d.verified_year);
 /** Every year-bound copy sits in the wrong year: the song wants moving, not trimming. @param {Dupe} d @param {Row[]} rows */
 const misfiled = (d, rows) => !!d.verified_year && rows.some(r => !YEAR_FREE.has(r.edition)) && rows.filter(r => !YEAR_FREE.has(r.edition)).every(r => wrongYear(d, r));
 
@@ -196,7 +210,7 @@ const views = n => n == null ? "" : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0
 /** @type {Record<string, string>} */
 const VTYPE = { MUSIC_VIDEO_TYPE_ATV: "audio track", MUSIC_VIDEO_TYPE_OMV: "official video", MUSIC_VIDEO_TYPE_UGC: "user upload", MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC: "official upload", MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK: "private track" };
 /** The year playlists a copy can move to (the build's pinned ids). */
-const moveYears = () => (state._years || []).map(String).filter(y => knownYear(y) || state.playlists[y]);
+export const moveYears = () => (state._years || []).map(String).filter(y => knownYear(y) || state.playlists[y]);
 /** @param {Row} r @param {Dupe} d */
 function rowHtml(r, d) {
   const info = state.videoInfo[r.videoId]; const wrong = wrongYear(d, r);
@@ -269,6 +283,7 @@ function afterChange() {
   $("#cl-quota").textContent = quotaLine();
   const f = filters(); const list = filteredDupes(); updateBulk(f, list);
   $("#cl-dupe-shown").textContent = list.length ? `${list.length} song${list.length === 1 ? "" : "s"}` : "";
+  cleanupHooks.onRender();
 }
 const quotaLine = () => quotaText() + ` · about ${Math.max(0, Math.floor((quotaLeft() - RESERVE) / (READ + WRITE)))} removals possible today`;
 
@@ -285,6 +300,7 @@ export async function renderDupes(reset = true) {
   if (!dupCount() && !unavCount() && !videoCount() && !auditRows().length) {
     box.innerHTML = ""; $("#cl-summary").textContent = dupesSummary(); $("#cl-dupe-shown").textContent = ""; $("#cl-dupe-bulk").hidden = true; $("#cl-dupe-lookup").hidden = true;
     const pill = $("#count-cleanup"); if (pill) pill.textContent = String(openCleanup());
+    cleanupHooks.onRender();
     return;
   }
   if (!dupesLoaded() && dupCount()) box.innerHTML = `<span class="muted">loading report…</span>`;
@@ -298,6 +314,7 @@ export async function renderDupes(reset = true) {
   $("#cl-dupe-kinds").textContent = Object.entries(kinds).sort((a, b) => KIND_ORDER.indexOf(a[0]) - KIND_ORDER.indexOf(b[0])).map(([k, n]) => `${n} ${KIND[k] || k}`).concat(openUnavailable() ? [`${openUnavailable()} not streamable here`] : [], openVideos() ? [`${openVideos()} filed as the video`] : []).join(" · ");
   if (reset) state.dupePage = 1;
   const f = filters();
+  cleanupHooks.onRender();
   if (f.kind === "unavailable" || f.kind === "video") { updateBulk(f, []); renderUnavailable(); return; }
   const list = filteredDupes();
   updateBulk(f, list);
@@ -353,9 +370,9 @@ const who = (d, r) => `${d.artist} - ${r.title || d.title}`;
 /** Delete every playlist item holding this video in this playlist (keepFirst: leave one); returns how many went. A live
  * row knows its item ids; a report row asks YouTube first (1 unit) so a copy removed elsewhere is never removed twice.
  * @param {Dupe} d @param {Row} r @param {boolean} keepFirst @param {string} why */
-async function removeRow(d, r, keepFirst, why) {
+export async function removeRow(d, r, keepFirst, why) {
   const live = !!(r.itemIds && r.itemIds.length);
-  let ids = live ? /** @type {string[]} */ (r.itemIds) : await playlistItemsFor(r.pid, r.videoId, { why: "Cleanup: verify which playlist items hold this copy before removing any", detail: who(d, r) });
+  let ids = live ? /** @type {string[]} */ (r.itemIds) : await itemsIn(r.pid, r.videoId, { why: "Cleanup: verify which playlist items hold this copy before removing any", detail: who(d, r) });
   // fewer than the report counted: confirm against the whole playlist before calling it fixed, so a real copy is never hidden
   if (!live && ids.length < r.copies) ids = (await readingOf(r.pid, r.year)).get(r.videoId) || [];
   const victims = keepFirst ? ids.slice(1) : ids;
@@ -368,9 +385,16 @@ async function removeRow(d, r, keepFirst, why) {
 /** @type {Map<string, { at: number, byVideo: Map<string, string[]> }>} */
 const readings = new Map();
 const READING_MS = 10 * 60e3;
+/** A full reading of this playlist from the last ten minutes, if there is one. @param {string} pid */
+export const freshReading = pid => { const hit = readings.get(pid); return hit && Date.now() - hit.at < READING_MS ? hit.byVideo : null; };
+/** Which items of a playlist hold a video: free from a fresh full reading, otherwise one lookup (1 unit).
+ * @param {string} pid @param {string} vid @param {{ why?: string, detail?: string }} ctx @returns {Promise<string[]>} */
+async function itemsIn(pid, vid, ctx) { const r = freshReading(pid); return r ? [...(r.get(vid) || [])] : playlistItemsFor(pid, vid, ctx); }
+/** Keep a reading in step with a write this tab made. @param {string} pid @param {string} vid @param {string[]} ids what the playlist holds now */
+function noteItems(pid, vid, ids) { const r = readings.get(pid); if (r) r.byVideo.set(vid, ids); }
 /** Every item of a playlist by video (1 unit per 50 tracks), reused for ten minutes so a run of fixes in one year reads it once.
  * @param {string} pid @param {string} year @returns {Promise<Map<string, string[]>>} */
-async function readingOf(pid, year) {
+export async function readingOf(pid, year) {
   const hit = readings.get(pid); if (hit && Date.now() - hit.at < READING_MS) return hit.byVideo;
   /** @type {Map<string, string[]>} */ const byVideo = new Map(); /** @type {string | undefined} */ let pageToken; let pages = 0;
   do {
@@ -383,10 +407,10 @@ async function readingOf(pid, year) {
 }
 /** Add this copy to another year (unless that playlist already holds the video), then take it out of this one.
  * @param {Dupe} d @param {Row} r @param {string} year */
-async function moveRow(d, r, year) {
+export async function moveRow(d, r, year) {
   const target = knownYear(year) || state.playlists[year]; if (!target) throw new Error(`no playlist id for ${year}`);
-  const present = await playlistItemsFor(target, r.videoId, { why: `Cleanup: verify “${titleFor(year)}” does not already hold this upload before moving it there`, detail: who(d, r) });
-  if (!present.length) await addToPlaylist(target, r.videoId, { why: `Cleanup: move this copy to “${titleFor(year)}”${d.verified_year && String(d.verified_year) === year ? " (the year the catalogues verified)" : ""}`, detail: who(d, r) });
+  const present = await itemsIn(target, r.videoId, { why: `Cleanup: verify “${titleFor(year)}” does not already hold this upload before moving it there`, detail: who(d, r) });
+  if (!present.length) noteItems(target, r.videoId, [await addToPlaylist(target, r.videoId, { why: `Cleanup: move this copy to “${titleFor(year)}”${d.verified_year && String(d.verified_year) === year ? " (the year the catalogues verified)" : ""}`, detail: who(d, r) })]);
   const n = await removeRow(d, r, false, `Cleanup: take the copy out of “${titleFor(r.year)}” after moving it to “${titleFor(year)}”`);
   if (d.live) d.entries.push({ year, playlistId: target, videoId: r.videoId, position: -1, title: r.title, edition: r.edition, label: r.label, album: r.album, duration: r.duration, videoType: r.videoType, itemIds: [] });
   else mark(`${d.key}|${target}|${r.videoId}|in|${year}`);
@@ -556,15 +580,16 @@ async function swapOne(btn) {
   } catch (e) { btn.disabled = false; toast("Could not swap: " + /** @type {Error} */ (e).message, true); }
 }
 /** @param {Unavailable} u @param {string} use the upload to add first, if any @returns {Promise<number>} removed copies */
-async function swapTrack(u, use) {
+export async function swapTrack(u, use) {
   const detail = u.artist || u.title ? `${u.artist} - ${u.title}` : `dead row #${(u.position || 0) + 1} of ${titleFor(u.year)}`;
   if (use) {
-    const present = await playlistItemsFor(u.playlistId, use, { why: `Cleanup: verify “${titleFor(u.year)}” does not already hold the upload that plays here`, detail });
-    if (!present.length) await addToPlaylist(u.playlistId, use, { why: `Cleanup: add the upload of this song that plays here to “${titleFor(u.year)}”`, detail });   // never a second copy of the good one
+    const present = await itemsIn(u.playlistId, use, { why: `Cleanup: verify “${titleFor(u.year)}” does not already hold the upload that plays here`, detail });
+    if (!present.length) noteItems(u.playlistId, use, [await addToPlaylist(u.playlistId, use, { why: `Cleanup: add the upload of this song that plays here to “${titleFor(u.year)}”`, detail })]);   // never a second copy of the good one
   }
   // the audit read the playlist itself and knows the row; the build's report needs one lookup first
-  const ids = u.itemId ? [u.itemId] : await playlistItemsFor(u.playlistId, u.videoId, { why: "Cleanup: verify which playlist items hold this video before removing any", detail });
+  const ids = u.itemId ? [u.itemId] : await itemsIn(u.playlistId, u.videoId, { why: "Cleanup: verify which playlist items hold this video before removing any", detail });
   for (const i of ids) await removePlaylistItem(i, { why: `Cleanup: remove the copy that will not play here from “${titleFor(u.year)}”`, detail });
+  noteItems(u.playlistId, u.videoId, []);
   return ids.length;
 }
 /** One search (100 units) for other uploads of a dead track, checked to play here, offered under the row. @param {HTMLButtonElement} btn */
@@ -632,9 +657,14 @@ export async function scanYear(year) {
   items.sort((a, b) => KIND_ORDER.indexOf(/** @type {string[]} */ (a.kinds)[0]) - KIND_ORDER.indexOf(/** @type {string[]} */ (b.kinds)[0]) || a.artist.localeCompare(b.artist));
   state.liveDupes = items; state.liveYear = String(year);
   status.textContent = `${n} tracks in ${titleFor(year)} · ${items.length} song${items.length === 1 ? "" : "s"} held more than once (${Math.ceil(n / 50) || 1} unit${n > 50 ? "s" : ""})`;
-  const box = $("#cl-dupes-live");
-  if (!items.length) { box.innerHTML = `<span class="muted">No duplicates in ${esc(titleFor(year))} 🎉</span>`; return; }
-  renderItems(box, items.map(d => ({ d, v: viewOf(d) })), items.length);
+  renderLive();
+}
+/** The live scan's songs still held more than once, with the one-tap clean-up for the year when there are any. */
+export function renderLive() {
+  const box = $("#cl-dupes-live"); const items = (state.liveDupes || []).map(d => ({ d, v: viewOf(d) })).filter(x => x.v.open);
+  const auto = $("#cl-live-auto"); if (auto) { auto.hidden = !items.length; auto.textContent = `clean up all ${items.length} automatically…`; }
+  if (!items.length) { box.innerHTML = `<span class="muted">No duplicates ${state.liveDupes && state.liveDupes.length ? "left " : ""}in ${esc(titleFor(state.liveYear || ""))} 🎉</span>`; return; }
+  renderItems(box, items, items.length);
 }
 
 /** The tab's controls, wired once. */
