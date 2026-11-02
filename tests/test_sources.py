@@ -83,18 +83,21 @@ def test_source_days_falls_back_to_listenbrainz_then_ten():
                       ("spotify", 30), ("reddit", 7), ("nts", 14), ("apple_music", 30), ("musicbrainz_artists", 60)):
         assert util.source_days(live, key) == want, key
     # the backfill window: how far the artist-watch sources reach when the current timeframe runs thin
-    assert util.backfill_years(live) == 3 and util.backfill_since(live, date(2026, 9, 8)) == date(2023, 1, 1)
+    assert util.backfill_years(live) == 5 and util.backfill_since(live, date(2026, 9, 8)) == date(2021, 1, 1)
     assert util.backfill_years({}) == 0 and util.backfill_since({}) is None
     assert util.backfill_since({"backfill": {"years": 0}}) is None
 
 
 def test_the_day_has_room_for_the_backfill_it_is_configured_to_make():
-    """A filled day holds about `backfill.target` cards plus the current ones riding along above the target, and
-    the final list is cut to `ranking.max_items` by score — with a filled-in card scoring below a current one, since
-    it earns no freshness. Too low a cap therefore throws away the fill it just asked for, quietly."""
+    """The fill aims at the day's size and never past it: `backfill.target` is the day (`ranking.max_items`, about
+    400), a thin day can be filled most of the way from the older releases (`backfill.max`), and rotation takes
+    waiting songs back before the day falls short of it (`rotation.min_cards`). The final list is cut to
+    `max_items` by score, so a fill aimed past the cap would be thrown away, quietly."""
     live = _cfg()
     back = live["backfill"]
-    assert live["ranking"]["max_items"] >= back["target"] + 120
+    day = live["ranking"]["max_items"]
+    assert back["target"] <= day and back["max"] >= day // 2 and back["min"] <= back["max"]
+    assert live["rotation"]["min_cards"] <= day
     # …and enough older candidates have to reach resolution to fill a day at all
     assert back["candidates"] >= back["max"]
 

@@ -54,6 +54,7 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
     undated = float(r.get("undated_freshness", 0.2))   # no date at all: less than anything released recently
     tags_w: dict[str, float] = profile["tags"]
     learned = profile.get("learned")
+    history = profile.get("history")     # a StationHistory (build.py loads it); absent or empty: no opinion
     today = date.today()
 
     for it in items:
@@ -80,6 +81,20 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
                 s += w["similar"] * (0.4 + entry["affinity"])
                 via = ", ".join(entry.get("via", [])[:2])
                 reasons.append(f"similar to {via}" if via else "similar artist")
+        # the station's whole Last.fm history (history.py): an act it has played gains with its all-time plays; one it
+        # has never played, and that you do not play under another name either (a profile "direct" act), loses — those
+        # were kept 2–11% of the time against 26–37% for acts the station plays
+        it.station_plays = None
+        if history:
+            plays = history.artist_plays(it.artist)
+            it.station_plays = plays
+            if plays:
+                s += float(w.get("history", 0.0)) * history.relevance(plays)
+                if plays >= 20:
+                    reasons.append(f"{plays:,} plays on the station")
+            elif kind != "direct":
+                s += float(w.get("unplayed_saved", 0.0) if kind == "saved" else w.get("unplayed", 0.0))
+                reasons.append("never played on the station")
         tag_score = 0.0
         hits: list[str] = []
         for t in it.tags:

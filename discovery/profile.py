@@ -26,6 +26,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
+from .history import StationHistory
 from .util import CACHE_DIR, DATA_DIR, PROFILE_VERSION, Http, item_key, log, norm, read_json, read_versioned, utcnow, write_json, write_versioned
 
 LASTFM_API = "https://ws.audioscrobbler.com/2.0/"
@@ -485,6 +486,19 @@ def build_profile(cfg: dict, http: Http) -> dict:
                 add_direct(a["name"], w, f"lastfm:{period}", a.get("mbid") or None)
     else:
         log.warning("LASTFM_API_KEY not set — profile will rely on playlists + seeds only")
+
+    # 1b. The station's whole play history (data/catalog_history.json, every track since the first scrobble): every
+    #     act played at least `history_min_plays` times is one you play, weighted by its all-time plays — so the
+    #     profile, and the artist watches that read it, cover the whole of Indie Discotheque and not only the top
+    #     `lastfm_top_artists_limit` of each period
+    history = StationHistory.load(reference=int(pcfg.get("history_reference_plays", 500)))
+    hist_w = float(pcfg.get("history_weight", 0.0) or 0.0)
+    if history and hist_w:
+        tops = history.top_artists(int(pcfg.get("history_min_plays", 20)))
+        most = math.log10((tops[0][1] if tops else 1) + 1)
+        for name, plays in tops:
+            add_direct(name, hist_w * math.log10(plays + 1) / most, "lastfm:history")
+        log.info("last.fm history: %d acts played %d+ times", len(tops), int(pcfg.get("history_min_plays", 20)))
 
     # 2. Your YouTube Music year playlists. Artists Last.fm never saw are kept apart as kind "saved": a library
     #    entry is a real signal, but not "you play them".

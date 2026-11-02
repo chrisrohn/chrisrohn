@@ -245,7 +245,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert "filling in from %d" % (today.year - 2) in older["reasons"]
     assert ("Roosevelt", "Ancient Single") not in ids       # older than the backfill window: never pulled in
     assert payload["backfill"] == 1 and payload["backfill_candidates"] == 1
-    assert payload["recent_since"] == today.year - 3 and payload["fresh_playable"] >= 1
+    assert payload["recent_since"] == today.year - cfg["backfill"]["years"] and payload["fresh_playable"] >= 1
     assert all(i["backfill"] is False for i in payload["items"] if i["title"] != "Earlier Single")
     assert payload["years"][0] >= 2026 and payload["years"][-1] == 1979
     assert payload["google"]["client_id"] == "abc.apps.googleusercontent.com"
@@ -883,7 +883,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
     payload = build.build_feed(_cfg())
     hist = util.read_json(sandbox / "site" / "data" / "history" / f"{today.isoformat()}.json", {})
     assert hist["ids"] == [payload["items"][0]["id"]]
-    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"], "r": 1, "sc": payload["items"][0]["score"], "y": None, "m": "direct", "af": 1.0}
+    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"], "r": 1, "sc": payload["items"][0]["score"], "y": None, "m": "direct", "af": 1.0, "hp": None}
     assert payload["learned"]["outcomes"] == 0 and payload["learned"]["sources"] == {}
     rss = (sandbox / "site" / "feed.xml").read_text()
     assert "<pubDate>" in rss and "<lastBuildDate>" in rss and 'media:thumbnail url="https://i/x.jpg"' in rss
@@ -2145,3 +2145,146 @@ def test_rotation_gives_each_act_its_turn():
     rot.cfg["enabled"] = True
     deferred = rot.defer([card("Average", "Waits", 9), card("Fresh Face", "Due", 1)])
     assert [i.title for i in deferred] == ["Due", "Waits"]                  # before resolution the due songs go first
+
+
+def test_scoring_follows_the_whole_station_history(sandbox):
+    """All-time plays on the station (data/catalog_history.json) lift an act, collaboration credits count for each act,
+    and an act the station has never played drops unless you play it under another name (a profile "direct" act).
+    Without a history snapshot nothing changes."""
+    from discovery.history import StationHistory
+
+    util.write_json(sandbox / "data" / "catalog_history.json", {"v": 2, "rows": [
+        ["Jungle", "Busy Earnin'", 400, True], ["Parcels & Jungle", "Feelin", 30, False], ["Parcels", "Tieduprightnow", 2, False],
+        ["Kraak & Smaak", "Squeeze Me", 50, False], ["Some Band", "Song", 5, False]]})
+    h = StationHistory.load()
+    assert h.artist_plays("Jungle") == 430 and h.artist_plays("Parcels") == 32 and h.artist_plays("Parcels feat. Nobody") == 32
+    assert h.artist_plays("Kraak & Smaak") == 50 and h.artist_plays("Kraak") == 0          # one act, never split
+    assert h.artist_plays("Roosevelt") == 0 and h.song_plays("Jungle", "Busy Earnin' (Radio Edit)") == 400
+    assert h.relevance(0) == 0 and 0.95 < h.relevance(500) <= 1.0 and h.relevance(10**6) == 1.25
+    assert h.top_artists(20) == [("Jungle", 430), ("Kraak & Smaak", 50), ("Parcels", 32)]   # acts, never a credit of two acts the station plays
+    cfg = _cfg()
+    w = cfg["ranking"]["weights"]
+
+    def scored(history):
+        items = [Item(artist="Parcels", title="A", sources=["ytmusic"]), Item(artist="TOPS", title="B", sources=["ytmusic"]),
+                 Item(artist="Nobody Known", title="C", sources=["ytmusic"]), Item(artist="Roosevelt", title="D", sources=["ytmusic"])]
+        return {i.artist: i for i in score_items(items, {**PROFILE, **({"history": history} if history is not None else {})}, cfg)}
+
+    base, now = scored(None), scored(h)
+    assert now["Parcels"].score == pytest.approx(base["Parcels"].score + w["history"] * h.relevance(32), abs=0.002)   # a similar act the station plays
+    assert now["Parcels"].station_plays == 32 and "32 plays on the station" in now["Parcels"].reasons
+    assert now["TOPS"].score == pytest.approx(base["TOPS"].score + w["unplayed"], abs=0.002)           # a genre act it never played
+    assert now["Nobody Known"].score == pytest.approx(base["Nobody Known"].score + w["unplayed"], abs=0.002)
+    assert "never played on the station" in now["Nobody Known"].reasons
+    assert now["Roosevelt"].score == pytest.approx(base["Roosevelt"].score, abs=0.002)                  # you play them: no penalty
+    assert scored(StationHistory([]))["TOPS"].score == pytest.approx(base["TOPS"].score, abs=0.002)    # no snapshot, no opinion
+    assert w["unplayed"] < w["unplayed_saved"] < 0 < w["history"]
+
+
+def test_profile_adds_the_acts_of_the_whole_play_history(monkeypatch, sandbox):
+    """Every act the station has played `history_min_plays` times joins the profile as one you play, weighted by its
+    plays, even when no Last.fm period chart lists it."""
+    from discovery import profile as prof
+
+    util.write_json(sandbox / "data" / "catalog_history.json", {"v": 2, "rows": [["Jungle", "Busy Earnin'", 900, True], ["Deep Cut", "Old Song", 40, False], ["Rare", "Once", 3, False]]})
+    monkeypatch.delenv("LASTFM_API_KEY", raising=False)
+    monkeypatch.setattr(prof, "youtube_playlist_seeds", lambda cfg: ({}, {}, [], {}))
+    monkeypatch.setattr(prof, "listenbrainz_similar", lambda http, mbid, limit: [])
+    monkeypatch.setattr(prof.ArtistIds, "mbid", lambda self, name, hint=None: None)
+    monkeypatch.setattr(prof, "genre_artists", lambda lastfm, tags, pcfg, exclude: {})
+    cfg = _cfg(); cfg["profile"]["seed_artists"] = []
+    monkeypatch.setattr(prof, "read_json", lambda path, default=None: util.read_json(path, default) if "catalog_history" in str(path) or "profile" in str(path) else default)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    p = prof.build_profile(cfg, NoNet())
+    arts = p["artists"]
+    assert arts["jungle"]["kind"] == "direct" and arts["jungle"]["affinity"] == 1.0 and "lastfm:history" in arts["jungle"]["via"]
+    assert arts["deep cut"]["kind"] == "direct" and 0 < arts["deep cut"]["affinity"] < 1
+    assert "rare" not in arts                                                   # fewer plays than history_min_plays
+
+
+def test_cards_you_did_not_get_to_come_back_until_rated(monkeypatch, sandbox):
+    """An unrated card is remembered and offered again on a later build — re-scored, saying since when it waits —
+    while a rated one is let go; a card first shown longer ago than `carryover.max_days` is let go too."""
+    import discovery.build as build
+    from discovery import carryover
+    from discovery import profile as prof
+
+    util.write_json(prof.PROFILE_PATH, PROFILE)
+    today = date.today()
+    day = {"items": [Item(artist="Jungle", title="Skipped One", kind="track", release_date=today, sources=["ytmusic"]),
+                     Item(artist="Jungle", title="Not Reached", kind="track", release_date=today, sources=["ytmusic"])]}
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: [Item(**{**i.__dict__}) for i in day["items"]])
+
+    def fake_resolve(items, cfg, deadline=None, avoid=None):
+        for it in items:
+            if not it.youtube:
+                it.youtube = {"videoId": "v-" + util.norm(it.title).replace(" ", "-"), "title": it.title, "artists": [it.artist], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
+    monkeypatch.setattr(build, "resolve_all", fake_resolve)
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    monkeypatch.setattr(build, "Http", NoNet)
+    cfg = _cfg(); cfg["rotation"]["enabled"] = False
+    first = build.build_feed(cfg)
+    ids = {i["title"]: i["id"] for i in first["items"]}
+    assert set(ids) == {"Skipped One", "Not Reached"} and first["carried"] == 0 and first["carryover_held"] == 2
+    # one was skipped on the site; the next build's sources find something else entirely
+    util.write_json(sandbox / "data" / "ratings.json", {"rated": {ids["Skipped One"]: {"decision": "down", "at": 1}}})
+    day["items"] = [Item(artist="Roosevelt", title="New Today", kind="track", release_date=today, sources=["ytmusic"])]
+    second = build.build_feed(cfg)
+    by = {i["title"]: i for i in second["items"]}
+    assert set(by) == {"New Today", "Not Reached"} and second["carried"] == 1
+    assert by["Not Reached"]["carried"] == today.isoformat() and any(r.startswith("still waiting from") for r in by["Not Reached"]["reasons"])
+    assert by["Not Reached"]["youtube"]["videoId"] == "v-not-reached" and by["Not Reached"]["score"] > 0
+    held = util.read_json(sandbox / "data" / "carryover.json", {})["items"]
+    assert ids["Skipped One"] not in held and held[ids["Not Reached"]]["days"] == 1 and held[ids["Not Reached"]]["first"] == today.isoformat()
+    # …and three weeks on, or once it is in a playlist, it is let go
+    later = today + timedelta(days=cfg["carryover"]["max_days"] + 1)
+    assert carryover.waiting(cfg, {}, {}, set(), today=later) == []
+    assert {i.title for i in carryover.waiting(cfg, {}, {}, set(), today=today)} == {"Not Reached", "New Today"}
+    assert {i.title for i in carryover.waiting(cfg, {}, {}, {"v-not-reached"}, today=today)} == {"New Today"}
+
+
+def test_a_video_with_no_paired_audio_track_is_searched_for_one(monkeypatch, sandbox):
+    """A hit still a video after its watch playlist was asked gets one song search: the audio track of the same
+    recording is taken (the video stays its video side); another version or another artist never is, and a search
+    that finds nothing is not repeated until the recheck is due."""
+    import sys
+    import types
+
+    from discovery import resolve
+
+    searches = []
+
+    class FakeYT:
+        def search(self, q, filter=None, limit=None):
+            searches.append(q)
+            if "Helix" in q:
+                return [{"resultType": "song", "title": "Helix (Live)", "artists": [{"name": "Justice"}], "videoId": "hLIVE", "videoType": resolve.ATV},
+                        {"resultType": "song", "title": "Helix", "artists": [{"name": "Justice"}], "videoId": "hATV", "videoType": resolve.ATV, "album": {"name": "Audio, Video, Disco", "id": "MPREb_avd"}, "duration": "4:30"}]
+            return [{"resultType": "song", "title": "Night By Night (Live at Coachella)", "artists": [{"name": "Chromeo"}], "videoId": "nLIVE", "videoType": resolve.ATV},
+                    {"resultType": "song", "title": "Night By Night", "artists": [{"name": "Someone Else"}], "videoId": "nOTHER", "videoType": resolve.ATV}]
+        def get_watch_playlist(self, **kw): raise AssertionError("the pair was asked today already")
+        def get_album(self, bid): return {}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    today = date.today().isoformat()
+    a = Item(artist="Justice", title="Helix", kind="track")
+    b = Item(artist="Chromeo", title="Night By Night", kind="track")
+    rows = {i.key: {"seen": today, "at": today, "audio": today, "len": 1, "v": resolve.CACHE_VERSION,
+                    "yt": {"videoId": vid, "title": i.title, "artists": [i.artist], "videoType": resolve.OMV, "via": "album-id"}} for i, vid in ((a, "hOMV"), (b, "nOMV"))}
+    util.write_json(resolve.YT_CACHE, rows)
+    resolve.resolve_all([a, b], _cfg())
+    assert a.youtube["videoId"] == "hATV" and a.youtube["videoType"] == resolve.ATV and a.youtube["video"] == "hOMV" and a.youtube["album"] == "Audio, Video, Disco"
+    assert b.youtube["videoId"] == "nOMV" and b.youtube["videoType"] == resolve.OMV          # a live take and another artist are not it
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[a.key]["yt"]["videoId"] == "hATV" and cache[b.key]["asearch"] == today
+    searches.clear()
+    again = Item(artist="Chromeo", title="Night By Night", kind="track")
+    resolve.resolve_all([again], _cfg())
+    assert searches == [] and again.youtube["videoId"] == "nOMV"                               # not searched again until the recheck

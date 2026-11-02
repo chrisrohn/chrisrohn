@@ -42,6 +42,8 @@ class Item:
     matched_artist: str | None = None
     match_kind: str | None = None    # "direct" | "saved" | "similar" | "genre" | None
     affinity: float | None = None    # the matched profile artist's affinity (0–1): learn.py bands it with the kind
+    station_plays: int | None = None  # the act's all-time plays on the station's Last.fm (history.py); None when unknown
+    carried: str | None = None       # the day an unrated card was first shown, when it is carried over to a later day (carryover.py)
 
     def normalize_credit(self) -> Item:
         """Apply Rohn Standard Notation: pull feat./remix info out of raw artist + title into fields."""

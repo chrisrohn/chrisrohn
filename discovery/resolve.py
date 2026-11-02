@@ -344,6 +344,40 @@ def prefer_audio(yt, found: dict[str, Any]) -> bool:
     return False
 
 
+def search_audio(yt, found: dict[str, Any], artist: str | None, title: str | None, avoid: set[str] | None = None,
+                 length: tuple[int | None, int | None] | None = None) -> bool:
+    """A hit that is still a video after asking its watch playlist (YouTube Music pairs no audio track with it): search
+    the songs for the audio track of the same recording. Only an audio track (never another video) whose artist and
+    title agree, that is not another version (live, acoustic, a remix the item is not) and not a flagged upload, is
+    taken; the video stays recorded as the song's video side. One request. Returns whether the hit is now the audio
+    track. On 2026-11-02, 1,841 of the day's 2,226 candidates waited on a video with no paired audio track."""
+    if not found or not found.get("videoId") or is_audio(found):
+        return is_audio(found)
+    want = title or found.get("title")
+    if not artist or not want:
+        return False
+    try:
+        res = yt.search(f"{artist} {want}", filter="songs", limit=8)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("audio search for %s – %s failed: %s", artist, want, exc)
+        return False
+    songs = [r for r in res or [] if r.get("videoType") == ATV and r.get("videoId") and r.get("videoId") != found.get("videoId")]
+    hit = _pick(songs, artist, want, avoid, length)
+    if not hit or not titles_agree(want, hit.get("title"), artist):
+        return False
+    new = _shape(hit, found.get("via") or "audio-search")
+    found["video"] = found.get("video") or found["videoId"]
+    found["videoKind"] = found.get("videoKind") or found.get("videoType") or OMV
+    found["videoFrom"] = found["videoId"]
+    for k in ("videoId", "title", "album", "albumBrowseId", "duration", "thumbnail"):
+        if new.get(k):
+            found[k] = new[k]
+    found["year"] = found.get("year") or new.get("year")
+    found["videoType"] = ATV
+    found["audioVia"] = "search"
+    return True
+
+
 def is_audio(yt_row: dict | None) -> bool:
     return bool(yt_row) and yt_row.get("videoType") == ATV
 
@@ -559,7 +593,8 @@ def _lookup(yt, it: Item, avoid: set[str] | None = None, length: tuple[int | Non
         if not hit:
             return None
         found = _shape(hit, "track-search")
-        prefer_audio(yt, found)
+        if not prefer_audio(yt, found):
+            search_audio(yt, found, it.artist, it.display_title, avoid, length)
         album_year(yt, found)
         return found if not (avoid and found.get("videoId") in avoid) else None
     want = it.release or it.title
@@ -571,7 +606,9 @@ def _lookup(yt, it: Item, avoid: set[str] | None = None, length: tuple[int | Non
         if not names or artist_agrees(it.artist, names):
             found = _from_album(detail, it, "album-id", avoid, length)
             if found:
-                prefer_audio(yt, found)          # an album page can list the video side of a track: take the audio side
+                # an album page can list the video side of a track: take the audio side, from the pair or a song search
+                if not prefer_audio(yt, found):
+                    search_audio(yt, found, it.artist, found.get("title"), avoid, length)
                 return found
     # otherwise find the release by title (an exact title first, then a title that contains ours), never "any album by them"
     res = yt.search(f"{it.artist} {want}", filter="albums", limit=5)
@@ -583,7 +620,8 @@ def _lookup(yt, it: Item, avoid: set[str] | None = None, length: tuple[int | Non
         found = _from_album(detail, it, "album", avoid, length)
         if found:
             found["year"] = found.get("year") or album.get("year")
-            prefer_audio(yt, found)
+            if not prefer_audio(yt, found):
+                search_audio(yt, found, it.artist, found.get("title"), avoid, length)
             return found
     # a single that is only listed as a song: the song must carry the release's name
     res = yt.search(f"{it.artist} {want}", filter="songs", limit=6)
@@ -591,7 +629,8 @@ def _lookup(yt, it: Item, avoid: set[str] | None = None, length: tuple[int | Non
     if not hit:
         return None
     found = _shape(hit, "release-fallback")
-    prefer_audio(yt, found)
+    if not prefer_audio(yt, found):
+        search_audio(yt, found, it.artist, want, avoid, length)
     album_year(yt, found)
     return found if not (avoid and found.get("videoId") in avoid) else None
 
@@ -684,6 +723,7 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     deadline = deadline or Deadline(None)
     budget = int(rcfg.get("max_lookups_per_run", 400))
     heal_budget = int(rcfg.get("audio_heals_per_run", 150))   # hits that are not the audio track: re-checked for a counterpart, a batch a run
+    search_budget = int(rcfg.get("audio_searches_per_run", 0) or 0)   # …and, with no counterpart, searched for the audio track
     recheck_days = int(rcfg.get("audio_recheck_days", 30) or 0)
     recheck_before = (today - timedelta(days=recheck_days)).isoformat() if recheck_days else None
     retry_days = int(rcfg.get("retry_misses_days", 7) or 0)
@@ -694,7 +734,7 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     video_budget = int(vcfg.get("feed_lookups_per_run", 400) or 0) if vcfg.get("enabled", True) else 0
     video_recheck = int(vcfg.get("recheck_days", 90) or 0)
     video_before = (today - timedelta(days=video_recheck)).isoformat() if video_recheck else None
-    looked = stale = rejected = healed = flagged = relooked = retried = videos = 0
+    looked = stale = rejected = healed = flagged = relooked = retried = videos = searched = found_by_search = 0
     skipped_deadline = 0
 
     def flush() -> None:
@@ -752,6 +792,18 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
                             row["vid"], row["vhow"] = today_s, VIDEO_FINDER
                         if healed % FLUSH_EVERY == 0:
                             flush()
+                    # still a video with no paired audio track: search the songs for it by name, once and then again
+                    # every `audio_recheck_days`, `audio_searches_per_run` a run
+                    searched_at = row.get("asearch")
+                    sdue = not is_audio(it.youtube) and (not searched_at or (recheck_before is not None and searched_at < recheck_before))
+                    if sdue and searched < search_budget and not deadline.expired:
+                        searched += 1
+                        row["asearch"] = today_s
+                        if search_audio(yt, it.youtube, it.artist, it.youtube.get("title") or it.display_title, not_these or None, length):
+                            found_by_search += 1
+                            row["vid"], row["vhow"] = today_s, VIDEO_FINDER
+                        if searched % FLUSH_EVERY == 0:
+                            flush()
                     if video_due(row, it.youtube) and videos < video_budget and not deadline.expired:
                         videos += 1
                         if attach_video(yt, it.youtube, it.artist, it.display_title):
@@ -778,7 +830,9 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
         # "len": this row was looked up with the song-length preference, so a hit outside the range is not redone again;
         # "audio": when the watch playlist was last asked for the audio track (the lookup itself asks, so today)
         # "at": when this lookup ran (a miss is tried again retry_misses_days later)
-        cache[key] = {"seen": today_s, "at": today_s, "yt": found, "v": CACHE_VERSION, "len": 1, "audio": today_s, **({"not": sorted(not_these)} if not_these else {})}
+        # "asearch": a hit that stayed a video was searched for its audio track by the lookup itself
+        cache[key] = {"seen": today_s, "at": today_s, "yt": found, "v": CACHE_VERSION, "len": 1, "audio": today_s, **({"asearch": today_s} if found and not is_audio(found) else {}),
+                      **({"not": sorted(not_these)} if not_these else {})}
         it.youtube = found
         if found:
             promote(it, found)
@@ -802,6 +856,8 @@ def resolve_all(items: list[Item], cfg: dict, deadline: Deadline | None = None, 
     log.info("youtube: %d lookups this run (%d stale rows redone, %d flagged as the wrong video redone, %d outside the song-length range looked up once more, "
              "%d older misses tried again, %d wrong-song hits rejected, %d video hits re-checked for the audio track), %d cached; %d items play the audio track, %d the video, %d an upload of unknown kind",
              looked, stale, flagged, relooked, retried, rejected, healed, len(cache), kinds["audio"], kinds["video"], kinds["unknown"])
+    if searched:
+        log.info("youtube: %d video-only hits searched for their audio track, %d found", searched, found_by_search)
     log.info("videos: %d cards asked for their video side this run; %d cards have a video, %d none, %d not asked yet", videos, vids["with_video"], vids["no_video"], vids["pending"])
 
 
