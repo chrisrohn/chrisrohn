@@ -35,7 +35,7 @@ import hashlib
 import html
 from datetime import date, timedelta
 
-from . import carryover
+from . import carryover, newcomers
 from .history import StationHistory
 from .learn import learn_from_history, load_ratings, merge_ratings, public_summary, wrong_videos
 from .models import Item
@@ -129,7 +129,16 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     # the slots count only what can become a card today (a cached audio hit, or a lookup still to make); what the
     # cache says is waiting on a heal or a retry rides along outside the count, so it costs the day nothing
     slack = int(rcfg.get("candidate_slack", 60) or 0)      # live slots beyond max_items, for what resolution then folds, drops or hides
-    fresh, fresh_live = select_candidates(fresh, max_items + slack, states)
+    # newcomers (acts the station has never played) get their own candidate slots, so the vetted acts, which score
+    # higher, never crowd them out of resolution before the day's newcomer share is chosen (newcomers.py)
+    ncfg = cfg.get("newcomers") or {}
+    hist = profile.get("history")
+    new_fresh = [i for i in fresh if newcomers.is_newcomer(i, hist)]
+    est_fresh = [i for i in fresh if not newcomers.is_newcomer(i, hist)]
+    est_fresh, est_live = select_candidates(est_fresh, max_items + slack, states)
+    new_fresh, new_live = select_candidates(new_fresh, int(ncfg.get("candidates", 300) or 0), states)
+    fresh = sorted(est_fresh + new_fresh, key=lambda i: (-i.score, i.artist_norm))
+    fresh_live = est_live + new_live
     # only the best older candidates are carried into resolution, so the lookup budget is spent where it can pay off
     older, older_live = select_candidates(older, int((cfg.get("backfill") or {}).get("candidates", 600) or 0), states)
     items = fresh + older
@@ -168,7 +177,9 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
                  turns["cooling"], turns["over_quota"], turns["per_artist"])
     items = diversify(items, cfg)
     # the second scoring pass can move an item below the floor (a merge changed its sources, a repeat penalty)
-    items = [i for i in items if i.score >= floor][:max_items]
+    items = [i for i in items if i.score >= floor]
+    # the day: the best vetted cards, and the best newcomers that fit the format spread evenly among them
+    items, lane = newcomers.compose(items, cfg, profile, max_items)
     verify_years(items, cfg, http, deadline)
     held_over = carryover.remember(cfg, items, ratings)
     # the duplicate report is derived from the profile's raw playlist scan on every build, so a change to what
@@ -254,6 +265,8 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
         "rotation": turns,
         # cards from earlier days you did not get to, back in today's list (carryover.py), and how many are remembered
         "carried": sum(1 for i in items if i.carried),
+        # acts new to the station in today's list, and how many newcomers fit the format or did not (newcomers.py)
+        "newcomers": lane,
         "carryover_held": held_over,
         "sources": sorted({s.split(":")[0] for i in items for s in i.sources}),
         # the named feeds the site can switch off one by one: blogs by name (as before), stations and channels by
@@ -391,7 +404,7 @@ def fill_from_backfill(items: list[Item], cfg: dict) -> tuple[list[Item], dict]:
 
 
 NAMED_FAMILIES = ("rss", "radio", "youtube", "reddit", "bandcamp", "apple")   # source families whose members have names of their own
-_PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb", "stated_year", "station_plays")
+_PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb", "stated_year", "station_plays", "similar_to", "fit")
 _PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration", "videoFrom", "albumType")
 
 
@@ -414,7 +427,7 @@ def _write_history(today_s: str, items: list[Item], keep_days: int = 90) -> None
     the rank and score each had, so a pass is only counted for what was on screen and the score can be calibrated."""
     hist = SITE_DATA_DIR / "history"
     rows = [{"id": i.key, "v": (i.youtube or {}).get("videoId"), "a": i.artist, "s": i.sources, "t": i.tags, "r": n + 1, "sc": round(i.score, 2), "y": i.year, "m": i.match_kind, "af": i.affinity,
-             "hp": i.station_plays, **({"c": i.carried} if i.carried else {})}
+             "hp": i.station_plays, **({"c": i.carried} if i.carried else {}), **({"n": 1} if i.newcomer else {})}
             for n, i in enumerate(items)]
     write_json(hist / f"{today_s}.json", {"date": today_s, "ids": [i.key for i in items], "items": rows}, compact=True)
     cutoff = (date.today() - timedelta(days=keep_days)).isoformat()

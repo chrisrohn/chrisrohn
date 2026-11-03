@@ -484,11 +484,15 @@ Everything lives in `discovery/config.yaml`:
 - `ranking.max_items` — how many songs a day holds (400), cut by score after the backfill (`backfill.target` aims the
   fill at it, never past it); `ranking.candidate_slack` — live slots beyond it carried into resolution (100), for
   what resolution then folds, drops or hides.
-- `ranking.weights.history` / `unplayed` / `unplayed_saved` — the station's whole Last.fm history
-  (`discovery/history.py`, read from `data/catalog_history.json`): the bonus for an act's all-time plays (full at
-  `profile.history_reference_plays`), and the penalty for an act the station has never played (smaller when it is in
-  your playlists; none when the profile says you play it). `profile.history_weight` / `history_min_plays` add every
-  act played that often to the profile as one you play; `profile.lastfm_periods` now lead with `overall`.
+- `ranking.weights.history` — the station's whole Last.fm history (`discovery/history.py`, read from
+  `data/catalog_history.json`): the bonus for an act's all-time plays (full at `profile.history_reference_plays`).
+  `profile.history_weight` / `history_min_plays` add every act played that often to the profile as one you play;
+  `profile.lastfm_periods` lead with `overall`.
+- `newcomers` — acts the station has never played: `share` of the day they hold (0.3), `max_share` when the vetted
+  acts run short (0.5), `candidates` carried into resolution apart from the vetted acts (300), `min_tag_score` for a
+  newcomer with only tags to go on; spread evenly through the list. `ranking.weights.similar_tracks` scores the fit;
+  `sources.lastfm_similar` finds them (Last.fm's similar tracks to the songs you kept, your picks and the history's
+  most played: `seeds_per_run`, `per_seed`, `min_match`).
 - `carryover` — the cards you did not get to: `max_days` they may wait (21) and `max_items` remembered (1,500);
   `enabled: false` turns it off.
 - `resolve.audio_searches_per_run` — video-only hits searched by name for the same recording's audio track a run

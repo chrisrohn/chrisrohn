@@ -243,6 +243,18 @@ sources:
     pool: 4000                # the strongest N profile artists of the kinds below, by affinity: the acts the station plays, its whole history included
     # similar acts were kept 9% of the time (3% when the station had never played them): their releases are left to the tags
     kinds: [direct, saved]
+  # New acts that sound like the station: Last.fm's similar tracks (track.getSimilar, listener co-occurrence) to the
+  # station's own songs — the ones you kept lately, your picks, then the most played of the whole history — keeping
+  # only songs by acts the station has never played. A batch of seeds a run through a cursor (data/cache/lastfm_similar.json).
+  lastfm_similar:
+    enabled: true
+    seeds_per_run: 150       # one Last.fm request each (cached for a day)
+    per_seed: 30             # similar tracks asked per seed
+    min_match: 0.1           # Last.fm's match (0–1) below which a song is not taken
+    kept_days: 120           # songs kept on the site this recently seed first
+    history_seeds: 1500      # then the most played songs of the whole history
+    per_artist: 2            # songs one new act may bring in a run
+    max_items: 600
   # Curator / session channels on YouTube (no record labels: the feed follows artists and genres, not imprints).
   # Free RSS per channel; wrong handles show up in ⚙ feed health.
   youtube_channels:
@@ -392,7 +404,7 @@ ranking:
   max_per_artist: 3
   max_unknown_per_source: 30
   repeat_penalty: 2.0
-  explore_slots: 5         # acts the profile does not know were kept 10% of the time from the top of the list (2026-09-18)
+  explore_slots: 0         # retired 2026-11-03: the newcomer share (`newcomers`) spreads new acts through the whole list
   # The base weights are set from the keep rates measured on 2026-09-18 (3,800 rated cards); learn.py then keeps
   # each kind of act honest from what you keep, banded by affinity (weights.learned below).
   weights:
@@ -406,13 +418,10 @@ ranking:
     editorial: 1.5         # appeared in a curated feed (RSS/Bandcamp Daily/KEXP)
     listens: 0.4           # log10(listen_count) from ListenBrainz
     learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
-    # The station's whole Last.fm history (discovery/history.py). Replayed over the 10,107 cards rated 2026-09-04 →
-    # 11-02: acts the station had never played were kept 7% of the time (2% unknown, 3% similar, 11% playlist-only)
-    # against 26–37% for acts it plays. With these weights the cards they drop below min_score had been kept 1.8% of
-    # the time, and the rest's keep rate goes from 23.7% to 28.1%.
+    # The station's whole Last.fm history (discovery/history.py): an act gains with its all-time plays. Acts it has
+    # never played are not marked down: they are ranked among themselves for the day's newcomer share (`newcomers`).
     history: 1.0           # × relevance of the act's all-time plays (0 never … 1.0 at profile.history_reference_plays)
-    unplayed: -3.5         # an act the station has never played, and not one you play under another name
-    unplayed_saved: -1.5   # …that is in your playlists (kept 11%: a library act, but not one the station plays)
+    similar_tracks: 1.5    # × fit (capped at 3): how strongly Last.fm listeners play it next to the station's songs
     explore: 1.0           # the exploration bonus for sources / tags / artists with little history (learn.explore)
     novelty: 0.3           # an artist the profile does not know, vouched for by an editorial feed or two sources
   freshness_days: 60       # a release this many days old has spent its freshness bonus (the sources look back ~90 days)
@@ -422,6 +431,21 @@ ranking:
   fresh_days: 90
   # Hide anything already in your year playlists, saved or skipped from the site.
   hide_seen: true
+
+# ---------- Newcomers: acts the station has never played (discovery/newcomers.py) ----------
+# A vetted act is kept far more often than a new one (26–37% against a few percent), so ranked together the new acts
+# would never be seen. The day is two lists instead: the acts the station plays (or that are in your profile and
+# playlists), and the newcomers, ranked among themselves — `share` of the day, more (up to `max_share`) when the
+# vetted acts run short — spread evenly through the list. A newcomer must fit the format: Last.fm listeners play it
+# next to the station's songs (sources.lastfm_similar), it is Last.fm-similar to your acts or a top act of your
+# genres, or its tags score `min_tag_score` in your tag profile. Of 1,600 newcomer cards rated 2026-09 → 11, 24 were
+# kept, nearly all from crawls with nothing tying them to the station; those are left out now.
+newcomers:
+  enabled: true
+  share: 0.3               # about 120 of a 400-card day
+  max_share: 0.5           # the most of a day newcomers may take when the vetted acts run short
+  candidates: 300          # newcomer candidates carried into YouTube resolution, apart from the vetted acts' slots
+  min_tag_score: 0.3       # a newcomer with only tags to go on needs this much of your tag profile
 
 # ---------- Carry-over: the cards you did not get to (discovery/carryover.py) ----------
 # A day's list is longer than a day's listening, and only a third of unrated cards ever came back by themselves. Every

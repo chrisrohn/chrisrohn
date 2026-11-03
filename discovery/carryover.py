@@ -22,7 +22,7 @@ _FIELDS = {f.name for f in dataclasses.fields(Item)}
 # what a carried card needs again; the scoring fields (score, reasons, match) are worked out afresh every build
 _KEEP = ("artist", "title", "kind", "featuring", "remixer", "remix_kind", "release", "release_type", "release_date", "stated_year", "date_kind",
          "tags", "sources", "links", "artwork", "artist_mbids", "listen_count", "editorial", "backfill", "year", "year_source", "year_confidence",
-         "year_evidence", "original_year", "youtube")
+         "year_evidence", "original_year", "youtube", "similar_to", "fit")
 
 
 def _path():

@@ -34,6 +34,7 @@ class StationHistory:
         self.loved: dict[str, int] = defaultdict(int)
         self.names: dict[str, str] = {}
         self.songs: dict[tuple[str, str], int] = {}
+        self.song_names: dict[tuple[str, str], tuple[str, str]] = {}   # (artist, title) as the history spells them
         self.reference = max(2, int(reference or 500))
         parsed: list[tuple[str, str, int, bool, str, list[tuple[str, str]]]] = []
         solo: set[str] = set()          # acts credited on their own somewhere in the history
@@ -65,6 +66,7 @@ class StationHistory:
                 self.names.setdefault(whole, artist)
             key = (whole, norm_track(title))
             self.songs[key] = self.songs.get(key, 0) + p
+            self.song_names.setdefault(key, (artist, title))
         self.plays, self.tracks, self.loved = dict(self.plays), dict(self.tracks), dict(self.loved)
 
     @classmethod

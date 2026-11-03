@@ -44,6 +44,9 @@ class Item:
     affinity: float | None = None    # the matched profile artist's affinity (0–1): learn.py bands it with the kind
     station_plays: int | None = None  # the act's all-time plays on the station's Last.fm (history.py); None when unknown
     carried: str | None = None       # the day an unrated card was first shown, when it is carried over to a later day (carryover.py)
+    similar_to: list[str] = field(default_factory=list)   # "Artist – Title" of the station's songs Last.fm says this one is like
+    fit: float = 0.0                 # how strongly (summed match, weighted by the seeds): sources/lastfm_similar.py
+    newcomer: bool = False           # an act new to the station, in the day's newcomer share (newcomers.py)
 
     def normalize_credit(self) -> Item:
         """Apply Rohn Standard Notation: pull feat./remix info out of raw artist + title into fields."""
@@ -108,6 +111,10 @@ class Item:
         self.remixer = self.remixer or other.remixer
         self.remix_kind = self.remix_kind or other.remix_kind
         self.stated_year = self.stated_year or other.stated_year
+        for x in other.similar_to:
+            if x not in self.similar_to:
+                self.similar_to.append(x)
+        self.fit = max(self.fit, other.fit)
         self.backfill = self.backfill and other.backfill    # a fresh sighting of an older release makes it current
         if self.kind == "release" and other.kind == "track":
             self.kind = "track"

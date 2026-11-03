@@ -166,7 +166,9 @@ export function renderMeta() {
   const turns = f.rotation?.waiting ? ` · ${f.rotation.waiting} by ${f.rotation.acts} recent acts wait their turn` : "";
   // unrated cards from earlier days, back in today's list (discovery/carryover.py)
   const carried = f.carried ? ` · ${f.carried} still waiting from earlier days` : "";
-  $("#meta").textContent = `${f.count} candidates${fill}${carried}${turns} · ${f.new_today} new today · built ${when ? relTime(when) : "?"} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar + ${f.profile?.counts?.genre ?? 0} from your genres`;
+  // acts new to the station, spread through the day (discovery/newcomers.py)
+  const fresh = f.newcomers?.shown ? ` · ${f.newcomers.shown} by acts new to the station` : "";
+  $("#meta").textContent = `${f.count} candidates${fresh}${fill}${carried}${turns} · ${f.new_today} new today · built ${when ? relTime(when) : "?"} · profile: ${f.profile?.counts?.direct ?? "?"} artists + ${f.profile?.counts?.similar ?? "?"} similar + ${f.profile?.counts?.genre ?? 0} from your genres`;
   // Two different pieces of news, and the day's feed being late is the common one: it deserves its own words rather
   // than a screen that just says there is nothing to rate. Anything past STALE_AFTER_MS is a real breakage.
   const stale = $("#stale"); const age = when ? Date.now() - when.getTime() : 0;

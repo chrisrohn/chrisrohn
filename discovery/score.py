@@ -81,9 +81,9 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
                 s += w["similar"] * (0.4 + entry["affinity"])
                 via = ", ".join(entry.get("via", [])[:2])
                 reasons.append(f"similar to {via}" if via else "similar artist")
-        # the station's whole Last.fm history (history.py): an act it has played gains with its all-time plays; one it
-        # has never played, and that you do not play under another name either (a profile "direct" act), loses — those
-        # were kept 2–11% of the time against 26–37% for acts the station plays
+        # the station's whole Last.fm history (history.py): an act it has played gains with its all-time plays. An act
+        # it has never played is not marked down here: newcomers are ranked among themselves and hold their own share
+        # of the day (newcomers.py), so a vetted act and a new one never compete for the same place
         it.station_plays = None
         if history:
             plays = history.artist_plays(it.artist)
@@ -92,9 +92,11 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
                 s += float(w.get("history", 0.0)) * history.relevance(plays)
                 if plays >= 20:
                     reasons.append(f"{plays:,} plays on the station")
-            elif kind != "direct":
-                s += float(w.get("unplayed_saved", 0.0) if kind == "saved" else w.get("unplayed", 0.0))
-                reasons.append("never played on the station")
+        # Last.fm listeners play it next to the station's own songs (sources/lastfm_similar.py): how strongly, and like what
+        if it.fit:
+            s += float(w.get("similar_tracks", 0.0)) * min(3.0, it.fit)
+            if it.similar_to:
+                reasons.append("like " + ", ".join(it.similar_to[:2]))
         tag_score = 0.0
         hits: list[str] = []
         for t in it.tags:

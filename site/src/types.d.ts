@@ -9,6 +9,7 @@ export interface FeedItem {
   youtube?: YouTubeMatch | null; score: number; reasons?: string[]; matched_artist?: string | null; match_kind?: string | null; affinity?: number | null; first_seen?: string | null;
   backfill?: boolean;   // an older release the build pulled in because the current timeframe was thin
   carried?: string | null;   // an unrated card from an earlier day, back in today's list: the day it was first shown
+  newcomer?: boolean;   // by an act the station has never played, in the day's newcomer share
   _pick?: boolean; _year?: string | number | null; _skipped?: boolean;
   plays?: number; loved?: boolean; first_played?: string | null; last_played?: string | null;   // catalog items: Last.fm play count, loved track, when the station first and last played it
   _concert?: boolean;   // a concert row's most popular song (concerts.js): playable, never rated
@@ -48,6 +49,7 @@ export interface Feed {
   learned?: LearnedSummary;
   feed_health?: Record<string, { ok: boolean; entries: number; kept: number; error?: string | null }>;
   recent_since?: number;        // the earliest year "new releases only" still counts as recent (the backfill window)
+  newcomers?: { shown: number; fitting: number; unfitting: number; share: number };   // acts new to the station in the day (discovery/newcomers.py)
   carried?: number; carryover_held?: number;   // unrated cards from earlier days back in today's list, and how many are remembered
   fresh_playable?: number; backfill?: number; backfill_candidates?: number;   // how much of the day came from the current timeframe, and what filled it
   rotation?: { enabled: boolean; waiting: number; acts: number; cooling: number; over_quota: number; per_artist: number; cooldown_days: number };   // songs waiting so other acts get a turn

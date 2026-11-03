@@ -2148,9 +2148,8 @@ def test_rotation_gives_each_act_its_turn():
 
 
 def test_scoring_follows_the_whole_station_history(sandbox):
-    """All-time plays on the station (data/catalog_history.json) lift an act, collaboration credits count for each act,
-    and an act the station has never played drops unless you play it under another name (a profile "direct" act).
-    Without a history snapshot nothing changes."""
+    """All-time plays on the station (data/catalog_history.json) lift an act, and collaboration credits count for each
+    act the station also plays on its own. An act it never played is not marked down. Without a snapshot nothing changes."""
     from discovery.history import StationHistory
 
     util.write_json(sandbox / "data" / "catalog_history.json", {"v": 2, "rows": [
@@ -2173,12 +2172,12 @@ def test_scoring_follows_the_whole_station_history(sandbox):
     base, now = scored(None), scored(h)
     assert now["Parcels"].score == pytest.approx(base["Parcels"].score + w["history"] * h.relevance(32), abs=0.002)   # a similar act the station plays
     assert now["Parcels"].station_plays == 32 and "32 plays on the station" in now["Parcels"].reasons
-    assert now["TOPS"].score == pytest.approx(base["TOPS"].score + w["unplayed"], abs=0.002)           # a genre act it never played
-    assert now["Nobody Known"].score == pytest.approx(base["Nobody Known"].score + w["unplayed"], abs=0.002)
-    assert "never played on the station" in now["Nobody Known"].reasons
-    assert now["Roosevelt"].score == pytest.approx(base["Roosevelt"].score, abs=0.002)                  # you play them: no penalty
-    assert scored(StationHistory([]))["TOPS"].score == pytest.approx(base["TOPS"].score, abs=0.002)    # no snapshot, no opinion
-    assert w["unplayed"] < w["unplayed_saved"] < 0 < w["history"]
+    # an act the station never played is not marked down: newcomers are ranked among themselves (newcomers.py)
+    assert now["TOPS"].score == pytest.approx(base["TOPS"].score, abs=0.002) and now["TOPS"].station_plays == 0
+    assert now["Nobody Known"].score == pytest.approx(base["Nobody Known"].score, abs=0.002)
+    assert now["Roosevelt"].score == pytest.approx(base["Roosevelt"].score, abs=0.002)
+    assert scored(StationHistory([]))["TOPS"].station_plays is None                                     # no snapshot, no opinion
+    assert w["history"] > 0 and "unplayed" not in w
 
 
 def test_profile_adds_the_acts_of_the_whole_play_history(monkeypatch, sandbox):
@@ -2288,3 +2287,85 @@ def test_a_video_with_no_paired_audio_track_is_searched_for_one(monkeypatch, san
     again = Item(artist="Chromeo", title="Night By Night", kind="track")
     resolve.resolve_all([again], _cfg())
     assert searches == [] and again.youtube["videoId"] == "nOMV"                               # not searched again until the recheck
+
+
+def test_newcomers_hold_a_share_of_the_day_spread_through_it_and_must_fit_the_format(sandbox):
+    """Acts the station has never played are ranked among themselves and take `newcomers.share` of the day, more
+    (up to `max_share`) when the vetted acts run short; each must fit the format (Last.fm-similar to the station's
+    songs, a similar or genre act, or your tags); and they are spread evenly through the list, the scores set so a
+    sort by score keeps the spread."""
+    from discovery import newcomers
+    from discovery.history import StationHistory
+
+    h = StationHistory([["Jungle", "Busy Earnin'", 400, True]])
+    prof = {**PROFILE, "history": h}
+    cfg = _cfg(); cfg["newcomers"] = {"enabled": True, "share": 0.25, "max_share": 0.5, "min_tag_score": 0.3}
+
+    def est(n, score):
+        return Item(artist="Jungle", title=f"Vetted {n}", score=score, station_plays=400, match_kind="direct")
+
+    def new(n, score, **kw):
+        return Item(artist=f"New Act {n}", title=f"Song {n}", score=score, station_plays=0, **kw)
+
+    fits = [new(i, 5.0 - i * 0.1, fit=1.2, similar_to=["Cut Copy – Lights & Music"]) for i in range(6)]
+    stray = new(99, 9.0)                                                                      # a blog headline: nothing ties it to the station
+    tagged = new(50, 1.0, tags=["nu disco"])                                                  # your genres: fits
+    vetted = [est(i, 8.0 - i * 0.2) for i in range(12)]
+    out, stats = newcomers.compose(vetted + fits + [stray, tagged], cfg, prof, max_items=16)
+    assert len(out) == 16 and stats["shown"] == 4 and stats["fitting"] == 7 and stats["unfitting"] == 1
+    assert stray not in out and all(i.newcomer for i in out if i.station_plays == 0)
+    assert [i.title for i in out if i.newcomer] == ["Song 0", "Song 1", "Song 2", "Song 3"]      # the best fits, in their own order
+    positions = [n for n, i in enumerate(out) if i.newcomer]
+    assert positions == [3, 7, 11, 15]                                                         # every fourth card is new
+    assert [i.score for i in out] == sorted((i.score for i in out), reverse=True)              # the spread survives a sort by score
+    assert out[3].reasons[0] == "new to the station"
+    # few vetted cards: the newcomers fill the day, up to max_share
+    out, stats = newcomers.compose(vetted[:3] + fits + [tagged], cfg, prof, max_items=10)
+    assert stats["shown"] == 5 and len(out) == 8
+    # no history snapshot: no newcomers, nothing changes
+    out, stats = newcomers.compose(vetted + fits, cfg, PROFILE, max_items=16)
+    assert stats["shown"] == 0 and len(out) == 16
+
+
+def test_lastfm_similar_finds_new_acts_that_sound_like_the_station(monkeypatch, sandbox):
+    """Seeds are the songs kept lately, the picks, then the history's most played songs; Last.fm's similar tracks to
+    them are kept only when by an act the station has never played and the profile does not count as yours; each
+    carries what it is like and a fit summed over the seeds; the cursor moves on by the seeds asked."""
+    from discovery import profile as prof
+    from discovery.sources import lastfm_similar
+
+    util.write_json(sandbox / "data" / "catalog_history.json", {"v": 2, "rows": [["Cut Copy", "Lights & Music", 900, True], ["Jungle", "Busy Earnin'", 300, False]]})
+    util.write_json(sandbox / "data" / "ratings.json", {"rated": {"k1": {"decision": "up", "artist": "Roosevelt", "title": "Lovers", "at": 4_102_444_800_000}}})
+    asked = []
+    SIMILAR = {
+        "Lovers": [{"name": "Night Drive", "match": "1.0", "artist": {"name": "Newcomer One"}, "url": "https://last.fm/n1"},
+                   {"name": "Hearts On Fire", "match": "0.9", "artist": {"name": "Cut Copy"}},              # the station plays them
+                   {"name": "Back On 74", "match": "0.8", "artist": {"name": "Jungle"}}],
+        "Lights & Music": [{"name": "Night Drive", "match": "0.5", "artist": {"name": "Newcomer One"}},
+                           {"name": "Faint", "match": "0.05", "artist": {"name": "Too Far Off"}},               # below min_match
+                           {"name": "Golden", "match": "0.7", "artist": {"name": "Parcels"}}],                 # a similar act: new to the station
+    }
+
+    class FakeLastFm:
+        def __init__(self, http, key): pass
+        enabled = True
+        def call(self, method, **p):
+            asked.append(p["track"])
+            return {"similartracks": {"track": SIMILAR.get(p["track"], [])}}
+    monkeypatch.setattr(prof, "LastFm", FakeLastFm)
+    monkeypatch.setenv("LASTFM_API_KEY", "k")
+    cfg = _cfg(); cfg["sources"]["lastfm_similar"]["seeds_per_run"] = 2
+    class NoNet:
+        deadline = None
+    out = {i.title: i for i in lastfm_similar.fetch(cfg, PROFILE, NoNet())}
+    assert asked == ["Lovers", "Lights & Music"]                                    # what you kept lately first, then the history
+    assert set(out) == {"Night Drive", "Golden"}
+    nd = out["Night Drive"]
+    assert nd.sources == ["lastfm:similar"] and nd.similar_to == ["Roosevelt – Lovers", "Cut Copy – Lights & Music"] and nd.links == {"last.fm": "https://last.fm/n1"}
+    from discovery.history import StationHistory
+    assert nd.fit == pytest.approx(1.0 * 1.0 + 0.5 * StationHistory().relevance(900), abs=0.01)   # summed over the seeds, weighted by how central each is
+    assert util.read_json(sandbox / "data" / "cache" / "lastfm_similar.json", {})["cursor"] == 2 % 3
+    # the fit lifts the score and says what it is like
+    scored = score_items([nd], PROFILE, cfg)[0]
+    assert "like Roosevelt – Lovers, Cut Copy – Lights & Music" in scored.reasons
+    assert scored.score >= cfg["ranking"]["weights"]["similar_tracks"] * 1.5 - 0.01
