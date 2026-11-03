@@ -108,11 +108,19 @@ job:
 # ---------- Taste profile ----------
 profile:
   # Last.fm periods to blend for artist affinity (weight per period).
+  # The feed follows the whole of Indie Discotheque, not this season: all-time leads, the last year and the last three
+  # months refine it (until 2026-11-02 the three months weighed most, and the long tail of the history was invisible).
   lastfm_periods:
-    overall: 1.0
-    12month: 1.6
-    3month: 2.2
-  lastfm_top_artists_limit: 1000   # 200 per request; cheap. Rank-decayed weight, so the tail mostly adds "you play them" matches.
+    overall: 1.6
+    12month: 1.0
+    3month: 0.6
+  lastfm_top_artists_limit: 2000   # 200 per request; cheap. Rank-decayed weight, so the tail mostly adds "you play them" matches.
+  # The station's whole play history (data/catalog_history.json, every track since 2012; discovery/history.py): every
+  # act played at least `history_min_plays` times joins the profile as one you play, weighted by its all-time plays
+  # (log-scaled against the most played act) — about 9,900 acts, 3,400 of them missing from the period charts above.
+  history_weight: 1.6
+  history_min_plays: 20
+  history_reference_plays: 500  # all-time plays at which an act's history bonus (ranking.weights.history) is full
   # How many top artists get expanded into similar artists (Last.fm + ListenBrainz). The associated artists are
   # what the artist-watch sources (YouTube Music, Deezer, MusicBrainz) check for releases, so wider = more supply.
   expand_top_n: 300
@@ -220,7 +228,7 @@ sources:
     # which profile artists count: the acts you play, the acts in your playlists, their associates. The playlist acts
     # were not watched before 2026-09-18, and they keep as well as the acts you play (42% with a few songs in the
     # library); the genre acts (Last.fm's top of a tag) were kept 5% of the time and are left to the tag matching
-    kinds: [direct, saved, similar]
+    kinds: [direct, saved]   # similar acts dropped 2026-11-02: kept 9% of the time, 3% when the station never played them
     related_per_artist: 0    # set >0 to also pull related artists' newest releases (slower)
     editorial_genres:        # Deezer editorial "new releases" feeds by genre id
       - 85    # Alternative
@@ -232,8 +240,21 @@ sources:
   ytmusic_artists:
     enabled: true
     top_artists: 700          # checked per run (about 0.3 s each), rotating through the pool so everyone comes round every few days
-    pool: 2500                # the strongest N profile artists of the kinds below, by affinity (≈1,200 you play, 950 from the playlists, 300 similar)
-    kinds: [direct, saved, similar]
+    pool: 4000                # the strongest N profile artists of the kinds below, by affinity: the acts the station plays, its whole history included
+    # similar acts were kept 9% of the time (3% when the station had never played them): their releases are left to the tags
+    kinds: [direct, saved]
+  # New acts that sound like the station: Last.fm's similar tracks (track.getSimilar, listener co-occurrence) to the
+  # station's own songs — the ones you kept lately, your picks, then the most played of the whole history — keeping
+  # only songs by acts the station has never played. A batch of seeds a run through a cursor (data/cache/lastfm_similar.json).
+  lastfm_similar:
+    enabled: true
+    seeds_per_run: 150       # one Last.fm request each (cached for a day)
+    per_seed: 30             # similar tracks asked per seed
+    min_match: 0.1           # Last.fm's match (0–1) below which a song is not taken
+    kept_days: 120           # songs kept on the site this recently seed first
+    history_seeds: 1500      # then the most played songs of the whole history
+    per_artist: 2            # songs one new act may bring in a run
+    max_items: 600
   # Curator / session channels on YouTube (no record labels: the feed follows artists and genres, not imprints).
   # Free RSS per channel; wrong handles show up in ⚙ feed health.
   youtube_channels:
@@ -366,14 +387,14 @@ sources:
 
 # ---------- Ranking ----------
 ranking:
-  max_items: 500           # the day's list; the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
+  max_items: 400           # the day's list (about 400 a day); the site shows a shortlist of it (⚙ sets how many) and "show all" the rest
                            # …with room for a full backfill on top of a rich fresh window: this cut is by score, so too
                            # low a cap silently drops the fill it was told to make (the older cards score lowest)
   # Current-timeframe candidates carried into resolution: max_items plus this slack, counting only items that can be
   # cards today (a cached audio hit, or a lookup still to make — build.py reads the resolver's cache first, so a
   # video with no audio side yet or a miss not yet due takes no slot). The slack covers what resolution then folds,
   # drops for length or hides as already filed.
-  candidate_slack: 60
+  candidate_slack: 100
   min_score: 0.6
   # One act must not own the day: past this many tracks by the same artist each further one loses `repeat_penalty`
   # from its score, so it drops down the list. Nor may one tag crawler: past `max_unknown_per_source` tracks by
@@ -383,7 +404,7 @@ ranking:
   max_per_artist: 3
   max_unknown_per_source: 30
   repeat_penalty: 2.0
-  explore_slots: 5         # acts the profile does not know were kept 10% of the time from the top of the list (2026-09-18)
+  explore_slots: 0         # retired 2026-11-03: the newcomer share (`newcomers`) spreads new acts through the whole list
   # The base weights are set from the keep rates measured on 2026-09-18 (3,800 rated cards); learn.py then keeps
   # each kind of act honest from what you keep, banded by affinity (weights.learned below).
   weights:
@@ -397,6 +418,10 @@ ranking:
     editorial: 1.5         # appeared in a curated feed (RSS/Bandcamp Daily/KEXP)
     listens: 0.4           # log10(listen_count) from ListenBrainz
     learned: 1.0           # the keep-rate adjustments learned from your history (see `learn` below)
+    # The station's whole Last.fm history (discovery/history.py): an act gains with its all-time plays. Acts it has
+    # never played are not marked down: they are ranked among themselves for the day's newcomer share (`newcomers`).
+    history: 1.0           # × relevance of the act's all-time plays (0 never … 1.0 at profile.history_reference_plays)
+    similar_tracks: 1.5    # × fit (capped at 3): how strongly Last.fm listeners play it next to the station's songs
     explore: 1.0           # the exploration bonus for sources / tags / artists with little history (learn.explore)
     novelty: 0.3           # an artist the profile does not know, vouched for by an editorial feed or two sources
   freshness_days: 60       # a release this many days old has spent its freshness bonus (the sources look back ~90 days)
@@ -406,6 +431,30 @@ ranking:
   fresh_days: 90
   # Hide anything already in your year playlists, saved or skipped from the site.
   hide_seen: true
+
+# ---------- Newcomers: acts the station has never played (discovery/newcomers.py) ----------
+# A vetted act is kept far more often than a new one (26–37% against a few percent), so ranked together the new acts
+# would never be seen. The day is two lists instead: the acts the station plays (or that are in your profile and
+# playlists), and the newcomers, ranked among themselves — `share` of the day, more (up to `max_share`) when the
+# vetted acts run short — spread evenly through the list. A newcomer must fit the format: Last.fm listeners play it
+# next to the station's songs (sources.lastfm_similar), it is Last.fm-similar to your acts or a top act of your
+# genres, or its tags score `min_tag_score` in your tag profile. Of 1,600 newcomer cards rated 2026-09 → 11, 24 were
+# kept, nearly all from crawls with nothing tying them to the station; those are left out now.
+newcomers:
+  enabled: true
+  share: 0.3               # about 120 of a 400-card day
+  max_share: 0.5           # the most of a day newcomers may take when the vetted acts run short
+  candidates: 300          # newcomer candidates carried into YouTube resolution, apart from the vetted acts' slots
+  min_tag_score: 0.3       # a newcomer with only tags to go on needs this much of your tag profile
+
+# ---------- Carry-over: the cards you did not get to (discovery/carryover.py) ----------
+# A day's list is longer than a day's listening, and only a third of unrated cards ever came back by themselves. Every
+# card shown is remembered (data/carryover.json); the next builds offer the unrated ones again, re-scored against
+# today's profile so they compete for the places, until they are rated, filed, or older than max_days.
+carryover:
+  enabled: true
+  max_days: 21             # a card first shown longer ago than this is let go
+  max_items: 1500          # the most cards remembered (the most recently shown first)
 
 # ---------- Rotation: acts take turns (discovery/rotation.py) ----------
 # You rate nearly the whole day's list, so variety is decided by which songs make the day, not their order. The artist
@@ -423,7 +472,7 @@ rotation:
   max_scale: 3.0
   prior: 4
   new_release_days: 14     # a release dated this recently never waits: a favourite's new single is news today
-  min_cards: 150           # a day shorter than this takes the best waiting songs back early (one per act first)
+  min_cards: 360           # a day shorter than this takes the best waiting songs back early (one per act first): ~400 is the day
 
 # ---------- Backfill: when the current timeframe runs thin, look further back ----------
 # The artist-watch sources (YouTube Music, Deezer, MusicBrainz) return releases back to `years` years ago for your
@@ -435,14 +484,14 @@ rotation:
 # that was emptied by the evening). `target` is therefore set to what a day is actually rated down to, not to what
 # the fresh window happens to yield.
 backfill:
-  years: 3                 # 0 turns backfill off (the sources fall back to their own `days`)
+  years: 5                 # 0 turns backfill off (the sources fall back to their own `days`); older releases keep better than this year's (30%+ vs 17%)
   # The last three years are part of every day, not only a thin one: at least `min` older cards join the day whenever
   # the artist watch has that many playable and unrated (on 2026-09-18 those cards were kept 35–40% of the time,
   # this year's 19%), and more, up to `max`, when the current timeframe holds fewer than `target` playable cards.
-  min: 120
-  target: 300              # playable current cards the day should hold before more than `min` older ones are used
-  max: 200                 # the most older cards one day may carry: even a thin day stays a third current music
-  candidates: 600          # the best older candidates carried into resolution (the rest wait for another day)
+  min: 150
+  target: 400              # playable current cards the day should hold before more than `min` older ones are used
+  max: 250                 # the most older cards one day may carry: even a thin day stays more than a third current music
+  candidates: 900          # the best older candidates carried into resolution (the rest wait for another day)
 
 # ---------- Learning from outcomes (discovery/learn.py) ----------
 # No API quota involved: what each day's feed showed (site/data/history/) is compared with what reached the year
@@ -529,6 +578,11 @@ resolve:
   # ⚙ → Stats say how many cards play the audio track.
   audio_heals_per_run: 500
   audio_recheck_days: 30
+  # A hit still a video once its watch playlist was asked (no audio track paired) is searched for the audio track of
+  # the same recording by name: an audio track whose artist and title agree and that is not another version. Once on
+  # the lookup, then again every audio_recheck_days, this many a run (about a second each). On 2026-11-02 1,841 of
+  # the day's 2,226 candidates waited on a video with no paired audio track.
+  audio_searches_per_run: 600
   counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload, and playlist rows that are the video asked
                                 # for their audio track, per run (Cleanup tab → data/unavailable.json)
   year_chain: full              # the feed asks every catalogue; the catalog's own setting is under `catalog`

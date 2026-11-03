@@ -31,6 +31,7 @@ SOURCE_MODULES = {
     "reddit": "reddit",
     "difm": "difm",
     "mixcloud": "mixcloud",
+    "lastfm_similar": "lastfm_similar",
 }
 PER_FEED_HEALTH = {"rss", "youtube_channels", "radio", "nts", "reddit", "apple_music", "difm", "mixcloud"}   # these report per feed / show / sub
 

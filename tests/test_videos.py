@@ -234,7 +234,7 @@ def test_the_feed_names_the_video_playlist_and_counts_the_cards_that_know_their_
     assert payload["youtube"]["videos"] == {"with_video": 1, "no_video": 1, "pending": 0}
     by = {i["title"]: i for i in payload["items"]}
     assert by["One"]["youtube"]["video"] == "vid1" and "video" not in by["Three"]["youtube"]
-    assert cfg["ranking"]["max_items"] == 500                                       # the day's list: 500 songs to review
+    assert cfg["ranking"]["max_items"] == 400                                       # the day's list: about 400 songs to review
 
 
 class SearchYT(FakeYT):

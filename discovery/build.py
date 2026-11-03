@@ -35,6 +35,8 @@ import hashlib
 import html
 from datetime import date, timedelta
 
+from . import carryover, newcomers
+from .history import StationHistory
 from .learn import learn_from_history, load_ratings, merge_ratings, public_summary, wrong_videos
 from .models import Item
 from .profile import find_duplicates, load_profile
@@ -66,6 +68,9 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
                  len(profile["wrong_videos"]), merged)
     # keep rates per source / tag / artist from what earlier feeds showed and what reached the playlists (quota-free)
     profile["learned"] = learn_from_history(profile, cfg, SITE_DATA_DIR / "history")
+    # the station's whole Last.fm history: how often each act has been played, ever (history.py); scoring rewards the
+    # acts it plays and holds back the ones it never has
+    profile["history"] = StationHistory.load(reference=int((cfg.get("profile") or {}).get("history_reference_plays", 500)))
     state = read_json(STATE_PATH, {"first_seen": {}})
     first_seen: dict[str, str] = state.setdefault("first_seen", {})
 
@@ -124,7 +129,16 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     # the slots count only what can become a card today (a cached audio hit, or a lookup still to make); what the
     # cache says is waiting on a heal or a retry rides along outside the count, so it costs the day nothing
     slack = int(rcfg.get("candidate_slack", 60) or 0)      # live slots beyond max_items, for what resolution then folds, drops or hides
-    fresh, fresh_live = select_candidates(fresh, max_items + slack, states)
+    # newcomers (acts the station has never played) get their own candidate slots, so the vetted acts, which score
+    # higher, never crowd them out of resolution before the day's newcomer share is chosen (newcomers.py)
+    ncfg = cfg.get("newcomers") or {}
+    hist = profile.get("history")
+    new_fresh = [i for i in fresh if newcomers.is_newcomer(i, hist)]
+    est_fresh = [i for i in fresh if not newcomers.is_newcomer(i, hist)]
+    est_fresh, est_live = select_candidates(est_fresh, max_items + slack, states)
+    new_fresh, new_live = select_candidates(new_fresh, int(ncfg.get("candidates", 300) or 0), states)
+    fresh = sorted(est_fresh + new_fresh, key=lambda i: (-i.score, i.artist_norm))
+    fresh_live = est_live + new_live
     # only the best older candidates are carried into resolution, so the lookup budget is spent where it can pay off
     older, older_live = select_candidates(older, int((cfg.get("backfill") or {}).get("candidates", 600) or 0), states)
     items = fresh + older
@@ -147,6 +161,11 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
         if before - len(items):
             log.info("hid %d more items whose YouTube video is already in a playlist", before - len(items))
     items = score_items(items, profile, cfg)
+    # the cards you did not get to on earlier days (carryover.py): still unrated, still not in a playlist, re-scored
+    # against today's profile, so they compete with today's sightings for the places
+    carried = _carried(cfg, items, profile, ratings, saved, saved_videos)
+    if carried:
+        items = sorted(items + carried, key=lambda i: (-i.score, i.artist_norm))
     # each act its turn: a cooling-down act's songs and anything past the day's quota per act wait, and the older
     # releases of acts that have not had a turn lately fill the places they leave
     items, held = rot.apply(items)
@@ -158,8 +177,11 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
                  turns["cooling"], turns["over_quota"], turns["per_artist"])
     items = diversify(items, cfg)
     # the second scoring pass can move an item below the floor (a merge changed its sources, a repeat penalty)
-    items = [i for i in items if i.score >= floor][:max_items]
+    items = [i for i in items if i.score >= floor]
+    # the day: the best vetted cards, and the best newcomers that fit the format spread evenly among them
+    items, lane = newcomers.compose(items, cfg, profile, max_items)
     verify_years(items, cfg, http, deadline)
+    held_over = carryover.remember(cfg, items, ratings)
     # the duplicate report is derived from the profile's raw playlist scan on every build, so a change to what
     # counts as a duplicate never waits for the next profile rebuild
     ymeta = profile.get("youtube") or {}
@@ -241,6 +263,11 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
         "backfill_candidates": filled["older"],
         # songs held back so other acts get a turn: by acts you rated lately (cooling) or past the day's quota per act
         "rotation": turns,
+        # cards from earlier days you did not get to, back in today's list (carryover.py), and how many are remembered
+        "carried": sum(1 for i in items if i.carried),
+        # acts new to the station in today's list, and how many newcomers fit the format or did not (newcomers.py)
+        "newcomers": lane,
+        "carryover_held": held_over,
         "sources": sorted({s.split(":")[0] for i in items for s in i.sources}),
         # the named feeds the site can switch off one by one: blogs by name (as before), stations and channels by
         # their full source label
@@ -254,6 +281,24 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     http.save()
     log.info("feed: %d items (%d new today)", payload["count"], payload["new_today"])
     return payload
+
+
+def _carried(cfg: dict, items: list[Item], profile: dict, ratings: dict, saved: dict, saved_videos: set[str]) -> list[Item]:
+    """Earlier days' unrated cards that may join today: playable, not already in today's list (by key or by video),
+    re-scored, each saying since when it has been waiting."""
+    have = {i.key for i in items} | {v for i in items if (v := (i.youtube or {}).get("videoId"))}
+    back = [c for c in carryover.waiting(cfg, ratings, saved, saved_videos)
+            if c.key not in have and (c.youtube or {}).get("videoId") not in have and is_audio(c.youtube)]
+    if not back:
+        return []
+    back = score_items(back, profile, cfg)
+    for c in back:
+        try:
+            when = date.fromisoformat(str(c.carried))
+            c.reasons.append(f"still waiting from {when:%b} {when.day}")
+        except ValueError:
+            c.reasons.append("still waiting from an earlier day")
+    return back
 
 
 def _known_saved(it: Item, states: dict[str, tuple[str, str | None]], saved_videos: set[str]) -> bool:
@@ -359,7 +404,7 @@ def fill_from_backfill(items: list[Item], cfg: dict) -> tuple[list[Item], dict]:
 
 
 NAMED_FAMILIES = ("rss", "radio", "youtube", "reddit", "bandcamp", "apple")   # source families whose members have names of their own
-_PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb", "stated_year")
+_PRIVATE_FIELDS = ("artist_mbids", "listen_count", "featuring", "remixer", "remix_kind", "blurb", "stated_year", "station_plays", "similar_to", "fit")
 _PRIVATE_YT_FIELDS = ("title", "artists", "via", "albumBrowseId", "trackCount", "duration", "videoFrom", "albumType")
 
 
@@ -381,7 +426,8 @@ def _write_history(today_s: str, items: list[Item], keep_days: int = 90) -> None
     """One file per build: the ids, plus the per-item facts learn.py needs later (source, tags, artist, video), and
     the rank and score each had, so a pass is only counted for what was on screen and the score can be calibrated."""
     hist = SITE_DATA_DIR / "history"
-    rows = [{"id": i.key, "v": (i.youtube or {}).get("videoId"), "a": i.artist, "s": i.sources, "t": i.tags, "r": n + 1, "sc": round(i.score, 2), "y": i.year, "m": i.match_kind, "af": i.affinity}
+    rows = [{"id": i.key, "v": (i.youtube or {}).get("videoId"), "a": i.artist, "s": i.sources, "t": i.tags, "r": n + 1, "sc": round(i.score, 2), "y": i.year, "m": i.match_kind, "af": i.affinity,
+             "hp": i.station_plays, **({"c": i.carried} if i.carried else {}), **({"n": 1} if i.newcomer else {})}
             for n, i in enumerate(items)]
     write_json(hist / f"{today_s}.json", {"date": today_s, "ids": [i.key for i in items], "items": rows}, compact=True)
     cutoff = (date.today() - timedelta(days=keep_days)).isoformat()

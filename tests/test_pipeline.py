@@ -245,7 +245,7 @@ def test_build_feed_hides_saved_and_skipped(monkeypatch, sandbox):
     assert "filling in from %d" % (today.year - 2) in older["reasons"]
     assert ("Roosevelt", "Ancient Single") not in ids       # older than the backfill window: never pulled in
     assert payload["backfill"] == 1 and payload["backfill_candidates"] == 1
-    assert payload["recent_since"] == today.year - 3 and payload["fresh_playable"] >= 1
+    assert payload["recent_since"] == today.year - cfg["backfill"]["years"] and payload["fresh_playable"] >= 1
     assert all(i["backfill"] is False for i in payload["items"] if i["title"] != "Earlier Single")
     assert payload["years"][0] >= 2026 and payload["years"][-1] == 1979
     assert payload["google"]["client_id"] == "abc.apps.googleusercontent.com"
@@ -883,7 +883,7 @@ def test_history_files_carry_learning_facts_and_rss_has_dates(monkeypatch, sandb
     payload = build.build_feed(_cfg())
     hist = util.read_json(sandbox / "site" / "data" / "history" / f"{today.isoformat()}.json", {})
     assert hist["ids"] == [payload["items"][0]["id"]]
-    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"], "r": 1, "sc": payload["items"][0]["score"], "y": None, "m": "direct", "af": 1.0}
+    assert hist["items"][0] == {"id": payload["items"][0]["id"], "v": "vid1", "a": "Jungle", "s": ["rss:Pitchfork", "bandcamp"], "t": ["nu disco"], "r": 1, "sc": payload["items"][0]["score"], "y": None, "m": "direct", "af": 1.0, "hp": None}
     assert payload["learned"]["outcomes"] == 0 and payload["learned"]["sources"] == {}
     rss = (sandbox / "site" / "feed.xml").read_text()
     assert "<pubDate>" in rss and "<lastBuildDate>" in rss and 'media:thumbnail url="https://i/x.jpg"' in rss
@@ -2145,3 +2145,227 @@ def test_rotation_gives_each_act_its_turn():
     rot.cfg["enabled"] = True
     deferred = rot.defer([card("Average", "Waits", 9), card("Fresh Face", "Due", 1)])
     assert [i.title for i in deferred] == ["Due", "Waits"]                  # before resolution the due songs go first
+
+
+def test_scoring_follows_the_whole_station_history(sandbox):
+    """All-time plays on the station (data/catalog_history.json) lift an act, and collaboration credits count for each
+    act the station also plays on its own. An act it never played is not marked down. Without a snapshot nothing changes."""
+    from discovery.history import StationHistory
+
+    util.write_json(sandbox / "data" / "catalog_history.json", {"v": 2, "rows": [
+        ["Jungle", "Busy Earnin'", 400, True], ["Parcels & Jungle", "Feelin", 30, False], ["Parcels", "Tieduprightnow", 2, False],
+        ["Kraak & Smaak", "Squeeze Me", 50, False], ["Some Band", "Song", 5, False]]})
+    h = StationHistory.load()
+    assert h.artist_plays("Jungle") == 430 and h.artist_plays("Parcels") == 32 and h.artist_plays("Parcels feat. Nobody") == 32
+    assert h.artist_plays("Kraak & Smaak") == 50 and h.artist_plays("Kraak") == 0          # one act, never split
+    assert h.artist_plays("Roosevelt") == 0 and h.song_plays("Jungle", "Busy Earnin' (Radio Edit)") == 400
+    assert h.relevance(0) == 0 and 0.95 < h.relevance(500) <= 1.0 and h.relevance(10**6) == 1.25
+    assert h.top_artists(20) == [("Jungle", 430), ("Kraak & Smaak", 50), ("Parcels", 32)]   # acts, never a credit of two acts the station plays
+    cfg = _cfg()
+    w = cfg["ranking"]["weights"]
+
+    def scored(history):
+        items = [Item(artist="Parcels", title="A", sources=["ytmusic"]), Item(artist="TOPS", title="B", sources=["ytmusic"]),
+                 Item(artist="Nobody Known", title="C", sources=["ytmusic"]), Item(artist="Roosevelt", title="D", sources=["ytmusic"])]
+        return {i.artist: i for i in score_items(items, {**PROFILE, **({"history": history} if history is not None else {})}, cfg)}
+
+    base, now = scored(None), scored(h)
+    assert now["Parcels"].score == pytest.approx(base["Parcels"].score + w["history"] * h.relevance(32), abs=0.002)   # a similar act the station plays
+    assert now["Parcels"].station_plays == 32 and "32 plays on the station" in now["Parcels"].reasons
+    # an act the station never played is not marked down: newcomers are ranked among themselves (newcomers.py)
+    assert now["TOPS"].score == pytest.approx(base["TOPS"].score, abs=0.002) and now["TOPS"].station_plays == 0
+    assert now["Nobody Known"].score == pytest.approx(base["Nobody Known"].score, abs=0.002)
+    assert now["Roosevelt"].score == pytest.approx(base["Roosevelt"].score, abs=0.002)
+    assert scored(StationHistory([]))["TOPS"].station_plays is None                                     # no snapshot, no opinion
+    assert w["history"] > 0 and "unplayed" not in w
+
+
+def test_profile_adds_the_acts_of_the_whole_play_history(monkeypatch, sandbox):
+    """Every act the station has played `history_min_plays` times joins the profile as one you play, weighted by its
+    plays, even when no Last.fm period chart lists it."""
+    from discovery import profile as prof
+
+    util.write_json(sandbox / "data" / "catalog_history.json", {"v": 2, "rows": [["Jungle", "Busy Earnin'", 900, True], ["Deep Cut", "Old Song", 40, False], ["Rare", "Once", 3, False]]})
+    monkeypatch.delenv("LASTFM_API_KEY", raising=False)
+    monkeypatch.setattr(prof, "youtube_playlist_seeds", lambda cfg: ({}, {}, [], {}))
+    monkeypatch.setattr(prof, "listenbrainz_similar", lambda http, mbid, limit: [])
+    monkeypatch.setattr(prof.ArtistIds, "mbid", lambda self, name, hint=None: None)
+    monkeypatch.setattr(prof, "genre_artists", lambda lastfm, tags, pcfg, exclude: {})
+    cfg = _cfg(); cfg["profile"]["seed_artists"] = []
+    monkeypatch.setattr(prof, "read_json", lambda path, default=None: util.read_json(path, default) if "catalog_history" in str(path) or "profile" in str(path) else default)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    p = prof.build_profile(cfg, NoNet())
+    arts = p["artists"]
+    assert arts["jungle"]["kind"] == "direct" and arts["jungle"]["affinity"] == 1.0 and "lastfm:history" in arts["jungle"]["via"]
+    assert arts["deep cut"]["kind"] == "direct" and 0 < arts["deep cut"]["affinity"] < 1
+    assert "rare" not in arts                                                   # fewer plays than history_min_plays
+
+
+def test_cards_you_did_not_get_to_come_back_until_rated(monkeypatch, sandbox):
+    """An unrated card is remembered and offered again on a later build — re-scored, saying since when it waits —
+    while a rated one is let go; a card first shown longer ago than `carryover.max_days` is let go too."""
+    import discovery.build as build
+    from discovery import carryover
+    from discovery import profile as prof
+
+    util.write_json(prof.PROFILE_PATH, PROFILE)
+    today = date.today()
+    day = {"items": [Item(artist="Jungle", title="Skipped One", kind="track", release_date=today, sources=["ytmusic"]),
+                     Item(artist="Jungle", title="Not Reached", kind="track", release_date=today, sources=["ytmusic"])]}
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: [Item(**{**i.__dict__}) for i in day["items"]])
+
+    def fake_resolve(items, cfg, deadline=None, avoid=None):
+        for it in items:
+            if not it.youtube:
+                it.youtube = {"videoId": "v-" + util.norm(it.title).replace(" ", "-"), "title": it.title, "artists": [it.artist], "videoType": "MUSIC_VIDEO_TYPE_ATV"}
+    monkeypatch.setattr(build, "resolve_all", fake_resolve)
+    monkeypatch.setattr(build, "verify_years", lambda items, cfg, http, deadline=None: None)
+    monkeypatch.setattr(build, "annotate_duplicate_years", lambda dups, cfg, http, deadline=None: 0)
+
+    class NoNet:
+        def __init__(self, *a, **k): pass
+        def save(self): pass
+    monkeypatch.setattr(build, "Http", NoNet)
+    cfg = _cfg(); cfg["rotation"]["enabled"] = False
+    first = build.build_feed(cfg)
+    ids = {i["title"]: i["id"] for i in first["items"]}
+    assert set(ids) == {"Skipped One", "Not Reached"} and first["carried"] == 0 and first["carryover_held"] == 2
+    # one was skipped on the site; the next build's sources find something else entirely
+    util.write_json(sandbox / "data" / "ratings.json", {"rated": {ids["Skipped One"]: {"decision": "down", "at": 1}}})
+    day["items"] = [Item(artist="Roosevelt", title="New Today", kind="track", release_date=today, sources=["ytmusic"])]
+    second = build.build_feed(cfg)
+    by = {i["title"]: i for i in second["items"]}
+    assert set(by) == {"New Today", "Not Reached"} and second["carried"] == 1
+    assert by["Not Reached"]["carried"] == today.isoformat() and any(r.startswith("still waiting from") for r in by["Not Reached"]["reasons"])
+    assert by["Not Reached"]["youtube"]["videoId"] == "v-not-reached" and by["Not Reached"]["score"] > 0
+    held = util.read_json(sandbox / "data" / "carryover.json", {})["items"]
+    assert ids["Skipped One"] not in held and held[ids["Not Reached"]]["days"] == 1 and held[ids["Not Reached"]]["first"] == today.isoformat()
+    # …and three weeks on, or once it is in a playlist, it is let go
+    later = today + timedelta(days=cfg["carryover"]["max_days"] + 1)
+    assert carryover.waiting(cfg, {}, {}, set(), today=later) == []
+    assert {i.title for i in carryover.waiting(cfg, {}, {}, set(), today=today)} == {"Not Reached", "New Today"}
+    assert {i.title for i in carryover.waiting(cfg, {}, {}, {"v-not-reached"}, today=today)} == {"New Today"}
+
+
+def test_a_video_with_no_paired_audio_track_is_searched_for_one(monkeypatch, sandbox):
+    """A hit still a video after its watch playlist was asked gets one song search: the audio track of the same
+    recording is taken (the video stays its video side); another version or another artist never is, and a search
+    that finds nothing is not repeated until the recheck is due."""
+    import sys
+    import types
+
+    from discovery import resolve
+
+    searches = []
+
+    class FakeYT:
+        def search(self, q, filter=None, limit=None):
+            searches.append(q)
+            if "Helix" in q:
+                return [{"resultType": "song", "title": "Helix (Live)", "artists": [{"name": "Justice"}], "videoId": "hLIVE", "videoType": resolve.ATV},
+                        {"resultType": "song", "title": "Helix", "artists": [{"name": "Justice"}], "videoId": "hATV", "videoType": resolve.ATV, "album": {"name": "Audio, Video, Disco", "id": "MPREb_avd"}, "duration": "4:30"}]
+            return [{"resultType": "song", "title": "Night By Night (Live at Coachella)", "artists": [{"name": "Chromeo"}], "videoId": "nLIVE", "videoType": resolve.ATV},
+                    {"resultType": "song", "title": "Night By Night", "artists": [{"name": "Someone Else"}], "videoId": "nOTHER", "videoType": resolve.ATV}]
+        def get_watch_playlist(self, **kw): raise AssertionError("the pair was asked today already")
+        def get_album(self, bid): return {}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    today = date.today().isoformat()
+    a = Item(artist="Justice", title="Helix", kind="track")
+    b = Item(artist="Chromeo", title="Night By Night", kind="track")
+    rows = {i.key: {"seen": today, "at": today, "audio": today, "len": 1, "v": resolve.CACHE_VERSION,
+                    "yt": {"videoId": vid, "title": i.title, "artists": [i.artist], "videoType": resolve.OMV, "via": "album-id"}} for i, vid in ((a, "hOMV"), (b, "nOMV"))}
+    util.write_json(resolve.YT_CACHE, rows)
+    resolve.resolve_all([a, b], _cfg())
+    assert a.youtube["videoId"] == "hATV" and a.youtube["videoType"] == resolve.ATV and a.youtube["video"] == "hOMV" and a.youtube["album"] == "Audio, Video, Disco"
+    assert b.youtube["videoId"] == "nOMV" and b.youtube["videoType"] == resolve.OMV          # a live take and another artist are not it
+    cache = util.read_json(resolve.YT_CACHE, {})
+    assert cache[a.key]["yt"]["videoId"] == "hATV" and cache[b.key]["asearch"] == today
+    searches.clear()
+    again = Item(artist="Chromeo", title="Night By Night", kind="track")
+    resolve.resolve_all([again], _cfg())
+    assert searches == [] and again.youtube["videoId"] == "nOMV"                               # not searched again until the recheck
+
+
+def test_newcomers_hold_a_share_of_the_day_spread_through_it_and_must_fit_the_format(sandbox):
+    """Acts the station has never played are ranked among themselves and take `newcomers.share` of the day, more
+    (up to `max_share`) when the vetted acts run short; each must fit the format (Last.fm-similar to the station's
+    songs, a similar or genre act, or your tags); and they are spread evenly through the list, the scores set so a
+    sort by score keeps the spread."""
+    from discovery import newcomers
+    from discovery.history import StationHistory
+
+    h = StationHistory([["Jungle", "Busy Earnin'", 400, True]])
+    prof = {**PROFILE, "history": h}
+    cfg = _cfg(); cfg["newcomers"] = {"enabled": True, "share": 0.25, "max_share": 0.5, "min_tag_score": 0.3}
+
+    def est(n, score):
+        return Item(artist="Jungle", title=f"Vetted {n}", score=score, station_plays=400, match_kind="direct")
+
+    def new(n, score, **kw):
+        return Item(artist=f"New Act {n}", title=f"Song {n}", score=score, station_plays=0, **kw)
+
+    fits = [new(i, 5.0 - i * 0.1, fit=1.2, similar_to=["Cut Copy – Lights & Music"]) for i in range(6)]
+    stray = new(99, 9.0)                                                                      # a blog headline: nothing ties it to the station
+    tagged = new(50, 1.0, tags=["nu disco"])                                                  # your genres: fits
+    vetted = [est(i, 8.0 - i * 0.2) for i in range(12)]
+    out, stats = newcomers.compose(vetted + fits + [stray, tagged], cfg, prof, max_items=16)
+    assert len(out) == 16 and stats["shown"] == 4 and stats["fitting"] == 7 and stats["unfitting"] == 1
+    assert stray not in out and all(i.newcomer for i in out if i.station_plays == 0)
+    assert [i.title for i in out if i.newcomer] == ["Song 0", "Song 1", "Song 2", "Song 3"]      # the best fits, in their own order
+    positions = [n for n, i in enumerate(out) if i.newcomer]
+    assert positions == [3, 7, 11, 15]                                                         # every fourth card is new
+    assert [i.score for i in out] == sorted((i.score for i in out), reverse=True)              # the spread survives a sort by score
+    assert out[3].reasons[0] == "new to the station"
+    # few vetted cards: the newcomers fill the day, up to max_share
+    out, stats = newcomers.compose(vetted[:3] + fits + [tagged], cfg, prof, max_items=10)
+    assert stats["shown"] == 5 and len(out) == 8
+    # no history snapshot: no newcomers, nothing changes
+    out, stats = newcomers.compose(vetted + fits, cfg, PROFILE, max_items=16)
+    assert stats["shown"] == 0 and len(out) == 16
+
+
+def test_lastfm_similar_finds_new_acts_that_sound_like_the_station(monkeypatch, sandbox):
+    """Seeds are the songs kept lately, the picks, then the history's most played songs; Last.fm's similar tracks to
+    them are kept only when by an act the station has never played and the profile does not count as yours; each
+    carries what it is like and a fit summed over the seeds; the cursor moves on by the seeds asked."""
+    from discovery import profile as prof
+    from discovery.sources import lastfm_similar
+
+    util.write_json(sandbox / "data" / "catalog_history.json", {"v": 2, "rows": [["Cut Copy", "Lights & Music", 900, True], ["Jungle", "Busy Earnin'", 300, False]]})
+    util.write_json(sandbox / "data" / "ratings.json", {"rated": {"k1": {"decision": "up", "artist": "Roosevelt", "title": "Lovers", "at": 4_102_444_800_000}}})
+    asked = []
+    SIMILAR = {
+        "Lovers": [{"name": "Night Drive", "match": "1.0", "artist": {"name": "Newcomer One"}, "url": "https://last.fm/n1"},
+                   {"name": "Hearts On Fire", "match": "0.9", "artist": {"name": "Cut Copy"}},              # the station plays them
+                   {"name": "Back On 74", "match": "0.8", "artist": {"name": "Jungle"}}],
+        "Lights & Music": [{"name": "Night Drive", "match": "0.5", "artist": {"name": "Newcomer One"}},
+                           {"name": "Faint", "match": "0.05", "artist": {"name": "Too Far Off"}},               # below min_match
+                           {"name": "Golden", "match": "0.7", "artist": {"name": "Parcels"}}],                 # a similar act: new to the station
+    }
+
+    class FakeLastFm:
+        def __init__(self, http, key): pass
+        enabled = True
+        def call(self, method, **p):
+            asked.append(p["track"])
+            return {"similartracks": {"track": SIMILAR.get(p["track"], [])}}
+    monkeypatch.setattr(prof, "LastFm", FakeLastFm)
+    monkeypatch.setenv("LASTFM_API_KEY", "k")
+    cfg = _cfg(); cfg["sources"]["lastfm_similar"]["seeds_per_run"] = 2
+    class NoNet:
+        deadline = None
+    out = {i.title: i for i in lastfm_similar.fetch(cfg, PROFILE, NoNet())}
+    assert asked == ["Lovers", "Lights & Music"]                                    # what you kept lately first, then the history
+    assert set(out) == {"Night Drive", "Golden"}
+    nd = out["Night Drive"]
+    assert nd.sources == ["lastfm:similar"] and nd.similar_to == ["Roosevelt – Lovers", "Cut Copy – Lights & Music"] and nd.links == {"last.fm": "https://last.fm/n1"}
+    from discovery.history import StationHistory
+    assert nd.fit == pytest.approx(1.0 * 1.0 + 0.5 * StationHistory().relevance(900), abs=0.01)   # summed over the seeds, weighted by how central each is
+    assert util.read_json(sandbox / "data" / "cache" / "lastfm_similar.json", {})["cursor"] == 2 % 3
+    # the fit lifts the score and says what it is like
+    scored = score_items([nd], PROFILE, cfg)[0]
+    assert "like Roosevelt – Lovers, Cut Copy – Lights & Music" in scored.reasons
+    assert scored.score >= cfg["ranking"]["weights"]["similar_tracks"] * 1.5 - 0.01

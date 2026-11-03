@@ -54,6 +54,7 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
     undated = float(r.get("undated_freshness", 0.2))   # no date at all: less than anything released recently
     tags_w: dict[str, float] = profile["tags"]
     learned = profile.get("learned")
+    history = profile.get("history")     # a StationHistory (build.py loads it); absent or empty: no opinion
     today = date.today()
 
     for it in items:
@@ -80,6 +81,22 @@ def score_items(items: list[Item], profile: dict, cfg: dict) -> list[Item]:
                 s += w["similar"] * (0.4 + entry["affinity"])
                 via = ", ".join(entry.get("via", [])[:2])
                 reasons.append(f"similar to {via}" if via else "similar artist")
+        # the station's whole Last.fm history (history.py): an act it has played gains with its all-time plays. An act
+        # it has never played is not marked down here: newcomers are ranked among themselves and hold their own share
+        # of the day (newcomers.py), so a vetted act and a new one never compete for the same place
+        it.station_plays = None
+        if history:
+            plays = history.artist_plays(it.artist)
+            it.station_plays = plays
+            if plays:
+                s += float(w.get("history", 0.0)) * history.relevance(plays)
+                if plays >= 20:
+                    reasons.append(f"{plays:,} plays on the station")
+        # Last.fm listeners play it next to the station's own songs (sources/lastfm_similar.py): how strongly, and like what
+        if it.fit:
+            s += float(w.get("similar_tracks", 0.0)) * min(3.0, it.fit)
+            if it.similar_to:
+                reasons.append("like " + ", ".join(it.similar_to[:2]))
         tag_score = 0.0
         hits: list[str] = []
         for t in it.tags:

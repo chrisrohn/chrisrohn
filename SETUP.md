@@ -266,7 +266,8 @@ session that the playlist's owner approved in that browser.
   install it too (the Install button in the header, or the icon in the address bar).
 - **Shortlist:** the Feed tab opens on the top 60 by score (⚙ sets how many); *show all* at the end of the list, or the
   `+N` next to the deck counter, lifts it for the visit. A search or another sort always shows everything. The day
-  itself is up to `ranking.max_items` (500) songs, ranked by score.
+  itself is up to `ranking.max_items` (about 400) songs, ranked by score, with the unrated cards of earlier days
+  back in it (*still waiting from <date>*) until you rate them.
 - **Video** tab: the official videos of the songs you keep and of everything the year playlists already hold, each
   played in place and either added to the music-video playlist (`▲︎ add`, the one playlist videos go to) or passed
   (free). The library is walked in the order it matters — your picks (the newest songs kept) first, then by how
@@ -480,9 +481,22 @@ Everything lives in `discovery/config.yaml`:
   after you rate one (× `min_scale`–`max_scale` by its keep rate against yours, smoothed by `prior`),
   `new_release_days` for a release that never waits, `min_cards` below which waiting songs come back early;
   `enabled: false` turns it off.
-- `ranking.max_items` — how many songs a day holds (500), cut by score after the backfill (keep it clear of
-  `backfill.target` + `backfill.max`); `ranking.candidate_slack` — live slots beyond it carried into resolution (60),
-  for what resolution then folds, drops or hides.
+- `ranking.max_items` — how many songs a day holds (400), cut by score after the backfill (`backfill.target` aims the
+  fill at it, never past it); `ranking.candidate_slack` — live slots beyond it carried into resolution (100), for
+  what resolution then folds, drops or hides.
+- `ranking.weights.history` — the station's whole Last.fm history (`discovery/history.py`, read from
+  `data/catalog_history.json`): the bonus for an act's all-time plays (full at `profile.history_reference_plays`).
+  `profile.history_weight` / `history_min_plays` add every act played that often to the profile as one you play;
+  `profile.lastfm_periods` lead with `overall`.
+- `newcomers` — acts the station has never played: `share` of the day they hold (0.3), `max_share` when the vetted
+  acts run short (0.5), `candidates` carried into resolution apart from the vetted acts (300), `min_tag_score` for a
+  newcomer with only tags to go on; spread evenly through the list. `ranking.weights.similar_tracks` scores the fit;
+  `sources.lastfm_similar` finds them (Last.fm's similar tracks to the songs you kept, your picks and the history's
+  most played: `seeds_per_run`, `per_seed`, `min_match`).
+- `carryover` — the cards you did not get to: `max_days` they may wait (21) and `max_items` remembered (1,500);
+  `enabled: false` turns it off.
+- `resolve.audio_searches_per_run` — video-only hits searched by name for the same recording's audio track a run
+  (600), again every `audio_recheck_days`.
 - `resolve.max_lookups_per_run` — YouTube Music lookups a run (800; the wall clock is the real limit) and
   `resolve.youtube_share` — the share of the resolve window they get before the year lookups (0.7).
 - `resolve.min_length` / `max_length` — the song-length range (1:55–9:31): shorter is an interlude, longer a mix,
