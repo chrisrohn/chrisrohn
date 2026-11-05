@@ -30,7 +30,7 @@ jobs:
       cancel-in-progress: false
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,5 +48,11 @@ jobs:
         with:
           path: dist
           include-hidden-files: true   # dist/.nojekyll comes from site/; v4+ skips dotfiles by default
+      # GitHub Pages sometimes hangs on "updating_pages" until the action gives up (2026-11-05: the day's feed was
+      # built and committed but never published, and the later slots then skip the day): one more try before failing
       - id: deployment
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      - id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v5

@@ -505,7 +505,8 @@ async function catalogFixture() {
   const items = playable.map((i, n) => {
     const year = n % 5 === 0 ? null : 1995 + (n % 20);
     if (year) years[year] = { playlist: 30 + n, candidates: (years[year]?.candidates || 0) + 1 };
-    return { ...i, id: "cat" + i.id, year, year_source: year ? "musicbrainz-search" : "unknown", year_confidence: year ? "high" : "low", release_date: null, first_seen: feed.generated_at.slice(0, 10),
+    // every year fact is the fixture's own: a reissue in the committed feed ("originally 2004") must not leak into it
+    return { ...i, id: "cat" + i.id, year, year_source: year ? "musicbrainz-search" : "unknown", year_confidence: year ? "high" : "low", original_year: null, year_evidence: [], release_date: null, first_seen: feed.generated_at.slice(0, 10),
       sources: n % 3 ? ["lastfm:top tracks"] : ["lastfm:loved", "lastfm:artist top"], plays: 200 - n, loved: n % 3 === 0, score: 8 - n / 10, reasons: [`${200 - n} plays`] };
   });
   return { generated_at: feed.generated_at, candidates: 500, count: items.length, undated: items.filter(i => !i.year).length, sources: ["lastfm:artist top", "lastfm:loved", "lastfm:top tracks"], years, items };

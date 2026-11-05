@@ -14,24 +14,29 @@ def report(name: str, ok: bool, entries: int = 0, kept: int = 0, error: str | No
     HEALTH[name] = {"ok": ok, "entries": entries, "kept": kept, "error": (error or None) and str(error)[:120]}
 
 
+# The order is the order they run in, against one time budget (`sources.time_budget_minutes`). The quick sources go
+# first, the new-act source among them, so a slow day never leaves them out; the three artist watches go last
+# because they are the slow ones and keep a cursor, so what they do not reach today is simply tomorrow's first.
+# (Until 2026-11-05 the watches ran in the middle and spent the budget: lastfm_similar, nts, reddit, difm and
+# mixcloud were left out, and the day had 9 cards by new acts instead of ~120.)
 SOURCE_MODULES = {
     "listenbrainz_fresh": "listenbrainz",
+    "lastfm_similar": "lastfm_similar",
     "musicbrainz_tags": "musicbrainz",
     "bandcamp": "bandcamp",
-    "deezer": "deezer",
-    "ytmusic_artists": "ytmusic_artists",
     "youtube_channels": "youtube_channels",
     "listenbrainz_playlists": "lb_playlists",
     "radio": "radio",
     "rss": "rss",
     "spotify": "spotify",
     "apple_music": "apple_music",
-    "musicbrainz_artists": "musicbrainz_artists",
     "nts": "nts",
     "reddit": "reddit",
     "difm": "difm",
     "mixcloud": "mixcloud",
-    "lastfm_similar": "lastfm_similar",
+    "deezer": "deezer",
+    "ytmusic_artists": "ytmusic_artists",
+    "musicbrainz_artists": "musicbrainz_artists",
 }
 PER_FEED_HEALTH = {"rss", "youtube_channels", "radio", "nts", "reddit", "apple_music", "difm", "mixcloud"}   # these report per feed / show / sub
 

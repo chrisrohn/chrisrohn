@@ -137,7 +137,9 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     est_fresh = [i for i in fresh if not newcomers.is_newcomer(i, hist)]
     est_fresh, est_live = select_candidates(est_fresh, max_items + slack, states)
     new_fresh, new_live = select_candidates(new_fresh, int(ncfg.get("candidates", 300) or 0), states)
-    fresh = sorted(est_fresh + new_fresh, key=lambda i: (-i.score, i.artist_norm))
+    # resolution stops when its time is up, so the newcomers are taken among the vetted acts at their share of the day
+    # rather than after them (in score order they came last and were the ones left unresolved)
+    fresh = newcomers.lookup_order(est_fresh, new_fresh, float(ncfg.get("share", 0.3)))
     fresh_live = est_live + new_live
     # only the best older candidates are carried into resolution, so the lookup budget is spent where it can pay off
     older, older_live = select_candidates(older, int((cfg.get("backfill") or {}).get("candidates", 600) or 0), states)

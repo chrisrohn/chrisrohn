@@ -73,6 +73,25 @@ def compose(items: list[Item], cfg: dict, profile: dict, max_items: int) -> tupl
     return out, stats
 
 
+def lookup_order(est: list[Item], new: list[Item], share: float) -> list[Item]:
+    """The order the resolver takes the candidates in: each list in its own order, a newcomer after every few vetted
+    candidates so they get about `share` of the YouTube lookups. Resolution stops when its time is up; in score order
+    the newcomers, which score lower, were the ones left unresolved."""
+    if not new or not est:
+        return est + new
+    share = min(0.9, max(0.05, share))
+    out: list[Item] = []
+    ei = ni = 0
+    while ei < len(est) or ni < len(new):
+        if ni < len(new) and (ei >= len(est) or ni < (len(out) + 1) * share):
+            out.append(new[ni])
+            ni += 1
+        else:
+            out.append(est[ei])
+            ei += 1
+    return out
+
+
 def interleave(est: list[Item], new: list[Item]) -> list[Item]:
     """Both lists in their own order, the newcomers spread evenly among the established cards, and every newcomer's
     score placed between its neighbours' so a sort by score keeps the spread."""

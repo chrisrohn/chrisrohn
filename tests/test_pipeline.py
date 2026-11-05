@@ -2369,3 +2369,20 @@ def test_lastfm_similar_finds_new_acts_that_sound_like_the_station(monkeypatch, 
     scored = score_items([nd], PROFILE, cfg)[0]
     assert "like Roosevelt – Lovers, Cut Copy – Lights & Music" in scored.reasons
     assert scored.score >= cfg["ranking"]["weights"]["similar_tracks"] * 1.5 - 0.01
+
+
+def test_new_acts_are_looked_up_among_the_vetted_ones_and_their_source_runs_early():
+    """Resolution and the source budget both stop when their time is up. The new-act source runs among the quick
+    sources, before the slow artist watches; and the newcomer candidates are resolved interleaved with the vetted
+    ones at their share, not after them (2026-11-05: the source was never reached, and 9 of 400 cards were new)."""
+    from discovery import newcomers
+    from discovery.sources import SOURCE_MODULES
+
+    order = list(SOURCE_MODULES)
+    assert order.index("lastfm_similar") < min(order.index(k) for k in ("deezer", "ytmusic_artists", "musicbrainz_artists"))
+    assert order[-3:] == ["deezer", "ytmusic_artists", "musicbrainz_artists"]
+    est = [Item(artist="Jungle", title=f"V{i}") for i in range(9)]
+    new = [Item(artist="New", title=f"N{i}") for i in range(3)]
+    got = [i.title for i in newcomers.lookup_order(est, new, 0.25)]
+    assert got[:8] == ["N0", "V0", "V1", "V2", "N1", "V3", "V4", "V5"] and sorted(got) == sorted(i.title for i in est + new)
+    assert [i.title for i in newcomers.lookup_order(est, [], 0.3)] == [i.title for i in est]
