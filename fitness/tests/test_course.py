@@ -185,3 +185,26 @@ def test_config_takes_the_start_and_finish_from_the_course():
     assert r["finish_ll"] == [44.7, -85.5]                                   # what config.toml says wins
     with pytest.raises(ValueError, match="not found"):
         config._race({"name": "X", "date": "2026-11-07", "course": "courses/missing.gpx"})
+
+
+def test_race_day_in_ride_mode_is_a_warm_up_then_the_race_on_its_guide(cfg):
+    """Race morning hands ride mode a warm-up and the race with no timed steps (the guide runs it, not a 2-hour timer),
+    and the guide: the record at this year's length, the heart rate it was ridden at, and a target just under it."""
+    th = {"lthr": 165, "max_hr": 188, "rest_hr": 50, "sex": "male"}
+    plan = season(date(2026, 11, 7), 50, 45, cfg)
+    days = [d for d in build.ride_config(cfg, th, plan)["days"] if d["date"] == "2026-11-07"]
+    assert [d["title"] for d in days][0] == "Race warm-up" and days[0]["steps"]
+    assert days[1]["race"] is True and days[1]["steps"] == [] and days[1]["title"].startswith("Race day")
+    eased = build._eased(days, {"level": "easy", "title": "Keep it easy"}, {"date": "2026-11-07", "level": "hard"})
+    assert eased == days                                                    # a low morning doesn't turn the race into a ride
+    page = {"name": "Iceman", "date": "2026-11-07", "start": "9:24 AM", "wave": 14, "kind": "mtb", "days_out": 1, "course": {"km": 44.1},
+            "expected": {"minutes": 114}, "fuel": {"rate": 60, "sips": "⅓ bottle every 20 min", "top_up": 0}}
+    eds = [{"date": "2024-11-02", "elapsed_s": 7770, "moving_s": 7600, "distance_m": 48900, "avg_hr": 158.4, "ctl": 52},
+           {"date": "2025-11-01", "elapsed_s": 7350, "moving_s": 7200, "distance_m": 48900, "avg_hr": 163.2, "ctl": 57.2},
+           {"date": "2023-11-04", "elapsed_s": 4000, "moving_s": 3900, "distance_m": 20000, "avg_hr": 150, "ctl": 40}]   # a ride to the start
+    g = build.race_guide(page, eds, th, {"ctl": 55.1, "tsb": 12})
+    assert g["gun"] == "2026-11-07T09:24" and g["wave"] == 14 and g["start_min"] == 6
+    assert g["pr"]["date"] == "2025-11-01" and g["pr"]["scaled"] and g["pr"]["secs"] == round(7350 * 44.1 / 48.9) and g["pr"]["avg_hr"] == 163
+    assert g["target_s"] == g["pr"]["secs"] - max(30, round(g["pr"]["secs"] * 0.01))   # a record, by a margin you can feel
+    assert g["settle"] == [152, 160] and g["ceiling"] == 165 and g["ctl"] == 55.1
+    assert build.race_guide(page, [], th)["target_s"] == 114 * 60 and build.race_guide(page, [], th)["pr"] is None   # no history: the expected time

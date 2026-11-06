@@ -46,39 +46,48 @@
     <span class="nbtext"><b id="nb-dist" class="num"></b><span id="nb-what"></span></span>
     <button type="button" class="chip" id="nb-action" hidden>Reroute</button>
   </div>
+
+  <!-- the glance dock: on every screen but Workout, what the workout asks of you now and how you're answering it -->
+  <button type="button" class="dock" id="dock" hidden>
+    <span class="dk-col"><span class="dk-k" id="dk-k">Free ride</span><b class="num dk-time" id="dk-time">—</b></span>
+    <span class="dk-col dk-right"><span class="dk-k" id="dk-sub">bpm</span><span class="dk-row"><b class="num dk-hr" id="dk-hr">—</b><span class="dk-st" id="dk-st"></span></span></span>
+    <span class="dk-bar" aria-hidden="true"><span id="dk-bar"></span></span>
+  </button>
+
+  <section class="climbstrip" id="climbstrip" hidden aria-label="Climb">
+    <span class="k" id="cs-k">Climb ahead</span><b class="num" id="cs-main"></b><span class="cs-sub" id="cs-sub"></span>
+    <span class="climbbar" aria-hidden="true"><span id="cs-bar"></span></span>
+  </section>
+
+  <div class="suggest" id="suggest" hidden role="status"><span id="suggest-text"></span><span class="sbtns"><button type="button" class="chip" id="suggest-yes">Undo</button><button type="button" class="chip primary" id="suggest-no">OK</button></span></div>
+  <div class="fuel" id="fuel" hidden role="alert"><b>Eat &amp; drink</b><span id="fuel-text"></span><button type="button" class="chip" id="fuel-ok">Done</button></div>
   </header>
 
   <main class="pages" id="pages" tabindex="0">
     <h1 class="sr">Ride mode</h1>
 
     <section class="page rmain" id="pg-workout" role="tabpanel" aria-labelledby="tab-workout">
-      <section class="stepcard" id="stepcard" aria-live="polite">
-        <div class="stephead"><div class="stepname" id="step-name">Free ride</div><button type="button" class="chip more" id="w-tailor" aria-label="Change the workout">Change</button></div>
-        <div class="steptime num" id="step-time">—</div>
-        <div class="target" id="step-target"></div>
+      <section class="stepcard" id="stepcard">
+        <div class="stephead"><div class="stepname" id="step-name" aria-live="polite">Free ride</div><button type="button" class="chip more" id="w-tailor" aria-label="Change the workout">Change</button></div>
+        <div class="rhero">
+          <div class="h-step"><div class="steptime num" id="step-time">—</div><span class="h-k" id="step-left">ride time</span></div>
+          <div class="hrcard" id="hrcard">
+            <div class="hrval num" id="hr">—</div>
+            <span class="zone" id="hr-zone">bpm</span>
+          </div>
+        </div>
+        <div class="doing"><span class="status" id="hr-status"></span><div class="target" id="step-target"></div></div>
         <div class="gauge" id="gauge" hidden aria-hidden="true"><span class="band" id="g-band"></span><b class="mark" id="g-mark"></b></div>
+        <div class="zbar" id="zbar" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><b id="zmark"></b></div>
         <div class="progress" aria-hidden="true"><span id="step-bar"></span></div>
         <div class="cue" id="step-cue"></div>
         <div class="next" id="step-next"></div>
       </section>
 
-      <div class="suggest" id="suggest" hidden role="status"><span id="suggest-text"></span><span class="sbtns"><button type="button" class="chip" id="suggest-yes">Undo</button><button type="button" class="chip primary" id="suggest-no">OK</button></span></div>
-
       <section class="brief" id="brief" hidden aria-label="Today">
         <div class="k">Today<span id="b-race"></span></div>
         <div class="call"><span class="score" id="b-score"></span><span id="b-title"></span></div>
         <ul id="b-why"></ul>
-      </section>
-
-      <section class="hrcard" id="hrcard">
-        <div class="hrval num" id="hr">—</div>
-        <div class="hrmeta"><span class="zone" id="hr-zone">bpm</span><span class="status" id="hr-status"></span></div>
-        <div class="zbar" id="zbar" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><b id="zmark"></b></div>
-      </section>
-
-      <section class="climbstrip" id="climbstrip" hidden aria-label="Climb">
-        <span class="k" id="cs-k">Climb ahead</span><b class="num" id="cs-main"></b><span class="cs-sub" id="cs-sub"></span>
-        <span class="climbbar" aria-hidden="true"><span id="cs-bar"></span></span>
       </section>
 
       <div class="rtiles" id="w-tiles" role="group" aria-label="Your fields"></div>
@@ -89,7 +98,6 @@
         <div class="rtile"><span class="k">On your line</span><span class="v" id="wx-rel">—</span><span class="s" id="wx-cost"></span><span class="s" id="wx-src"></span></div>
       </section>
 
-      <div class="fuel" id="fuel" hidden role="alert"><b>Eat &amp; drink</b><span id="fuel-text"></span><button type="button" class="chip" id="fuel-ok">Done</button></div>
       <p class="note" id="note"></p>
     </section>
 
@@ -123,7 +131,7 @@
         <h2 class="k" id="free-k">Road ahead</h2>
         <figure class="prof">
           <figcaption class="k" id="free-prof-k">Next 5 mi</figcaption>
-          <canvas id="prof-free" height="120" role="img" aria-label="Elevation profile of the road ahead"></canvas>
+          <canvas id="prof-free" height="104" role="img" aria-label="Elevation profile of the road ahead"></canvas>
         </figure>
         <section class="climb" id="free-climb" hidden>
           <div class="k" id="free-climb-k">Next climb</div>
@@ -149,12 +157,8 @@
         </section>
         <div class="actions left abtns"><button type="button" class="chip" id="btn-pace">Race plan</button></div>
         <figure class="prof">
-          <figcaption class="k">Whole route</figcaption>
-          <canvas id="prof-all" height="96" role="img" aria-label="Elevation profile of the whole route"></canvas>
-        </figure>
-        <figure class="prof">
           <figcaption class="k" id="prof-next-k">Next 5 mi</figcaption>
-          <canvas id="prof-next" height="120" role="img" aria-label="Elevation profile of the next stretch"></canvas>
+          <canvas id="prof-next" height="104" role="img" aria-label="Elevation profile of the next stretch"></canvas>
         </figure>
         <section class="climb" id="climb" hidden>
           <div class="k" id="climb-k">Next climb</div>
@@ -163,6 +167,10 @@
         </section>
         <section class="list"><h2 class="k">Turns</h2><ol id="turn-list"></ol></section>
         <section class="list" id="poi-wrap" hidden><h2 class="k">Stops &amp; points</h2><ol id="poi-list"></ol></section>
+        <figure class="prof">
+          <figcaption class="k">Whole route</figcaption>
+          <canvas id="prof-all" height="64" role="img" aria-label="Elevation profile of the whole route"></canvas>
+        </figure>
         <section class="list"><h2 class="k">Wind ahead</h2><p id="wind-ahead" class="note">Fetched with the weather at Start.</p></section>
       </div>
     </section>
@@ -200,10 +208,12 @@
   <dialog id="settings" aria-labelledby="settings-h">
     <form method="dialog" class="sform">
       <h2 id="settings-h">Ride settings</h2>
+      <p class="note syncnote" id="s-sync"></p>
       <label>Threshold HR (LTHR) <input id="s-lthr" type="number" inputmode="numeric" min="100" max="220"></label>
       <label>Max HR <input id="s-max" type="number" inputmode="numeric" min="120" max="230"></label>
       <label>Resting HR <input id="s-rest" type="number" inputmode="numeric" min="30" max="100"></label>
       <label>FTP, watts (0 = no power targets) <input id="s-ftp" type="number" inputmode="numeric" min="0" max="600"></label>
+      <div class="actions left" id="s-sync-row" hidden><button type="button" class="chip" id="s-follow">Use my training numbers</button></div>
       <label>Wheel circumference (m) <input id="s-wheel" type="number" inputmode="decimal" step="0.01" min="1.5" max="2.5"></label>
       <label>Fuel reminder every (min, 0 = off) <input id="s-fuel" type="number" inputmode="numeric" min="0" max="60"></label>
       <label>Auto lap every (mi or km, 0 = off) <input id="s-autolap" type="number" inputmode="decimal" step="0.5" min="0" max="50"></label>

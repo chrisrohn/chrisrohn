@@ -9,7 +9,8 @@
 body.ride {
   --tap: 44px; --gutter: var(--sp-4); --radius: 0;
   --num: var(--font);
-  --fs-ride-hr: clamp(4.25rem, min(40vw, 17dvh), 11rem); --fs-ride-clock: clamp(2.5rem, min(19vw, 10dvh), 6rem);
+  /* the step's clock and heart rate share one row (the hero): both as big as half the width allows */
+  --fs-ride-hr: clamp(3.25rem, min(24vw, 13dvh), 8rem); --fs-ride-clock: clamp(2.5rem, min(19vw, 11dvh), 6.5rem);
   --fs-ride-figure: clamp(1.5rem, min(9vw, 5dvh), 2.9rem);
   /* pinned to the visible window (not 100dvh, which on Android can include the strip under the navigation bar and
      push the controls off screen); --app-h is the window's measured height, kept current by ride.js */
@@ -81,15 +82,25 @@ span.chip {
 .rmain { max-width: none; margin: 0; padding: var(--sp-3) var(--gutter); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; counter-reset: none; }
 
 /* ── the step: what to do now, for how long, at what heart rate ────────────────────────────────────────────── */
-.stepcard { display: grid; gap: 6px; border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); }
+.stepcard { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); }
 .stephead { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; }
 .stepname, .zone, .rtile .k, .next, .status, .sform label, .sum, .fuel b, button.big, .mapfields .k, .prof .k, .list .k, .climb .k, .lapnow .k, h3.k {
   font-size: var(--fs-label); font-weight: 700; line-height: var(--lh-snug); text-transform: uppercase; letter-spacing: var(--track-label);
 }
-.stepname { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.stepname::before { content: ""; width: 10px; height: 10px; background: var(--accent); flex: none; }
+/* a block, not a flex box: text in a flex box can't shrink below its length, and a long race name pushed the screen wide */
+.stepname { flex: 1 1 auto; min-width: 0; display: block; font-size: var(--fs-small); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.stepname::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: var(--sp-2); background: var(--accent); vertical-align: 0; }
 .stephead .chip.more { min-height: 32px; padding: 0 var(--sp-3); font-size: var(--fs-label); color: var(--ink); border: 1.5px solid var(--ink); background: transparent; }
-.steptime { font-size: var(--fs-ride-clock); font-weight: 700; line-height: .92; }
+/* the hero (.rhero: the dashboard has its own .hero): time left in the step on the left, heart rate on the right, read in one glance */
+.rhero { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); min-width: 0; }
+.rhero .zone { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.h-step { display: grid; gap: 2px; min-width: 0; }
+.h-k { font-size: var(--fs-label); font-weight: 700; line-height: var(--lh-snug); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--ink-2); white-space: nowrap; }
+.steptime { font-size: var(--fs-ride-clock); font-weight: 700; line-height: .92; white-space: nowrap; }
+.steptime.long { font-size: calc(var(--fs-ride-clock) * .76); }
+/* what to do now: ▲ Push / On target / ▼ Ease off beside the target itself */
+.doing { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); min-height: 36px; }
+.doing .target { flex: 1 1 10rem; min-width: 0; }
 .target { font-size: var(--fs-lead); line-height: var(--lh-snug); color: var(--ink-2); }
 .target b { font-weight: 700; color: var(--ink); font-family: var(--num); font-variant-numeric: tabular-nums; font-size: 1.15em; }
 .gauge { position: relative; height: var(--sp-3); background: var(--grid); margin-top: 2px; }
@@ -112,19 +123,18 @@ span.chip {
 .suggest .chip.primary { background: var(--page); color: var(--ink); border-color: var(--page); }
 
 /* ── heart rate: the biggest thing on the screen, in its zone's color ──────────────────────────────────────── */
-.hrcard { display: grid; gap: 6px; border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); }
-.hrval { font-size: var(--fs-ride-hr); font-weight: 700; line-height: .85; letter-spacing: -.06em; margin-left: -.05em; color: var(--ink); transition: color .4s ease; }
-.hrval.idle { font-size: calc(var(--fs-ride-hr) * .45); line-height: 1.2; letter-spacing: 0; color: var(--muted); }
+.hrcard { display: grid; justify-items: end; gap: 4px; min-width: 0; }
+.hrval { font-size: var(--fs-ride-hr); font-weight: 700; line-height: .85; letter-spacing: -.05em; color: var(--ink); transition: color .4s ease; }
+.hrval.idle { font-size: calc(var(--fs-ride-clock) * .6); line-height: 1.2; letter-spacing: 0; color: var(--muted); }
 .hrcard[data-zone="1"] .hrval { color: var(--zc1); } .hrcard[data-zone="2"] .hrval { color: var(--zc2); } .hrcard[data-zone="3"] .hrval { color: var(--zc3); }
 .hrcard[data-zone="4"] .hrval { color: var(--zc4); } .hrcard[data-zone="5"] .hrval { color: var(--zc5); }
-.hrmeta { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); min-height: 36px; }
 .zone { color: var(--ink); font-size: var(--fs-small); display: inline-flex; align-items: center; gap: var(--sp-2); }
 /* the zone as a line bullet: a filled circle in the zone's color with its number, like a subway map's */
 .zone[data-n]::before { content: attr(data-n); display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; font-size: var(--fs-body); letter-spacing: 0;
   color: #ffffff; background: var(--zc1); }
 .zone[data-n="2"]::before { background: var(--zc2); } .zone[data-n="3"]::before { background: var(--zc3); } .zone[data-n="4"]::before { background: var(--zc4); color: #000000; } .zone[data-n="5"]::before { background: var(--zc5); }
 .status { font-size: var(--fs-small); display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0 var(--sp-3); border: 1.5px solid transparent; }
-.status:empty { padding: 0; border: 0; }
+.status:empty { display: none; }
 .status::before { content: ""; width: 10px; height: 10px; background: transparent; }
 .status.good { border-color: var(--ink); } .status.good::before { background: var(--good); }
 .status.up { background: var(--ink); color: var(--page); } .status.up::before { background: var(--zc2); }
@@ -186,6 +196,11 @@ body.riding .lockbtn { display: grid; place-items: center; }
 .navbanner .nbtext b { font-size: var(--fs-ride-figure); letter-spacing: -.01em; margin-right: var(--sp-1); }
 .navbanner .chip { color: #ffffff; border: 1.5px solid #ffffff; background: transparent; min-height: var(--tap); padding: 0 var(--sp-3); }
 .navbanner.now { border-left-color: var(--accent); }
+/* far from the turn, on any screen but the map: one slim line, so where you're going is always in view */
+.navbanner.slim { min-height: 48px; padding-top: 4px; padding-bottom: 4px; gap: var(--sp-2); }
+.navbanner.slim .arrow { font-size: 1.75rem; }
+.navbanner.slim .nbtext { font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.navbanner.slim .nbtext b { font-size: 1.5rem; }
 .navbanner.alert { background: #c42b1b; color: #ffffff; border-left-color: #000000; }
 @media (prefers-reduced-motion: reduce) { .navbanner .arrow { transition: none; } }
 
@@ -215,11 +230,13 @@ html[data-theme="dark"] .maplibregl-ctrl-attrib-button { filter: invert(1); }
 /* ── what's ahead ──────────────────────────────────────────────────────────────────────────────────────────── */
 .empty { display: grid; gap: var(--sp-3); justify-items: start; border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-3); }
 .empty .chip { min-height: var(--tap); padding: 0 var(--sp-4); }
-#ahead { display: grid; gap: var(--sp-4); }
+#ahead { display: grid; gap: var(--sp-3); }
 .rtile .s.warn { color: var(--accent-ink); font-weight: 700; }
 .prof { margin: 0; display: grid; gap: var(--sp-1); }
 .prof .k, .list .k, .climb .k, h3.k { color: var(--ink-2); }
 .prof canvas { display: block; width: 100%; border-bottom: var(--rule-minor) solid var(--ink); }
+#prof-all { height: 64px; } #prof-next, #prof-free { height: 104px; }
+@media (max-height: 760px) { #prof-all { height: 52px; } #prof-next, #prof-free { height: 88px; } }
 .climb { border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); display: grid; gap: var(--sp-1); }
 .climb.on { border-top-color: var(--zc4); }
 .climbrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); }
@@ -332,22 +349,22 @@ dialog.ask .sform { gap: var(--sp-2); }
 
 /* ── short screens: the same layout, tightened step by step until it fits without scrolling ─────────────────── */
 @media (max-height: 760px) {
-  body.ride { --fs-ride-hr: clamp(4rem, min(40vw, 15dvh), 11rem); --fs-ride-clock: clamp(2.25rem, min(17vw, 9dvh), 5.5rem); --fs-ride-figure: clamp(1.4rem, min(8.5vw, 4.6dvh), 2.75rem); }
+  body.ride { --fs-ride-hr: clamp(3rem, min(23vw, 12dvh), 7.5rem); --fs-ride-clock: clamp(2.25rem, min(18vw, 10dvh), 6rem); --fs-ride-figure: clamp(1.4rem, min(8.5vw, 4.6dvh), 2.75rem); }
   .rmain { gap: var(--sp-2); padding-top: var(--sp-2); }
   .rtile { padding: 6px var(--sp-2) 8px; }
   .cue { -webkit-line-clamp: 1; }
   button.big { min-height: 60px; }
 }
 @media (max-height: 640px) {
-  body.ride { --fs-ride-hr: clamp(3.5rem, min(38vw, 13dvh), 11rem); --fs-ride-clock: clamp(2rem, min(16vw, 8dvh), 5.25rem); --fs-ride-figure: clamp(1.25rem, min(8vw, 4.2dvh), 2.5rem); }
+  body.ride { --fs-ride-hr: clamp(2.75rem, min(22vw, 11dvh), 7rem); --fs-ride-clock: clamp(2rem, min(16vw, 9dvh), 5.25rem); --fs-ride-figure: clamp(1.25rem, min(8vw, 4.2dvh), 2.5rem); }
   .rbar select, .rbar .chip { min-height: 40px; }
   .rtabs button { min-height: 34px; }
-  .hrmeta, .status { min-height: 30px; }
+  .doing, .status { min-height: 30px; }
   .wxbar { display: none; }
   button.big { min-height: 52px; }
 }
 @media (orientation: landscape) and (max-height: 560px) {
-  body.ride { --fs-ride-hr: clamp(3.5rem, 20dvh, 7rem); --fs-ride-clock: clamp(2.25rem, 12dvh, 4rem); --fs-ride-figure: clamp(1.375rem, 7dvh, 2.25rem); }
+  body.ride { --fs-ride-hr: clamp(3rem, 18dvh, 6rem); --fs-ride-clock: clamp(2.25rem, 14dvh, 5rem); --fs-ride-figure: clamp(1.375rem, 7dvh, 2.25rem); }
   .rmain { column-gap: var(--sp-5); grid-template-columns: 1fr 1fr; }
   .cue, .note { display: none; }
   .rtiles { grid-column: 1 / -1; grid-template-columns: repeat(6, minmax(0, 1fr)); }
@@ -366,7 +383,7 @@ dialog.ask .sform { gap: var(--sp-2); }
 body.riding .brief { display: none; }
 /* a turn on the banner takes the room the weather had; the readings shrink a step to keep everything on screen */
 body.nav.riding .wxbar { display: none; }
-body.nav { --fs-ride-hr: clamp(4rem, min(38vw, 14.5dvh), 10rem); --fs-ride-clock: clamp(2.25rem, min(17vw, 8.5dvh), 5.5rem); }
+body.nav { --fs-ride-hr: clamp(3rem, min(23vw, 11.5dvh), 7.5rem); --fs-ride-clock: clamp(2.25rem, min(18vw, 9.5dvh), 6rem); }
 body.nav .cue { -webkit-line-clamp: 1; }
 body.nav .rmain { gap: var(--sp-2); }
 @media (max-width: 380px) {
@@ -397,7 +414,7 @@ body.nav .rmain { gap: var(--sp-2); }
 .steptime.behind { color: var(--crit); }
 
 /* the climb within 2 km or underway, on the Workout screen: a ClimbPro strip in the climb's orange; the weather steps aside */
-.climbstrip { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px var(--sp-3); border-top: var(--rule-major) solid var(--zc4); padding-top: var(--sp-2); }
+.climbstrip { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px var(--sp-3); border-top: var(--rule-major) solid var(--zc4); padding: var(--sp-2) var(--gutter) var(--sp-2); background: var(--page); color: var(--ink); }
 .climbstrip .k { grid-column: 1 / -1; font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; letter-spacing: var(--track-label); color: var(--ink-2); }
 .climbstrip b { font-size: var(--fs-ride-figure); line-height: 1; white-space: nowrap; }
 .climbstrip .cs-sub { font-size: var(--fs-body); color: var(--ink-2); min-width: 0; }
@@ -410,3 +427,49 @@ body.climbing .wxbar { display: none; }
 /* the wind's cost under "On your line" */
 #wx-cost { font-weight: 700; color: var(--ink); }
 #wx-cost:empty { display: none; }
+
+/* ── the glance dock: on Map, Ahead, Data and Laps, the workout in one row (tap it for the Workout screen) ────── */
+.dock { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 0 var(--sp-3); width: 100%;
+  padding: 6px var(--gutter) 9px calc(var(--gutter) - var(--sp-2)); margin: 0; font: inherit; text-align: left; cursor: pointer;
+  background: var(--page); color: var(--ink); border: 0; border-left: var(--sp-2) solid var(--hair); border-bottom: var(--rule-minor) solid var(--ink); }
+.dock:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+.dock[data-zone="1"] { border-left-color: var(--zc1); } .dock[data-zone="2"] { border-left-color: var(--zc2); } .dock[data-zone="3"] { border-left-color: var(--zc3); }
+.dock[data-zone="4"] { border-left-color: var(--zc4); } .dock[data-zone="5"] { border-left-color: var(--zc5); }
+.dk-col { display: grid; gap: 2px; min-width: 0; }
+.dk-right { justify-items: end; }
+.dk-k { font-size: var(--fs-label); font-weight: 700; line-height: var(--lh-snug); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dk-time, .dk-hr { font-size: clamp(1.9rem, min(11vw, 6dvh), 3rem); font-weight: 700; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dk-time.ahead { color: var(--good); } .dk-time.behind { color: var(--crit); }
+.dk-hr { letter-spacing: -.03em; }
+.dock[data-zone="1"] .dk-hr { color: var(--zc1); } .dock[data-zone="2"] .dk-hr { color: var(--zc2); } .dock[data-zone="3"] .dk-hr { color: var(--zc3); }
+.dock[data-zone="4"] .dk-hr { color: var(--zc4); } .dock[data-zone="5"] .dk-hr { color: var(--zc5); }
+.dk-row { display: flex; align-items: center; gap: var(--sp-2); }
+.dk-st { font-size: var(--fs-small); font-weight: 700; line-height: 1.2; text-transform: uppercase; letter-spacing: var(--track-label); padding: 3px 6px; border: 1.5px solid transparent; white-space: nowrap; }
+.dk-st:empty { display: none; }
+.dk-st.good { border-color: var(--ink); } .dk-st.up { background: var(--ink); color: var(--page); } .dk-st.down { background: #c42b1b; color: #ffffff; } .dk-st.feel { color: var(--ink-2); border-color: var(--hair); }
+.dk-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--grid); }
+.dk-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .9s linear; }
+@media (prefers-reduced-motion: reduce) { .dk-bar span { transition: none; } }
+/* the app's word and the eat-and-drink prompt sit in the header too, so they reach you on any screen */
+.rtop .suggest, .rtop .fuel { border-bottom: 1px solid var(--hair); }
+.rtop .climbstrip b { font-size: clamp(1.25rem, min(7vw, 4dvh), 2rem); }
+/* the training sync's numbers in settings */
+.syncnote { border-left: var(--sp-1) solid var(--zc2); padding-left: var(--sp-2); }
+/* short screens: the header's glance blocks tighten, and on the map the climb steps aside (the map draws it in its colors) */
+@media (max-height: 700px) {
+  .navbanner.slim { min-height: 42px; }
+  .dock { padding-top: 4px; padding-bottom: 7px; }
+  .dk-time, .dk-hr { font-size: clamp(1.6rem, min(9vw, 5.4dvh), 2.4rem); }
+  .rtop .climbstrip { padding-top: 6px; padding-bottom: 6px; }
+  .rtop .climbstrip .climbbar { display: none; }
+  body[data-page="map"] .rtop .climbstrip { display: none; }
+  body.riding .doing .target { font-size: var(--fs-body); }
+}
+@media (max-height: 700px) {
+  .navbanner:not(.slim) { min-height: 56px; }
+  .navbanner:not(.slim) .arrow { font-size: 2.2rem; }
+  .navbanner .nbtext { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+/* race morning: the plan's few lines in full before the gun */
+body:not(.riding) .cue { -webkit-line-clamp: 6; }

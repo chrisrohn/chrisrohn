@@ -302,7 +302,26 @@ source and license in [`fonts/`](fonts)).
   asking. The **lock** beside End (or *Lock the screen at Start* in Settings) makes the screen ignore rain and bumps:
   the readings stay in view, and only a one-second hold on the bar along the bottom unlocks it.
 
-Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data · Laps**.
+Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data · Laps**. They work as one computer, not
+five apps: whatever screen you're on, you can see what to do with your legs and where to go.
+
+- **The workout rides along.** On Map, Ahead, Data and Laps a one-row dock under the tabs carries the step and its time
+  left (or the ride clock, or how far ahead of the race plan you are), heart rate in its zone's color with ✓ / ▲ Push /
+  ▼ Ease against the target, and the step's progress along its foot. Tap it for the Workout screen.
+- **The next turn is always in view.** With a route, every screen shows the next turn (or the distance to the finish) as
+  a slim line; it grows into the full banner as the turn comes up, and on the Map. Off course and wrong way take it over
+  on any screen.
+- **The climb, the app's word and the fuel prompt reach you anywhere.** The ClimbPro strip (on every screen but Ahead,
+  which has its own), anything the app changes on its own with its Undo, the weather and fuel-tank warnings and the
+  eat-and-drink prompt all sit in the header, not on one screen.
+- **Workout reads in one glance:** time left in the step and heart rate side by side, as big as half the width allows;
+  ▲ Push / On target / ▼ Ease off beside the target; the target gauge; what's next. It fits a phone mid-ride without
+  scrolling (360 × 640 up), turn, climb and all.
+- **Your numbers are your training's.** LTHR, max and resting HR, FTP and weight come from the sync, the same ones the
+  dashboard's zones, plan and load use, and follow it as it learns (a new LTHR from a hard ride, a new weigh-in). One you
+  type in Settings stays yours until the sync learns a new value; Settings shows the sync's numbers and *Use my training
+  numbers* goes back to them. With no FTP of your own, the steps' watts and ERG use the eFTP the sync learned from your
+  power curve. (Settings saved before this froze every number at that moment: those follow the sync again.)
 
 - **Routes.** Load a **GPX or TCX** (Ride with GPS, Komoot, Strava, Garmin Connect, a race site) under **Map → Routes**,
   or on Android **share** the file to Training from any app (Files, Gmail, Komoot…); desktop Chrome opens .gpx files
@@ -349,7 +368,8 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   it: *the wind cost you about 6 min; headwind 55% of the time*.
 - **Data.** Ride and moving time, distance, speed, average and max, climbed, grade, HR and max, power (10 s) and
   cadence, time of day, sunset, elevation, the climb, the wind, lap time, the fuel tank, W′, and the phone's battery
-  with **how long it lasts** at this ride's drain (and whether that's enough for the ride left). **Your fields:**
+  with **how long it lasts** at this ride's drain (and whether that's enough for the ride left), and from the route the
+  **next turn**, **to go** and **arrival** (with *lights* when it's after sunset), and the **weather**. **Your fields:**
   **Fields** picks the Workout screen's six and the Data screen's list and order; **2 · 3 · 4 a row** on the Data
   screen is the zoom (fewer, bigger numbers on rough ground). Kept on the phone.
 - **Back to the start**, under **Go**: **Retrace my track** turns your own track around and guides you back the way
@@ -396,6 +416,23 @@ Five screens, swiped or tapped along the top: **Workout · Map · Ahead · Data 
   eaten, and when it runs low at this pace; it says *eat something* at 40% and *eat now* at 25%, and the after-ride note
   says how the fueling went. With power and the critical power and W′ the sync learned from your power curve, **W′
   left** tracks the reserve above CP (Skiba's model) and says when it's nearly gone.
+- **Race day, guided to a record.** Within a day of the race, the sync sends ride mode a race guide built from your past
+  editions (`build.race_guide`): your record at this year's course length (an edition of a different length counts at its
+  own pace), the heart rate you rode it at, and a target just under it (1%, half a minute at least). Ride mode sets that
+  plan on the race course by itself and calibrates every section's heart rate to the effort that set your record, so it
+  works from heart rate alone: a little more up the climbs, less down them, nothing over threshold until the last 15%.
+  On race morning the session is a **Race warm-up** (the dashboard's: easy, two 30 s at race effort, to the corral) and
+  then the **race**, which has no timer: from 75 minutes before the gun ride mode picks the race and the course itself.
+  On the bike:
+  - **The start:** a countdown for the minutes you go hard for your place (6 on an MTB wave start), then *settle at …*.
+  - **Then the big number is your record:** how far ahead or behind your record pace you are, the section's heart rate
+    with ▲ / ▼ / *On the plan*, and your projected finish against your record, on Workout and in the dock everywhere.
+  - **Said as you go:** each climb and its ceiling, *descent: recover, eat and drink*, every quarter (ahead or behind
+    your record, and the finish time you're on for), and in the last 15% *whatever you saved, use it now*.
+  - **Keeping you feeling good:** a warning that repeats every 4 minutes while heart rate sits over the plan (the finish
+    is what you're spending), eating every 20 minutes, and the fuel tank.
+  - **The race clock runs:** no auto-pause in a race, and the clock starts as you roll off the line, not in the corral.
+  - A low readiness morning doesn't turn the race into an easy ride, and a race plan you set yourself is kept.
 - **Race your past self.** Load a route you've ridden with ride mode and *Ahead* shows **your best** (or last) ride
   there; on the ride, how far ahead or behind it you are, said every quarter of the route. Each climb's time is said at
   the top against your best on it (*a new record*, with a fanfare). **Save as route** in a ride's summary turns any ride,
@@ -995,4 +1032,4 @@ legs actually felt on the bike.
 | `demo.py` | the synthetic athlete |
 | `fonts/` | Nimbus Sans L (URW, GPL v2): the source OTFs, the license, and `subset.sh`, which writes the app's `site/fonts/*.woff2` |
 
-Tests: `python -m pytest fitness/tests` (models, planner, parsers, build, race courses checked against ride mode's own analysis) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target, the race course on the card and kept as a route). CI runs both. This is a personal analysis tool, not medical advice.
+Tests: `python -m pytest fitness/tests` (models, planner, parsers, build, race courses checked against ride mode's own analysis) and `npx playwright test fitness/tests` (the hosted app and ride page: manifest, offline, data import, the GitHub sync against a stand-in API, CSP, accessibility, link hand-off, the move from chrisrohn.com; and the cycling computer: route parsing, climbs, turn by turn, off course and detours against a stand-in BRouter, the map under its CSP, recording and FIT / GPX / TCX, tailoring, the share target, the race course on the card and kept as a route; and at a glance: the workout dock and the next turn on every screen, Workout fitting a phone mid-ride, and the numbers following the sync). CI runs both. This is a personal analysis tool, not medical advice.
