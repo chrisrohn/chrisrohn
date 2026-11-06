@@ -66,27 +66,27 @@
   //    dashboard's zones, plan and load use) unless you type your own here. One you type stays yours until the sync
   //    learns a new value (a fresh LTHR from a hard ride, a new weigh-in), and then the newer number wins.
   //    own: { field: [your value, the sync's value when you set it] }
-  const ANCHORS = { lthr: "lthr", max: "max_hr", rest: "rest_hr", ftp: "ftp", weight: "weight_kg" };
+  const syncSent = { lthr: cfg.lthr, max: cfg.max_hr, rest: cfg.rest_hr, ftp: cfg.ftp, weight: cfg.weight_kg };   // as the sync sent them (null: not sent)
   const own = prefs.own && typeof prefs.own === "object" ? { ...prefs.own } : {};
   // settings saved before this froze every number at the moment they were saved, so those follow the sync again
-  for (const [k, ck] of Object.entries(ANCHORS)) {
+  for (const k of Object.keys(syncSent)) {
     const o = own[k];
-    if (o && (!Array.isArray(o) || !Number.isFinite(+o[0]) || (cfg[ck] != null && +o[1] !== +cfg[ck]))) delete own[k];   // the sync has moved on
+    if (o && (!Array.isArray(o) || !Number.isFinite(+o[0]) || (syncSent[k] != null && +o[1] !== +syncSent[k]))) delete own[k];   // the sync has moved on
   }
   const synced = { lthr: cfg.lthr, max: cfg.max_hr, rest: cfg.rest_hr, ftp: cfg.ftp ?? 0, weight: cfg.weight_kg || 75 };
-  const anchor = k => (own[k] ? +own[k][0] : synced[k]);
+  const A = Object.fromEntries(Object.keys(synced).map(k => [k, own[k] ? +own[k][0] : synced[k]]));
   const P = {
-    lthr: anchor("lthr"), max: anchor("max"), rest: anchor("rest"), wheel: prefs.wheel || cfg.wheel_m || 2.29,
+    lthr: A.lthr, max: A.max, rest: A.rest, wheel: prefs.wheel || cfg.wheel_m || 2.29,
     fuel: prefs.fuel ?? cfg.fuel_every_min ?? 20, voice: prefs.voice ?? true, km: (ls.get("fitness-units") || (cfg.units === "metric" ? "km" : "mi")) === "km",
-    ftp: anchor("ftp"), autoPause: prefs.autoPause ?? true, stepLap: prefs.stepLap ?? true, autoLap: prefs.autoLap ?? 0,
+    ftp: A.ftp, autoPause: prefs.autoPause ?? true, stepLap: prefs.stepLap ?? true, autoLap: prefs.autoLap ?? 0,
     climbs: prefs.climbs ?? true, reroute: prefs.reroute ?? true, profile: prefs.profile || "trekking", headingUp: prefs.headingUp ?? true,
-    trainer: prefs.trainer || "auto", weight: anchor("weight"), upload: prefs.upload ?? true, saver: prefs.saver || "auto",
+    trainer: prefs.trainer || "auto", weight: A.weight, upload: prefs.upload ?? true, saver: prefs.saver || "auto",
     autoLock: prefs.autoLock ?? false, freeride: prefs.freeride || "all",
   };
   /** A number from the settings sheet: yours if it differs from the sync's, else the sync's again. */
   const setAnchor = (k, v) => {
     if (!Number.isFinite(v)) return;
-    if (synced[k] != null && Math.abs(v - synced[k]) < 1e-9) delete own[k]; else own[k] = [v, cfg[ANCHORS[k]] ?? null];
+    if (synced[k] != null && Math.abs(v - synced[k]) < 1e-9) delete own[k]; else own[k] = [v, syncSent[k] ?? null];
     P[k] = v;
   };
   const savePrefs = () => ls.set("fitness-ride-prefs", JSON.stringify({ own, wheel: P.wheel, fuel: P.fuel, voice: P.voice,
@@ -143,7 +143,7 @@
 
   // ── the day's session ───────────────────────────────────────────────────────────────────────────────────
   const daySel = $("day");
-  const days = (cfg.days || []).filter(d => d.steps && d.steps.length);
+  const days = (cfg.days || []).filter(d => (d.steps && d.steps.length) || d.race);
   const paintDays = () => {
     const quick = S.quick ? `<option value="quick">${esc(S.quick.title)}</option>` : "";
     daySel.innerHTML = quick + days.map((d, i) => {
@@ -152,12 +152,31 @@
       return `<option value="${i}">${label} · ${esc(d.title)}${d.minutes ? ` · ${Math.round(+d.minutes)} min` : ""}</option>`;
     }).join("") + `<option value="free">Free ride (no steps)</option>`;
   };
-  const todayIdx = days.findIndex(d => d.date === iso(today));
+  // ── race day: the guide the sync built from your past editions (build.race_guide). Untrusted like all config: numbers
+  //    checked, text only ever shown as text.
+  const RG = (() => {
+    const g = cfg.race && cfg.race.guide, num = x => (Number.isFinite(+x) && x !== null && x !== "" ? +x : null);
+    if (!g || typeof g !== "object" || !(num(g.target_s) > 600) || !Array.isArray(g.settle) || g.settle.length !== 2) return null;
+    const pr = g.pr && typeof g.pr === "object" && num(g.pr.secs) > 600 ? { secs: num(g.pr.secs), raw: num(g.pr.raw_secs), date: String(g.pr.date || "").slice(0, 10),
+      scaled: !!g.pr.scaled, hr: num(g.pr.avg_hr), ctl: num(g.pr.ctl) } : null;
+    const gun = /^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(String(g.gun || "")) ? new Date(String(g.gun)).getTime() : null;
+    return { target: num(g.target_s), expected: num(g.expected_s), pr, gun, wave: num(g.wave) || 0, kind: String(g.kind || ""),
+      settle: [num(g.settle[0]) || bpm(92), num(g.settle[1]) || bpm(97)], ceiling: num(g.ceiling) || P.lthr, startMin: Math.max(0, Math.min(15, num(g.start_min) || 0)),
+      ctl: num(g.ctl), tsb: num(g.tsb) };
+  })();
+  const daysTo = d => Math.round((new Date(`${d}T12:00:00`).getTime() - new Date(`${iso(today)}T12:00:00`).getTime()) / 864e5);
+  const raceName = () => String((cfg.race && cfg.race.name) || "Race").replace(/^Bell's\s+/, "");
+  const raceSoon = () => !!(RG && cfg.race && cfg.race.date && daysTo(cfg.race.date) >= 0 && daysTo(cfg.race.date) <= 1);
+  const raceDayIdx = days.findIndex(d => d.date === iso(today) && (d.race || /^Race day/.test(String(d.title || ""))));
+  const todayIdx = raceDayIdx >= 0 && (!RG || !RG.gun || Date.now() >= RG.gun - 75 * 60e3) ? raceDayIdx : days.findIndex(d => d.date === iso(today));
   const dayOf = v => v === "quick" ? S.quick : v === "free" ? null : days[+v] || null;
   let planned = null;
+  /** The race itself (not its warm-up): no timed steps, the race guide runs it. An older sync's "Race day" session
+   *  came as warm-up + one long "Race" step; that's set aside too, so the gun never starts a warm-up timer. */
+  const raceSession = () => !!(planned && (planned.race || /^Race day/.test(String(planned.title || ""))));
   const pickDay = () => {
     planned = dayOf(daySel.value);
-    S.plan = planned ? planned.steps.map(s => ({ ...s })) : [];
+    S.plan = planned && !raceSession() ? planned.steps.map(s => ({ ...s })) : [];
     S.step = 0; S.stepStart = S.elapsed; S.intensity = 1;
     render();
   };
@@ -166,7 +185,8 @@
   const fresh = () => ({ running: false, paused: false, elapsed: 0, moving: 0, dist: 0, step: 0, stepStart: 0, hrSum: 0, hrSecs: 0, hrMax: 0, zones: [0, 0, 0, 0, 0],
     trimp: 0, cadSum: 0, cadSecs: 0, pwSum: 0, pwSecs: 0, fuelAt: 0, fuelDue: false, ended: false, plan: [], intensity: 1, quick: null, rideId: "", wallStart: 0, chunk: 0,
     laps: [], lapStart: 0, lapElapsed: 0, lapDist: 0, pauses: [], autoPaused: false, still: 0, ascent: 0, maxSpeed: 0, held: 0, missed: 0, hot: 0, loadOffered: false, navAlong: 0, battSaid: false, tgtSecs: 0, tgtOn: 0, workSecs: 0, workOn: 0,
-    tank: null, fuelSaid: 0, wbal: null, wbalLow: false, routeT0: null, mine: [], ghostSaid: 0, paceSaid: -1, paceHot: 0, wxSaid: [], windSec: 0, windSecs: 0, windHead: 0, windTail: 0 });
+    tank: null, fuelSaid: 0, wbal: null, wbalLow: false, routeT0: null, mine: [], ghostSaid: 0, paceSaid: -1, paceHot: 0, wxSaid: [], windSec: 0, windSecs: 0, windHead: 0, windTail: 0,
+    raceSaid: [], hotSaidAt: 0 });
   const S = fresh();
   const live = { heading: null, anchor: null, hr: null, hrAt: 0, cad: null, cadAt: 0, power: null, powerAt: 0, pw: [], wheelSpeed: null, wheelAt: 0, gpsSpeed: null, gpsAt: 0, lastFix: null, alt: null, battery: null };
   let samples = [];
@@ -635,6 +655,14 @@
       await DB.put("routes", row);
       if (navigator.onLine) downloadMap(route, true);
     } else if (!row.offline && navigator.onLine) downloadMap(C.analyze(C.unstore(row)), true);
+    if (RG && raceSoon() && (!row.pace || (!row.pace.mine && row.pace.guide !== race.date) || (row.pace.guide === race.date && !row.pace.mine && row.pace.target !== RG.target))) {
+      const route = C.analyze(C.unstore(row));
+      if (route.hasEle) {
+        row.pace = guidePace(route);
+        await DB.put("routes", row);
+        if (onRaceCourse()) { await loadPace(row); renderAhead(true); }
+      }
+    }
     const key = "fitness-race-course-chosen";
     if (race.date === iso(today) && ls.get(key) !== race.date && !S.running && (!NAV.route || NAV.route.id !== c.id)) {
       await useRoute(c.id);
@@ -798,7 +826,8 @@
   function trackMine() {
     const st = NAV.st;
     if (!S.running || !NAV.route || !st || st.offCourse || NAV.detour) return;
-    if (S.routeT0 == null) { if (st.along > 300) return; S.routeT0 = S.elapsed; S.mine = []; }
+    // in the race, standing in the corral isn't racing: the clock starts as you roll off the line
+    if (S.routeT0 == null || (guideOn() && st.along < 150 && (speedNow() ?? 0) < 2 && S.mine.length <= 3)) { if (st.along > 300) return; S.routeT0 = S.elapsed; S.mine = []; }
     const k = Math.floor(st.along / 50);
     while (S.mine.length <= k && S.mine.length < 20000) S.mine.push(Math.round(S.elapsed - S.routeT0));
   }
@@ -816,7 +845,7 @@
   /** Every quarter of the route: how you stand against your best. */
   function ghostCallout() {
     const G = NAV.ghosts, st = NAV.st;
-    if (!G || !G.best || !st || !S.running) return;
+    if (!G || !G.best || !st || !S.running || guideOn()) return;   // in the race, the guide's own quarters say it
     const q = Math.floor(st.frac * 4);
     if (q <= S.ghostSaid || q >= 4) return;
     S.ghostSaid = q;
@@ -827,25 +856,48 @@
   // ── the race plan: watts and heart rate for each section of the route, for a finish time (Power Guide) ─────────
   const parseHM = s => { const m = String(s || "").trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/); return m ? (+m[1] * 60 + +(m[2] || 0)) * 60 : null; };
   const fmtHM = sec => { const m = Math.round(sec / 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
-  const paceOpts = surface => ({ ftp: ftpNow(), mass: P.weight + 10, surface });
-  const hrBand = watts => { const pct = C.hrPctFor(watts / ftpNow() * 100); return [Math.round(P.lthr * pct / 100) - 4, Math.round(P.lthr * pct / 100) + 4]; };
+  const paceOpts = surface => ({ ftp: NAV.calFtp || ftpNow(), mass: P.weight + 10, surface });
+  const hrBand = (watts, ftp = (NAV.pace && NAV.pace.ftp) || NAV.calFtp || ftpNow()) => { const pct = C.hrPctFor(watts / ftp * 100); return [Math.round(P.lthr * pct / 100) - 4, Math.round(P.lthr * pct / 100) + 4]; };
+  /** Ride mode on the race course with the sync's guide: the plan is the PR plan. */
+  const onRaceCourse = () => !!(NAV.route && cfg.race && cfg.race.course && NAV.route.id === cfg.race.course.id);
+  const guideOn = () => !!(RG && NAV.pace && NAV.pace.guide && onRaceCourse());
+  /** The race's heart-rate band for a section: no climb above threshold until the last 15% (one match kept for the finale). */
+  const raceBand = (watts, frac) => {
+    const b = hrBand(watts), hi = Math.min(b[1], RG.ceiling + (frac >= 0.85 ? 4 : 0));
+    return [Math.min(b[0], hi - 6), hi];
+  };
+  /** The PR plan for the race course: the target from the guide, and the "FTP" the plan's watts are measured against set
+   *  so that riding your PR's time asks for the heart rate you rode it at. Each section's heart rate is then your PR's
+   *  effort, shaped to the ground: a bit more up the climbs, less down them. Works from heart rate alone (no power
+   *  meter needed): the watts are only the physics in between. */
+  function guidePace(route) {
+    const surface = RG.kind === "mtb" ? "mtb" : RG.kind === "gravel" ? "gravel" : "road", mass = P.weight + 10;
+    const prSecs = RG.pr ? RG.pr.secs : RG.expected || RG.target;
+    const hr = RG.pr && RG.pr.hr ? RG.pr.hr : (RG.settle[0] + RG.settle[1]) / 2;
+    const ref = C.pacePlan(route, { target: prSecs, ftp: 1, mass, surface });
+    return { target: RG.target, surface, ftp: Math.round(ref.np / (C.ftpPct(hr / P.lthr * 100) / 100)), guide: cfg.race.date };
+  }
   const KIND_NAME = { climb: "Climb", flat: "Flat", descent: "Descent" };
   async function loadPace(row) {
     NAV.pace = null;
+    NAV.calFtp = row && row.pace && +row.pace.ftp > 0 ? +row.pace.ftp : null;
     if (!row || !row.pace || !NAV.route || !NAV.route.hasEle) return;
     NAV.pace = C.pacePlan(NAV.route, { ...paceOpts(row.pace.surface), target: row.pace.target });
+    NAV.pace.guide = row.pace.guide || null;
   }
   function paintPlan(plan) {
     const list = $("pc-list"), sum = $("pc-sum");
     if (!plan) { list.replaceChildren(); return; }
     const over = plan.if != null && plan.if > plan.sustain + 0.02;
-    sum.textContent = `${fmtHM(plan.total)} at ${plan.base} W on the flat (normalised ${plan.np} W, ${Math.round((plan.if || 0) * 100)}% of ${ftpNow()} W FTP${P.ftp ? "" : " (estimated)"}). `
+    sum.textContent = NAV.calFtp && RG && onRaceCourse()
+      ? `${clock(plan.total)}. Each section's heart rate is set from your record here${RG.pr ? ` (${clock(RG.pr.secs)} pace${RG.pr.hr ? ` at ${RG.pr.hr} bpm` : ""}, ${RG.pr.date.slice(0, 4)})` : ""}: harder up the climbs, easier down, and nothing over ${RG.ceiling} bpm until the last 15%.`
+      : `${fmtHM(plan.total)} at ${plan.base} W on the flat (normalised ${plan.np} W, ${Math.round((plan.if || 0) * 100)}% of ${ftpNow()} W FTP${P.ftp ? "" : " (estimated)"}). `
       + (over ? `That's more than you can hold for ${fmtHM(plan.total)} (about ${Math.round(plan.sustain * 100)}%): pick a slower time.` : `Holdable for that long (up to about ${Math.round(plan.sustain * 100)}%).`);
     sum.classList.toggle("warn", over);
     list.replaceChildren(...plan.sections.map((s, i) => {
       const li = document.createElement("li"), n = document.createElement("b"), what = document.createElement("span"), t = document.createElement("span");
       n.textContent = String(i + 1);
-      const [lo, hi] = hrBand(s.watts);
+      const [lo, hi] = NAV.calFtp && RG && onRaceCourse() ? raceBand(s.watts, s.from / Math.max(1, NAV.route.total)) : hrBand(s.watts, plan.ftp);
       what.textContent = `${KIND_NAME[s.kind]} ${distTxt(s.len)} ${unitD()}${s.kind !== "flat" ? ` at ${(s.grade * 100).toFixed(1)}%` : ""} · ${s.watts > 20 ? `${s.watts} W · ${lo}–${hi} bpm` : "coast, eat, drink"} · ${speedTxt(s.speed)} ${unitS()}`;
       t.className = "t"; t.textContent = fmtHM(s.end);
       li.append(n, what, t);
@@ -879,26 +931,67 @@
     draftPlan = planFromDialog();
     if (!draftPlan || !NAV.route) { $("pc-sum").textContent = "A finish time like 4:30, please."; return; }
     const row = await DB.get("routes", NAV.route.id);
-    row.pace = { target: draftPlan.target, surface: draftPlan.surface };
+    row.pace = { target: draftPlan.target, surface: draftPlan.surface, mine: true, ...(NAV.calFtp ? { ftp: NAV.calFtp, guide: row.pace && row.pace.guide } : {}) };
     await DB.put("routes", row);
-    NAV.pace = draftPlan; S.paceSaid = -1;
+    NAV.pace = draftPlan; NAV.pace.guide = row.pace.guide || null; S.paceSaid = -1;
     $("pace").close(); renderAhead(true); render();
   });
   $("pc-clear").addEventListener("click", async () => {
     if (NAV.route) { const row = await DB.get("routes", NAV.route.id); if (row) { delete row.pace; await DB.put("routes", row); } }
-    NAV.pace = null; $("pace").close(); renderAhead(true); render();
+    NAV.pace = null; NAV.calFtp = null; $("pace").close(); renderAhead(true); render();
   });
   /** Where you are in the plan: the section, its targets, and your clock against the plan's (+ behind). */
   function paceNow() {
     const plan = NAV.pace, st = NAV.st, me = myClock();
     if (!plan || !st) return null;
-    const at = C.paceAt(plan, st.along);
-    return { ...at, delta: me == null || me < 30 ? null : me - at.planned, hr: hrBand(at.section.watts) };
+    const at = C.paceAt(plan, st.along), g = guideOn(), ok = me != null && me >= 30;
+    const pr = g && RG.pr ? RG.pr.secs : null;
+    return { ...at, delta: ok ? me - at.planned : null, hr: g ? raceBand(at.section.watts, st.frac) : hrBand(at.section.watts), guide: g, frac: st.frac,
+      pr, prDelta: ok && pr ? me - at.planned * pr / plan.total : null,   // your clock against your record's at the same place: + behind
+      finish: me != null && at.planned > 300 ? me + (plan.total - at.planned) * Math.max(0.8, Math.min(1.25, me / at.planned)) : null,
+      start: g && RG.startMin > 0 && (me == null || me < RG.startMin * 60) ? Math.max(0, RG.startMin * 60 - (me ?? 0)) : null };
+  }
+  /** The race, as the guide coaches it: the start, then settle; each climb and descent; a warning that repeats while you
+   *  ride over the plan (that's the finish you're spending); every quarter how you stand on your record and when you'll
+   *  finish; and the last 15%, where whatever's left goes. */
+  function raceCoach(now, p) {
+    const said = k => S.raceSaid.includes(k), mark = k => { S.raceSaid = [...S.raceSaid, k]; };
+    const [lo, hi] = RG.settle, me = myClock();
+    if (me == null) return;
+    if (p.start != null) {
+      if (!said("go")) { mark("go"); say(`Race on. Go hard for ${RG.startMin} minutes to get your place before the singletrack, then settle at ${lo} to ${hi}.`); }
+      return;
+    }
+    if (RG.startMin && !said("settle")) { mark("settle"); say(`Settle now: ${lo} to ${hi}. Smooth and seated. Eat at 20 minutes.`); beep(880, 120, 2); }
+    const s = p.section;
+    if (p.i !== S.paceSaid) {
+      S.paceSaid = p.i; S.paceHot = 0;
+      if (s.kind === "climb" && s.len >= 300) say(`Climb, ${nearSay(s.len)} at ${(s.grade * 100).toFixed(0)} percent: up to ${p.hr[1]}, seated, and keep pedaling over the top.`, false);
+      else if (s.kind === "descent" && s.len >= 400) say("Descent: recover, eat and drink.", false);
+    }
+    const hr = live.hr && now - live.hrAt < 5000 ? live.hr : null;
+    S.paceHot = hr != null && hr > p.hr[1] + 3 && !rolling() ? S.paceHot + 1 : 0;
+    if (S.paceHot >= 60 && p.frac < 0.85 && now - S.hotSaidAt > 240e3) {
+      S.hotSaidAt = now;
+      say(`Over the plan: ${hr} against ${p.hr[1]}. Ease off now and you'll still have legs at the end.`, false);
+    }
+    const vsPr = d => (Math.abs(d) < 5 ? " right on your record pace" : ` ${aheadSay(d)} ${d <= 0 ? "ahead of" : "behind"} your record pace`);
+    const q = Math.floor(p.frac * 4);
+    if (q >= 1 && q <= 3 && !said(`q${q}`)) {
+      mark(`q${q}`);
+      say(`${q * 25} percent.${p.prDelta != null ? `${vsPr(p.prDelta)}.` : ""}${p.finish ? ` Finishing about ${hmSay(p.finish / 3600)}.` : ""}`, false);
+    }
+    if (p.frac >= 0.85 && !said("last")) {
+      mark("last");
+      say(`Last ${nearSay(NAV.route.total - NAV.st.along)}. Whatever you saved, use it now${p.prDelta != null ? `:${vsPr(p.prDelta)}` : ""}.`);
+      beep(1100, 140, 3);
+    }
   }
   /** On the ride: a word at each new section, and a warning when the first half is ridden too hot. */
   function paceCoach(now) {
     const p = paceNow();
     if (!p || !S.running || S.paused) return;
+    if (p.guide) { raceCoach(now, p); return; }
     const s = p.section;
     if (p.i !== S.paceSaid) {
       S.paceSaid = p.i; S.paceHot = 0;
@@ -1437,9 +1530,11 @@
     $("pace-tile").hidden = !p;
     const tone = (el, d) => { el.classList.toggle("ahead", d != null && d <= 0); el.classList.toggle("behind", d != null && d > 0); };
     if (p) {
-      $("pace-delta").textContent = p.delta == null ? fmtHM(NAV.pace.target) : `${p.delta <= 0 ? "−" : "+"}${signed(p.delta)}`;
-      tone($("pace-delta"), p.delta);
-      $("pace-sec").textContent = p.section.watts > 20 ? `${KIND_NAME[p.section.kind]}: ${p.hr[0]}–${p.hr[1]} bpm · ${p.section.watts} W` : `${KIND_NAME[p.section.kind]}: coast, eat`;
+      const d = p.prDelta ?? p.delta;
+      $("pace-tile").querySelector(".k").textContent = p.pr ? "Record pace" : "Race plan";
+      $("pace-delta").textContent = d == null ? fmtHM(NAV.pace.target) : `${d <= 0 ? "−" : "+"}${signed(d)}`;
+      tone($("pace-delta"), d);
+      $("pace-sec").textContent = p.section.watts > 20 ? `${KIND_NAME[p.section.kind]}: ${p.hr[0]}–${p.hr[1]} bpm${p.guide ? "" : ` · ${p.section.watts} W`}` : `${KIND_NAME[p.section.kind]}: coast, eat`;
     }
     $("ghost-tile").hidden = !gh;
     if (gh) {
@@ -1897,7 +1992,7 @@
       const spd = speedNow(now), gpsQuiet = watch != null && live.gpsAt && now - live.gpsAt > 8000 && now - live.gpsAt < 60000 && (live.gpsSpeed ?? 0) < 1.5;
       const v = spd ?? (gpsQuiet ? 0 : null);
       // auto-pause: stopped 4 s (a speed source says so) pauses the timer and the recording; moving again resumes
-      if (P.autoPause && v != null) {
+      if (P.autoPause && !raceSession() && v != null) {
         if (v < 0.6) { S.still += dt; if (!S.autoPaused && S.still >= 4) { S.autoPaused = true; S.pauses.push([now, 0]); beep(520, 90, 2); } }
         else { S.still = 0; if (S.autoPaused && v > 1.2) { S.autoPaused = false; const p = S.pauses[S.pauses.length - 1]; if (p && !p[1]) p[1] = now; beep(880, 90, 2); } }
       } else if (S.autoPaused) { S.autoPaused = false; const p = S.pauses[S.pauses.length - 1]; if (p && !p[1]) p[1] = now; }
@@ -2101,6 +2196,46 @@
       $("step-next").textContent = "";
       $("step-bar").style.width = "0";
       paintGauge(null);
+    } else if (S.running && (!list.length || S.step >= list.length) && paceNow() && paceNow().guide) {   // the race, on its guide
+      const p = paceNow(), sec = p.section, [lo, hi] = RG.settle;
+      if (p.start != null) {   // the start: get your place, then settle
+        $("step-name").textContent = `The start · ${raceName()}`;
+        $("step-time").textContent = clock(p.start); $("step-time").classList.remove("ahead", "behind");
+        $("step-left").textContent = "then settle";
+        lineOf($("step-target"), ["Go hard for your place · then ", nb(`${lo}–${hi}`), " bpm"]);
+        $("step-cue").textContent = "Position before the singletrack narrows. Seated and smooth in the sand.";
+        $("step-next").textContent = `Next: settle at ${lo}–${hi} bpm, eat at 20 min`;
+        $("step-bar").style.width = `${Math.min(100, (1 - p.start / (RG.startMin * 60)) * 100)}%`;
+        paintGauge({ lo: lo / P.lthr * 100, hi: hi / P.lthr * 100 }, hrLive, lo, hi);
+        st.classList.add("feel"); st.textContent = "Go";
+        dockTgt = `${lo}–${hi}`;
+      } else {
+        const d = p.prDelta ?? p.delta;
+        $("step-name").textContent = `${p.pr ? "Record pace" : "Race plan"} · ${KIND_NAME[sec.kind]} ${p.i + 1}/${NAV.pace.sections.length}`;
+        $("step-time").textContent = d == null ? clock(myClock() ?? S.elapsed) : `${d <= 0 ? "−" : "+"}${signed(d)}`;
+        $("step-time").classList.toggle("ahead", d != null && d <= 0); $("step-time").classList.toggle("behind", d != null && d > 0);
+        $("step-left").textContent = d == null ? "race time" : `${d <= 0 ? "ahead of" : "behind"} ${p.pr ? "record pace" : "the plan"}`;
+        if (sec.watts > 20) lineOf($("step-target"), ["Target ", nb(`${p.hr[0]}–${p.hr[1]}`), " bpm · ", speedTxt(sec.speed), ` ${unitS()}`]);
+        else lineOf($("step-target"), ["Descent: ", "recover", ", eat and drink"]);
+        $("step-bar").style.width = `${Math.min(100, p.frac * 100)}%`;
+        $("step-cue").textContent = `${p.finish ? `Finish about ${clock(p.finish)}` : `Target ${clock(NAV.pace.total)}`}${p.pr ? ` · record pace ${clock(p.pr)}` : ""} · ${nearTxt(Math.max(0, NAV.route.total - NAV.st.along))} to go`;
+        $("step-next").textContent = p.frac >= 0.85 ? "The finale: whatever's left, use it" : p.next ? `Next: ${KIND_NAME[p.next.kind]} ${distTxt(p.next.len)} ${unitD()}${p.next.kind !== "flat" ? ` at ${(p.next.grade * 100).toFixed(1)}%` : ""}` : "Last section: to the finish";
+        paintGauge(sec.watts > 20 ? { lo: p.hr[0] / P.lthr * 100, hi: p.hr[1] / P.lthr * 100 } : null, hrLive, p.hr[0], p.hr[1]);
+        if (hrLive && sec.watts > 20) { st.classList.add(hrLive > p.hr[1] + 2 ? "down" : hrLive < p.hr[0] - 2 ? "up" : "good"); st.textContent = hrLive > p.hr[1] + 2 ? "▼ Ease off" : hrLive < p.hr[0] - 2 ? "▲ Push" : "On the plan"; }
+        dockTgt = sec.watts > 20 ? `${p.hr[0]}–${p.hr[1]}` : "coast";
+      }
+    } else if (!S.running && raceSession() && RG && guideOn()) {   // race morning, before the gun: the plan in a few lines
+      $("step-time").classList.remove("ahead", "behind");
+      paintGauge(null);
+      $("step-name").textContent = raceName();
+      $("step-time").textContent = clock(NAV.pace.total);
+      $("step-left").textContent = RG.pr ? "target · a new record" : "target";
+      lineOf($("step-target"), ["Settle ", nb(`${RG.settle[0]}–${RG.settle[1]}`), " bpm · under ", RG.ceiling, " until the last 15%"]);
+      $("step-cue").textContent = `${RG.pr ? `Record pace here ${clock(RG.pr.secs)}${RG.pr.scaled ? " (your " + RG.pr.date.slice(0, 4) + " ride at this course's length)" : ` (${RG.pr.date.slice(0, 4)})`}${RG.pr.hr ? `, ridden at ${RG.pr.hr} bpm` : ""}. ` : ""}`
+        + `${RG.startMin ? `Go hard ${RG.startMin} min for your place, then settle. ` : ""}Eat every 20 min from 20 min in.`
+        + `${RG.pr && RG.pr.ctl != null && RG.ctl != null && RG.ctl < RG.pr.ctl - 3 ? ` Fitness ${Math.round(RG.ctl)} against ${Math.round(RG.pr.ctl)} then: ride the plan's heart rate, not the clock, early on.` : ""}`;
+      $("step-next").textContent = RG.gun ? `Wave ${RG.wave || "—"} at ${hhmm(RG.gun)} · Start when you roll to the line` : "Start when you roll to the line";
+      $("step-bar").style.width = "0";
     } else if (S.running && (!list.length || S.step >= list.length) && paceNow()) {   // racing to the plan: its section is the step
       const p = paceNow(), sec = p.section, hrNow = hrLive;
       $("step-name").textContent = `Race plan · ${KIND_NAME[sec.kind]} ${p.i + 1}/${NAV.pace.sections.length}`;
@@ -2627,7 +2762,7 @@
   dlg.addEventListener("close", () => {
     if (dlg.returnValue !== "save") return;
     const num = (id, d) => { const v = parseFloat(inp(id).value); return Number.isFinite(v) ? v : d; };
-    for (const [k, id] of [["lthr", "s-lthr"], ["max", "s-max"], ["rest", "s-rest"], ["ftp", "s-ftp"], ["weight", "s-weight"]]) setAnchor(k, num(id, P[k]));
+    for (const k of Object.keys(synced)) setAnchor(k, num(`s-${k}`, P[k]));   // s-lthr, s-max, s-rest, s-ftp, s-weight
     Object.assign(P, { wheel: num("s-wheel", P.wheel), fuel: num("s-fuel", P.fuel),
       autoLap: num("s-autolap", P.autoLap), voice: inp("s-voice").checked, autoPause: inp("s-autopause").checked, autoLock: inp("s-autolock").checked, stepLap: inp("s-steplap").checked,
       climbs: inp("s-climbs").checked, reroute: inp("s-reroute").checked, profile: /** @type {HTMLSelectElement} */ ($("s-profile")).value,
@@ -2677,7 +2812,7 @@
 
   // ── start-up: the session, the route, and a ride restored after a reload ──────────────────────────────────
   planned = dayOf(daySel.value);
-  if (!S.running || !S.plan.length) { S.plan = planned ? planned.steps.map(s => ({ ...s })) : S.plan; if (!S.running) S.intensity = 1; }
+  if (!S.running || !S.plan.length) { S.plan = planned && !raceSession() ? planned.steps.map(s => ({ ...s })) : raceSession() ? [] : S.plan; if (!S.running) S.intensity = 1; }
   if (S.running) { note.textContent = "Ride restored after a reload — tap Resume."; startGps(); await restoreSamples(); }
   const lastRoute = ls.get("fitness-ride-route");
   if (lastRoute) await useRoute(lastRoute, false).catch(() => {});

@@ -227,8 +227,8 @@ def assemble(cfg: dict, days: dict[str, dict], raw_acts: list[dict], today: date
         "ytd": {"rides": len(ytd), "hours": round(sum(a["moving_s"] for a in ytd) / 3600, 1), "km": round(sum(a["distance_m"] for a in ytd) / 1000),
                 "elev_m": round(sum(a["elev_m"] for a in ytd))},
         "coverage": coverage,
-        "ride": {**ride_config(cfg, th, plan, wx, now, rec), "brief": _brief(t, rec, ready_today, form_now, plan, commute, th),
-                 "weight_kg": round(weight, 1) if weight else None, **_ride_power(pwr)},
+        "ride": _with_guide({**ride_config(cfg, th, plan, wx, now, rec), "brief": _brief(t, rec, ready_today, form_now, plan, commute, th),
+                             "weight_kg": round(weight, 1) if weight else None, **_ride_power(pwr)}, races_soon, editions, th, form_now),
         "commute": {**commute, "today": commute_today} if commute else None,
         "fuel": _fuel(cfg, plan, rec, commute_today, today, {**(profile or {}), **({"weight_kg": trend["kg"]} if trend else {})}, wx),
         "weight": trend,
@@ -620,6 +620,11 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
         if d.get("legs"):
             days += [{"date": d["date"], "title": leg["title"], "session": d["session"], "minutes": leg["minutes"], "load": round(d["load"] / 2),
                       "indoor": False, "steps": leg["steps"], "leg": leg["leg"], "check": True} for leg in d["legs"]]
+        elif d.get("steps") is not None and d.get("role") == "race":
+            days += [{"date": d["date"], "title": "Race warm-up", "session": "Before the gun", "minutes": 20, "load": 15, "indoor": False,
+                      "steps": [wo.step("Easy spin", 12, "z2", "Loosen up, nothing more"), wo.step("Race effort", 0.5, "race", "Start-line speed"),
+                                wo.step("Easy", 1.5, "z1"), wo.step("Race effort", 0.5, "race", "Start-line speed"), wo.step("Easy, then to the corral", 5.5, "z1", "A gel 10 minutes before the gun")]},
+                     {k: d[k] for k in ("date", "title", "session", "minutes", "load", "indoor")} | {"steps": [], "race": True}]
         elif d.get("steps") is not None:
             days.append({k: d[k] for k in ("date", "title", "session", "minutes", "load", "indoor", "steps")})
     if plan and rec:
@@ -636,6 +641,48 @@ def ride_config(cfg: dict, th: dict, plan: dict | None, wx: wxm.Wx | None = None
             "wheel_m": cfg["ride"]["wheel_m"], "fuel_every_min": cfg["ride"]["fuel_every_min"], "units": cfg["athlete"]["units"], "commute": models,
             "drink": {k: v for k, v in {**fuel.RIDE_FUEL, **cfg.get("nutrition", {}).get("ride_fuel", {})}.items() if k in ("name", "carbs")},
             "wx": _ride_wx(wx, now or datetime.now()) if wx else None}
+
+
+def race_guide(page: dict, eds: list[dict] | None, th: dict, form: dict | None = None) -> dict:
+    """Ride mode's guide through the race, from the race-day page and your past editions: the personal record at this
+    year's course length (an edition of a different length counts at its own pace, as racewx.expected scales it), the
+    heart rate it was ridden at (what ride mode calibrates each section's target to), a target just under it, the
+    settle band and the ceiling to stay under until the finale, the start, and the fueling."""
+    km = (page.get("course") or {}).get("km") or 0
+    best = None
+    for e in eds or []:
+        secs = e.get("elapsed_s") or e.get("moving_s")
+        if not secs:
+            continue
+        ratio = km * 1000 / e["distance_m"] if km and e.get("distance_m") else 1.0
+        if not 0.7 <= ratio <= 1.3:
+            continue   # a ride to the start, or a broken recording
+        scaled = abs(ratio - 1) > 0.03
+        t = secs * ratio if scaled else secs
+        if best is None or t < best["secs"]:
+            best = {"date": e["date"], "secs": round(t), "raw_secs": round(secs), "scaled": scaled, "avg_hr": round(e["avg_hr"]) if e.get("avg_hr") else None,
+                    "ctl": round(e["ctl"], 1) if e.get("ctl") is not None else None}
+    lthr = th.get("lthr") or 160
+    expected = round(page["expected"]["minutes"] * 60)
+    # a record by a margin you can feel (1%, half a minute at least), never a target slower than the time you expect today
+    target = min(best["secs"] - max(30, round(best["secs"] * 0.01)), max(expected, best["secs"] - round(best["secs"] * 0.03))) if best else expected
+    gun = datetime.strptime(page["start"], "%I:%M %p")
+    return {"gun": f"{page['date']}T{gun:%H:%M}", "wave": page.get("wave") or 0, "kind": page.get("kind"),
+            "pr": best, "target_s": int(target), "expected_s": expected,
+            "settle": [round(lthr * 0.92), round(lthr * 0.97)], "ceiling": round(lthr),
+            "start_min": 6 if page.get("kind") == "mtb" else 0,
+            "fuel": {"rate": page["fuel"]["rate"], "sips": page["fuel"]["sips"], "top_up": page["fuel"]["top_up"]},
+            "ctl": round(form["ctl"], 1) if form and form.get("ctl") is not None else None,
+            "tsb": round(form["tsb"]) if form and form.get("tsb") is not None else None}
+
+
+def _with_guide(ride: dict, races_soon: list[dict], editions: dict, th: dict, form: dict | None) -> dict:
+    """The next race's guide on ride mode's race (and its session that day steps aside for it: see ride_config)."""
+    race = ride.get("race")
+    page = next((p for p in races_soon if race and p["name"] == race.get("name")), None)
+    if page and page["days_out"] <= raceday.WINDOW_DAYS:
+        ride["race"] = {**race, "guide": race_guide(page, editions.get(page["name"]), th, form)}
+    return ride
 
 
 def _ride_power(pwr: dict | None) -> dict:
@@ -672,7 +719,7 @@ def _eased(days: list[dict], rec: dict, plan_today: dict | None) -> list[dict]:
     why = rec.get("title") or "Today's call says ease off"
     out = []
     for d in days:
-        if d["date"] != plan_today["date"]:
+        if d["date"] != plan_today["date"] or d.get("race") or d["title"] == "Race warm-up":   # race day is race day
             out.append(d)
             continue
         mins = round(d.get("minutes") or 60)

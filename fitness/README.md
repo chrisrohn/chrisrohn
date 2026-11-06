@@ -416,6 +416,23 @@ five apps: whatever screen you're on, you can see what to do with your legs and 
   eaten, and when it runs low at this pace; it says *eat something* at 40% and *eat now* at 25%, and the after-ride note
   says how the fueling went. With power and the critical power and W′ the sync learned from your power curve, **W′
   left** tracks the reserve above CP (Skiba's model) and says when it's nearly gone.
+- **Race day, guided to a record.** Within a day of the race, the sync sends ride mode a race guide built from your past
+  editions (`build.race_guide`): your record at this year's course length (an edition of a different length counts at its
+  own pace), the heart rate you rode it at, and a target just under it (1%, half a minute at least). Ride mode sets that
+  plan on the race course by itself and calibrates every section's heart rate to the effort that set your record, so it
+  works from heart rate alone: a little more up the climbs, less down them, nothing over threshold until the last 15%.
+  On race morning the session is a **Race warm-up** (the dashboard's: easy, two 30 s at race effort, to the corral) and
+  then the **race**, which has no timer: from 75 minutes before the gun ride mode picks the race and the course itself.
+  On the bike:
+  - **The start:** a countdown for the minutes you go hard for your place (6 on an MTB wave start), then *settle at …*.
+  - **Then the big number is your record:** how far ahead or behind your record pace you are, the section's heart rate
+    with ▲ / ▼ / *On the plan*, and your projected finish against your record, on Workout and in the dock everywhere.
+  - **Said as you go:** each climb and its ceiling, *descent: recover, eat and drink*, every quarter (ahead or behind
+    your record, and the finish time you're on for), and in the last 15% *whatever you saved, use it now*.
+  - **Keeping you feeling good:** a warning that repeats every 4 minutes while heart rate sits over the plan (the finish
+    is what you're spending), eating every 20 minutes, and the fuel tank.
+  - **The race clock runs:** no auto-pause in a race, and the clock starts as you roll off the line, not in the corral.
+  - A low readiness morning doesn't turn the race into an easy ride, and a race plan you set yourself is kept.
 - **Race your past self.** Load a route you've ridden with ride mode and *Ahead* shows **your best** (or last) ride
   there; on the ride, how far ahead or behind it you are, said every quarter of the route. Each climb's time is said at
   the top against your best on it (*a new record*, with a fanfare). **Save as route** in a ride's summary turns any ride,

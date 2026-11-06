@@ -82,16 +82,18 @@ span.chip {
 .rmain { max-width: none; margin: 0; padding: var(--sp-3) var(--gutter); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; counter-reset: none; }
 
 /* ── the step: what to do now, for how long, at what heart rate ────────────────────────────────────────────── */
-.stepcard { display: grid; gap: 6px; border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); }
+.stepcard { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; border-top: var(--rule-major) solid var(--ink); padding-top: var(--sp-2); }
 .stephead { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; }
 .stepname, .zone, .rtile .k, .next, .status, .sform label, .sum, .fuel b, button.big, .mapfields .k, .prof .k, .list .k, .climb .k, .lapnow .k, h3.k {
   font-size: var(--fs-label); font-weight: 700; line-height: var(--lh-snug); text-transform: uppercase; letter-spacing: var(--track-label);
 }
-.stepname { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.stepname::before { content: ""; width: 10px; height: 10px; background: var(--accent); flex: none; }
+/* a block, not a flex box: text in a flex box can't shrink below its length, and a long race name pushed the screen wide */
+.stepname { flex: 1 1 auto; min-width: 0; display: block; font-size: var(--fs-small); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.stepname::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: var(--sp-2); background: var(--accent); vertical-align: 0; }
 .stephead .chip.more { min-height: 32px; padding: 0 var(--sp-3); font-size: var(--fs-label); color: var(--ink); border: 1.5px solid var(--ink); background: transparent; }
 /* the hero (.rhero: the dashboard has its own .hero): time left in the step on the left, heart rate on the right, read in one glance */
 .rhero { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); min-width: 0; }
+.rhero .zone { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .h-step { display: grid; gap: 2px; min-width: 0; }
 .h-k { font-size: var(--fs-label); font-weight: 700; line-height: var(--lh-snug); text-transform: uppercase; letter-spacing: var(--track-label); color: var(--ink-2); white-space: nowrap; }
 .steptime { font-size: var(--fs-ride-clock); font-weight: 700; line-height: .92; white-space: nowrap; }
@@ -469,3 +471,5 @@ body.climbing .wxbar { display: none; }
   .navbanner:not(.slim) .arrow { font-size: 2.2rem; }
   .navbanner .nbtext { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+/* race morning: the plan's few lines in full before the gun */
+body:not(.riding) .cue { -webkit-line-clamp: 6; }
