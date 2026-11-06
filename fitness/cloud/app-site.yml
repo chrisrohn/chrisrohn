@@ -1,11 +1,12 @@
 # The Training app's sites, one workflow for both (.github/workflows/deploy.yml in each; this copy is its source):
 #
-#   chrisrohn/chris.bike          the app itself at https://chris.bike/ ([app] url in fitness/config.toml), with its CNAME
-#   chrisrohn/chrisrohn.github.io the old address: it forwards to chris.bike, carrying what each phone kept there along
+#   chrisrohn/chrisrohn.github.io the app itself at https://chrisrohn.github.io/ ([app] url in fitness/config.toml)
+#   chrisrohn/chris.bike          parked (an empty site) until [app] url names https://chris.bike/; then it is the app,
+#                                 with its CNAME, and chrisrohn.github.io forwards there, carrying what each phone kept
 #                                 (fitness/site/move-out.js), but only once chris.bike answers with the app; until then
 #                                 it keeps serving the app itself ("standby"), so nobody is sent to an address not yet live
 #
-# `node fitness/build-app.mjs --role <this repository>` says which (app | standby | forward). Each run checks out
+# `node fitness/build-app.mjs --role <this repository>` says which (app | standby | forward | parked). Each run checks out
 # chrisrohn/chrisrohn (public: no token needed), builds that with `--as <role>`, and commits the result to this
 # repository's main branch, which Pages serves. Hourly it does that only when fitness/ or the role has changed since
 # the last deploy; "Run workflow" deploys any branch or commit at once.
@@ -51,7 +52,7 @@ jobs:
         run: |
           cd src
           if ! grep -q "export async function role" fitness/build-app.mjs; then
-            echo "This ref predates the move to chris.bike: nothing to deploy." && echo "skip=1" >> "$GITHUB_OUTPUT" && exit 0
+            echo "This ref predates the app's site roles: nothing to deploy." && echo "skip=1" >> "$GITHUB_OUTPUT" && exit 0
           fi
           role="$(node fitness/build-app.mjs --role "$GITHUB_REPOSITORY")"
           echo "This site: $role" && echo "role=$role" >> "$GITHUB_OUTPUT"

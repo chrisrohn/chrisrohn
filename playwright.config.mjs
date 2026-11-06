@@ -25,8 +25,9 @@ function browserPath() {
 const executablePath = browserPath();
 
 // The Training app and its old addresses, all on local origins as they are apart in production: the app on :8766
-// (chris.bike), chrisrohn.com/fitness/ on :8765 and the old github.io site on :8767, each forwarding to the app. The
-// web servers and the tests read these, so a move runs end to end.
+// (chrisrohn.github.io, or a domain of its own later), chrisrohn.com/fitness/ on :8765 and another old address on :8767
+// (github.io once the app has moved to a domain), each forwarding to the app. The web servers and the tests read these,
+// so a move runs end to end.
 process.env.FITNESS_APP_URL ||= "http://127.0.0.1:8766/";
 process.env.FITNESS_MOVED_FROM ||= "http://127.0.0.1:8765/fitness/,http://127.0.0.1:8767/";
 
@@ -58,7 +59,7 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 20_000,
     },
-    {   // the app's old address (chrisrohn.github.io), now a forwarder that carries the phone's data to it
+    {   // an old address of the app (chrisrohn.github.io after a move to a domain), a forwarder that carries the phone's data to it
       command: "node fitness/build-app.mjs --as forward dist-old && python3 -m http.server -d dist-old 8767 --bind 127.0.0.1",
       url: "http://127.0.0.1:8767/index.html",
       reuseExistingServer: true,

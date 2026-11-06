@@ -1,7 +1,7 @@
 "use strict";
-// An old address of the Training app (chrisrohn.github.io, chrisrohn.com/fitness/): everything this phone kept here
-// goes to the app's new address, then the page forwards there. fitness/build-app.mjs fills in TO (the app) and BASE
-// (this copy's path).
+// An old address of the Training app (chrisrohn.com/fitness/; chrisrohn.github.io too, once the app has a domain of
+// its own): everything this phone kept here goes to the app's new address, then the page forwards there.
+// fitness/build-app.mjs fills in TO (the app) and BASE (this copy's path).
 //
 // Browser storage belongs to an address, so the settings (localStorage) and the routes, rides and a ride still being
 // recorded (IndexedDB "fitness-ride") would otherwise stay behind. They travel in the #fragment, which never reaches a
