@@ -89,7 +89,7 @@ test.describe("installable app", () => {
     expect(await axe(page)).toEqual([]);
   });
 
-  // the old addresses (playwright.config.mjs): chrisrohn.github.io on :8767, chrisrohn.com/fitness/ on :8765
+  // the old addresses (playwright.config.mjs): github.io-after-a-move on :8767, chrisrohn.com/fitness/ on :8765
   const OLD = "http://127.0.0.1:8767", APP = new URL(APP_URL).origin;
   const ROUTE = { id: "r1", name: "Loop", points: [[42.3, -83.0, 180], [42.31, -83.01, 182]], marks: [], added: 1, dist: 1500, gain: 2, climbs: 0, turns: 0 };
   /** ride mode's database, as ride.js makes it, with a route, a ride, its track and a ride still being recorded */

@@ -11,7 +11,7 @@ Barry-Roubaix (Apr 17, 2027), with the 100k and 50k compared side by side.
 python -m fitness demo --open        # see it with a synthetic athlete first; no accounts needed
 ```
 
-It installs as an app on your phone from **<https://chris.bike/>**, with your data kept only on the phone
+It installs as an app on your phone from **<https://chrisrohn.github.io/>**, with your data kept only on the phone
 (see [The app on your phone](#the-app-on-your-phone)).
 
 ## What the Venu Sq can and can't give you
@@ -484,7 +484,7 @@ to *Never* for rides, in case the browser ignores the keep-awake request.
 
 Once connected, a sensor is remembered and reconnects by itself when it's back in range (Chrome).
 
-**Where it lives: <https://chris.bike/ride.html>**, inside the installed app (see
+**Where it lives: <https://chrisrohn.github.io/ride.html>**, inside the installed app (see
 [The app on your phone](#the-app-on-your-phone)). It's a data-free page: no zones, plan or history are in it, and it's
 `noindex`. Its Content-Security-Policy ([`site/csp.txt`](site/csp.txt)) lets only its own scripts and files run, and
 lets it talk only to GitHub's API, Open-Meteo, OpenFreeMap's tiles, BRouter and OpenStreetMap's Overpass API. HTTPS is what phones require for
@@ -508,7 +508,7 @@ for Barry-Roubaix dim the screen or bring a small battery pack.
 Everything runs on GitHub and your phone. A **private** repository of yours syncs Garmin (and Strava, if you use it) every hour
 while you're up (5:17 to 22:17 Michigan time; a run takes about 30 seconds) and whenever you open the app with data more than
 45 minutes old, with [`fitness-sync.yml`](../.github/workflows/fitness-sync.yml), and the app
-at <https://chris.bike/> reads the result with a token that can only see that repository. Garmin's
+at <https://chrisrohn.github.io/> reads the result with a token that can only see that repository. Garmin's
 official API is for approved companies only, so this signs in the way Garmin's own mobile app does.
 
 **One-time setup, about 10 minutes, all from the phone's browser:**
@@ -542,7 +542,7 @@ imports it once:
    any time; each file is imported once, and rides the watch also recorded are merged with their Garmin copy.
 
 **Strava (optional, live).** Strava's API needs a paid Strava subscription since June 2026. With one, create an app at
-<https://www.strava.com/settings/api> (*Authorization Callback Domain* `chris.bike`), add `STRAVA_CLIENT_ID` and
+<https://www.strava.com/settings/api> (*Authorization Callback Domain* `chrisrohn.github.io`), add `STRAVA_CLIENT_ID` and
 `STRAVA_CLIENT_SECRET` as secrets, and **Connect Strava** appears in the app. Without it, the sync and the app
 simply leave Strava out.
 
@@ -796,7 +796,7 @@ Silca weight comes from the same figure.
 
 ## The app on your phone
 
-**<https://chris.bike/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
+**<https://chrisrohn.github.io/>** is an installable app (a PWA): home-screen icon, full screen, no browser bars,
 and it opens offline. The hosted copy holds no one's data; yours arrives from the [cloud sync](#cloud-sync-no-computer)
 (or by hand from a computer, below) and stays on the phone.
 
@@ -804,58 +804,21 @@ and it opens offline. The hosted copy holds no one's data; yours arrives from th
 an app under chrisrohn.com/fitness/ could only ever offer *Open in New Music*. On its own origin it installs as its own
 app, with its own icon, storage and notifications.
 
-- **The site** is the GitHub Pages site of the public `chrisrohn/chris.bike` repository, at the custom domain
-  `chris.bike` ([`config.toml`](config.toml) `[app] url`). Its `deploy.yml` workflow (source:
-  [`cloud/app-site.yml`](cloud/app-site.yml)) builds the app from this repository's `main`
-  (`node fitness/build-app.mjs --as app <dir>`, which also writes the Pages `CNAME`) every hour when `fitness/` has
-  changed, and on demand (*Actions → Deploy the Training app → Run workflow*, any branch).
-- **The old addresses** — <https://chrisrohn.github.io/> (the `chrisrohn/chrisrohn.github.io` repository, same
-  workflow) and chrisrohn.com/fitness/ — forward there, and every QR link and home-screen shortcut from before still
-  works. Browser storage belongs to an address, so on the way each phone's data comes along: the GitHub connection,
-  settings and saved plan (localStorage) and ride mode's routes, rides and any ride still being recorded (IndexedDB),
-  in the link's `#fragment`, which never reaches a server, in parts of up to 900 KB, one hop each
-  ([`site/move-out.js`](site/move-out.js) → `chris.bike/move.html`, [`site/move-in.js`](site/move-in.js)). Nothing
-  already at the new address is overwritten, the old copy is kept until the move has landed, and the new address only
-  takes a move from the addresses in `[app] moved_from`. The old offline copy is retired. The app then says it moved
-  once, and offers to turn the morning notification back on (a subscription belongs to the address it was made at);
-  install it from chris.bike and remove the old icon.
-- **The old github.io site only forwards once chris.bike is live.** Its deploy asks
-  `node fitness/build-app.mjs --role chrisrohn/chrisrohn.github.io`: *forward* once `https://chris.bike/move.html`
-  answers with the app, *standby* (the app itself, served there as before) until then. So the switch happens by
-  itself on the first hourly run after the domain works, and nobody is sent to an address that isn't there yet.
-
-**Setting up chris.bike** (once):
-
-1. **GitHub:** create the public repository **`chrisrohn/chris.bike`** (with a README) and add
-   [`cloud/app-site.yml`](cloud/app-site.yml) to it as `.github/workflows/deploy.yml`. *Actions → Deploy the
-   Training app → Run workflow*: it commits the app and its `CNAME`. Then *Settings → Pages*: *Deploy from a
-   branch*, `main`, `/ (root)`; the custom domain reads `chris.bike`.
-2. **Verify the domain** (stops anyone else's Pages site claiming it): *github.com → Settings (your profile) → Pages →
-   Add a domain* → `chris.bike`; it shows a TXT record to add.
-3. **Namecheap → Domain List → chris.bike → Manage → Advanced DNS**: delete the parking records (the *CNAME* `www` →
-   `parkingpage.namecheap.com` and the *URL Redirect* `@`), then add:
-
-   | Type | Host | Value |
-   |---|---|---|
-   | A | `@` | `185.199.108.153` |
-   | A | `@` | `185.199.109.153` |
-   | A | `@` | `185.199.110.153` |
-   | A | `@` | `185.199.111.153` |
-   | AAAA | `@` | `2606:50c0:8000::153` |
-   | AAAA | `@` | `2606:50c0:8001::153` |
-   | AAAA | `@` | `2606:50c0:8002::153` |
-   | AAAA | `@` | `2606:50c0:8003::153` |
-   | CNAME | `www` | `chrisrohn.github.io.` |
-   | TXT | `_github-pages-challenge-chrisrohn` | the code from step 2 |
-
-   `www.chris.bike` then redirects to `chris.bike`.
-4. Once the DNS check in *Settings → Pages* is green and the certificate is issued (minutes to an hour), tick
-   **Enforce HTTPS**.
-5. **Strava** (if you use it): set the app's *Authorization Callback Domain* to `chris.bike` at
-   <https://www.strava.com/settings/api>.
-6. Within the hour `chrisrohn.github.io` switches to forwarding (or run its *Deploy the Training app* workflow).
-   Open the old app on the phone once: it carries everything over and opens Training at chris.bike. Install it from
-   there, turn the morning notification back on, and remove the old icon.
+- **The site** is the GitHub Pages site of the public `chrisrohn/chrisrohn.github.io` repository
+  ([`config.toml`](config.toml) `[app] url`). Its `deploy.yml` workflow (source:
+  [`cloud/app-site.yml`](cloud/app-site.yml)) asks `node fitness/build-app.mjs --role <repository>` what that
+  repository serves (*app* here), builds it from this repository's `main` every hour when `fitness/` has changed, and
+  on demand (*Actions → Deploy the Training app → Run workflow*, any branch).
+- **The old address** chrisrohn.com/fitness/ forwards there, and every QR link and home-screen shortcut from before
+  still works. Browser storage belongs to an address, so on the way each phone's data comes along: the GitHub
+  connection, settings and saved plan (localStorage) and ride mode's routes, rides and any ride still being recorded
+  (IndexedDB), in the link's `#fragment`, which never reaches a server, in parts of up to 900 KB, one hop each
+  ([`site/move-out.js`](site/move-out.js) → `move.html`, [`site/move-in.js`](site/move-in.js)). Nothing already at
+  the new address is overwritten, the old copy is kept until the move has landed, and the new address only takes a
+  move from the addresses in `[app] moved_from`. The old offline copy is retired. The app then says it moved once,
+  and offers to turn the morning notification back on (a subscription belongs to the address it was made at).
+- **`chrisrohn/chris.bike` is parked.** The same workflow there gets the role *parked*: it empties that site (no app,
+  no `CNAME`), so nothing stale is served while the domain isn't set up.
 
 1. **Install.** iPhone: open it in Safari → **Share** → **Add to Home Screen**. Android: Chrome → **Install**
    (the button in the top bar, or the ⋮ menu). Desktop Chrome / Edge: the install icon in the address bar.
@@ -874,6 +837,49 @@ Ride mode (also a long-press shortcut on the icon on Android) reads the same cop
 already there. Theme (light, auto or dark) and units follow you between the two. A new build of the site replaces the cached app the
 next time it opens with signal.
 
+### Moving the app to a domain of its own (later)
+
+Everything is in place for `chris.bike`; it switches over by itself once the domain works, and phones bring their data
+along exactly as from chrisrohn.com/fitness/.
+
+1. **Config:** in [`config.toml`](config.toml) set `[app] url = "https://chris.bike/"` and add
+   `"https://chrisrohn.github.io/"` to `moved_from`. Update the *Authorization Callback Domain* comments and links in
+   this README, [`strava.py`](strava.py), [`cloud/training.yml`](cloud/training.yml) and
+   [`fitness-sync.yml`](../.github/workflows/fitness-sync.yml), and the two `https://chrisrohn.github.io/` links in
+   [`tests/test_fitness.py`](tests/test_fitness.py). Merge to `main`. From then on `chrisrohn/chris.bike` deploys as
+   *app* (with its `CNAME`), and `chrisrohn/chrisrohn.github.io` as *standby* (the app itself, as before) until
+   `https://chris.bike/move.html` answers with the app, then as *forward*. Nobody is sent to an address that isn't
+   there yet.
+2. **GitHub:** in `chrisrohn/chris.bike`, *Actions → Deploy the Training app → Run workflow*: it commits the app and
+   its `CNAME`. Then *Settings → Pages*: *Deploy from a branch*, `main`, `/ (root)`; the custom domain reads
+   `chris.bike`.
+3. **Verify the domain** (stops anyone else's Pages site claiming it): *github.com → Settings (your profile) → Pages →
+   Add a domain* → `chris.bike`; it shows a TXT record to add.
+4. **Namecheap → Domain List → chris.bike → Manage → Advanced DNS**: delete the parking records (the *CNAME* `www` →
+   `parkingpage.namecheap.com` and the *URL Redirect* `@`), then add:
+
+   | Type | Host | Value |
+   |---|---|---|
+   | A | `@` | `185.199.108.153` |
+   | A | `@` | `185.199.109.153` |
+   | A | `@` | `185.199.110.153` |
+   | A | `@` | `185.199.111.153` |
+   | AAAA | `@` | `2606:50c0:8000::153` |
+   | AAAA | `@` | `2606:50c0:8001::153` |
+   | AAAA | `@` | `2606:50c0:8002::153` |
+   | AAAA | `@` | `2606:50c0:8003::153` |
+   | CNAME | `www` | `chrisrohn.github.io.` |
+   | TXT | `_github-pages-challenge-chrisrohn` | the code from step 3 |
+
+   `www.chris.bike` then redirects to `chris.bike`.
+5. Once the DNS check in *Settings → Pages* is green and the certificate is issued (minutes to an hour), tick
+   **Enforce HTTPS**.
+6. **Strava** (if you use it): set the app's *Authorization Callback Domain* to `chris.bike` at
+   <https://www.strava.com/settings/api>.
+7. Within the hour `chrisrohn.github.io` switches to forwarding (or run its *Deploy the Training app* workflow).
+   Open the old app on the phone once: it carries everything over and opens Training at chris.bike. Install it from
+   there, turn the morning notification back on, and remove the old icon.
+
 ## Setup on a computer (optional)
 
 ```bash
@@ -890,7 +896,7 @@ pip install -r fitness/requirements.txt
 2. **Strava history.** On strava.com go to *Settings → My Account → Download or Delete Your Account → Request your archive*.
    When the zip arrives: `python -m fitness import-strava ~/Downloads/export_12345.zip`.
 3. **Strava ongoing.** Create an app at <https://www.strava.com/settings/api> with
-   *Authorization Callback Domain* `chris.bike` (Strava always allows `localhost` too), then
+   *Authorization Callback Domain* `chrisrohn.github.io` (Strava always allows `localhost` too), then
    `STRAVA_CLIENT_ID=… STRAVA_CLIENT_SECRET=… python -m fitness login strava`. Keep `STRAVA_CLIENT_SECRET` in the
    environment for later syncs too (e.g. `export` it in your shell profile): it's never written to disk.
    This is how your Zwift and MyWoosh rides arrive, with their power. If you also record a trainer ride on the

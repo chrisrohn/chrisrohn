@@ -1,4 +1,4 @@
-// The installable Training app. It lives on an origin of its own ([app] url in fitness/config.toml, https://chris.bike/),
+// The installable Training app. It lives on an origin of its own ([app] url in fitness/config.toml, https://chrisrohn.github.io/),
 // apart from the music app: Android installs one app per scope, and the music app's scope is all of chrisrohn.com, so a
 // training app under chrisrohn.com/fitness/ could only ever "open in New Music".
 //
@@ -9,20 +9,25 @@
 //     vendor/             MapLibre GL, for the map (loaded only on the Map screen)
 //     manifest.webmanifest, sw.js, icons/, fonts/, .nojekyll, robots.txt   installable, offline, not indexed
 //     CNAME               the custom domain, when the site is the app's own ({ cname: true })
-//   buildForward(out)     an old address's whole site (chrisrohn.github.io): every page carries what this phone kept
-//                         there to the app (move-out.js), retires the old service worker, and forwards
+//   buildForward(out)     an old address's whole site (the owner's github.io, once the app has a domain of its own):
+//                         every page carries what this phone kept there to the app (move-out.js), retires the old
+//                         service worker, and forwards
+//   buildParked(out)      a domain repository that isn't the app's address (yet): an empty, unindexed site
 //   buildApp(out)         <out>/fitness/ on chrisrohn.com: the same, for the address before that
 //
 // Every page carries a Content-Security-Policy (fitness/site/csp.txt): only its own inline scripts (by hash) and its
 // own files run, and it talks only to GitHub's API, Open-Meteo, OpenFreeMap's tiles and the BRouter router.
 //
 //   node fitness/build-app.mjs <dir>                  the app, without a CNAME (tests, a local copy)
-//   node fitness/build-app.mjs --role <owner/repo>    what that repository's Pages site serves: app | standby | forward
+//   node fitness/build-app.mjs --role <owner/repo>    what that repository's Pages site serves: app | standby | forward | parked
 //   node fitness/build-app.mjs --as <role> <dir>      builds it (what the sites' deploy workflow runs, fitness/cloud/app-site.yml)
 //
-// The roles: a repository named after the app's host (chrisrohn/chris.bike) is the app, with its CNAME. The owner's
-// github.io repository forwards to it, but only once the app answers at its address with a move.html: until then it
-// stays "standby", the app itself without a CNAME, so a phone never forwards to an address that isn't there yet.
+// The roles: a repository named after the app's host is the app: chrisrohn/chrisrohn.github.io while [app] url is
+// https://chrisrohn.github.io/ (no CNAME), or e.g. chrisrohn/chris.bike with its CNAME once url names that domain. Then
+// the owner's github.io repository forwards to it, but only once the app answers at its address with a move.html: until
+// then it stays "standby", the app itself without a CNAME, so a phone never forwards to an address that isn't there
+// yet. Any other repository named like a domain (chrisrohn/chris.bike while the app is on github.io) is "parked": its
+// site is emptied, and it becomes the app by itself once [app] url names it.
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -35,7 +40,7 @@ export const POLICY = part("csp.txt").trim();
 const slash = (/** @type {string} */ u) => (u.endsWith("/") ? u : u + "/");
 const APP_SECTION = (readFileSync(join(HERE, "config.toml"), "utf8").match(/^\[app\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m) || ["", ""])[1];
 /** Where the app lives: [app] url in fitness/config.toml (FITNESS_APP_URL overrides it). */
-export const APP_URL = slash(process.env.FITNESS_APP_URL || (APP_SECTION.match(/^url\s*=\s*"([^"]*)"/m) || [])[1] || "https://chris.bike/");
+export const APP_URL = slash(process.env.FITNESS_APP_URL || (APP_SECTION.match(/^url\s*=\s*"([^"]*)"/m) || [])[1] || "https://chrisrohn.github.io/");
 /** The app's earlier addresses, whose pages may hand a move to this one: [app] moved_from (FITNESS_MOVED_FROM, comma-separated, overrides it). */
 export const MOVED_FROM = (process.env.FITNESS_MOVED_FROM
   ? process.env.FITNESS_MOVED_FROM.split(",")
@@ -164,6 +169,13 @@ export function buildForward(out) {
   writeFileSync(join(out, "robots.txt"), "User-agent: *\nDisallow: /\n");
 }
 
+/** A domain repository the app doesn't live at (yet): nothing served, nothing indexed, no CNAME. @param {string} out */
+export function buildParked(out) {
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, ".nojekyll"), "");
+  writeFileSync(join(out, "robots.txt"), "User-agent: *\nDisallow: /\n");
+}
+
 /** chrisrohn.com/fitness/, the address before that: same pages, same job. @param {string} out */
 export function buildApp(out) {
   writeForward(join(out, "fitness"), "/fitness/");
@@ -174,7 +186,10 @@ export async function role(repo) {
   const [owner, name] = repo.toLowerCase().split("/");
   const host = new URL(APP_URL).hostname.toLowerCase();
   if (name === host) return "app";
-  if (name !== `${owner}.github.io`) throw new Error(`${repo} is neither the app's site (a repository named ${host}) nor ${owner}.github.io`);
+  if (name !== `${owner}.github.io`) {
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(name)) return "parked";   // a domain the app isn't at (yet)
+    throw new Error(`${repo} is neither the app's site (a repository named ${host}), ${owner}.github.io, nor a domain repository`);
+  }
   try {
     const res = await fetch(APP_URL + "move.html", { signal: AbortSignal.timeout(20_000) });
     if (res.ok && (await res.text()).includes('name="fitness-move"')) return "forward";
@@ -188,9 +203,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const repo = flag("--role"), as = flag("--as") || "standby", out = args[0];
   if (repo != null) {
     console.log(await role(repo));
-  } else if (!out || !["app", "standby", "forward"].includes(as)) {
-    console.error("usage: node fitness/build-app.mjs [--as app|standby|forward] <dir>  ·  node fitness/build-app.mjs --role <owner/repo>");
+  } else if (!out || !["app", "standby", "forward", "parked"].includes(as)) {
+    console.error("usage: node fitness/build-app.mjs [--as app|standby|forward|parked] <dir>  ·  node fitness/build-app.mjs --role <owner/repo>");
     process.exit(2);
+  } else if (as === "parked") {
+    buildParked(out);
+    console.log(`parked ${out}/ · the app lives at ${APP_URL}`);
   } else if (as === "forward") {
     buildForward(out);
     console.log(`built the forwarder into ${out}/ · every page carries this phone's data to ${APP_URL}`);
