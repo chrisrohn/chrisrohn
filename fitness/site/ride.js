@@ -65,30 +65,25 @@
   // ── your numbers follow your training: LTHR, max and resting HR, FTP and weight come from the sync (the same ones the
   //    dashboard's zones, plan and load use) unless you type your own here. One you type stays yours until the sync
   //    learns a new value (a fresh LTHR from a hard ride, a new weigh-in), and then the newer number wins.
-  //    own: { field: [your value, the sync's value when you set it] }
-  const syncSent = { lthr: cfg.lthr, max: cfg.max_hr, rest: cfg.rest_hr, ftp: cfg.ftp, weight: cfg.weight_kg };   // as the sync sent them (null: not sent)
-  const own = prefs.own && typeof prefs.own === "object" ? { ...prefs.own } : {};
-  // settings saved before this froze every number at the moment they were saved, so those follow the sync again
-  for (const k of Object.keys(syncSent)) {
-    const o = own[k];
-    if (o && (!Array.isArray(o) || !Number.isFinite(+o[0]) || (syncSent[k] != null && +o[1] !== +syncSent[k]))) delete own[k];   // the sync has moved on
-  }
+  //    own.<field>: [your value, the sync's value when you set it], or null to follow the sync. Every field is named
+  //    outright (no keys from stored or linked data), and a stored entry is kept only while the sync still says what it
+  //    said when you set it; settings saved before this froze every number, so those follow the sync again.
+  const po = prefs.own && typeof prefs.own === "object" ? prefs.own : {};
+  const keep = (o, sent) => (Array.isArray(o) && Number.isFinite(+o[0]) && (sent == null || +o[1] === +sent) ? [+o[0], o[1] == null ? null : +o[1]] : null);
+  const own = { lthr: keep(po.lthr, cfg.lthr), max: keep(po.max, cfg.max_hr), rest: keep(po.rest, cfg.rest_hr), ftp: keep(po.ftp, cfg.ftp), weight: keep(po.weight, cfg.weight_kg) };
   const synced = { lthr: cfg.lthr, max: cfg.max_hr, rest: cfg.rest_hr, ftp: cfg.ftp ?? 0, weight: cfg.weight_kg || 75 };
-  const A = Object.fromEntries(Object.keys(synced).map(k => [k, own[k] ? +own[k][0] : synced[k]]));
+  const val = (o, sync) => (o ? o[0] : sync);
   const P = {
-    lthr: A.lthr, max: A.max, rest: A.rest, wheel: prefs.wheel || cfg.wheel_m || 2.29,
+    lthr: val(own.lthr, synced.lthr), max: val(own.max, synced.max), rest: val(own.rest, synced.rest), wheel: prefs.wheel || cfg.wheel_m || 2.29,
     fuel: prefs.fuel ?? cfg.fuel_every_min ?? 20, voice: prefs.voice ?? true, km: (ls.get("fitness-units") || (cfg.units === "metric" ? "km" : "mi")) === "km",
-    ftp: A.ftp, autoPause: prefs.autoPause ?? true, stepLap: prefs.stepLap ?? true, autoLap: prefs.autoLap ?? 0,
+    ftp: val(own.ftp, synced.ftp), autoPause: prefs.autoPause ?? true, stepLap: prefs.stepLap ?? true, autoLap: prefs.autoLap ?? 0,
     climbs: prefs.climbs ?? true, reroute: prefs.reroute ?? true, profile: prefs.profile || "trekking", headingUp: prefs.headingUp ?? true,
-    trainer: prefs.trainer || "auto", weight: A.weight, upload: prefs.upload ?? true, saver: prefs.saver || "auto",
+    trainer: prefs.trainer || "auto", weight: val(own.weight, synced.weight), upload: prefs.upload ?? true, saver: prefs.saver || "auto",
     autoLock: prefs.autoLock ?? false, freeride: prefs.freeride || "all",
   };
-  /** A number from the settings sheet: yours if it differs from the sync's, else the sync's again. */
-  const setAnchor = (k, v) => {
-    if (!Number.isFinite(v)) return;
-    if (synced[k] != null && Math.abs(v - synced[k]) < 1e-9) delete own[k]; else own[k] = [v, syncSent[k] ?? null];
-    P[k] = v;
-  };
+  /** A number from the settings sheet: yours if it differs from the sync's (kept with what the sync said then), null to
+   *  follow the sync again; a blank or junk entry changes nothing. */
+  const mineOf = (cur, v, sync, sent) => (!Number.isFinite(v) ? cur : sync != null && Math.abs(v - sync) < 1e-9 ? null : [v, sent ?? null]);
   const savePrefs = () => ls.set("fitness-ride-prefs", JSON.stringify({ own, wheel: P.wheel, fuel: P.fuel, voice: P.voice,
     autoPause: P.autoPause, stepLap: P.stepLap, autoLap: P.autoLap, climbs: P.climbs, reroute: P.reroute, profile: P.profile, headingUp: P.headingUp,
     trainer: P.trainer, upload: P.upload, saver: P.saver, autoLock: P.autoLock, freeride: P.freeride }));
@@ -2751,20 +2746,24 @@
   function paintSyncNote() {
     const parts = [cfg.lthr && `LTHR ${cfg.lthr}`, cfg.max_hr && `max ${cfg.max_hr}`, cfg.rest_hr && `resting ${cfg.rest_hr}`,
       cfg.ftp ? `FTP ${cfg.ftp} W` : cfg.eftp ? `eFTP ${Math.round(cfg.eftp)} W (power targets use it until you set an FTP)` : "", cfg.weight_kg && `${cfg.weight_kg} kg`].filter(Boolean);
-    const mine = Object.keys(own).map(k => ({ lthr: "LTHR", max: "max HR", rest: "resting HR", ftp: "FTP", weight: "weight" })[k]);
+    const mine = [own.lthr && "LTHR", own.max && "max HR", own.rest && "resting HR", own.ftp && "FTP", own.weight && "weight"].filter(Boolean);
     $("s-sync").textContent = parts.length ? `Your training sync: ${parts.join(" · ")}. These follow it as it learns${mine.length ? `; yours instead: ${mine.join(", ")} (until the sync learns a new one)` : ""}.`
       : "No training sync on this phone yet: set your numbers here.";
     $("s-sync-row").hidden = !mine.length;
   }
   $("s-follow").addEventListener("click", () => {
-    for (const k of Object.keys(own)) delete own[k];
+    own.lthr = own.max = own.rest = own.ftp = own.weight = null;
     inp("s-lthr").value = synced.lthr; inp("s-max").value = synced.max; inp("s-rest").value = synced.rest; inp("s-ftp").value = synced.ftp || 0; inp("s-weight").value = synced.weight;
     paintSyncNote();
   });
   dlg.addEventListener("close", () => {
     if (dlg.returnValue !== "save") return;
     const num = (id, d) => { const v = parseFloat(inp(id).value); return Number.isFinite(v) ? v : d; };
-    for (const k of Object.keys(synced)) setAnchor(k, num(`s-${k}`, P[k]));   // s-lthr, s-max, s-rest, s-ftp, s-weight
+    const n = id => parseFloat(inp(id).value);
+    own.lthr = mineOf(own.lthr, n("s-lthr"), synced.lthr, cfg.lthr); own.max = mineOf(own.max, n("s-max"), synced.max, cfg.max_hr);
+    own.rest = mineOf(own.rest, n("s-rest"), synced.rest, cfg.rest_hr); own.ftp = mineOf(own.ftp, n("s-ftp"), synced.ftp, cfg.ftp);
+    own.weight = mineOf(own.weight, n("s-weight"), synced.weight, cfg.weight_kg);
+    Object.assign(P, { lthr: val(own.lthr, synced.lthr), max: val(own.max, synced.max), rest: val(own.rest, synced.rest), ftp: val(own.ftp, synced.ftp), weight: val(own.weight, synced.weight) });
     Object.assign(P, { wheel: num("s-wheel", P.wheel), fuel: num("s-fuel", P.fuel),
       autoLap: num("s-autolap", P.autoLap), voice: inp("s-voice").checked, autoPause: inp("s-autopause").checked, autoLock: inp("s-autolock").checked, stepLap: inp("s-steplap").checked,
       climbs: inp("s-climbs").checked, reroute: inp("s-reroute").checked, profile: /** @type {HTMLSelectElement} */ ($("s-profile")).value,
