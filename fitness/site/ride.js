@@ -2076,14 +2076,14 @@
     d.hidden = !on;
     if (!on) return;
     const tm = $("step-time");
-    $("dk-k").textContent = `${$("step-name").textContent.replace(/\s+·\s+/g, " · ")} · ${$("step-left").textContent}`;
+    $("dk-k").textContent = `${$("step-name").textContent.split("  ·  ").join(" · ")} · ${$("step-left").textContent}`;
     $("dk-time").textContent = tm.textContent;
     $("dk-time").classList.toggle("ahead", tm.classList.contains("ahead")); $("dk-time").classList.toggle("behind", tm.classList.contains("behind"));
     const hrKnown = !!(hrLive || live.hrAt);
     if (hrKnown) {
       $("dk-hr").textContent = hrLive ? String(hrLive) : "—";
       d.dataset.zone = hrLive ? String(zoneOf(hrLive)) : "";
-      $("dk-sub").textContent = tgtTxt && tgtTxt !== "coast" && tgtTxt !== "by feel" && !/W$/.test(tgtTxt) ? `bpm · target ${tgtTxt}` : hrLive ? `bpm · ${ZNAME[zoneOf(hrLive)]}` : "bpm · signal lost";
+      $("dk-sub").textContent = tgtTxt && tgtTxt !== "coast" && tgtTxt !== "by feel" && !tgtTxt.endsWith("W") ? `bpm · target ${tgtTxt}` : hrLive ? `bpm · ${ZNAME[zoneOf(hrLive)]}` : "bpm · signal lost";
     } else {   // no strap: speed takes its place
       $("dk-hr").textContent = spd == null ? "—" : speedTxt(spd);
       d.dataset.zone = "";
@@ -2091,7 +2091,9 @@
     }
     const st = $("hr-status"), ds = $("dk-st");
     ds.className = `dk-st ${[...st.classList].filter(c => c !== "status").join(" ")}`;
-    ds.textContent = st.textContent.replace(/^On target/, "✓").replace(/^On the plan/, "✓").replace(/ · \d+ W$/, "").replace(/^▲ Push$/, "▲ Push").replace(/^▼ Ease off$/, "▼ Ease");
+    // the status in a word: "On target · 212 W" → ✓, "▼ Ease off" → ▼ Ease, "▲ Push · 180 W" → ▲ Push
+    const word = st.textContent.split(" · ")[0];
+    ds.textContent = word === "On target" || word === "On the plan" ? "✓" : word === "▼ Ease off" ? "▼ Ease" : word;
     $("dk-bar").style.width = $("step-bar").style.width || "0";
   }
   $("dock").addEventListener("click", () => show("workout"));
