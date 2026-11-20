@@ -1867,7 +1867,7 @@ def test_counterpart_misses_are_retried_and_old_audio_answers_asked_again(monkey
 def test_the_cleanup_reports_keep_a_window_the_feed_cannot_spend(monkeypatch, sandbox):
     """The feed's year lookups used to run the shared deadline out, so the counterpart search ran with none left:
     the Cleanup reports now get `resolve.cleanup_minutes` of their own, the feed's window shortened by as much."""
-    import discovery.build as build
+    from discovery import build
     from discovery import profile as prof
 
     util.write_json(prof.PROFILE_PATH, PROFILE)
