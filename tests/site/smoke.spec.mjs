@@ -862,6 +862,8 @@ test("Cleanup: auto-clean spends what the Feed leaves of the day's quota — fre
   await expect(page.locator('#cl-auto input[data-opt="dupes"]')).toBeChecked();
   await expect(page.locator('#cl-auto input[data-opt="dead"]')).not.toBeChecked();
   await expect(page.locator("#cl-auto-est")).toContainText("6 fixes");
+  // what the plan leaves out says why: the dead track with no replacement waits for the opt-in removal
+  await expect(page.locator("#cl-auto-est")).toContainText("Not in the plan: 1 dead tracks with no replacement");
   await expect(page.locator("#cl-auto-go")).toHaveText("Use what's left today: 5 of 6 fixes");
   await page.click("#cl-auto-preview");
   await expect(page.locator("#cl-auto-plan")).toContainText("1 marked fine");

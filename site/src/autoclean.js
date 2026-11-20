@@ -14,7 +14,7 @@ import { isOwner, tokenValid } from "./auth.js";
 import { titleFor, videoDetails } from "./youtube.js";
 import { YEAR_FREE, kindsOf, EDITION_NAME } from "./editions.js";
 import { audit, auditDrop } from "./audit.js";
-import { READ, WRITE, EDITION_RANK, cleanupHooks, loadReports, viewOf, unavailableRows, unavOpen, unavKey, isVideoRow, mark, removeRow, moveRow, swapTrack, readingOf, freshReading, moveYears, renderDupes, renderLive } from "./dupes.js";
+import { READ, WRITE, EDITION_RANK, cleanupHooks, capMarks, loadReports, viewOf, unavailableRows, unavOpen, unavKey, isVideoRow, mark, removeRow, moveRow, swapTrack, readingOf, freshReading, moveYears, renderDupes, renderLive } from "./dupes.js";
 
 /** @typedef {import("./types").Dupe} Dupe */
 /** @typedef {import("./types").Unavailable} Unavailable */
@@ -22,7 +22,7 @@ import { READ, WRITE, EDITION_RANK, cleanupHooks, loadReports, viewOf, unavailab
 /** @typedef {import("./types").AutoClean} Config */
 /** @typedef {import("./dupes.js").Row} Row */
 /** @typedef {{ kind: "dismiss" | "trim" | "remove" | "move" | "swap" | "drop", d?: Dupe, r?: Row, u?: Unavailable, year?: string, use?: string, pid: string, cost: number }} Op */
-/** @typedef {{ cat: Cat, label: string, ops: Op[], cost: number }} Job */
+/** @typedef {{ cat: Cat, label: string, ops: Op[], cost: number, key?: string }} Job */
 /** @typedef {"dismiss" | "extra" | "audio" | "streamable" | "dupes" | "versions" | "moves" | "dead"} Cat */
 
 /** What each kind of fix is called, in the order a run takes them: free first, then the safest and the most fixes per
@@ -81,7 +81,7 @@ function planSong(d, o, dead, scope) {
     if (k.length === 1 && k[0] === "versions") ops.push({ kind: "dismiss", d, pid: "", cost: 0 });
   }
   if (!ops.length) return null;
-  return { cat, label: `${d.artist} - ${d.title}`, ops, cost: ops.reduce((n, op) => n + op.cost, 0) };
+  return { cat, label: `${d.artist} - ${d.title}`, ops, cost: ops.reduce((n, op) => n + op.cost, 0), key: d.key };
 }
 /** Every job for the songs and tracks in scope, best value first. @param {Opts} o @param {string} scope @param {Dupe[]} [songs] the live scan's songs instead of the report */
 export function plan(o, scope, songs) {
@@ -102,6 +102,31 @@ export function plan(o, scope, songs) {
   }
   jobs.sort((a, b) => ORDER.indexOf(a.cat) - ORDER.indexOf(b.cat) || (a.ops[0].pid || "").localeCompare(b.ops[0].pid || "") || a.cost - b.cost);
   return jobs;
+}
+/** What the plan cannot reach and why, so a list that never empties says what it waits on.
+ * @param {Opts} o @param {string} scope @param {Job[]} jobs @returns {string[]} */
+export function leftOut(o, scope, jobs) {
+  const planned = new Set(jobs.map(j => j.key).filter(Boolean));
+  const swapped = new Set(jobs.flatMap(j => j.ops.filter(op => op.u).map(op => unavKey(/** @type {Unavailable} */ (op.u)))));
+  const rows = unavailableRows().filter(unavOpen).filter(u => (!scope || u.year === scope) && !swapped.has(unavKey(u)));
+  const n = { waiting: 0, noAudio: 0, deadOff: 0, audioOff: 0, swapOff: 0, songs: 0 };
+  for (const u of rows) {
+    if (u.alt) { if (isVideoRow(u)) n.audioOff++; else n.swapOff++; }
+    else if (u.pending) n.waiting++;
+    else if (isVideoRow(u)) n.noAudio++;
+    else n.deadOff++;   // planned (and so not here) when removing dead tracks is on
+  }
+  for (const d of state.dupes || []) { const v = viewOf(d); if (v.open && !planned.has(d.key) && (!scope || v.rows.some(r => r.year === scope))) n.songs++; }
+  /** @type {[number, string][]} */
+  const parts = [
+    [n.waiting, "waiting on the nightly build's counterpart search"],
+    [n.noAudio, "videos with no audio track on YouTube Music yet"],
+    [n.deadOff, "dead tracks with no replacement (tick “remove dead tracks” to clear them)"],
+    [n.swapOff, "dead tracks with a replacement (streamable swaps are off)"],
+    [n.audioOff, "videos with an audio track (audio swaps are off)"],
+    [n.songs, "songs that only need a fix switched off above"],
+  ];
+  return parts.filter(([k]) => k > 0).map(([k, what]) => `${k.toLocaleString()} ${what}`);
 }
 /** Songs and copies in scope that YouTube has not been asked about this session. @param {string} scope */
 function unlooked(scope) {
@@ -147,8 +172,19 @@ async function doOp(op) {
   const u = unavailableRows().find(x => x.playlistId === r.pid && x.videoId === r.videoId);
   if (u) { mark(unavKey(u)); auditDrop(u.playlistId, u.videoId); }
 }
-/** Spend what is left of today's quota, down to the reserve, on the plan. @param {{ auto?: boolean, live?: boolean }} [how] */
-export async function runAutoClean({ auto = false, live = false } = {}) {
+/** Spend what is left of today's quota, down to the reserve, on the plan — in one tab at a time: every open tab checks
+ * for the evening run, and two runs would spend the quota twice on the same fixes. @param {{ auto?: boolean, live?: boolean }} [how] */
+export async function runAutoClean(how = {}) {
+  if (run.on) return;
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (!locks) return runHere(how);
+  await locks.request("id:autoclean", { ifAvailable: true }, async lock => {
+    if (!lock) { toast("Auto-clean is already running in another tab", true); return; }
+    await runHere(how);
+  });
+}
+/** @param {{ auto?: boolean, live?: boolean }} how */
+async function runHere({ auto = false, live = false }) {
   if (run.on) return;
   if (!isOwner()) { toast("Auto-clean edits the Indie Discotheque playlists: sign in as the curator first", true); return; }
   const c = config(); const o = live ? { ...c.opts, versionsOk: false, audio: false, streamable: false, dead: false, lookup: false } : c.opts;
@@ -231,7 +267,25 @@ function eveningCheck() {
   }
   c.lastDay = ptDay(); persist();
   toast("Evening clean-up: spending what is left of today's quota on the Cleanup list", false, { label: "Stop", fn: stopAutoClean });
-  runAutoClean({ auto: true });
+  const t0 = Date.now();
+  runAutoClean({ auto: true }).then(() => {
+    // the sign-in lapsed mid-run: not done for the day, so the next check offers it with one tap
+    const cc = config(); if (cc.last && cc.last.at >= t0 && cc.last.stopped === "sign-in" && cc.lastDay === ptDay()) { delete cc.lastDay; delete cc.promptDay; persist(); }
+  });
+}
+/** What another tab saved: its marks joined to this tab's (else this tab's next save would write its older list back
+ * and fixes already made would be listed again), and its evening run counted, so this tab does not run it twice.
+ * @param {StorageEvent} e */
+function fromOtherTab(e) {
+  if (e.key !== "id:settings" || !e.newValue) return;
+  /** @type {any} */ let other; try { other = JSON.parse(e.newValue); } catch { return; }
+  const mine = state.settings.dupesDone || []; const have = new Set(mine);
+  const add = (Array.isArray(other?.dupesDone) ? other.dupesDone : []).filter(/** @param {string} m */ m => !have.has(m));
+  if (add.length) state.settings.dupesDone = capMarks([...mine, ...add]);
+  const oc = other?.autoClean; const c = config();
+  if (oc?.lastDay && (!c.lastDay || oc.lastDay > c.lastDay)) c.lastDay = oc.lastDay;
+  if (oc?.last && (!c.last || oc.last.at > c.last.at)) c.last = oc.last;
+  if (add.length && !run.on) renderDupes(false); else estimate();
 }
 /** When the quota resets, in the viewer's own time. */
 function resetLocal() {
@@ -259,6 +313,8 @@ function estimate() {
     est.textContent = jobs.length
       ? `${jobs.length.toLocaleString()} fixes${scope ? ` in ${scope}` : ""}, ≈${total.toLocaleString()} units in all · ${quotaLeft().toLocaleString()} left today, ${c.reserve.toLocaleString()} kept back for the Feed → ${f.n.toLocaleString()} fixes now (≈${f.units.toLocaleString()} units)${f.n < jobs.length ? ` · the rest takes about ${Math.max(1, Math.ceil((total - f.units) / daily))} more day${Math.ceil((total - f.units) / daily) === 1 ? "" : "s"} of unused quota` : ""}`
       : `Nothing for these settings${scope ? ` in ${scope}` : ""}: the list is clean, or only needs the fixes that are switched off.`;
+    const out = leftOut(c.opts, scope, jobs);
+    if (out.length) est.textContent += ` · Not in the plan: ${out.join(" · ")}.`;
     const last = c.last; const l = $("#cl-auto-last");
     if (l) l.textContent = last ? `Last run ${new Date(last.at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}: ${last.done.toLocaleString()} fixed${last.failed ? `, ${last.failed} failed` : ""}, ${last.units.toLocaleString()} units` : "";
     if (!$("#cl-auto-plan")?.hidden) preview(jobs, budget);
@@ -310,6 +366,7 @@ export function wireAutoClean() {
     runAutoClean({ live: true });
   });
   cleanupHooks.onRender = () => { resetNote(); estimate(); };
+  window.addEventListener("storage", fromOtherTab);
   window.setInterval(eveningCheck, 60e3);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") eveningCheck(); });
   window.setTimeout(eveningCheck, 8000);   // after the feed and the sign-in have settled

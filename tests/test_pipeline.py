@@ -284,8 +284,9 @@ def test_the_build_splits_its_budget_between_fetching_and_resolving(monkeypatch,
     cfg = _cfg()
     cfg["sources"]["time_budget_minutes"] = 14      # more than half of the budget below: the job's share wins
     cfg["resolve"]["youtube_share"] = 1.0
+    cfg["resolve"]["cleanup_minutes"] = 0           # the Cleanup reports' own slice has its own test
     build.build_feed(cfg, budget_minutes=20)
-    assert 9.5 < seen["sources"].remaining_minutes <= 10                     # half of the 20 the job had left
+    assert 9.5 < seen["sources"].remaining_minutes <= 10                    # half of the 20 the job had left
     assert 19 < seen["resolve"].remaining_minutes <= 20                      # …and the rest, the configured 28 being more
 
     cfg["sources"]["time_budget_minutes"] = 3       # a smaller configured budget is respected as it stands
@@ -1767,12 +1768,17 @@ def test_playlist_rows_that_are_videos_get_their_audio_track_in_the_report(monke
 
     monkeypatch.setattr(unavailable, "CACHE", sandbox / "data" / "cache" / "counterparts.json")
     monkeypatch.setattr(unavailable, "REPORT", sandbox / "site" / "data" / "unavailable.json")
-    watched = []
+    watched, searched = [], []
 
     class FakeYT:
         def __init__(self, **kw): pass
         def search(self, q, filter=None, limit=None):
-            raise AssertionError("a video row is asked through the watch playlist, never searched")
+            # only when the watch playlist pairs no audio track: the songs are searched for the same recording's
+            searched.append((q, filter))
+            if q == "Someone Upload" and filter == "songs":
+                return [{"resultType": "song", "title": "Upload (Live)", "artists": [{"name": "Someone"}], "videoId": "live2", "videoType": "MUSIC_VIDEO_TYPE_ATV"},
+                        {"resultType": "song", "title": "Upload", "artists": [{"name": "Someone"}], "videoId": "vid2-atv", "videoType": "MUSIC_VIDEO_TYPE_ATV", "album": {"name": "Uploads", "id": "MPREb_u"}}]
+            return []
         def get_watch_playlist(self, videoId=None, limit=1, **kw):
             watched.append(videoId)
             if videoId == "vid1":
@@ -1794,13 +1800,95 @@ def test_playlist_rows_that_are_videos_get_their_audio_track_in_the_report(monke
     assert report["count"] == 1 and report["video"] == 2                                       # `count` stays the not-streamable rows
     assert rows["vid1"]["why"] == "video" and rows["vid1"]["alt"] == {"videoId": "vid1-atv", "title": "Candle Flame", "album": "Volcano", "videoType": "MUSIC_VIDEO_TYPE_ATV"}
     assert rows["vid2"]["pending"] is True and report["video_pending"] == 1 and report["video_with_audio"] == 1   # over budget: waits
-    assert watched == ["vid1"]
+    assert watched == ["vid1"] and searched == []                                              # a paired audio track needs no search
     cfg["resolve"]["counterparts_per_run"] = 5
     report = unavailable.build_report(profile, cfg)
     rows = {r["videoId"]: r for r in report["rows"]}
-    assert watched == ["vid1", "vid2"] and rows["vid2"]["alt"] is None and rows["vid2"]["pending"] is False and report["video_pending"] == 0
+    assert watched == ["vid1", "vid2"] and searched == [("Someone Upload", "songs")]
+    assert rows["vid2"]["alt"]["videoId"] == "vid2-atv" and rows["vid2"]["alt"]["videoType"] == "MUSIC_VIDEO_TYPE_ATV"   # never the live take
+    assert rows["vid2"]["pending"] is False and report["video_pending"] == 0 and report["video_with_audio"] == 2
     cache = util.read_json(unavailable.CACHE, {})
     assert cache["audio:vid1"]["alt"]["videoId"] == "vid1-atv" and "vid1" not in cache          # kept apart from the dead rows' searches
+    assert cache["audio:vid1"]["v"] == unavailable.AUDIO_CACHE_VERSION and cache["audio:vid1"]["at"]
+
+
+def test_counterpart_misses_are_retried_and_old_audio_answers_asked_again(monkeypatch, sandbox):
+    """A miss is asked again after `counterpart_retry_days`; a video row answered under the watch-playlist-only rules
+    (cache version 1) is asked again with the song search; every row the report still lists keeps its cache entry."""
+    import sys
+    import types
+    from datetime import timedelta
+
+    from discovery import unavailable
+
+    monkeypatch.setattr(unavailable, "CACHE", sandbox / "data" / "cache" / "counterparts.json")
+    monkeypatch.setattr(unavailable, "REPORT", sandbox / "site" / "data" / "unavailable.json")
+    asked = []
+
+    class FakeYT:
+        def __init__(self, **kw): pass
+        def search(self, q, filter=None, limit=None):
+            asked.append(q)
+            if filter == "songs":
+                artist, title = q.split(" ", 1)
+                return [{"resultType": "song", "title": title, "artists": [{"name": artist}], "videoId": f"{title.lower()}-atv", "videoType": "MUSIC_VIDEO_TYPE_ATV"}]
+            return []
+        def get_watch_playlist(self, videoId=None, limit=1, **kw):
+            return {"tracks": [{"videoId": videoId, "videoType": "MUSIC_VIDEO_TYPE_OMV"}]}
+    monkeypatch.setitem(sys.modules, "ytmusicapi", types.SimpleNamespace(YTMusic=FakeYT))
+    entries = [
+        {"year": "2024", "playlistId": "PL2024", "position": 0, "videoId": "deadOld", "artist": "Jungle", "title": "Old", "avail": False},
+        {"year": "2024", "playlistId": "PL2024", "position": 1, "videoId": "deadNew", "artist": "Jungle", "title": "New", "avail": False},
+        {"year": "2024", "playlistId": "PL2024", "position": 2, "videoId": "deadHit", "artist": "Jungle", "title": "Hit", "avail": False},
+        {"year": "2023", "playlistId": "PL2023", "position": 0, "videoId": "vidV", "artist": "Roosevelt", "title": "Lovers", "videoType": "MUSIC_VIDEO_TYPE_OMV", "avail": True},
+    ]
+    today = date.today()
+    old = (today - timedelta(days=45)).isoformat()
+    util.write_json(unavailable.CACHE, {
+        "deadOld": {"seen": old, "at": old, "alt": None, "v": 1},                                           # a miss past the retry: asked again
+        "deadNew": {"seen": today.isoformat(), "at": today.isoformat(), "alt": None, "v": 1},               # a fresh miss: left alone
+        "deadHit": {"seen": old, "alt": {"videoId": "hit-atv", "videoType": "MUSIC_VIDEO_TYPE_ATV"}, "v": 1},   # a hit: never asked again
+        "audio:vidV": {"seen": old, "alt": None, "v": 1},                                                   # the old rules' miss: asked again
+    })
+    cfg = _cfg(); cfg["resolve"]["counterparts_per_run"] = 10; cfg["resolve"]["counterpart_retry_days"] = 30
+    profile = {"youtube": {"entries": entries}}
+    report = unavailable.build_report(profile, cfg)
+    rows = {r["videoId"]: r for r in report["rows"]}
+    assert sorted(asked) == ["Jungle Old", "Roosevelt Lovers"]
+    assert rows["deadOld"]["alt"]["videoId"] == "old-atv" and rows["deadNew"]["alt"] is None and rows["deadHit"]["alt"]["videoId"] == "hit-atv"
+    assert rows["vidV"]["alt"]["videoId"] == "lovers-atv" and report["video_with_audio"] == 1 and report["looked"] == 2
+    assert util.read_json(unavailable.CACHE, {})["deadHit"]["seen"] == today.isoformat()   # saved even for a row not looked up
+    # nothing due: no lookup, nothing waiting
+    asked.clear()
+    report = unavailable.build_report(profile, cfg)
+    assert asked == [] and report["looked"] == 0 and report["pending"] == 0
+
+
+def test_the_cleanup_reports_keep_a_window_the_feed_cannot_spend(monkeypatch, sandbox):
+    """The feed's year lookups used to run the shared deadline out, so the counterpart search ran with none left:
+    the Cleanup reports now get `resolve.cleanup_minutes` of their own, the feed's window shortened by as much."""
+    from discovery import build
+    from discovery import profile as prof
+
+    util.write_json(prof.PROFILE_PATH, PROFILE)
+    monkeypatch.setattr(build, "run_sources", lambda cfg, profile, http, deadline=None: [])
+    seen = {}
+
+    def years(dups, cfg, http, deadline=None):
+        seen["years"] = deadline
+    def unavailable(profile, cfg, deadline=None):
+        seen["unavailable"] = deadline
+        return {"count": 0, "with_counterpart": 0, "pending": 0}
+    def verify(items, cfg, http, deadline=None):
+        seen["feed"] = deadline
+    monkeypatch.setattr(build, "annotate_duplicate_years", years)
+    monkeypatch.setattr(build, "unavailable_report", unavailable)
+    monkeypatch.setattr(build, "verify_years", verify)
+    cfg = _cfg(); cfg["resolve"]["time_budget_minutes"] = 30; cfg["resolve"]["cleanup_minutes"] = 6
+    build.build_feed(cfg, budget_minutes=36)
+    assert 23.0 < seen["feed"].remaining_minutes <= 24.0                 # 30 minus the 6 kept back
+    assert 5.0 < seen["years"].remaining_minutes <= 6.0                  # the window, never spent by the feed
+    assert 3.0 < seen["unavailable"].remaining_minutes <= 3.6            # the counterparts' 60% of it, first
 
 
 def test_only_audio_cards_and_misses_are_tried_again(monkeypatch, sandbox):
