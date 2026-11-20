@@ -583,8 +583,12 @@ resolve:
   # the lookup, then again every audio_recheck_days, this many a run (about a second each). On 2026-11-02 1,841 of
   # the day's 2,226 candidates waited on a video with no paired audio track.
   audio_searches_per_run: 600
-  counterparts_per_run: 300     # greyed-out playlist tracks searched for a streamable upload, and playlist rows that are the video asked
+  counterparts_per_run: 600     # greyed-out playlist tracks searched for a streamable upload, and playlist rows that are the video asked
                                 # for their audio track, per run (Cleanup tab → data/unavailable.json)
+  counterpart_workers: 4        # those lookups a few at a time (ytmusicapi, no quota), so a run clears hundreds in a few minutes
+  counterpart_retry_days: 30    # a row with no counterpart found is asked again after this long (uploads appear, regions open)
+  cleanup_minutes: 7            # kept off the end of the window above for the Cleanup reports (counterparts, then duplicate years),
+                                # so the feed's year lookups can never leave them no time
   year_chain: full              # the feed asks every catalogue; the catalog's own setting is under `catalog`
   # Year verification (see discovery/years.py): identify the recording via ListenBrainz's MusicBrainz mapper, take
   # MusicBrainz's earliest release date for it, cross-check with Deezer (ISRC → MusicBrainz), Discogs master year

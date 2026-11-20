@@ -11,20 +11,31 @@ site/data/unavailable.json for the Cleanup tab, where a swap (add the counterpar
 YouTube API writes. Lookups are cached in data/cache/counterparts.json and bounded per run.
 The same report lists every playlist row that is a video (an official video or an upload, videoType other than
 MUSIC_VIDEO_TYPE_ATV) with why "video" and, from the watch playlist, the audio track YouTube Music pairs it with as
-the counterpart, so the tab can swap the library over to audio files one row (or one year) at a time.
+the counterpart (or, when it pairs none, the same recording's audio track found by a song search, as the resolver
+does for cards), so the tab can swap the library over to audio files one row (or one year) at a time.
+
+The lookups run a few at a time (`resolve.counterpart_workers`) inside a window of their own (build.py reserves
+`resolve.cleanup_minutes` off the end of the feed's), so the feed's slow year lookups can no longer leave them none:
+from 2026-10-29 to 2026-11-19 every run reached this report with its deadline spent and looked nothing up. A miss
+(no counterpart found) is asked again after `resolve.counterpart_retry_days`, since uploads appear and regions open.
 """
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Any
 
 from .models import Item
-from .resolve import ATV, _pick, _shape, audio_counterpart, prefer_audio, prune_cache, ytmusic
+from .resolve import ATV, _pick, _shape, audio_counterpart, prefer_audio, prune_cache, search_audio, ytmusic
 from .util import CACHE_DIR, SITE_DATA_DIR, Deadline, log, read_json, utcnow, write_json
 
 CACHE = CACHE_DIR / "counterparts.json"
 REPORT = SITE_DATA_DIR / "unavailable.json"
 CACHE_VERSION = 1
+# a video row's audio side: 2 adds the song search when the watch playlist pairs no audio track (375 of the 376 rows
+# asked under version 1 came back empty), so every version-1 answer is asked again
+AUDIO_CACHE_VERSION = 2
 
 
 def unavailable_entries(profile: dict, ratings: dict | None = None) -> list[dict]:
@@ -92,11 +103,33 @@ def find_counterpart(yt, artist: str, title: str, avoid: str) -> dict[str, Any] 
 
 
 def audio_side(yt, entry: dict) -> dict[str, Any] | None:
-    """The audio track YouTube Music pairs with a playlist row that is a video, named after the row itself."""
+    """The audio track of a playlist row that is a video: the one YouTube Music pairs with it in the watch playlist,
+    else the same recording's audio track found by a song search (artist and title agreeing, never another version),
+    named after the row itself."""
     cp = audio_counterpart(yt, entry["videoId"])
-    if not cp:
+    if cp:
+        return {k: v for k, v in (("videoId", cp), ("title", entry.get("title")), ("album", entry.get("album")), ("videoType", ATV)) if v is not None}
+    artist, title = entry.get("artist") or "", entry.get("title") or ""
+    if not artist or not title:
         return None
-    return {k: v for k, v in (("videoId", cp), ("title", entry.get("title")), ("album", entry.get("album")), ("videoType", ATV)) if v is not None}
+    found: dict[str, Any] = {"videoId": entry["videoId"], "videoType": entry.get("videoType"), "title": title}
+    want = Item(artist=artist, title=title, kind="track").normalize_credit().display_title
+    if not search_audio(yt, found, artist, want, {entry["videoId"]}) or found.get("videoId") == entry["videoId"]:
+        return None
+    return {k: v for k, v in (("videoId", found["videoId"]), ("title", found.get("title") or title), ("album", found.get("album") or entry.get("album")), ("videoType", ATV)) if v is not None}
+
+
+def _due(row: dict | None, version: int, today: date, retry_days: int) -> bool:
+    """Whether a row needs (another) lookup: never asked, asked under older rules, or a miss old enough to retry."""
+    if row is None or row.get("v") != version:
+        return True
+    if row.get("alt") or not retry_days:
+        return False
+    try:
+        asked = date.fromisoformat(str(row.get("at") or ""))
+    except ValueError:
+        return True          # a miss from before the date was kept: due now
+    return (today - asked).days >= retry_days
 
 
 def build_report(profile: dict, cfg: dict, deadline: Deadline | None = None) -> dict:
@@ -108,35 +141,82 @@ def build_report(profile: dict, cfg: dict, deadline: Deadline | None = None) -> 
     rcfg = cfg.get("resolve") or {}
     budget = int(rcfg.get("counterparts_per_run", 300))
     keep_days = int(rcfg.get("cache_keep_days", 120))
+    retry_days = int(rcfg.get("counterpart_retry_days", 30))
+    workers = max(1, int(rcfg.get("counterpart_workers", 4)))
     deadline = deadline or Deadline(None)
-    today_s = date.today().isoformat()
+    today = date.today()
+    today_s = today.isoformat()
     cache: dict[str, Any] = read_json(CACHE, {})
-    yt = ytmusic(cfg) if any(r.get("why") == "video" or (r.get("artist") and r.get("title")) for r in rows) and budget else None
+
+    def key(e: dict) -> str:
+        # a video row's counterpart is the audio side the watch playlist names, a dead row's a search: cached apart
+        return f"audio:{e['videoId']}" if e.get("why") == "video" else e["videoId"]
+
+    def ver(e: dict) -> int:
+        return AUDIO_CACHE_VERSION if e.get("why") == "video" else CACHE_VERSION
+
+    def searchable(e: dict) -> bool:
+        # a deleted video has no name left to search by: the tab offers a removal or a typed search
+        return e.get("why") == "video" or bool(e.get("artist") and e.get("title"))
+
+    # never asked first, then misses due a retry, newest year first within each (rows are already in that order);
+    # one lookup per video id even when several playlists hold it
+    due: dict[str, dict] = {}
+    for e in rows:
+        k = key(e)
+        if k not in due and searchable(e) and _due(cache.get(k), ver(e), today, retry_days):
+            due[k] = e
+
+    def fresh(k: str, e: dict) -> bool:
+        return cache.get(k) is None or cache[k].get("v") != ver(e)
+    todo = [kv for kv in due.items() if fresh(*kv)] + [kv for kv in due.items() if not fresh(*kv)]
+    todo = todo[:budget] if budget > 0 else []
+
+    local = threading.local()
+
+    def client():
+        if not hasattr(local, "yt"):
+            local.yt = ytmusic(cfg)
+        return local.yt
+
+    def look(item: tuple[str, dict]) -> tuple[str, dict | None, bool]:
+        """One row's lookup on this worker's own client (ytmusicapi's session is not shared across threads)."""
+        k, e = item
+        if deadline.expired:
+            return k, None, False
+        try:
+            yt = client()
+            vid = e["videoId"]
+            alt = audio_side(yt, e) if e.get("why") == "video" else find_counterpart(yt, e.get("artist") or "", e.get("title") or "", vid)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("counterpart lookup for %s failed: %s", e.get("videoId"), exc)
+            return k, None, False
+        return k, alt, True
+
     looked = 0
+    if todo:
+        with ThreadPoolExecutor(max_workers=min(workers, len(todo))) as pool:
+            for (k, e), (_, alt, ok) in zip(todo, pool.map(look, todo), strict=True):
+                if ok:
+                    looked += 1
+                    cache[k] = {"seen": today_s, "at": today_s, "alt": alt, "v": ver(e)}
+
     out: list[dict] = []
     for e in rows:
-        vid = e["videoId"]
-        video = e.get("why") == "video"
-        # a video row's counterpart is the audio side the watch playlist names, a dead row's a search: cached apart
-        row = cache.get(f"audio:{vid}" if video else vid)
-        if not video and not (e.get("artist") and e.get("title")):
-            alt, pending = None, False   # a deleted video has no name left to search by: the tab offers a removal or a typed search
-        elif row is None or row.get("v") != CACHE_VERSION:
-            if yt is None or looked >= budget or deadline.expired:
-                alt: dict | None = None
-                pending = True
-            else:
-                looked += 1
-                alt = audio_side(yt, e) if video else find_counterpart(yt, e.get("artist") or "", e.get("title") or "", vid)
-                row = cache[f"audio:{vid}" if video else vid] = {"seen": today_s, "alt": alt, "v": CACHE_VERSION}
-                pending = False
+        k = key(e)
+        row = cache.get(k)
+        if not searchable(e):
+            alt, pending = None, False
+        elif row is None or row.get("v") != ver(e):
+            alt, pending = None, True        # not asked yet (over budget or out of time): waits, is not "no counterpart"
         else:
             row["seen"] = today_s
             alt, pending = row.get("alt"), False
-        out.append({"year": str(e.get("year") or ""), "playlistId": e.get("playlistId"), "videoId": vid, "position": e.get("position"),
+        out.append({"year": str(e.get("year") or ""), "playlistId": e.get("playlistId"), "videoId": e["videoId"], "position": e.get("position"),
                     "artist": e.get("artist") or "", "title": e.get("title") or "", "alt": alt, "pending": pending, "why": e.get("why") or "greyed"})
-    if looked:
-        write_json(CACHE, prune_cache(cache, date.today(), keep_days), compact=True)
+    # always written: the rows still listed are marked seen, so the pruning never drops an answer the report still uses
+    if cache or looked:
+        write_json(CACHE, prune_cache(cache, today, keep_days), compact=True)
     dead_rows = [r for r in out if r["why"] != "video"]
     video_rows = [r for r in out if r["why"] == "video"]
     report = {"checked_at": (profile.get("youtube") or {}).get("checked_at"), "generated_at": utcnow().isoformat(), "count": len(dead_rows),
@@ -144,8 +224,8 @@ def build_report(profile: dict, cfg: dict, deadline: Deadline | None = None) -> 
               "pending": sum(1 for r in dead_rows if r["pending"]),
               # playlist rows that are the video, not the audio track, and how many have the audio side to swap in
               "video": len(video_rows), "video_with_audio": sum(1 for r in video_rows if r["alt"]), "video_pending": sum(1 for r in video_rows if r["pending"]),
-              "rows": out}
+              "looked": looked, "rows": out}
     write_json(REPORT, report, compact=True)
-    log.info("unavailable: %d greyed-out playlist tracks, %d with a streamable counterpart (%d looked up this run, %d waiting); %d playlist rows are the video rather than the audio track, %d with the audio side found (%d waiting)",
-             report["count"], report["with_counterpart"], looked, report["pending"], report["video"], report["video_with_audio"], report["video_pending"])
+    log.info("unavailable: %d greyed-out playlist tracks, %d with a streamable counterpart (%d looked up this run, %d waiting); %d playlist rows are the video rather than the audio track, %d with the audio side found (%d waiting); %d lookups still due",
+             report["count"], report["with_counterpart"], looked, report["pending"], report["video"], report["video_with_audio"], report["video_pending"], max(0, len(due) - looked))
     return report

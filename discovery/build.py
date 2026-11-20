@@ -89,12 +89,19 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     resolve_minutes = float(rescfg.get("time_budget_minutes") or 0) or None
     if budget_minutes is not None:      # …and what is left of the job's own budget, whichever is less
         resolve_minutes = min(resolve_minutes or job.remaining_minutes, job.remaining_minutes)
+    # the Cleanup tab's reports (streamable counterparts, the audio side of video rows, the verified year of songs
+    # filed twice) get a slice of their own off the end: run last on what the feed left, they got none from
+    # 2026-10-29 to 2026-11-19 (the year lookups always ran the window out) and auto-clean had nothing new to fix
+    cleanup_minutes = max(0.0, float(rescfg.get("cleanup_minutes", 7) or 0))
+    if resolve_minutes and cleanup_minutes:
+        cleanup_minutes = min(cleanup_minutes, resolve_minutes / 3)
+        resolve_minutes -= cleanup_minutes
     # YouTube lookups are what make cards; they get their share of the window first, and the year lookups
     # (MusicBrainz at one request a second) whatever is left — a card dated tomorrow beats a card not shown today
     yt_share = min(1.0, max(0.0, float(rescfg.get("youtube_share", 1.0) or 1.0)))
     yt_minutes = resolve_minutes * yt_share if resolve_minutes else None
-    log.info("time: %.1f min left of the build's budget; %.1f of it for YouTube and the year lookups (YouTube's share %.1f)",
-             job.remaining_minutes, resolve_minutes or float("inf"), yt_minutes or float("inf"))
+    log.info("time: %.1f min left of the build's budget; %.1f of it for YouTube and the year lookups (YouTube's share %.1f), %.1f kept for the Cleanup reports",
+             job.remaining_minutes, resolve_minutes or float("inf"), yt_minutes or float("inf"), cleanup_minutes)
     deadline = Deadline(resolve_minutes)
     yt_deadline = Deadline(yt_minutes)
     # drop things already in your year playlists (kept) or the Skipped playlist (skipped)
@@ -188,15 +195,19 @@ def build_feed(cfg: dict, *, budget_minutes: float | None = None) -> dict:
     # counts as a duplicate never waits for the next profile rebuild
     ymeta = profile.get("youtube") or {}
     dups = find_duplicates(ymeta.get("entries") or []) if ymeta.get("entries") else list(ymeta.get("duplicates") or [])
-    annotate_duplicate_years(dups, cfg, http, deadline)
+    # the reserved window, never past the job's own budget: the counterparts (YouTube Music, a few at a time) take up
+    # to 60% of it first, the duplicate years (MusicBrainz, one request a second) the rest
+    cleanup_window = max(0.05, min(cleanup_minutes, job.remaining_minutes)) if cleanup_minutes else None   # 0 would read as "no limit"
+    cleanup = Deadline(cleanup_window)
+    # tracks the playlists hold that will not stream here, with a counterpart that will (ytmusicapi, no quota)
+    unavailable = unavailable_report(profile, cfg, Deadline(cleanup_window * 0.6) if cleanup_window else cleanup)
+    annotate_duplicate_years(dups, cfg, http, cleanup)
     # a song counts under every problem it has (an extra copy in one year and two uploads is both)
     dup_kinds: dict[str, int] = {}
     for d in dups:
         for k in d.get("kinds") or [d.get("kind", "?")]:
             dup_kinds[k] = dup_kinds.get(k, 0) + 1
     checked_at = (profile.get("youtube") or {}).get("checked_at")
-    # tracks the playlists hold that will not stream here, with a counterpart that will (ytmusicapi, no quota)
-    unavailable = unavailable_report(profile, cfg, deadline)
     # the full report lives in its own file (thousands of rows on a big library); feed.json only carries the counts
     write_json(SITE_DATA_DIR / "duplicates.json", {"version": 2, "checked_at": checked_at, "count": len(dups), "kinds": dup_kinds, "duplicates": dups}, compact=True)
 

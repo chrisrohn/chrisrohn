@@ -135,8 +135,8 @@ pairs no audio track with it yet) is asked again every `resolve.audio_recheck_da
 learns it the same way. ⚙ → *Stats* says how many of the day's cards (and the catalog's) play the audio track, the
 build's log line the same. The library itself is checked too: every playlist row that is a video rather than the
 audio track is listed in the **Cleanup** tab under *filed as the video, not the audio track*, with the audio track
-YouTube Music pairs with it (asked through the watch playlist, `resolve.counterparts_per_run` a run, no API quota)
-and a **swap** (add the audio track, remove the video: 100 units), per row or *swap all in a year*; **keep the
+YouTube Music pairs with it (asked through the watch playlist, or, when it pairs none, found by a song search for the
+same recording; `resolve.counterparts_per_run` a run, no API quota) and a **swap** (add the audio track, remove the video: 100 units), per row or *swap all in a year*; **keep the
 video** stops listing a row you want as it is. The album a song names is opened once for the year YouTube Music
 states and its playlist, which is what the "full release" link and the year fallback come from.
 
@@ -206,7 +206,9 @@ for is deleted or private, one restricted away from the region is blocked. Findi
 under *not streamable here* with why (a deleted video keeps whatever name the site's own records still have for it),
 and travel to the build with the ratings file (`data/ratings.json` → `unplayable`), where the build searches for
 another upload of each song that streams there, the audio track first, a batch a run (`resolve.counterparts_per_run`,
-cached). A **swap** adds the counterpart and removes the dead copy (100 units, 101 for the build's rows), *swap all
+`resolve.counterpart_workers` at a time, cached; a miss is asked again after `resolve.counterpart_retry_days`). These
+lookups and the duplicate report's verified years run in a window of their own (`resolve.cleanup_minutes`, kept off
+the end of the feed's), so a slow day for the feed's year lookups cannot leave them none. A **swap** adds the counterpart and removes the dead copy (100 units, 101 for the build's rows), *swap all
 in a year* does it in bulk within the day's quota, **find a replacement now** does the search from the tab for 101
 units (the audio track first, anything blocked here left out, each result playable in place before you use it), and
 a track with no other upload can be removed or searched by hand. The report is `site/data/unavailable.json`.
