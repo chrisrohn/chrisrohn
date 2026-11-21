@@ -2474,3 +2474,94 @@ def test_new_acts_are_looked_up_among_the_vetted_ones_and_their_source_runs_earl
     got = [i.title for i in newcomers.lookup_order(est, new, 0.25)]
     assert got[:8] == ["N0", "V0", "V1", "V2", "N1", "V3", "V4", "V5"] and sorted(got) == sorted(i.title for i in est + new)
     assert [i.title for i in newcomers.lookup_order(est, [], 0.3)] == [i.title for i in est]
+
+
+def test_reissues_are_filed_under_the_original_year():
+    """A remaster / reissue / anniversary edition carries the reissue's own dates: they never decide the year."""
+    from discovery.years import base_title, decide, reissue_info
+
+    this = date.today().year
+    tagged = Item(artist="Cabaret Voltaire", title="Don't Argue (7\" Version, 2026 Remaster)", kind="track", stated_year=this,
+                  youtube={"videoId": "v", "year": str(this), "album": "Don't Argue (7\" Version, 2026 Remaster)"})
+    assert reissue_info(tagged).strength == "strong" and base_title(tagged.title) == "Don't Argue"
+    assert base_title("Ritual (Nous Sommes Du Soleil) [Single Edit 2] [2026 Remaster]") == "Ritual (Nous Sommes Du Soleil)"
+    assert base_title("Heroes - 2017 Remaster") == "Heroes" and base_title("Song (The Vampire Song)") == "Song (The Vampire Song)"
+    year, source, conf, ev = decide({}, tagged)
+    assert (year, source) == (None, "reissue")                             # never "this year" for a 1987 song
+    assert all(e.note == "reissue" for e in ev)
+    assert decide({"musicbrainz": this, "deezer": 1987}, tagged)[:2] == (1987, "deezer")    # MB matched only the remaster
+    assert decide({"musicbrainz": 1987, "deezer": this}, tagged)[:3] == (1987, "musicbrainz", "high")
+
+    anniv = Item(artist="Soccer Mommy", title="Henry", kind="track", release="For Young Hearts (10th Anniversary Edition)", stated_year=this)
+    assert decide({}, anniv)[:2] == (this - 10, "anniversary")             # the edition dates itself
+    assert decide({"musicbrainz-search": this - 10}, anniv)[:3] == (this - 10, "musicbrainz-search", "high")
+
+    deluxe = Item(artist="The Beaches", title="Should've Known Better", kind="track", stated_year=this,
+                  youtube={"videoId": "w", "year": str(this), "album": "No Hard Feelings (Deluxe)"})
+    assert reissue_info(deluxe).strength == "weak"
+    assert decide({}, deluxe)[0] == this                                   # a bonus track can be new
+    assert decide({"musicbrainz": this, "deezer": this - 1, "itunes": this - 1}, deluxe)[:2] == (this - 1, "deezer")   # an older store year wins
+
+    plain = Item(artist="Nina", title="To See You", kind="track", stated_year=this)
+    assert reissue_info(plain).strength == "" and decide({}, plain)[0] == this
+
+
+def test_verify_years_looks_reissues_up_under_the_base_title_through_the_whole_chain(monkeypatch):
+    from discovery import years
+
+    this = date.today().year
+    monkeypatch.setenv("DISCOGS_TOKEN", "tok")
+    asked = []
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            p = kw.get("params", {}); asked.append((url, dict(p)))
+            if "metadata/lookup" in url:
+                return {}
+            if url.endswith("/recording/"):
+                return {"recordings": []}
+            if "deezer.com/search" in url:
+                return {"data": []}
+            if "discogs.com" in url:
+                return {"results": [{"title": "Cabaret Voltaire - Don't Argue", "year": "1987"}]} if p["track"] == "Don't Argue" else {"results": []}
+            if "itunes" in url:
+                return {"results": []}
+            return {}
+
+    cfg = _cfg()
+    cfg["resolve"] = {**cfg["resolve"], "year_chain": "fast", "max_year_lookups_per_run": 5}
+    it = Item(artist="Cabaret Voltaire", title="Don't Argue (7\" Version, 2026 Remaster)", kind="track", stated_year=this, score=0.1,
+              youtube={"videoId": "v", "year": str(this), "album": "Don't Argue (7\" Version, 2026 Remaster)"})
+    # an entry from before reissues were recognised: looked up under the remaster's title, nothing found → asked again
+    util.write_json(years.YEAR_CACHE, {it.key: {"v": years.CACHE_VERSION, "found": {}}})
+    years.verify_years([it], cfg, FakeHttp(), yt=False)
+    assert (it.year, it.year_source, it.year_confidence) == (1987, "discogs", "high")
+    assert (it.original_year, it.reissue_year) == (1987, this)
+    assert f"YouTube album: {this} (reissue)" in it.year_evidence
+    assert any("discogs" in u for u, _ in asked)                          # the fast chain does not stop a reissue
+    assert all("2026 Remaster" not in str(p) for _, p in asked)           # only ever the base title
+    assert util.read_json(years.YEAR_CACHE, {})[it.key]["reissue"] == 1
+
+
+def test_cleanup_verified_year_is_never_the_reissue():
+    from discovery import years
+    from discovery.util import item_key, write_json
+
+    # cached from before: Deezer only knew the 10th-anniversary reissue
+    write_json(years.YEAR_CACHE, {item_key("CHVRCHES", "The Mother We Share"): {"v": 2, "found": {"deezer": 2023, "isrc": 2023}}})
+    d = {"artist": "CHVRCHES", "title": "The Mother We Share", "kind": "cross-year", "kinds": ["cross-year"], "years": ["2023", "2012"], "count": 2,
+         "entries": [{"year": "2023", "title": "The Mother We Share (2023 Remaster)", "album": "The Bones of What You Believe (10th Anniversary Edition)"},
+                     {"year": "2012", "title": "The Mother We Share", "album": "The Bones of What You Believe"}]}
+
+    class FakeHttp:
+        def get(self, url, **kw):
+            if "metadata/lookup" in url:
+                return {"artist_credit_name": "CHVRCHES", "recording_name": "The Mother We Share", "recording_mbid": "rec-m"}
+            if url.endswith("/recording/rec-m"):
+                return {"isrcs": [], "releases": [{"date": "2012-11-19", "release-group": {"first-release-date": "2012-11-19"}},
+                                                  {"date": "2023-09-22", "release-group": {"first-release-date": "2023-09-22"}}]}
+            return {}
+
+    years.annotate_duplicate_years([d], _cfg(), FakeHttp())
+    assert d["verified_year"] == 2012 and "original of a reissue" in d["verified_source"]
+    assert years.decide_found({"deezer": 2023}, years.reissue_of(["Song (2023 Remaster)"])) == (None, None)

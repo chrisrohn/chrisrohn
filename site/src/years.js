@@ -23,18 +23,21 @@ export function fillYearSelect(ysel, it) {
   ysel.value = g == null ? "" : String(g); ysel.classList.toggle("unknown", g == null);
 }
 /** @type {Record<string, string>} */
-export const YEAR_SOURCE = { musicbrainz: "verified: MusicBrainz's earliest release of this exact recording (identified via ListenBrainz)", "musicbrainz-search": "verified: earliest MusicBrainz release matching artist + title", "musicbrainz-isrc": "verified: earliest MusicBrainz release sharing this track's ISRC", discogs: "verified: Discogs master (original issue) year", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "the release date the source itself stated", "ytmusic-year": "the release year YouTube Music states on the artist page", isrc: "from the ISRC registration year only", youtube: "from the YouTube album only", "ytmusic-date": "from the release date YouTube Music states for this upload only — the catalogues have no date", "feed-date": "from the blog post date only — check it", unknown: "no release date found anywhere — find year asks MusicBrainz, or pick the year yourself", pending: "not looked up yet — the next build will; Keep asks for the year meanwhile" };
+export const YEAR_SOURCE = { musicbrainz: "verified: MusicBrainz's earliest release of this exact recording (identified via ListenBrainz)", "musicbrainz-search": "verified: earliest MusicBrainz release matching artist + title", "musicbrainz-isrc": "verified: earliest MusicBrainz release sharing this track's ISRC", discogs: "verified: Discogs master (original issue) year", deezer: "earliest release on Deezer", itunes: "earliest release on Apple Music", "release-date": "the release date the source itself stated", "ytmusic-year": "the release year YouTube Music states on the artist page", isrc: "from the ISRC registration year only", youtube: "from the YouTube album only", "ytmusic-date": "from the release date YouTube Music states for this upload only — the catalogues have no date", "feed-date": "from the blog post date only — check it", reissue: "a remaster / reissue: its own date is the reissue's, and no catalogue knows the original yet — find year asks MusicBrainz, or pick the original year yourself", anniversary: "the anniversary edition's year minus its anniversary (a catalogue date replaces it when one is found)", unknown: "no release date found anywhere — find year asks MusicBrainz, or pick the year yourself", pending: "not looked up yet — the next build will; Keep asks for the year meanwhile" };
 /** The badge text: verified year, unverified guess, reissue notice, or "year unknown". @param {FeedItem} it */
 export function yearBadge(it) {
   const conf = it.year_confidence || "low";
-  let text = it.original_year ? `reissue? originally ${it.original_year}`
+  const mark = conf === "high" ? " ✓" : conf === "medium" ? "" : " ?";
+  let text = it.reissue_year && it.original_year ? `${it.original_year}${mark} · reissue ${it.reissue_year}`
+    : it.original_year ? `reissue? originally ${it.original_year}`
+    : it.year_source === "reissue" ? `reissue${it.reissue_year ? " " + it.reissue_year : ""} · year?`
     : it.year_source === "pending" ? "year pending"
     : it.year_source === "unknown" ? (yearGuess(it) == null ? "year unknown" : `${yearGuess(it)}? · unverified`)
     : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
   // an older year the build pulled in on purpose says so; anything else old in the feed is a warning (radio and
   // recommendations surface catalogue too), and in the Catalog tab an older year is the point
   if (it.backfill) text += " · filling in";
-  else if (Number.isFinite(it.year) && /** @type {number} */ (it.year) < new Date().getFullYear() - 1 && it.year_source !== "unknown" && it.plays == null) text += " · catalog";
+  else if (Number.isFinite(it.year) && /** @type {number} */ (it.year) < new Date().getFullYear() - 1 && it.year_source !== "unknown" && !it.reissue_year && it.plays == null) text += " · catalog";
   return { text, conf, title: (YEAR_SOURCE[it.year_source || ""] || "") + ((it.year_evidence || []).length ? "\n" + (it.year_evidence || []).join("\n") : "") };
 }
 /** @param {string} r */

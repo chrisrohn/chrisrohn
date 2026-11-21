@@ -36,6 +36,7 @@ class Item:
     year_confidence: str | None = None      # "high" | "medium" | "low"
     year_evidence: list[str] = field(default_factory=list)   # every year the catalogues reported, e.g. "MusicBrainz recording: 2009"
     original_year: int | None = None        # set when MusicBrainz knows an earlier release than the feed date (reissue)
+    reissue_year: int | None = None         # a remaster / reissue / anniversary edition: the year of that reissue (years.py)
     youtube: dict[str, Any] | None = None
     score: float = 0.0
     reasons: list[str] = field(default_factory=list)

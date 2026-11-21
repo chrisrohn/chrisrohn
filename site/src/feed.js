@@ -365,7 +365,8 @@ function listFor(view) {
     if (!(i.sources || []).some(sourceOn)) return false;
     if (f.onlyNew && i.first_seen !== today) return false;
     if (f.onlyKnown && !i.match_kind) return false;
-    if (f.onlyRecent && !i.backfill && Number.isFinite(i.year) && i.year_source !== "unknown" && /** @type {number} */ (i.year) < oldest) return false;
+    // a reissue out this year stays in "new releases only" (it is filed under the original year, but it is new)
+    if (f.onlyRecent && !i.backfill && !(i.reissue_year && i.reissue_year >= oldest) && Number.isFinite(i.year) && i.year_source !== "unknown" && /** @type {number} */ (i.year) < oldest) return false;
     return true;
   });
   /** @type {Record<string, (a: FeedItem, b: FeedItem) => number>} */

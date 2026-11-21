@@ -6,6 +6,7 @@ export interface FeedItem {
   release?: string | null; release_type?: string | null; release_date?: string | null; date_kind?: string;
   tags?: string[]; sources?: string[]; links?: Record<string, string | string[]>; artwork?: string | null; editorial?: boolean;
   year?: number | null; year_source?: string | null; year_confidence?: string | null; year_evidence?: string[]; original_year?: number | null;
+  reissue_year?: number | null;   // a remaster / reissue / anniversary edition: the year of that reissue (year is the original's)
   youtube?: YouTubeMatch | null; score: number; reasons?: string[]; matched_artist?: string | null; match_kind?: string | null; affinity?: number | null; first_seen?: string | null;
   backfill?: boolean;   // an older release the build pulled in because the current timeframe was thin
   carried?: string | null;   // an unrated card from an earlier day, back in today's list: the day it was first shown
