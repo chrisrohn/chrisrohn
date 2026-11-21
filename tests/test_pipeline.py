@@ -2507,6 +2507,8 @@ def test_reissues_are_filed_under_the_original_year():
 
 
 def test_verify_years_looks_reissues_up_under_the_base_title_through_the_whole_chain(monkeypatch):
+    from urllib.parse import urlparse
+
     from discovery import years
 
     this = date.today().year
@@ -2522,7 +2524,7 @@ def test_verify_years_looks_reissues_up_under_the_base_title_through_the_whole_c
                 return {"recordings": []}
             if "deezer.com/search" in url:
                 return {"data": []}
-            if "discogs.com" in url:
+            if urlparse(url).hostname == "api.discogs.com":
                 return {"results": [{"title": "Cabaret Voltaire - Don't Argue", "year": "1987"}]} if p["track"] == "Don't Argue" else {"results": []}
             if "itunes" in url:
                 return {"results": []}
@@ -2538,7 +2540,7 @@ def test_verify_years_looks_reissues_up_under_the_base_title_through_the_whole_c
     assert (it.year, it.year_source, it.year_confidence) == (1987, "discogs", "high")
     assert (it.original_year, it.reissue_year) == (1987, this)
     assert f"YouTube album: {this} (reissue)" in it.year_evidence
-    assert any("discogs" in u for u, _ in asked)                          # the fast chain does not stop a reissue
+    assert any(urlparse(u).hostname == "api.discogs.com" for u, _ in asked)   # the fast chain does not stop a reissue
     assert all("2026 Remaster" not in str(p) for _, p in asked)           # only ever the base title
     assert util.read_json(years.YEAR_CACHE, {})[it.key]["reissue"] == 1
 
