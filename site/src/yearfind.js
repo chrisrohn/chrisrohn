@@ -17,6 +17,13 @@ let last = 0;   // MusicBrainz asks for one request per second per client
 const norm = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 /** @param {string} s */
 const core = s => norm(String(s || "").replace(/\s*[([][^)\]]*[)\]]\s*$/g, "").replace(/\s+-\s+[^-]+$/, "").replace(/\s+(feat|ft)\.?\s.*$/i, ""));
+// a reissue's version notes ("[2026 Remaster]", "(7\" Version, 2026 Remaster)", "- Remastered 2011"): the catalogues
+// file the original under the song's own title (discovery/years.py base_title)
+const VERSION = String.raw`re-?master(?:ed)?|re-?issue|re-?release|anniversary|deluxe|expanded|edition|version|edit|mono|stereo|single|mix|bonus|\d+\s*(?:"|''|inch)`;
+const VERSION_GROUP = new RegExp(String.raw`\s*[([][^()[\]]*\b(?:${VERSION})[^()[\]]*[)\]]`, "gi");
+const VERSION_DASH = new RegExp(String.raw`\s+[-–—]\s+[^-–—]*\b(?:${VERSION})\b[^-–—]*$`, "i");
+/** @param {string} s */
+export const baseTitle = s => { let t = String(s || ""); for (let i = 0; i < 4; i++) { const n = t.replace(VERSION_GROUP, "").replace(VERSION_DASH, "").trim(); if (n === t) break; t = n; } return t || String(s || ""); };
 /** @param {string} s */
 const lucene = s => s.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, " ").replace(/\s+/g, " ").trim();
 
@@ -24,7 +31,8 @@ const lucene = s => s.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, " ").replace(/\s+/g, 
 export async function findYears(it) {
   const wait = 1100 - (Date.now() - last); if (wait > 0) await new Promise(r => setTimeout(r, wait));
   last = Date.now();
-  const title = it.display_title || it.title;
+  const reissue = it.reissue_year || it.year_source === "reissue";
+  const title = reissue ? baseTitle(it.display_title || it.title) : it.display_title || it.title;
   const q = `artist:"${lucene(it.artist)}" AND recording:"${lucene(title)}"`;
   const r = await fetch(`${MB}?query=${encodeURIComponent(q)}&fmt=json&limit=15`, { headers: { Accept: "application/json" } });
   if (!r.ok) throw new Error(`MusicBrainz answered ${r.status}`);
@@ -40,6 +48,7 @@ export async function findYears(it) {
       const rg = rel["release-group"] || {}; const types = [...(rg["secondary-types"] || []), rg["primary-type"] || ""].join(" ");
       if (EXCLUDE.test(types)) continue;
       const date = rg["first-release-date"] || rel.date || ""; const y = parseInt(date.slice(0, 4), 10);
+      if (it.reissue_year && y >= it.reissue_year) continue;   // the reissue itself, not the original
       if (Number.isFinite(y)) found.push({ year: y, release: rel.title || rg.title || "?", date });
     }
   }
