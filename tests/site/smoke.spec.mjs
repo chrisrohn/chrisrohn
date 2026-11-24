@@ -886,6 +886,66 @@ test("Cleanup: auto-clean spends what the Feed leaves of the day's quota — fre
   await ctx.close();
 });
 
+test("Cleanup: auto-clean carries on past an item YouTube no longer has — already gone counts as fixed, a copy re-added under a new item id still goes", async ({ browser }) => {
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const ys = Object.keys(feed.youtube.playlists).sort().reverse(); const ya = ys[1], yb = ys[2];
+  test.skip(!yb, "the committed feed pins fewer than three year playlists");
+  const P = feed.youtube.playlists;
+  const e = (year, videoId, position, title) => ({ year, playlistId: P[year], videoId, position, title, edition: "original", label: "", videoType: "MUSIC_VIDEO_TYPE_ATV" });
+  const report = { version: 2, checked_at: new Date().toISOString(), count: 2, kinds: { "same-video": 1, "cross-year": 1 }, duplicates: [
+    { key: "songX", artist: "Jungle", title: "Busy Earnin'", kind: "same-video", kinds: ["same-video"], years: [ya], count: 2, uploads: 1, editions: ["original"], entries: [e(ya, "vidE", 5, "Busy Earnin'"), e(ya, "vidE", 9, "Busy Earnin'")] },
+    { key: "songY", artist: "Phoenix", title: "Lisztomania", kind: "cross-year", kinds: ["cross-year"], years: [ya, yb], count: 2, uploads: 1, editions: ["original"], verified_year: Number(yb), verified_source: "MusicBrainz recording", entries: [e(ya, "vidC", 11, "Lisztomania"), e(yb, "vidC", 2, "Lisztomania")] }] };
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  page.on("dialog", d => d.accept());
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => { const j = await (await r.fetch()).json(); Object.assign(j.youtube, { duplicates_count: 2, duplicates_kinds: report.kinds, unavailable_count: 0, video_count: 0 }); await r.fulfill({ json: j }); });
+  await page.route("**/data/duplicates.json", r => r.fulfill({ json: report }));
+  await page.route("**/data/unavailable.json", r => r.fulfill({ json: { rows: [] } }));
+  const calls = [];
+  // what the first lookups answer (as read before another device acted), and what YouTube holds by the time of the deletes
+  const listed = { [`${P[ya]}|vidE`]: ["PLI-e1", "PLI-e2"], [`${P[ya]}|vidC`]: ["PLI-c1"], [`${P[yb]}|vidC`]: ["PLI-c0"] };
+  const held = { [`${P[ya]}|vidE`]: ["PLI-e1"], [`${P[ya]}|vidC`]: ["PLI-c9"], [`${P[yb]}|vidC`]: ["PLI-c0"] };
+  const looked = new Set();
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); const params = Object.fromEntries(u.searchParams);
+    calls.push({ method: req.method(), path: u.pathname, params });
+    if (u.pathname.startsWith("/drive/") || u.pathname.startsWith("/upload/")) return route.fulfill({ json: { files: [], id: "drive-1" } });
+    if (u.pathname === "/youtube/v3/videos") return route.fulfill({ json: { items: params.id.split(",").map(id => ({ id, snippet: { title: id, channelTitle: "Artist - Topic" }, contentDetails: { duration: "PT4M" }, statistics: { viewCount: "10" }, status: { embeddable: true, uploadStatus: "processed" } })) } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") {
+      if (!params.videoId) return route.fulfill({ json: { items: [] } });
+      const k = `${params.playlistId}|${params.videoId}`; const first = !looked.has(k); looked.add(k);
+      return route.fulfill({ json: { items: ((first ? listed : held)[k] || []).map(id => ({ id })) } });
+    }
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "DELETE") {
+      const k = Object.keys(held).find(k => held[k].includes(params.id));
+      if (!k) return route.fulfill({ status: 404, json: { error: { code: 404, message: "Playlist item not found.", errors: [{ reason: "playlistItemNotFound" }] } } });
+      held[k] = held[k].filter(id => id !== params.id); return route.fulfill({ status: 204, body: "" });
+    }
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html?view=cleanup");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("#cl-auto")).toBeVisible();
+  await page.click("#cl-auto-go");
+  await expect(page.locator("#cl-auto-status")).toContainText("1 extra copies trimmed · 1 songs cut to one copy", { timeout: 15_000 });
+  await expect(page.locator("#cl-auto-status")).not.toContainText("failed");
+  // the stale ids were tried, YouTube asked again, and only the copy still there under its new id removed; the kept copies stay
+  expect(calls.filter(c => c.method === "DELETE").map(c => c.params.id)).toEqual(["PLI-e2", "PLI-c1", "PLI-c9"]);
+  expect(held).toEqual({ [`${P[ya]}|vidE`]: ["PLI-e1"], [`${P[ya]}|vidC`]: [], [`${P[yb]}|vidC`]: ["PLI-c0"] });
+  const done = JSON.parse(await page.evaluate(() => localStorage.getItem("id:settings") || "{}"));
+  expect(done.dupesDone).toEqual(expect.arrayContaining([`songX|${P[ya]}|vidE|one`, `songY|${P[ya]}|vidC|gone`]));
+  expect(done.autoClean.last).toMatchObject({ done: 2, failed: 0 });
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
 test("Cleanup: the playability audit finds deleted and blocked tracks, offers a replacement search, and removes a dead row by its item id", async ({ browser }) => {
   const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
   const y = Object.keys(feed.youtube.playlists).sort().reverse()[0]; const pid = feed.youtube.playlists[y];

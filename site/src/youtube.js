@@ -25,6 +25,7 @@ export async function yt(method, path, { params = {}, body, why, detail, _retrie
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
       const msg = (j.error && j.error.message) || r.statusText;
+      const reason = (j.error && Array.isArray(j.error.errors) && j.error.errors[0] && j.error.errors[0].reason) || "";
       record(r, msg);
       if (r.status === 401) {
         // token revoked or expired early: get a fresh one silently and retry once
@@ -34,7 +35,7 @@ export async function yt(method, path, { params = {}, body, why, detail, _retrie
       }
       if (r.status === 403 && /quota/i.test(msg)) throw new Error(msg + " — daily YouTube API quota reached; try again after midnight Pacific");
       if (r.status === 403 && path.startsWith("/playlistItems") && method === "POST") throw new Error("YouTube refused to add to that playlist for this sign-in. Collaborative playlists can only be edited through the API by the channel that owns them (@indiedisco) — sign out and sign in again choosing that channel, or make the playlist owner account a curator.");
-      throw new Error(msg);
+      throw Object.assign(new Error(msg), { status: r.status, reason });   // callers tell "already gone" (404) from a real failure
     }
     record(r);
     return j;
@@ -124,8 +125,13 @@ export async function addToPlaylist(playlistId, videoId, ctx = {}) {
   const j = await yt("POST", "/playlistItems", { params: { part: "snippet" }, body: { snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } }, ...ctx });
   return j.id;
 }
-/** @param {string} playlistItemId @param {{why?: string, detail?: string}} [ctx] */
-export async function removePlaylistItem(playlistItemId, ctx = {}) { await yt("DELETE", "/playlistItems", { params: { id: playlistItemId }, ...ctx }); }
+/** Delete one playlist item. Returns false when YouTube no longer has it ("Playlist item not found": removed in another
+ * tab, on another device or in YouTube itself since it was read), which is the end the caller wanted; other errors throw.
+ * @param {string} playlistItemId @param {{why?: string, detail?: string}} [ctx] @returns {Promise<boolean>} */
+export async function removePlaylistItem(playlistItemId, ctx = {}) {
+  try { await yt("DELETE", "/playlistItems", { params: { id: playlistItemId }, ...ctx }); return true; }
+  catch (e) { if (/** @type {{ status?: number }} */ (e).status === 404) return false; throw e; }
+}
 // every playlist item holding this video (1 quota unit) — the duplicate guard and the cleanup tool both use it
 /** @param {string} playlistId @param {string} videoId @param {{why?: string, detail?: string}} [ctx] @returns {Promise<string[]>} */
 export async function playlistItemsFor(playlistId, videoId, ctx = {}) {

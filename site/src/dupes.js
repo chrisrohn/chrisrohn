@@ -376,11 +376,30 @@ export async function removeRow(d, r, keepFirst, why) {
   // fewer than the report counted: confirm against the whole playlist before calling it fixed, so a real copy is never hidden
   if (!live && ids.length < r.copies) ids = (await readingOf(r.pid, r.year)).get(r.videoId) || [];
   const victims = keepFirst ? ids.slice(1) : ids;
-  for (const i of victims) await removePlaylistItem(i, { why, detail: who(d, r) });
-  const read = readings.get(r.pid); if (read) read.byVideo.set(r.videoId, ids.filter(i => !victims.includes(i)));
-  if (d.live) { d.entries = d.entries.filter(e => !(e.playlistId === r.pid && e.videoId === r.videoId) || (keepFirst && e.itemIds && e.itemIds[0] === ids[0])); if (keepFirst) for (const e of d.entries) if (e.itemIds) e.itemIds = e.itemIds.filter(i => !victims.includes(i)); }
-  else mark(`${d.key}|${r.pid}|${r.videoId}|${keepFirst && ids.length ? "one" : "gone"}`);   // what YouTube holds now, even when nothing had to go
+  const left = await deleteItems(r.pid, r.videoId, victims, keepFirst ? ids.slice(0, 1) : [], { why, detail: who(d, r) });
+  noteItems(r.pid, r.videoId, left);
+  if (d.live) { d.entries = d.entries.filter(e => !(e.playlistId === r.pid && e.videoId === r.videoId) || (keepFirst && e.itemIds && left.includes(e.itemIds[0]))); for (const e of d.entries) if (e.itemIds && e.playlistId === r.pid && e.videoId === r.videoId) e.itemIds = e.itemIds.filter(i => left.includes(i)); }
+  else mark(`${d.key}|${r.pid}|${r.videoId}|${keepFirst && left.length ? "one" : "gone"}`);   // what YouTube holds now, even when nothing had to go
   return victims.length;
+}
+/** Delete these items of one video in a playlist and return the items that hold it now. An item YouTube answers
+ * "Playlist item not found" for is already gone (removed in another tab, on another device, in YouTube itself, or read
+ * before that happened), so the run carries on: the video is looked up afresh (1 unit) and any copy still there under
+ * another item id goes too, keeping `keep` (or, if that went as well, one copy in its place). Only an item YouTube
+ * still lists yet will not delete is an error.
+ * @param {string} pid @param {string} vid @param {string[]} victims @param {string[]} keep item ids meant to stay
+ * @param {{ why: string, detail?: string }} ctx @returns {Promise<string[]>} */
+export async function deleteItems(pid, vid, victims, keep, ctx) {
+  let stale = false;
+  for (const i of victims) if (!(await removePlaylistItem(i, ctx))) stale = true;
+  if (!stale) return keep;
+  const r = readings.get(pid); if (r) r.byVideo.delete(vid);   // the reading was out of date for this video
+  const now = await playlistItemsFor(pid, vid, { why: "Cleanup: an item was already gone — verify what still holds this video before calling it done", detail: ctx.detail });
+  const stay = now.filter(i => keep.includes(i));
+  if (stay.length < keep.length) stay.push(...now.filter(i => !stay.includes(i)).slice(0, keep.length - stay.length));
+  for (const i of now.filter(i => !stay.includes(i)))
+    if (!(await removePlaylistItem(i, ctx))) throw new Error(`YouTube lists ${ctx.detail || "this video"} in the playlist but will not remove it (Playlist item not found) — remove it in YouTube itself`);
+  return stay;
 }
 /** @type {Map<string, { at: number, byVideo: Map<string, string[]> }>} */
 const readings = new Map();
@@ -588,7 +607,7 @@ export async function swapTrack(u, use) {
   }
   // the audit read the playlist itself and knows the row; the build's report needs one lookup first
   const ids = u.itemId ? [u.itemId] : await itemsIn(u.playlistId, u.videoId, { why: "Cleanup: verify which playlist items hold this video before removing any", detail });
-  for (const i of ids) await removePlaylistItem(i, { why: `Cleanup: remove the copy that will not play here from “${titleFor(u.year)}”`, detail });
+  await deleteItems(u.playlistId, u.videoId, ids, [], { why: `Cleanup: remove the copy that will not play here from “${titleFor(u.year)}”`, detail });
   noteItems(u.playlistId, u.videoId, []);
   return ids.length;
 }
