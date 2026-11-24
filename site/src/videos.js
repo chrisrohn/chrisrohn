@@ -157,7 +157,8 @@ export function videosSummary() {
   if (!videosPlaylist()) return "No music-video playlist is configured (youtube_music.videos_playlist_id in config.yaml): approvals have nowhere to go.";
   if (state.videosState === "missing" || !v || !v.generated_at) return `${n ?? 0} videos to review from what you kept · the library's own list appears after the first Videos workflow run`;
   const when = v.generated_at ? relTime(new Date(v.generated_at)) : "?";
-  const fresh = allItems().filter(it => it.youtube?.video && decisionFor(it.id)?.decision === "up" && !videoMark(/** @type {string} */ (it.youtube?.video))).length;
+  // the list's own rows: one per video, so a kept song the feed and the catalog both carry counts once
+  const fresh = n == null ? 0 : videoRows().filter(r => r.from === "feed").length;
   return `${n ?? "…"} videos to review (the library's list built ${when}: ${v.count} songs with a video${v.pending ? `, ${v.pending} rows still being asked` : ""}${v.in_playlist ? `, ${v.in_playlist} already in ${VIDEOS_TITLE}` : ""}${fresh ? `; ${fresh} from songs kept here` : ""})` + (state.mvAt ? ` · playlist read ${relTime(new Date(state.mvAt))}` : "");
 }
 const quotaLine = () => quotaText() + ` · about ${Math.max(0, Math.floor((quotaLeft() - RESERVE) / (READ + WRITE)))} approvals possible today`;
