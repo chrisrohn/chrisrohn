@@ -15,6 +15,7 @@ import { isOwner } from "./auth.js";
 import { yt, titleFor, knownYear, playlistItemsFor, removePlaylistItem, addToPlaylist, videoDetails } from "./youtube.js";
 import { editionOf, songKey, kindsOf, KIND, KIND_LONG, KIND_ORDER, YEAR_FREE, EDITION_NAME } from "./editions.js";
 import { stopPlayer, playerActive } from "./player.js";
+import { nearestYear } from "./years.js";
 import { auditRows, auditYear, auditAll, auditDrop, auditCost, renderAudit, findReplacements, creditOf, region, WHY } from "./audit.js";
 
 /** @typedef {import("./types").Dupe} Dupe */
@@ -140,8 +141,11 @@ export function rowsOf(d) {
 }
 /** @param {Dupe} d @returns {View} */
 export function viewOf(d) { const rows = rowsOf(d); const kinds = kindsOf(rows); const dismissed = !d.live && has(`${d.key}|ok`); return { rows, kinds, dismissed, open: !dismissed && kinds.length > 0 }; }
+/** The playlist year the catalogues' verified year files into: that year, or the nearest with a playlist (1978 → 1979).
+ * "" when the catalogues do not know. @param {Dupe} d */
+export const verifiedYear = d => d.verified_year ? String(nearestYear(Number(d.verified_year))) : "";
 /** A copy filed in a year the catalogues say is not the song's — remixes, live takes and the like have their own year. @param {Dupe} d @param {Row} r */
-export const wrongYear = (d, r) => !!d.verified_year && !YEAR_FREE.has(r.edition) && r.year !== String(d.verified_year);
+export const wrongYear = (d, r) => !!d.verified_year && !YEAR_FREE.has(r.edition) && r.year !== verifiedYear(d);
 /** Every year-bound copy sits in the wrong year: the song wants moving, not trimming. @param {Dupe} d @param {Row[]} rows */
 const misfiled = (d, rows) => !!d.verified_year && rows.some(r => !YEAR_FREE.has(r.edition)) && rows.filter(r => !YEAR_FREE.has(r.edition)).every(r => wrongYear(d, r));
 
@@ -228,7 +232,7 @@ function rowHtml(r, d) {
       </span>
       <span class="dact">
         ${r.copies > 1 ? `<button class="btn ghost small" type="button" data-fix="extra" data-pid="${esc(r.pid)}" data-vid="${esc(r.videoId)}" data-year="${esc(r.year)}" title="remove the extra ${r.copies - 1}, one stays (${(r.copies - 1) * WRITE + READ} units)">keep one of ×${r.copies}</button>` : ""}
-        ${years.length ? `<select class="dmove" aria-label="move this copy to another year" title="move this copy to another year (${READ + WRITE + READ + WRITE * r.copies} units)"><option value="">move to…</option>${years.map(y => `<option value="${y}" ${d.verified_year && String(d.verified_year) === y ? "class=\"verified\"" : ""}>${y}${d.verified_year && String(d.verified_year) === y ? " ✓ verified" : ""}</option>`).join("")}</select>` : ""}
+        ${years.length ? `<select class="dmove" aria-label="move this copy to another year" title="move this copy to another year (${READ + WRITE + READ + WRITE * r.copies} units)"><option value="">move to…</option>${years.map(y => `<option value="${y}" ${verifiedYear(d) === y ? "class=\"verified\"" : ""}>${y}${verifiedYear(d) === y ? " ✓ verified" : ""}</option>`).join("")}</select>` : ""}
         <a class="dopen" href="https://music.youtube.com/watch?v=${esc(r.videoId)}&list=${esc(r.pid)}" target="_blank" rel="noopener" title="open on YouTube Music">↗</a>
         <button class="x" type="button" data-fix="one" data-pid="${esc(r.pid)}" data-vid="${esc(r.videoId)}" data-year="${esc(r.year)}" title="remove this copy from ${esc(titleFor(r.year))} (${READ + WRITE * r.copies} units)">✕</button>
       </span>
@@ -238,13 +242,13 @@ function rowHtml(r, d) {
 function itemHtml(d, v) {
   const rows = v.rows; const years = [...new Set(rows.map(r => r.year))]; const copies = rows.reduce((n, r) => n + r.copies, 0);
   const mis = misfiled(d, rows); const looked = rows.every(r => state.videoInfo[r.videoId]);
-  const target = d.verified_year ? String(d.verified_year) : "";
+  const target = verifiedYear(d);
   const canMove = mis && target && moveYears().includes(target);
   return `<div class="dupe ${d.live ? "live" : ""} ${v.dismissed ? "dismissed" : ""}" data-key="${esc(d.key)}">
       <div class="dupe-song">
         <span class="dname"><b>${esc(d.artist)}</b> - ${esc(d.title)}</span>
         <span class="flags">${v.kinds.map(k => `<span class="flag ${k}" title="${esc(KIND_LONG[k] || k)}">${esc(KIND[k] || k)}</span>`).join("")}<span class="muted">${copies} ${copies === 1 ? "copy" : "copies"} · ${rows.length === 1 ? "one upload" : `${new Set(rows.map(r => r.videoId)).size} uploads`} · ${years.join(", ")}</span></span>
-        ${d.verified_year ? `<span class="verified" title="${esc(d.verified_source || "")}">verified ${esc(d.verified_year)}${d.verified_source ? ` · ${esc(d.verified_source)}` : ""}</span>` : ""}
+        ${d.verified_year ? `<span class="verified" title="${esc(d.verified_source || "")}">verified ${esc(d.verified_year)}${target && target !== String(d.verified_year) ? ` → files in ${esc(target)}` : ""}${d.verified_source ? ` · ${esc(d.verified_source)}` : ""}</span>` : ""}
         ${mis ? `<span class="misfiled">every copy is in the wrong year</span>` : ""}
       </div>
       <div class="dupe-rows">${rows.map(r => rowHtml(r, d)).join("")}</div>
@@ -429,7 +433,7 @@ export async function readingOf(pid, year) {
 export async function moveRow(d, r, year) {
   const target = knownYear(year) || state.playlists[year]; if (!target) throw new Error(`no playlist id for ${year}`);
   const present = await itemsIn(target, r.videoId, { why: `Cleanup: verify “${titleFor(year)}” does not already hold this upload before moving it there`, detail: who(d, r) });
-  if (!present.length) noteItems(target, r.videoId, [await addToPlaylist(target, r.videoId, { why: `Cleanup: move this copy to “${titleFor(year)}”${d.verified_year && String(d.verified_year) === year ? " (the year the catalogues verified)" : ""}`, detail: who(d, r) })]);
+  if (!present.length) noteItems(target, r.videoId, [await addToPlaylist(target, r.videoId, { why: `Cleanup: move this copy to “${titleFor(year)}”${verifiedYear(d) === year ? " (the year the catalogues verified)" : ""}`, detail: who(d, r) })]);
   const n = await removeRow(d, r, false, `Cleanup: take the copy out of “${titleFor(r.year)}” after moving it to “${titleFor(year)}”`);
   if (d.live) d.entries.push({ year, playlistId: target, videoId: r.videoId, position: -1, title: r.title, edition: r.edition, label: r.label, album: r.album, duration: r.duration, videoType: r.videoType, itemIds: [] });
   else mark(`${d.key}|${target}|${r.videoId}|in|${year}`);
@@ -494,7 +498,7 @@ async function onClick(e) {
       break;
     }
     case "moveall": {
-      const rows = rowsOf(d); const year = String(d.verified_year || ""); const units = moveAllCost(rows);
+      const rows = rowsOf(d); const year = verifiedYear(d); const units = moveAllCost(rows);
       if (!affordable(units)) return;
       if (!confirm(`Move every copy of “${d.artist} - ${d.title}” to ${titleFor(year)} — ${new Set(rows.map(r => r.videoId)).size} upload${new Set(rows.map(r => r.videoId)).size === 1 ? "" : "s"} added there (unless already in), ${rows.length} cop${rows.length === 1 ? "y" : "ies"} taken out of ${[...new Set(rows.map(r => titleFor(r.year)))].join(", ")}? (≈${units} quota units)`)) return;
       await busy(btn, async () => {
@@ -516,7 +520,7 @@ async function onChange(e) {
   const d = itemFor(sel); const r = d && rowFor(sel, d); if (!d || !r) { sel.value = ""; return; }
   const units = READ + WRITE + READ + WRITE * r.copies;
   if (!affordable(units)) { sel.value = ""; return; }
-  if (!confirm(`Move “${who(d, r)}” from ${titleFor(r.year)} to ${titleFor(year)}?${d.verified_year && String(d.verified_year) === year ? " (the year the catalogues verified)" : d.verified_year ? ` The catalogues say ${d.verified_year}.` : ""} (≈${units} quota units: one add, ${r.copies} removal${r.copies === 1 ? "" : "s"})`)) { sel.value = ""; return; }
+  if (!confirm(`Move “${who(d, r)}” from ${titleFor(r.year)} to ${titleFor(year)}?${verifiedYear(d) === year ? " (the year the catalogues verified)" : d.verified_year ? ` The catalogues say ${d.verified_year}.` : ""} (≈${units} quota units: one add, ${r.copies} removal${r.copies === 1 ? "" : "s"})`)) { sel.value = ""; return; }
   sel.disabled = true;
   try { await moveRow(d, r, year); toast(`Moved to ${year} · ${who(d, r)}`); refreshItem(d); }
   catch (err) { sel.disabled = false; sel.value = ""; toast("Could not move: " + /** @type {Error} */ (err).message, true); }
@@ -553,7 +557,7 @@ export async function bulkFix() {
     if (r.year !== f.year) continue;
     if (f.kind === "same-video" && r.copies > 1) todo.push({ d, r, op: "trim" });
     // a wrong-year copy goes when the verified year already has this edition, and moves there when it does not
-    else if (f.kind === "wrong-year" && wrongYear(d, r)) todo.push({ d, r, op: v.rows.some(o => o.year === String(d.verified_year) && o.edition === r.edition) ? "remove" : "move" });
+    else if (f.kind === "wrong-year" && wrongYear(d, r)) todo.push({ d, r, op: v.rows.some(o => o.year === verifiedYear(d) && o.edition === r.edition) ? "remove" : "move" });
   }
   if (!todo.length) return;
   const cost = (/** @type {typeof todo[0]} */ t) => t.op === "trim" ? READ + WRITE * (t.r.copies - 1) : t.op === "remove" ? READ + WRITE * t.r.copies : READ + WRITE + READ + WRITE * t.r.copies;
@@ -568,7 +572,7 @@ export async function bulkFix() {
     try {
       if (t.op === "trim") await removeRow(t.d, t.r, true, `Cleanup: remove the extra copy of a song added twice to “${titleFor(f.year)}” (one copy stays)`);
       else if (t.op === "remove") await removeRow(t.d, t.r, false, `Cleanup: remove the copy filed in the wrong year from “${titleFor(f.year)}” (the verified year already holds the song)`);
-      else await moveRow(t.d, t.r, String(t.d.verified_year));
+      else await moveRow(t.d, t.r, verifiedYear(t.d));
       done++;
     } catch (e) { failed++; if (/quota/i.test(/** @type {Error} */ (e).message)) break; }
   }

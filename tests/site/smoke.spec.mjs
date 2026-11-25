@@ -1136,6 +1136,61 @@ test("a lapsed sign-in refreshes itself after the first tap, and the tap still c
   await ctx.close();
 });
 
+test("a card the build found an older original for files into the year playlist nearest that original", async ({ browser }) => {
+  // a 2025 upload of a 1978 recording (the badge's "reissue? originally 1978"): there is no 1978 playlist, so 1979 is
+  // the nearest; and a song from a year with its own playlist (originally 1996) files there
+  const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());
+  const P = feed.youtube.playlists; const first = Math.min(...Object.keys(P).map(Number));
+  const [a, b] = feed.items.filter(i => i.youtube && i.youtube.videoId).slice(0, 2);
+  test.skip(!a || !b || !P[String(first)] || !P["1996"], "the committed feed lacks playable cards or the playlists this needs");
+  const ctx = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
+  await ctx.addInitScript(([hash]) => {
+    localStorage.setItem("id:auth", JSON.stringify({ email: "curator@example.com", name: "Curator", hash }));
+    localStorage.setItem("id:settings", JSON.stringify({ introDismissed: true, installDismissedAt: Date.now(), deck: false, shortlistSize: 500 }));
+    localStorage.setItem("id:filters", JSON.stringify({ q: "", sourcesOff: [], blogsOff: [], sort: "score", onlyNew: false, onlyKnown: false, onlyRecent: false, shortlist: false }));
+    sessionStorage.setItem("id:token", JSON.stringify({ access_token: "test-token", expires_at: Date.now() + 3600e3 }));
+  }, [feed.google.curator_hashes[0]]);
+  const page = await ctx.newPage();
+  const errors = []; page.on("pageerror", e => errors.push("pageerror: " + e.message)); page.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push("console: " + m.text()); });
+  await page.route("https://accounts.google.com/gsi/client", r => r.fulfill({ contentType: "application/javascript", body: "window.google = { accounts: { oauth2: { initTokenClient() { return { requestAccessToken() {} }; } } } };" }));
+  await page.route("**/data/feed.json", async r => {
+    const j = await (await r.fetch()).json();
+    for (const it of j.items) {
+      if (it.id === a.id) Object.assign(it, { year: 2025, year_source: "musicbrainz", year_confidence: "high", original_year: first - 1, reissue_year: null, backfill: true });
+      if (it.id === b.id) Object.assign(it, { year: 2026, year_source: "musicbrainz", year_confidence: "high", original_year: 1996, reissue_year: null, backfill: false });
+    }
+    await r.fulfill({ json: j });
+  });
+  const calls = [];
+  await page.route("https://www.googleapis.com/**", async route => {
+    const req = route.request(); const u = new URL(req.url()); const body = req.postData() ? JSON.parse(req.postData() || "{}") : null;
+    calls.push({ method: req.method(), path: u.pathname, body });
+    if (u.pathname.startsWith("/drive/")) return route.fulfill({ json: { files: [] } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "GET") return route.fulfill({ json: { items: [] } });
+    if (u.pathname === "/youtube/v3/playlistItems" && req.method() === "POST") return route.fulfill({ json: { id: "PLI-" + body.snippet.resourceId.videoId, snippet: body.snippet } });
+    return route.fulfill({ status: 404, json: { error: { message: "unexpected " + u.pathname } } });
+  });
+  await page.goto("/index.html");
+  await expect(page.locator("#meta")).not.toHaveText(/loading feed/, { timeout: 15_000 });
+  await expect(page.locator("body")).toHaveClass(/curator/);
+  const ca = page.locator(`.card[data-id="${a.id}"]`), cb = page.locator(`.card[data-id="${b.id}"]`);
+  await expect(ca.locator(".year")).toHaveValue(String(first));
+  await expect(ca).toContainText(`originally ${first - 1} · files in ${first} · filling in`);
+  await expect(cb.locator(".year")).toHaveValue("1996");
+  await expect(cb).toContainText("originally 1996");
+  await expect(cb).not.toContainText("files in");
+  await ca.locator(".btn.up").click();
+  await expect(page.locator(".toast")).toContainText(`${first} | Indie Discotheque`);
+  await cb.locator(".btn.up").click();
+  await expect(page.locator(".toast")).toContainText("1996 | Indie Discotheque");
+  const adds = calls.filter(c => c.method === "POST" && c.path === "/youtube/v3/playlistItems").map(c => [c.body.snippet.resourceId.videoId, c.body.snippet.playlistId]);
+  expect(adds).toEqual([[a.youtube.videoId, P[String(first)]], [b.youtube.videoId, P["1996"]]]);
+  const rated = JSON.parse(await page.evaluate(() => localStorage.getItem("id:rated") || "{}"));
+  expect([rated[a.id].year, rated[b.id].year]).toEqual([first, 1996]);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
 test("a Keep verifies the playlist, adds the track, Undo removes it — and the API activity sheet shows each request", async ({ browser }) => {
   // a signed-in curator with a live token; every Google API answered here, so the whole flow runs without the network
   const feed = await fetch("http://127.0.0.1:8765/data/feed.json").then(r => r.json());

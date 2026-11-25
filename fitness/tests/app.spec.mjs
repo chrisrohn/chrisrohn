@@ -237,8 +237,10 @@ test.describe("installable app", () => {
     await expect(page.locator(".tonight")).toContainText("Lights out by 9:45 PM: up around 6:00 AM for the ride in");
     await expect(page.locator(".fuel")).toContainText("Weigh in now and then");
     await page.locator("#tab-plan").click();
-    await page.locator(".week-ahead li").nth(1).locator("summary").click();
-    const [file] = await Promise.all([page.waitForEvent("download"), page.locator("[data-zwo]").click()]);
+    // the trainer day's own button: other days in the committed plan can be indoor with steps of their own
+    const day = page.locator(".week-ahead li").nth(1);
+    await day.locator("summary").click();
+    const [file] = await Promise.all([page.waitForEvent("download"), day.locator("[data-zwo]").click()]);
     expect(file.suggestedFilename()).toMatch(/trainer-workout\.zwo$/);
     const xmlText = readFileSync(await file.path(), "utf8");
     expect(xmlText).toContain('<SteadyState Duration="720" Power="0.97">');

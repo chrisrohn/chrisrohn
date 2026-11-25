@@ -14,7 +14,7 @@ import { isOwner, tokenValid } from "./auth.js";
 import { titleFor, videoDetails } from "./youtube.js";
 import { YEAR_FREE, kindsOf, EDITION_NAME } from "./editions.js";
 import { audit, auditDrop } from "./audit.js";
-import { READ, WRITE, EDITION_RANK, cleanupHooks, capMarks, loadReports, viewOf, unavailableRows, unavOpen, unavKey, isVideoRow, mark, removeRow, moveRow, swapTrack, readingOf, freshReading, moveYears, renderDupes, renderLive } from "./dupes.js";
+import { READ, WRITE, EDITION_RANK, cleanupHooks, capMarks, loadReports, viewOf, unavailableRows, unavOpen, unavKey, isVideoRow, mark, removeRow, moveRow, swapTrack, readingOf, freshReading, moveYears, verifiedYear, renderDupes, renderLive } from "./dupes.js";
 
 /** @typedef {import("./types").Dupe} Dupe */
 /** @typedef {import("./types").Unavailable} Unavailable */
@@ -47,7 +47,7 @@ function isDead(dead, r) { const i = state.videoInfo[r.videoId]; return !r.avail
  * the video, the earliest year, then the copy filed first. With `byEdition` the original edition comes before all of that.
  * @param {Dupe} d @param {Row[]} rows @param {Set<string>} dead @param {boolean} byEdition */
 export function keeperOf(d, rows, dead, byEdition) {
-  const vy = d.verified_year ? String(d.verified_year) : "";
+  const vy = verifiedYear(d);
   /** @param {Row} r */
   const score = r => { const i = state.videoInfo[r.videoId]; return [isDead(dead, r) ? 1 : 0, byEdition ? EDITION_RANK[r.edition] ?? 9 : 0, vy && !YEAR_FREE.has(r.edition) && r.year !== vy ? 1 : 0, r.videoType === "MUSIC_VIDEO_TYPE_ATV" || (i && i.topic) ? 0 : 1, Number(r.year) || 9999, r.positions.length ? Math.min(...r.positions) : 1e9]; };
   return rows.map(r => ({ r, s: score(r) })).sort((a, b) => { for (let i = 0; i < a.s.length; i++) if (a.s[i] !== b.s[i]) return a.s[i] - b.s[i]; return a.r.videoId.localeCompare(b.r.videoId); })[0].r;
@@ -64,7 +64,7 @@ function planSong(d, o, dead, scope) {
   const inScope = r => !scope || r.year === scope;
   /** @type {Map<string, Row[]>} */ const groups = new Map();
   for (const r of rows) { const k = o.versions ? "all" : r.edition; groups.set(k, [...(groups.get(k) || []), r]); }
-  const vy = d.verified_year ? String(d.verified_year) : "";
+  const vy = verifiedYear(d);
   let cat = /** @type {Cat} */ ("dismiss");
   for (const g of groups.values()) {
     const k = keeperOf(d, g, dead, o.versions);

@@ -7,7 +7,7 @@
 import { state, persist, byId, skipsInYouTube, quotaLeft } from "./state.js";
 import { $, toast } from "./dom.js";
 import { isCurator, ensureToken, needSignIn } from "./auth.js";
-import { yearGuess, yearOf } from "./years.js";
+import { yearGuess, yearOf, fileYear } from "./years.js";
 import { schedulePush } from "./sync.js";
 import { titleFor, skippedTitle, playlistFor, skippedPlaylist, addToPlaylist, removePlaylistItem, playlistItemsFor, knownYear } from "./youtube.js";
 import { render, deckOn, deckItem, focusCard } from "./render.js";
@@ -41,7 +41,7 @@ export async function rate(id, decision, year) {
     toast(`Release year unknown for ${credit(it)} — pick the year playlist first (the YouTube Music link may show it)`, true);
     return;
   }
-  year = year || yearOf(it);
+  year = year || fileYear(it) || yearOf(it);   // the playlist nearest the original release
   const needsYouTube = decision === "up" || (decision === "down" && skipsInYouTube());
   const wasPlaying = state.playingId === id && playerActive(); const idx = state.order.indexOf(id);
   // the card's sources, tags and how the profile knew the act travel with the rating: the personal ranking learns from them

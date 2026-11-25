@@ -16,9 +16,26 @@ export const yearGuess = it => {
 };
 /** @param {FeedItem} it */
 export const yearOf = it => yearGuess(it) ?? new Date().getFullYear();
+/** The year playlist nearest a year: that year when it has one, else the closest there is (the later on a tie), so a
+ * song from before the first playlist (or after the last) files into the nearest instead of failing. Unchanged while
+ * the feed's year list is not in. @param {number} y @returns {number} */
+export function nearestYear(y) {
+  const ys = (state._years || []).map(Number).filter(Number.isFinite);
+  if (!ys.length || ys.includes(y)) return y;
+  return ys.reduce((b, c) => { const dc = Math.abs(c - y), db = Math.abs(b - y); return dc < db || (dc === db && c > b) ? c : b; });
+}
+/** The release a card belongs to: the original when the build found an earlier one (a reissue, a remaster, a new
+ * upload of an old recording), else its own year; null when unknown. @param {FeedItem} it @returns {number | null} */
+export const originalYear = it => {
+  const g = yearGuess(it); if (g == null) return null;
+  const o = Number(it.original_year);
+  return Number.isFinite(o) && o > 0 && o < g ? o : g;
+};
+/** The year playlist a card files into: the playlist nearest its original release. @param {FeedItem} it @returns {number | null} */
+export const fileYear = it => { const o = originalYear(it); return o == null ? null : nearestYear(o); };
 /** @param {HTMLSelectElement} ysel @param {FeedItem} it */
 export function fillYearSelect(ysel, it) {
-  const g = yearGuess(it);
+  const g = fileYear(it);
   ysel.innerHTML = (g == null ? `<option value="">year?</option>` : "") + state._years.map(y => `<option value="${y}">${y}</option>`).join("");
   ysel.value = g == null ? "" : String(g); ysel.classList.toggle("unknown", g == null);
 }
@@ -36,6 +53,9 @@ export function yearBadge(it) {
     : (conf === "high" ? `${yearOf(it)} ✓` : conf === "medium" ? `${yearOf(it)}` : `${yearOf(it)} ?`);
   // an older year the build pulled in on purpose says so; anything else old in the feed is a warning (radio and
   // recommendations surface catalogue too), and in the Catalog tab an older year is the point
+  // where it files when that is not the year named: the original, or the nearest year with a playlist
+  const named = it.original_year ? originalYear(it) : yearGuess(it), files = fileYear(it);
+  if (files != null && files !== named) text += ` · files in ${files}`;
   if (it.backfill) text += " · filling in";
   else if (Number.isFinite(it.year) && /** @type {number} */ (it.year) < new Date().getFullYear() - 1 && it.year_source !== "unknown" && !it.reissue_year && it.plays == null) text += " · catalog";
   return { text, conf, title: (YEAR_SOURCE[it.year_source || ""] || "") + ((it.year_evidence || []).length ? "\n" + (it.year_evidence || []).join("\n") : "") };
